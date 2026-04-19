@@ -28,4 +28,9 @@ Unlike prior projects sharing this name (e.g. [andyzeng/ikfastpy](https://github
 
 ## License
 
-LGPL-3.0, matching the upstream OpenRAVE IKFast sources from which this work is derived.
+This project is dual-licensed, matching its upstream sources:
+
+- The **IKFast generator** (`ikfast.py`, `ikfast_generator_cpp.py`) is licensed under **LGPL-3.0-or-later** ([`LICENSE`](LICENSE)). These files are vendored from [rdiankov/openrave](https://github.com/rdiankov/openrave); see [`src/ikfastpy/_vendor/UPSTREAM.md`](src/ikfastpy/_vendor/UPSTREAM.md) for the pinned upstream commit.
+- The **runtime header** (`ikfast.h`), included by the generated C++ solvers, is licensed under **Apache-2.0** ([`LICENSE.apache`](LICENSE.apache)).
+
+The generator and the runtime header have always carried these distinct licenses upstream. Generated solvers are bound by the runtime header's Apache-2.0 license; the generator itself remains LGPL.

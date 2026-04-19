@@ -55,6 +55,7 @@ packages = ["src/ikfastpy"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+extend-exclude = ["src/ikfastpy/_vendor"]
 
 [tool.ruff.lint]
 select = [
@@ -72,6 +73,7 @@ select = [
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
+exclude = ["src/ikfastpy/_vendor/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
