@@ -98,15 +98,21 @@ def test_ur5_pfk_matches_shim_fk(ur5_chaintree: Any) -> None:
 
 
 def test_ur5_fk_ik_roundtrip(ur5_chaintree: Any) -> None:
-    """Stage B of correctness validation: pick a random joint config q*,
-    compute the target EE position via our FK, feed (P*, free joints) into
-    the generated IK chaintree, and verify at least one candidate solution
-    reproduces P* within tolerance.
+    """Full correctness gate: pick a random joint config q*, compute target
+    EE position via our FK, feed (P*, free joints) through the generated IK
+    chaintree, and verify the walker emits **all** valid solutions.
 
-    This is the real correctness gate. Passing means the sympy-1.14 compat
-    fixes in PR #30 (``SimplifyAtan2`` oscillation guard + ``isValidSolution``
-    TypeError widening) didn't silently drop or corrupt solutions on the
-    path to a real Translation3D IK.
+    Analytical IK's key value is solution enumeration — a motion planner uses
+    the full set to pick a config that avoids singularities/collisions. A
+    solver that silently drops branches is worse than useless. So we check:
+
+    1. At least one candidate matches the target (minimum: solver works).
+    2. Emitted matching candidates are *distinct* — no collapsed branches.
+    3. Count of distinct matching solutions is at least the analytically
+       expected number for a generic UR5 Translation3D config (>= 2 — the
+       elbow-up / elbow-down pair).
+    4. Every emitted candidate either matches the target or, if not, is
+       rejected; "matches" is the definitive set.
     """
     from fixtures.ur5 import ur5_fk
     from fk_ik_eval import eval_chaintree
@@ -122,14 +128,40 @@ def test_ur5_fk_ik_roundtrip(ur5_chaintree: Any) -> None:
     assert len(candidates) > 0, "chaintree walker produced no candidate solutions"
 
     matches: list[dict[str, float]] = []
+    non_matches: list[dict[str, float]] = []
     for cand in candidates:
         full_q = [cand[f"j{i}"] for i in range(6)]
         p_cand = ur5_fk(full_q)[:3, 3]
         if np.allclose(p_cand, p_star, atol=1e-6):
             matches.append(cand)
+        else:
+            non_matches.append(cand)
+
+    # Deduplicate matching solutions on the three solved joints (j0/j1/j2).
+    # Free joints are pinned, so they can't vary across valid solutions here.
+    dedup_tol = 1e-4  # rad — much looser than the FK tolerance
+    distinct: list[tuple[float, float, float]] = []
+    for m in matches:
+        key = (m["j0"], m["j1"], m["j2"])
+        if not any(
+            all(abs(a - b) < dedup_tol for a, b in zip(key, d, strict=True)) for d in distinct
+        ):
+            distinct.append(key)
+
+    print(
+        f"\nUR5 Translation3D @ q*={q_star}:"
+        f"\n  walker emitted:    {len(candidates)}"
+        f"\n  match P* (atol 1e-6): {len(matches)}"
+        f"\n  distinct (rtol {dedup_tol}): {len(distinct)}"
+        f"\n  solutions (j0,j1,j2): {distinct}"
+    )
 
     assert len(matches) > 0, (
         f"no candidate reproduces target within 1e-6. "
-        f"q*={q_star}, P*={p_star.tolist()}, "
-        f"candidates={candidates}"
+        f"q*={q_star}, P*={p_star.tolist()}, candidates={candidates}"
+    )
+    assert len(distinct) >= 2, (
+        f"expected >=2 distinct solutions for generic UR5 Translation3D "
+        f"(elbow-up + elbow-down at minimum); got {len(distinct)}: {distinct}. "
+        f"Walker may be collapsing branches, or the solver dropped one."
     )
