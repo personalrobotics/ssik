@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+<!--
+  Minimal kinematic-only UR5 URDF for adapter testing. Encodes the same
+  classical DH parameters as tests/fixtures/ur5.py, but with the
+  `Trans_z(d) * Trans_x(a) * Rot_x(alpha)` factors split off to each joint's
+  origin in the standard URDF convention (child-link frame = joint frame
+  after rotation; pre-rotation offsets become the NEXT joint's origin, or a
+  trailing fixed joint for the end-effector). All joints are z-axis revolute.
+
+  No visuals, collisions, or inertial data — we only need the kinematic chain.
+-->
+<robot name="ur5">
+  <link name="base_link"/>
+  <link name="shoulder_link"/>
+  <link name="upper_arm_link"/>
+  <link name="forearm_link"/>
+  <link name="wrist_1_link"/>
+  <link name="wrist_2_link"/>
+  <link name="wrist_3_link"/>
+  <link name="ee_link"/>
+
+  <joint name="shoulder_pan_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="150" velocity="3.15" lower="-6.28318530717959" upper="6.28318530717959"/>
+  </joint>
+
+  <joint name="shoulder_lift_joint" type="revolute">
+    <parent link="shoulder_link"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="0 0 0.089159" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="150" velocity="3.15" lower="-6.28318530717959" upper="6.28318530717959"/>
+  </joint>
+
+  <joint name="elbow_joint" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="forearm_link"/>
+    <origin xyz="-0.425 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="150" velocity="3.15" lower="-3.14159265358979" upper="3.14159265358979"/>
+  </joint>
+
+  <joint name="wrist_1_joint" type="revolute">
+    <parent link="forearm_link"/>
+    <child link="wrist_1_link"/>
+    <origin xyz="-0.39225 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="28" velocity="3.2" lower="-6.28318530717959" upper="6.28318530717959"/>
+  </joint>
+
+  <joint name="wrist_2_joint" type="revolute">
+    <parent link="wrist_1_link"/>
+    <child link="wrist_2_link"/>
+    <origin xyz="0 0 0.10915" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="28" velocity="3.2" lower="-6.28318530717959" upper="6.28318530717959"/>
+  </joint>
+
+  <joint name="wrist_3_joint" type="revolute">
+    <parent link="wrist_2_link"/>
+    <child link="wrist_3_link"/>
+    <origin xyz="0 0 0.09465" rpy="-1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="28" velocity="3.2" lower="-6.28318530717959" upper="6.28318530717959"/>
+  </joint>
+
+  <joint name="ee_fixed_joint" type="fixed">
+    <parent link="wrist_3_link"/>
+    <child link="ee_link"/>
+    <origin xyz="0 0 0.0823" rpy="0 0 0"/>
+  </joint>
+</robot>

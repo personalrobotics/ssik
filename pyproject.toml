@@ -26,6 +26,12 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+# Optional feature extras. Users opt in per feature; the core wheel stays light.
+[project.optional-dependencies]
+urdf = [
+    "urchin>=0.0.27",
+]
+
 [project.urls]
 Repository = "https://github.com/siddhss5/ikfastpy"
 Issues = "https://github.com/siddhss5/ikfastpy/issues"
@@ -36,6 +42,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.8",
     "mypy>=1.13",
+    "urchin>=0.0.27",  # exercised by the URDF-adapter tests
 ]
 docs = [
     "mkdocs-material>=9.5",
@@ -87,6 +94,11 @@ follow_imports_for_stubs = true
 # correctness checks against the vendored generator).
 [[tool.mypy.overrides]]
 module = "sympy.*"
+ignore_missing_imports = true
+
+# urchin (URDF parser) ships no type stubs.
+[[tool.mypy.overrides]]
+module = "urchin.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
