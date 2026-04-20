@@ -13,6 +13,7 @@ with the parent-link +Z) and lump the post-rotation DH factors into
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -62,3 +63,28 @@ def ur5_specs() -> list[JointSpec]:
         )
         for i, (a, alpha, d) in enumerate(_UR5_DH)
     ]
+
+
+def _rot_z(angle: float) -> NDArray[np.float64]:
+    c, s = math.cos(angle), math.sin(angle)
+    return np.array(
+        [[c, -s, 0, 0], [s, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        dtype=np.float64,
+    )
+
+
+def ur5_fk(q: Sequence[float]) -> NDArray[np.float64]:
+    """Ground-truth forward kinematics for the UR5 fixture.
+
+    Applies the per-joint transform ``parent_link_T @ R(q_i) @ child_link_T``
+    for each of the six revolute joints, in order — matching exactly what
+    ``build_kinbody(ur5_specs())`` hands to IKFastSolver. Returns the 4x4
+    base-to-EE transform.
+    """
+    if len(q) != 6:
+        raise ValueError(f"UR5 has 6 joints; got q of length {len(q)}")
+    T = np.eye(4, dtype=np.float64)
+    for spec, qi in zip(ur5_specs(), q, strict=True):
+        child = spec.child_link_T if spec.child_link_T is not None else np.eye(4)
+        T = T @ spec.parent_link_T @ _rot_z(qi) @ child
+    return T

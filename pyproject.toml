@@ -83,6 +83,12 @@ module = "ikfastpy._vendor.*"
 follow_imports = "skip"
 follow_imports_for_stubs = true
 
+# sympy ships no type stubs and is only used inside tests (for roundtrip
+# correctness checks against the vendored generator).
+[[tool.mypy.overrides]]
+module = "sympy.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "-m", "not slow"]

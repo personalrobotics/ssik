@@ -1810,15 +1810,19 @@ class IKFastSolver(AutoReloader):
             curcount=newcount
         return eq
     
-    def SimplifyAtan2(self, eq, incos=False, insin=False, epsilon=None):
+    def SimplifyAtan2(self, eq, incos=False, insin=False, epsilon=None, _add_visited=None):
         """simplifies equations like sin(atan2(y,x)) to y/sqrt(x**2+y**2)
-        
+
         Sometimes can get equations like
         sin(-atan2(-r21, -r20))
         cos(-atan2(-r21, -r20) + 3.14159265358979)
-        
+
         which means the operations internally have to be carried over
         """
+        # BUGFIX (ikfastpy #28): _add_visited threads hashes seen by the
+        # Add-branch simplify-until-fixed-point loop so we break structural
+        # oscillations in sympy's simplify(). Other recursion sites in this
+        # function do not propagate it — they walk substructure and terminate.
         processed = False # if incos or insin set to True, then this flag specifies whether the function was already taking into account or not.
         if eq.is_Add:
             if incos:
@@ -1846,7 +1850,18 @@ class IKFastSolver(AutoReloader):
                     #log.info('complexity: %d', self.codeComplexity(neweq))
                     neweq2 = simplify(neweq)
                 if neweq2 != neweq:
-                    neweq = self.SimplifyAtan2(neweq2)
+                    # BUGFIX (ikfastpy #28): on sympy 1.14, simplify() can
+                    # oscillate between structurally-unequal-but-equivalent
+                    # forms, causing infinite recursion here. Guard with a
+                    # visited-hash set scoped to this Add-branch chain.
+                    if _add_visited is None:
+                        _add_visited = {hash(neweq)}
+                    if hash(neweq2) in _add_visited:
+                        # cycle: accept current and drop out
+                        neweq = neweq2
+                    else:
+                        _add_visited.add(hash(neweq2))
+                        neweq = self.SimplifyAtan2(neweq2, _add_visited=_add_visited)
                 else:
                     try:
                         #print 'simplifying',neweq
@@ -9141,7 +9156,16 @@ class IKFastSolver(AutoReloader):
         """return true if solution does not contain any nan or inf terms"""
         if expr.is_number:
             e=expr.evalf()
-            if e.has(I) or isinf(e) or isnan(e):
+            if e.has(I):
+                return False
+            # BUGFIX (ikfastpy #28): on sympy 1.14, `evalf()` can return a
+            # complex mpmath number whose repr doesn't contain the `I` symbol,
+            # so `.has(I)` misses it. isinf/isnan then raise TypeError trying
+            # to float-convert. Any such number is not a valid real solution.
+            try:
+                if isinf(e) or isnan(e):
+                    return False
+            except TypeError:
                 return False
             return True
         if expr.is_Mul:
