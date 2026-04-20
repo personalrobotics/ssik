@@ -21,7 +21,8 @@ Each entry below documents a tracked PR that modifies these files. Re-pinning re
 
 | PR | Issue | Files touched | Summary |
 |---|---|---|---|
-| [#?](https://github.com/siddhss5/ikfastpy/pulls) | [#4](https://github.com/siddhss5/ikfastpy/issues/4) | `ikfast.py`, `ikfast_generator_cpp.py` | Strip OpenRAVE imports (keep fallback branches inline); rename loggers to `ikfastpy.ikfast`; replace `ikfast.py` `__main__` CLI with a `NotImplementedError` stub; remove the docstring section describing the now-removed CLI. |
+| [#26](https://github.com/siddhss5/ikfastpy/pull/26) | [#4](https://github.com/siddhss5/ikfastpy/issues/4) | `ikfast.py`, `ikfast_generator_cpp.py` | Strip OpenRAVE imports (keep fallback branches inline); rename loggers to `ikfastpy.ikfast`; replace `ikfast.py` `__main__` CLI with a `NotImplementedError` stub; remove the docstring section describing the now-removed CLI. |
+| [#?](https://github.com/siddhss5/ikfastpy/pulls) | [#6](https://github.com/siddhss5/ikfastpy/issues/6) | `ikfast.py` | Remove the `import six` and `@six.python_2_unicode_compatible` decorator on `CannotSolveError`. Both are Python-2 compat shims that are no-ops on Python ≥3.11. With this single patch the vendored generator imports cleanly on sympy 1.14 (latest stable as of writing). |
 
 ## What was deliberately not vendored
 

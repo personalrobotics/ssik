@@ -261,7 +261,6 @@ except ImportError:
             else:
                 return
 
-import six
 import logging
 log = logging.getLogger('ikfastpy.ikfast')
 
@@ -1328,7 +1327,6 @@ class IKFastSolver(AutoReloader):
     tjX - tan of joint angle    
     """
 
-    @six.python_2_unicode_compatible
     class CannotSolveError(Exception):
         """thrown when ikfast fails to solve a particular set of equations with the given knowns and unknowns
         """

@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.0",
+    "sympy>=1.10",
 ]
 dynamic = ["version"]
 
@@ -75,6 +76,20 @@ strict = true
 files = ["src", "tests"]
 exclude = ["src/ikfastpy/_vendor/"]
 
+# Vendored modules are not type-checked. Treat anything imported from them
+# as Any in our typed code so strict mode doesn't flag every call site.
+[[tool.mypy.overrides]]
+module = "ikfastpy._vendor.*"
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers"]
+filterwarnings = [
+    # Upstream ikfast.py uses unraw regex literals like '\d', '\g'. They render
+    # correctly at runtime but emit SyntaxWarning on Python 3.12+. Out of scope
+    # to fix in vendored code; would resurface on every upstream re-pin.
+    "ignore::SyntaxWarning:ikfastpy._vendor",
+    "ignore::SyntaxWarning:ikfastpy",
+]
