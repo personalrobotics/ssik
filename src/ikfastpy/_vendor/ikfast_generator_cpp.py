@@ -31,34 +31,29 @@ try:
 except ImportError:
     from io import StringIO
 
-try:
-    from openravepy.metaclass import AutoReloader
-except:
-    class AutoReloader:
-        pass
+# The AutoReloader stub and the IkType enum are kept inline because ikfastpy
+# is OpenRAVE-free by design. Constants below are the canonical ikfast type
+# IDs preserved from upstream.
+class AutoReloader:
+    pass
 
-# import the correct iktypes from openravepy (if present)
-try:
-    from openravepy import IkParameterization
-    IkType = IkParameterization.Type
-except:
-    class IkType:
-        Transform6D=0x67000001
-        Rotation3D=0x34000002
-        Translation3D=0x33000003
-        Direction3D=0x23000004
-        Ray4D=0x46000005
-        Lookat3D=0x23000006
-        TranslationDirection5D=0x56000007
-        TranslationXY2D=0x22000008
-        TranslationXYOrientation3D=0x33000009
-        TranslationLocalGlobal6D=0x3600000a
-        TranslationXAxisAngle4D=0x4400000b
-        TranslationYAxisAngle4D=0x4400000c
-        TranslationZAxisAngle4D=0x4400000d
-        TranslationXAxisAngleZNorm4D=0x4400000e
-        TranslationYAxisAngleXNorm4D=0x4400000f
-        TranslationZAxisAngleYNorm4D=0x44000010
+class IkType:
+    Transform6D=0x67000001
+    Rotation3D=0x34000002
+    Translation3D=0x33000003
+    Direction3D=0x23000004
+    Ray4D=0x46000005
+    Lookat3D=0x23000006
+    TranslationDirection5D=0x56000007
+    TranslationXY2D=0x22000008
+    TranslationXYOrientation3D=0x33000009
+    TranslationLocalGlobal6D=0x3600000a
+    TranslationXAxisAngle4D=0x4400000b
+    TranslationYAxisAngle4D=0x4400000c
+    TranslationZAxisAngle4D=0x4400000d
+    TranslationXAxisAngleZNorm4D=0x4400000e
+    TranslationYAxisAngleXNorm4D=0x4400000f
+    TranslationZAxisAngleYNorm4D=0x44000010
 
 from sympy import *
 from sympy.simplify import cse_main
@@ -76,7 +71,7 @@ except ImportError:
     using_swiginac = False
 
 import logging
-log = logging.getLogger('openravepy.ikfast')
+log = logging.getLogger('ikfastpy.ikfast')
 
 from sympy.core import function # for sympy 0.7.1+
 class fmod(function.Function):

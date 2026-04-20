@@ -76,21 +76,6 @@ The main file ikfast.py can be used both as a library and as an executable progr
 
 **However, the recommended way of using IKFast** is through the OpenRAVE :mod:`.databases.inversekinematics` database generator which directly loads the IK into OpenRAVE as an interface. 
 
-Stand-alone Executable
-======================
-
-To get help and a description of the ikfast arguments type
-
-.. code-block:: bash
-
-  python `openrave-config --python-dir`/openravepy/_openravepy_/ikfast.py --help
-
-A simple example to generate IK for setting the 3rd joint free of the Barrett WAM is
-
-.. code-block:: bash
-
-  python `openrave-config --python-dir`/openravepy/_openravepy_/ikfast.py --robot=robots/barrettwam.robot.xml --baselink=0 --eelink=7 --savefile=ik.cpp --freeindex=2
-
 Through Python
 ==============
 
@@ -202,13 +187,13 @@ else:
     import builtins as __builtin__
 
 from optparse import OptionParser
-try:
-    from openravepy.metaclass import AutoReloader
-    from openravepy import axisAngleFromRotationMatrix
-except:
-    axisAngleFromRotationMatrix = None
-    class AutoReloader:
-        pass
+
+# Both helpers had try/except fallbacks upstream so ikfast could run without
+# OpenRAVE installed. We are OpenRAVE-free by design, so the fallbacks are
+# now the only path.
+axisAngleFromRotationMatrix = None
+class AutoReloader:
+    pass
 
 import numpy # required for fast eigenvalue computation
 
@@ -278,7 +263,7 @@ except ImportError:
 
 import six
 import logging
-log = logging.getLogger('openravepy.ikfast')
+log = logging.getLogger('ikfastpy.ikfast')
 
 try:
     # not necessary, just used for testing
@@ -9619,65 +9604,11 @@ class IKFastSolver(AutoReloader):
                 }
 
 if __name__ == '__main__':
-    import openravepy
-    parser = OptionParser(description="""IKFast: The Robot Kinematics Compiler                                             
-Software License Agreement (Lesser GPL v3). 
-Copyright (C) 2009-2011 Rosen Diankov. 
-IKFast is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Lesser General Public License for more details.
-
-IKFast is part of OpenRAVE. This program can be used with robots or kinbodies defined and is independent of the OpenRAVE databases.
-                                                  
-Example usage for 7 DOF Barrett WAM where the 3rd joint is a free parameter:                               
-
-python ikfast.py --robot=robots/barrettwam.robot.xml --baselink=0 --eelink=7 --savefile=ik.cpp --freeindex=2
-
-""",version=__version__)
-    parser.add_option('--robot', action='store', type='string', dest='robot',default=None,
-                      help='robot file (COLLADA or OpenRAVE XML)')
-    parser.add_option('--savefile', action='store', type='string', dest='savefile',default='ik.cpp',
-                      help='filename where to store the generated c++ code')
-    parser.add_option('--baselink', action='store', type='int', dest='baselink',
-                      help='base link index to start extraction of ik chain')
-    parser.add_option('--eelink', action='store', type='int', dest='eelink',
-                      help='end effector link index to end extraction of ik chain')
-    parser.add_option('--freeindex', action='append', type='int', dest='freeindices',default=[],
-                      help='Optional joint index specifying a free parameter of the manipulator. If not specified, assumes all joints not solving for are free parameters. Can be specified multiple times for multiple free parameters.')
-    parser.add_option('--iktype', action='store', dest='iktype',default='transform6d',
-                      help='The iktype to generate the ik for. Possible values are: %s'%(', '.join(name for name,fn in IKFastSolver.GetSolvers().items())))
-    parser.add_option('--maxcasedepth', action='store', type='int', dest='maxcasedepth',default=3,
-                      help='The max depth to go into degenerate cases. If ikfast file is too big, try reducing this, (default=%default).')
-    parser.add_option('--lang', action='store',type='string',dest='lang',default='cpp',
-                      help='The language to generate the code in (default=%default), available=('+','.join(name for name,value in CodeGenerators.items())+')')
-    parser.add_option('--debug','-d', action='store', type='int',dest='debug',default=logging.INFO,
-                      help='Debug level for python nose (smaller values allow more text).')
-    
-    (options, args) = parser.parse_args()
-    if options.robot is None or options.baselink is None or options.eelink is None:
-        print('Error: Not all arguments specified')
-        sys.exit(1)
-
-    format = logging.Formatter('%(levelname)s: %(message)s')
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(format)
-    log.addHandler(handler)
-    log.setLevel(options.debug)
-
-    solvefn=IKFastSolver.GetSolvers()[options.iktype.lower()]
-    if options.robot is not None:
-        try:
-            env=openravepy.Environment()
-            kinbody=env.ReadRobotXMLFile(options.robot)
-            env.Add(kinbody)
-            solver = IKFastSolver(kinbody,kinbody)
-            solver.maxcasedepth = options.maxcasedepth
-            chaintree = solver.generateIkSolver(options.baselink,options.eelink,options.freeindices,solvefn=solvefn)
-            code=solver.writeIkSolver(chaintree,lang=options.lang)
-        finally:
-            openravepy.RaveDestroy()
-
-    if len(code) > 0:
-        with open(options.savefile,'w') as f:
-            f.write(code)
+    # The original CLI lived here and accepted an OpenRAVE XML/COLLADA robot
+    # file on argv. The ikfastpy package replaces it with a Python entry point
+    # that accepts URDF / DH / axes / per-joint transforms — see issue #12 and
+    # `ikfastpy.Manipulator`. This module is now an importable library only.
+    raise NotImplementedError(
+        "ikfast.py is the vendored ikfast generator and is not invokable as a script. "
+        "Use ikfastpy.Manipulator (e.g. `Manipulator.from_urdf(...)`) instead."
+    )
