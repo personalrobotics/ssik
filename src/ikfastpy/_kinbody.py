@@ -94,9 +94,7 @@ class Joint:
 
     def _check_iaxis(self, iaxis: int) -> None:
         if iaxis != 0:
-            raise ValueError(
-                f"joint {self.name!r} is single-DOF; iaxis must be 0, got {iaxis}"
-            )
+            raise ValueError(f"joint {self.name!r} is single-DOF; iaxis must be 0, got {iaxis}")
 
     def GetName(self) -> str:
         return self.name
@@ -174,13 +172,9 @@ class KinBody:
         return self._dof_to_joint[idof]
 
     @overload
-    def GetChain(
-        self, baselink: str, eelink: str, returnjoints: Literal[True]
-    ) -> list[Joint]: ...
+    def GetChain(self, baselink: str, eelink: str, returnjoints: Literal[True]) -> list[Joint]: ...
     @overload
-    def GetChain(
-        self, baselink: str, eelink: str, returnjoints: Literal[False]
-    ) -> list[Link]: ...
+    def GetChain(self, baselink: str, eelink: str, returnjoints: Literal[False]) -> list[Link]: ...
     @overload
     def GetChain(
         self, baselink: str, eelink: str, returnjoints: bool
@@ -197,9 +191,7 @@ class KinBody:
         except KeyError as err:
             raise ValueError(f"unknown link name: {err.args[0]!r}") from err
         if i0 > i1:
-            raise ValueError(
-                f"baselink {baselink!r} must precede eelink {eelink!r} in the chain"
-            )
+            raise ValueError(f"baselink {baselink!r} must precede eelink {eelink!r} in the chain")
         if returnjoints:
             return list(self.joints[i0:i1])
         return list(self.links[i0 : i1 + 1])
