@@ -6,10 +6,15 @@ not production code. The real consumer of a chaintree is the C++ codegen
 sympy evaluation is ~1000x slower but correct-by-construction — perfect
 for validating a single roundtrip before we have the compiled pipeline.
 
-Supported node types (added incrementally as UR5's Translation3D chaintree
-surfaced them):
-    SolverCheckZeros, SolverPolynomialRoots, SolverSolution,
-    SolverStoreSolution, SolverSequence.
+Supported node types (added incrementally as real chaintrees surfaced them):
+    - SolverCheckZeros, SolverBranchConds — conditional branching.
+    - SolverPolynomialRoots — real roots of a polynomial in a joint variable.
+    - SolverSolution — direct / cos / sin joint-value expressions.
+    - SolverStoreSolution — emit a candidate from current bindings.
+    - SolverSequence — chain multiple sub-trees.
+    - SolverRotation — rewrite the r_ij target bindings via a 3x3 expression
+      matrix before walking a nested tree (used in Pieper-style
+      spherical-wrist decompositions).
 
 Any other node type raises ``NotImplementedError`` with the class name;
 extend here when a new robot/solve-mode needs it.
@@ -40,15 +45,21 @@ def _eval_float(expr: Any, bindings: dict[Symbol, float]) -> float:
 
 
 def _trig_bindings(joint_name: str, value: float) -> dict[Symbol, float]:
-    """Return ``{j: v, cj: cos(v), sj: sin(v)}`` — the trig pre-computations
-    that the generated code keeps as a cache and that solver expressions
-    rely on via symbols like ``cj0`` / ``sj0``.
+    """Return the trig pre-computations the generated C++ keeps as a cache
+    and that solver expressions reference via symbols like ``cj0`` / ``sj0``.
+
+    Transform6D additionally uses the half-tangent (``htj``) and tangent
+    (``tj``) forms; Translation3D only ever touches ``cj`` / ``sj`` but
+    binding them anyway is harmless (unused bindings are ignored by subs).
     """
-    return {
+    out: dict[Symbol, float] = {
         Symbol(joint_name): value,
         Symbol("c" + joint_name): float(np.cos(value)),
         Symbol("s" + joint_name): float(np.sin(value)),
+        Symbol("ht" + joint_name): float(np.tan(value / 2.0)),
+        Symbol("t" + joint_name): float(np.tan(value)),
     }
+    return out
 
 
 def _joint_values_from_solution_node(node: Any, bindings: dict[Symbol, float]) -> list[float]:
@@ -235,6 +246,22 @@ def _eval_tree(
             _eval_tree(list(subtree) + rest, bindings, emit)
         return
 
+    if cls == "SolverRotation":
+        # The Pieper-style decomposition emits this after the first three
+        # joints (arm positioning) have been solved: ``node.T`` is a 3x3
+        # sympy Matrix re-expressing the remaining orientation problem in a
+        # sub-frame where the wrist-joint equations simplify. The C++
+        # generator (``ikfast_generator_cpp.generateRotation``) writes the
+        # values into **new_r_ij** symbols (NOT ``r_ij``) and leaves the
+        # outer r_ij values unchanged. The nested jointtree references
+        # ``new_r_ij``. Do NOT touch ``r_ij`` here.
+        new_bindings = dict(bindings)
+        for i in range(3):
+            for j in range(3):
+                new_bindings[Symbol(f"new_r{i}{j}")] = _eval_float(node.T[i, j], bindings)
+        _eval_tree(list(node.jointtree) + rest, new_bindings, emit)
+        return
+
     raise NotImplementedError(f"chaintree walker does not support {cls}")
 
 
@@ -280,3 +307,78 @@ def eval_chaintree(
     emit: list[dict[str, float]] = []
     _eval_tree(list(chaintree.jointtree), bindings, emit)
     return emit
+
+
+def eval_chaintree_6d(
+    chaintree: Any,
+    q_free: dict[str, float],
+    target_pose: np.ndarray,
+) -> list[dict[str, float]]:
+    """Numerically evaluate an ``SolverIKChainTransform6D`` chaintree.
+
+    :param q_free: ``{joint_name: value}`` for any free joints (empty for
+        standard 6-DOF 6D solve).
+    :param target_pose: desired end-effector pose as a 4x4 homogeneous
+        transform in the **ikfast frame convention** (i.e., what
+        ``chaintree.Tfk`` would produce). See :func:`ee_rest_rotation` for
+        translating between this and a URDF-native FK.
+    :returns: list of candidate solutions, each a full ``{joint_name: value}``
+        dict covering solved + free joints.
+    """
+    if target_pose.shape != (4, 4):
+        raise ValueError(f"target_pose must be 4x4, got {target_pose.shape}")
+
+    # Bind the target as the Tee symbols (r00..r22 + px/py/pz).
+    bindings: dict[Symbol, float] = {}
+    for i in range(3):
+        for j in range(3):
+            bindings[Symbol(f"r{i}{j}")] = float(target_pose[i, j])
+    bindings[Symbol("px")] = float(target_pose[0, 3])
+    bindings[Symbol("py")] = float(target_pose[1, 3])
+    bindings[Symbol("pz")] = float(target_pose[2, 3])
+
+    for name, val in q_free.items():
+        bindings.update(_trig_bindings(name, val))
+
+    if chaintree.dictequations:
+        for sym, expr in chaintree.dictequations:
+            bindings[sym] = _eval_float(expr, bindings)
+
+    # The chaintree's Tee is a 4x4 sympy Matrix re-expressing the target in
+    # the frame the downstream jointtree expects. Evaluate it numerically
+    # and rewrite the r_ij / p_xyz bindings. Pattern mirrors
+    # ikfast_generator_cpp.generateChain (ikfast_generator_cpp.py:672).
+    new_rotation = [
+        [_eval_float(chaintree.Tee[4 * i + j], bindings) for j in range(3)] for i in range(3)
+    ]
+    new_translation = [_eval_float(chaintree.Tee[4 * i + 3], bindings) for i in range(3)]
+    for i in range(3):
+        for j in range(3):
+            bindings[Symbol(f"r{i}{j}")] = new_rotation[i][j]
+    bindings[Symbol("px")] = new_translation[0]
+    bindings[Symbol("py")] = new_translation[1]
+    bindings[Symbol("pz")] = new_translation[2]
+
+    emit: list[dict[str, float]] = []
+    _eval_tree(list(chaintree.jointtree), bindings, emit)
+    return emit
+
+
+def ee_rest_rotation(kinbody: Any) -> np.ndarray:
+    """Return the end-effector rotation matrix at q=0 for the given KinBody.
+
+    Used to translate between ikfast's internal FK convention (URDF-native:
+    cumulative `rpy` values on joint origins appear in the rest pose) and
+    EAIK's convention (FK=I at q=0). For a target pose ``T_ours`` you want
+    ikfast to solve, the equivalent target for EAIK is
+    ``T_eaik[:3,:3] = T_ours[:3,:3] @ R_rest.T``. Position is unchanged.
+
+    This is purely a convention bridge — the underlying q solutions are the
+    same.
+    """
+    T = np.eye(4, dtype=np.float64)
+    for j in kinbody.joints:
+        # At q=0 the joint rotation is identity, so the joint contributes
+        # T_left @ T_right to the cumulative transform.
+        T = T @ j.T_left @ j.T_right
+    return T[:3, :3].copy()

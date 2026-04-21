@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<!--
+  Unimation Puma 560: classic Pieper-compatible 6R arm with spherical wrist
+  (joints 4/5/6 intersect at a single point because d5=d6=0, a4=a5=a6=0).
+
+  DH parameters (classical / distal / "Paul") from Peter Corke's Robotics
+  Toolbox — the canonical reference numbers for Puma 560:
+
+      i | a        alpha   d         theta
+      1 | 0        +pi/2   0         theta_1
+      2 | 0.4318   0       0         theta_2
+      3 | 0.0203  -pi/2    0.15005   theta_3
+      4 | 0        +pi/2   0.4318    theta_4
+      5 | 0       -pi/2    0         theta_5
+      6 | 0        0       0         theta_6
+
+  Encoding convention (same as tests/fixtures/ur5.urdf): joint i's origin
+  captures (a_{i-1}, 0, d_{i-1}) as xyz and (alpha_{i-1}, 0, 0) as rpy.
+  All joint axes are +z in their local frame — rotations come from accumulated
+  rpy values of prior joint origins.
+
+  Source robot is used in:
+    - EAIK's own canonical UrdfRobot example.
+    - Craig, "Introduction to Robotics," Chapter 3 worked examples.
+    - Every analytical-IK textbook written since 1982.
+
+  No meshes, inertia, or visuals — kinematic-only fixture for IK testing.
+-->
+<robot name="puma560">
+  <link name="base_link"/>
+  <link name="shoulder_link"/>
+  <link name="upper_arm_link"/>
+  <link name="forearm_link"/>
+  <link name="wrist_1_link"/>
+  <link name="wrist_2_link"/>
+  <link name="wrist_3_link"/>
+
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link"/>
+    <child link="shoulder_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" velocity="2.0" lower="-3.14159265358979" upper="3.14159265358979"/>
+  </joint>
+
+  <joint name="joint_2" type="revolute">
+    <parent link="shoulder_link"/>
+    <child link="upper_arm_link"/>
+    <origin xyz="0 0 0" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" velocity="2.0" lower="-3.14159265358979" upper="3.14159265358979"/>
+  </joint>
+
+  <joint name="joint_3" type="revolute">
+    <parent link="upper_arm_link"/>
+    <child link="forearm_link"/>
+    <origin xyz="0.4318 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" velocity="2.0" lower="-3.14159265358979" upper="3.14159265358979"/>
+  </joint>
+
+  <joint name="joint_4" type="revolute">
+    <parent link="forearm_link"/>
+    <child link="wrist_1_link"/>
+    <origin xyz="0.0203 0 0.15005" rpy="-1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" velocity="2.0" lower="-3.14159265358979" upper="3.14159265358979"/>
+  </joint>
+
+  <joint name="joint_5" type="revolute">
+    <parent link="wrist_1_link"/>
+    <child link="wrist_2_link"/>
+    <origin xyz="0 0 0.4318" rpy="1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" velocity="2.0" lower="-3.14159265358979" upper="3.14159265358979"/>
+  </joint>
+
+  <joint name="joint_6" type="revolute">
+    <parent link="wrist_2_link"/>
+    <child link="wrist_3_link"/>
+    <origin xyz="0 0 0" rpy="-1.5707963267948966 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" velocity="2.0" lower="-3.14159265358979" upper="3.14159265358979"/>
+  </joint>
+</robot>

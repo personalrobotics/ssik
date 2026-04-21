@@ -4835,7 +4835,10 @@ class IKFastSolver(AutoReloader):
                     if eq != S.Zero and self.CheckExpressionUnique(reducedeqs, eq):
                         reducedeqs.append(eq)
             for testrational in [Rational(-103651, 500000), Rational(-413850340369, 2000000000000), Rational(151,500), Rational(301463, 1000000)]:
-                if ((neweqs_simple[0][0]*tvar - neweqs_simple[1][0])*testrational + neweqs_simple[6][0]*tvar - neweqs_simple[7][0]).expand() == S.Zero:
+                # BUGFIX (ikfastpy #13): Poly.expand() was removed on sympy 1.x.
+                # The subexpression is a Poly (neweqs_simple[i][0] are Polys);
+                # go to Expr first, then expand.
+                if ((neweqs_simple[0][0]*tvar - neweqs_simple[1][0])*testrational + neweqs_simple[6][0]*tvar - neweqs_simple[7][0]).as_expr().expand() == S.Zero:
                     if (neweqs_simple[0][0]*tvar - neweqs_simple[1][0]) == S.Zero:
                         eq = (neweqs_simple[6][1]*tvar - neweqs_simple[7][1]).expand().as_expr()
                     else:
@@ -8118,7 +8121,11 @@ class IKFastSolver(AutoReloader):
                             complexity = 0
                             for i2 in range(M2.rows):
                                 for j2 in range(M2.cols):
-                                    complexity += self.codeComplexity(M2[i,j])
+                                    # BUGFIX (ikfastpy #13): upstream typo —
+                                    # used outer-loop `i,j` instead of inner
+                                    # `i2,j2`, indexing M2 out of bounds when
+                                    # the outer values exceed M2's shape.
+                                    complexity += self.codeComplexity(M2[i2,j2])
                             if self.IsDeterminantNonZeroByEval(M2):
                                 if complexity < 5000:
                                     Mdet = M2.det()
@@ -9363,9 +9370,24 @@ class IKFastSolver(AutoReloader):
                 detvalue = A.subs(testconsistentvalue).evalf().det()
             else:
                 detvalue = A.subs(testconsistentvalue).det().evalf()
-            if abs(detvalue) > thresh:
+            # BUGFIX (ikfastpy #13): the test substitution may not cover all
+            # free symbols (e.g., `new_r*` introduced by Tee remapping). If
+            # the determinant still has free symbols, `abs(detvalue) > thresh`
+            # is a symbolic Relational that can't be cast to bool. Substitute
+            # any remaining free symbols with concrete non-zero values; if
+            # that reduces to a number, use it.
+            free = detvalue.free_symbols
+            if free:
+                detvalue = detvalue.subs([(s, Rational(13, 17)) for s in free]).evalf()
+            try:
+                if abs(detvalue) > thresh:
+                    return True
+            except TypeError:
+                # still couldn't reduce — conservatively assume non-singular
+                # so the solver continues; downstream singularity checks
+                # will catch it if it actually was zero.
                 return True
-            
+
         return False
     
     @staticmethod

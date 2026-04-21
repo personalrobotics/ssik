@@ -25,7 +25,7 @@ from ikfastpy._kinbody import Joint, JointType, KinBody, Link
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from urchin import Joint as UrchinJoint
 
-__all__ = ["load_urdf_kinbody"]
+__all__ = ["load_urdf_kinbody", "load_urdf_kinbody_normalized"]
 
 _IDENTITY: NDArray[np.float64] = np.eye(4, dtype=np.float64)
 
@@ -166,5 +166,120 @@ def load_urdf_kinbody(
     # Rewire the last joint's reference since we just replaced the Link object.
     # (Joint.parent_link points at the *previous* link in the chain — the
     # replacement is the final link, not a parent — so no rewire needed.)
+
+    return KinBody(links=links, joints=joints)
+
+
+def load_urdf_kinbody_normalized(
+    urdf_path: str | Path,
+    base_link: str,
+    ee_link: str,
+    *,
+    lazy_load_meshes: bool = True,
+) -> KinBody:
+    """Load a URDF and build a **POE-normalized** :class:`KinBody` for the
+    chain between ``base_link`` and ``ee_link``.
+
+    The resulting chain is kinematically identical to :func:`load_urdf_kinbody`
+    (same FK at every ``q``) but uses a different internal encoding that
+    exposes the robot's kinematic structure to ikfast's pattern-matcher:
+
+    - Each active joint's ``T_left`` is a **pure translation** (no rotation).
+    - Each active joint's ``axis`` is expressed in the **base frame at q=0**.
+    - ``T_right`` is identity for all but the last active joint; the last
+      one absorbs any trailing fixed-joint offset **and** the cumulative
+      home-pose orientation so that FK(q=0) exactly matches the URDF.
+
+    This is the :ref:`POE (product-of-exponentials) encoding
+    <https://en.wikipedia.org/wiki/Product_of_exponentials_formula>`_
+    flattened into our ``T_left @ R(axis, q) @ T_right`` chain format.
+
+    **Why this matters.** ikfast's ``TestIntersectingAxes`` and similar
+    pattern-matchers symbolically inspect joint axes *in each joint's local
+    frame*. With URDF's native encoding, joint axes live in frames that
+    accumulate arbitrary ``rpy`` rotations from upstream joint origins, so
+    structural patterns like "three parallel axes" (UR5) are hidden behind
+    symbolic rotation products that sympy can't simplify into recognizable
+    form. POE-normalizing the chain puts axes directly in the base frame at
+    q=0, making the structure visible. See #33 for the full analysis.
+
+    :param lazy_load_meshes: forwarded to ``urchin.URDF.load``.
+    """
+    urchin = _import_urchin()
+    urdf = urchin.URDF.load(str(urdf_path), lazy_load_meshes=lazy_load_meshes)  # type: ignore[attr-defined]
+
+    chain = _walk_chain(urdf, base_link, ee_link)
+
+    # Accumulate base-frame rotation and position as we walk through joint
+    # origins. At q=0 every joint's rotation is identity, so only the origin
+    # transforms contribute.
+    r_cum = np.eye(3, dtype=np.float64)
+    pos_cum = np.zeros(3, dtype=np.float64)
+    prev_active_pos = np.zeros(3, dtype=np.float64)
+
+    # Per-active-joint records: (name, joint_type, axis_base, P_offset).
+    records: list[tuple[str, JointType, NDArray[np.float64], NDArray[np.float64]]] = []
+
+    for uj in chain:
+        if uj.mimic is not None:
+            raise NotImplementedError(
+                f"joint {uj.name!r} mimics joint {uj.mimic.joint!r}; "
+                "mimic joints are not supported by the kinbody shim."
+            )
+
+        origin = np.asarray(uj.origin, dtype=np.float64)
+        r_origin = origin[:3, :3]
+        t_origin = origin[:3, 3]
+
+        # Advance base-frame cumulative state through this joint's origin.
+        pos_cum = pos_cum + r_cum @ t_origin
+        r_cum = r_cum @ r_origin
+
+        if uj.joint_type == "fixed":
+            # Fixed joints don't emit records; their origin already folded in.
+            continue
+
+        joint_type = _map_joint_type(uj.joint_type, uj.name)
+        axis_base = r_cum @ np.asarray(uj.axis, dtype=np.float64)
+        p_offset = pos_cum - prev_active_pos
+        records.append((uj.name, joint_type, axis_base, p_offset))
+        prev_active_pos = pos_cum.copy()
+
+    if not records:
+        raise ValueError(
+            f"chain from {base_link!r} to {ee_link!r} contains no active joints (all fixed)"
+        )
+
+    # Any trailing fixed-joint offset + the home orientation live in the
+    # final active joint's T_right. The "final offset" is the translation
+    # from the last active joint to the EE; the home rotation is r_cum.
+    p_final = pos_cum - prev_active_pos
+    r_ee_home = r_cum.copy()
+    final_t_right = np.eye(4, dtype=np.float64)
+    final_t_right[:3, 3] = p_final
+    final_rotation = np.eye(4, dtype=np.float64)
+    final_rotation[:3, :3] = r_ee_home
+    final_t_right = final_t_right @ final_rotation
+
+    # Build the KinBody with synthesized intermediate link names.
+    n = len(records)
+    link_names = [base_link, *[f"_poe_link_{i}" for i in range(1, n)], ee_link]
+    links = [Link(name=name) for name in link_names]
+    joints: list[Joint] = []
+    for i, (name, joint_type, axis_base, p_offset) in enumerate(records):
+        t_left = np.eye(4, dtype=np.float64)
+        t_left[:3, 3] = p_offset
+        t_right = final_t_right if i == n - 1 else _IDENTITY.copy()
+        joints.append(
+            Joint(
+                name=name,
+                dof_index=i,
+                parent_link=links[i],
+                T_left=t_left,
+                T_right=t_right,
+                axis=axis_base,
+                joint_type=joint_type,
+            )
+        )
 
     return KinBody(links=links, joints=joints)
