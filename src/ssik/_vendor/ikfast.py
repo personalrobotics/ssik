@@ -262,7 +262,7 @@ except ImportError:
                 return
 
 import logging
-log = logging.getLogger('ikfastpy.ikfast')
+log = logging.getLogger('ssik.ikfast')
 
 try:
     # not necessary, just used for testing
@@ -9649,10 +9649,10 @@ class IKFastSolver(AutoReloader):
 
 if __name__ == '__main__':
     # The original CLI lived here and accepted an OpenRAVE XML/COLLADA robot
-    # file on argv. The ikfastpy package replaces it with a Python entry point
+    # file on argv. The ssik package replaces it with a Python entry point
     # that accepts URDF / DH / axes / per-joint transforms — see issue #12 and
-    # `ikfastpy.Manipulator`. This module is now an importable library only.
+    # `ssik.Manipulator`. This module is now an importable library only.
     raise NotImplementedError(
         "ikfast.py is the vendored ikfast generator and is not invokable as a script. "
-        "Use ikfastpy.Manipulator (e.g. `Manipulator.from_urdf(...)`) instead."
+        "Use ssik.Manipulator (e.g. `Manipulator.from_urdf(...)`) instead."
     )

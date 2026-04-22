@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from ikfastpy._urdf import load_urdf_kinbody
+from ssik._urdf import load_urdf_kinbody
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

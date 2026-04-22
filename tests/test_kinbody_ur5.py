@@ -32,8 +32,8 @@ pytestmark = pytest.mark.slow
 def ur5_chaintree() -> Any:
     """Build the UR5 Translation3D chaintree once per module (~2 min)."""
     from fixtures.ur5 import ur5_specs
-    from ikfastpy._kinbody import build_kinbody
-    from ikfastpy._vendor.ikfast import IKFastSolver
+    from ssik._kinbody import build_kinbody
+    from ssik._vendor.ikfast import IKFastSolver
 
     kb = build_kinbody(ur5_specs())
     solver = IKFastSolver(kinbody=kb)
@@ -52,8 +52,8 @@ def test_forward_kinematics_chain_runs() -> None:
     GetDOFIndex) without the combinatorial cost of ``generateIkSolver``.
     """
     from fixtures.ur5 import ur5_specs
-    from ikfastpy._kinbody import build_kinbody
-    from ikfastpy._vendor.ikfast import IKFastSolver
+    from ssik._kinbody import build_kinbody
+    from ssik._vendor.ikfast import IKFastSolver
 
     kb = build_kinbody(ur5_specs())
     solver = IKFastSolver(kinbody=kb)

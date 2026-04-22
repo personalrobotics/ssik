@@ -1,36 +1,43 @@
-# ikfastpy
+# ssik
 
-Standalone Python implementation of the [IKFast](https://www.openrave.org/docs/0.8.2/openravepy/ikfast/) analytic inverse kinematics solver, with no [OpenRAVE](https://github.com/rdiankov/openrave) dependency.
+Pluggable analytical inverse-kinematics library for Python. Subproblem decomposition, extensible solver registry, URDF-native.
 
-> **Status: pre-alpha.** Under active construction. Tracking work in [issues](../../issues).
+> **Status: pre-alpha, mid-rebuild.** See the [umbrella rebuild issue](https://github.com/siddhss5/ikfastpy/issues/37) for the current architecture and phase tracking.
 
-## What this is
+> **Renamed from `ikfastpy`.** The package was originally a port of OpenRAVE's [IKFast](https://www.openrave.org/docs/0.8.2/openravepy/ikfast/) symbolic IK generator. The IKFast general-solver path turned out unfixable on modern sympy for non-Pieper 6R arms, so the project is being rebuilt around the subproblem-decomposition approach ([IK-Geo](https://github.com/rpiRobotics/ik-geo), [EAIK](https://github.com/OstermD/EAIK)) with a pluggable registry for specialist solvers (Husty-Pfurner, GeoFIK, stereographic-SEW, future algorithms). The vendored IKFast tree remains available for Pieper-class arms during the transition, quarantined under `ssik._vendor`. See #37.
 
-IKFast symbolically derives a closed-form inverse kinematics solver for a given kinematic chain, emits C++ source, and compiles it into a fast runtime library. Upstream, this lives inside OpenRAVE and is awkward to use as a Python module.
-
-`ikfastpy` extracts the IKFast generator (`ikfast.py`, ~10k lines of sympy) into a standalone Python package, so you can do:
+## What this will be
 
 ```python
-import ikfastpy
+import ssik
 
-arm = ikfastpy.Manipulator.from_urdf("ur5.urdf", base_link="base", ee_link="tool0")
-T = arm.fk(q)               # forward kinematics: (4, 4) ndarray
-solutions = arm.ik(T)       # inverse kinematics: list of joint configs
+arm = ssik.Manipulator.from_urdf("ur5.urdf", base_link="base", ee_link="tool0")
+T = arm.fk(q)              # forward kinematics: (4, 4) ndarray
+solutions = arm.ik(T)      # inverse kinematics: list of solutions with provenance
 ```
 
-## What this is not
+The dispatcher routes each chain to the best-matching analytical solver:
 
-Unlike prior projects sharing this name (e.g. [andyzeng/ikfastpy](https://github.com/andyzeng/ikfastpy), [yijiangh/ikfast_pybind](https://github.com/yijiangh/ikfast_pybind)), `ikfastpy` is **not** a runtime wrapper around pre-generated C++. It contains the full symbolic generator and produces solvers on demand.
+- **Tier 0** (closed-form): spherical wrist (Pieper), three-parallel axes (UR-style). Puma, UR5, UR10.
+- **Tier 1** (1D search): any chain with one intersecting or parallel axis pair.
+- **Tier 2** (2D search + numeric polish): fully general 6R. JACO 2.
+- **Universal fallback**: Husty-Pfurner Study-quaternion degree-16 univariate for any 6R.
+- **7R via joint-locking**: Franka Panda, KUKA iiwa.
 
-## Relationship to EAIK
+Third-party packages register new solvers via the `ssik.solvers` entry-point group; no core patching required.
 
-[EAIK](https://github.com/OstermD/EAIK) is a complementary project that detects robots belonging to known closed-form kinematic families and runs hand-coded analytic solvers. It is fast at construction time but limited to recognised families. `ikfastpy` derives a custom solver per robot, supporting arbitrary 6-DOF chains and (via joint-locking) many redundant ones, at the cost of a slow first-run code-generation step. The two are useful in different regimes.
+## Relation to prior work
+
+Unlike the other Python packages named `ikfastpy` (e.g. [andyzeng/ikfastpy](https://github.com/andyzeng/ikfastpy), [yijiangh/ikfast_pybind](https://github.com/yijiangh/ikfast_pybind)), `ssik` is not a runtime wrapper around pre-generated C++. It is a Python-native analytical IK framework that combines subproblem decomposition with specialist solvers under one public API.
+
+[EAIK](https://github.com/OstermD/EAIK) is a closely related project — C++/pybind11, built directly on [IK-Geo](https://github.com/rpiRobotics/ik-geo). EAIK's subproblem catalog is the initial bundled algorithm in `ssik`'s registry. Both projects are Apache/BSD-licensed analytical-IK tooling; `ssik` additionally exposes a plugin surface so future algorithms and universal fallbacks can coexist.
 
 ## License
 
 This project is dual-licensed, matching its upstream sources:
 
-- The **IKFast generator** (`ikfast.py`, `ikfast_generator_cpp.py`) is licensed under **LGPL-3.0-or-later** ([`LICENSE`](LICENSE)). These files are vendored from [rdiankov/openrave](https://github.com/rdiankov/openrave); see [`src/ikfastpy/_vendor/UPSTREAM.md`](src/ikfastpy/_vendor/UPSTREAM.md) for the pinned upstream commit.
-- The **runtime header** (`ikfast.h`), included by the generated C++ solvers, is licensed under **Apache-2.0** ([`LICENSE.apache`](LICENSE.apache)).
+- The vendored **IKFast generator** (`ikfast.py`, `ikfast_generator_cpp.py` under `src/ssik/_vendor/`) is **LGPL-3.0-or-later** ([`LICENSE`](LICENSE)) from [rdiankov/openrave](https://github.com/rdiankov/openrave); see [`src/ssik/_vendor/UPSTREAM.md`](src/ssik/_vendor/UPSTREAM.md) for the pinned upstream commit.
+- The vendored **runtime header** (`ikfast.h`) is **Apache-2.0** ([`LICENSE.apache`](LICENSE.apache)).
+- New code written for the rebuild is Apache-2.0, clean-room from [Elias & Wen (IK-Geo)](https://arxiv.org/abs/2211.05737) and the BSD-3 IK-Geo reference.
 
-The generator and the runtime header have always carried these distinct licenses upstream. Generated solvers are bound by the runtime header's Apache-2.0 license; the generator itself remains LGPL.
+Generated solvers bind only the Apache-2.0 runtime header; LGPL stays with the generator itself.

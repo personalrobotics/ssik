@@ -18,7 +18,7 @@ from collections.abc import Sequence
 import numpy as np
 from numpy.typing import NDArray
 
-from ikfastpy._kinbody import JointSpec
+from ssik._kinbody import JointSpec
 
 # (a, alpha, d) per joint, theta=0. Units: meters, radians.
 _UR5_DH: tuple[tuple[float, float, float], ...] = (

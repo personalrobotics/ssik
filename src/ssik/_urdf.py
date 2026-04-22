@@ -1,6 +1,6 @@
 """URDF → KinBody adapter.
 
-Loads a URDF via `urchin` and builds a :class:`ikfastpy._kinbody.KinBody` for
+Loads a URDF via `urchin` and builds a :class:`ssik._kinbody.KinBody` for
 the chain from ``base_link`` to ``ee_link``. Fixed joints in the chain are
 fused into the adjacent active joint's ``T_left`` (or the previous active
 joint's ``T_right`` if they trail the last active joint).
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from ikfastpy._kinbody import Joint, JointType, KinBody, Link
+from ssik._kinbody import Joint, JointType, KinBody, Link
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from urchin import Joint as UrchinJoint
@@ -36,7 +36,7 @@ def _import_urchin() -> object:
     except ImportError as err:
         raise ImportError(
             "URDF loading requires the optional 'urdf' extra: "
-            "`pip install ikfastpy[urdf]` (or `uv add urchin`)."
+            "`pip install ssik[urdf]` (or `uv add urchin`)."
         ) from err
     return urchin
 

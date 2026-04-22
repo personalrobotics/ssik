@@ -49,7 +49,7 @@ def _fk(kinbody: Any, q: np.ndarray) -> np.ndarray:
 
 @pytest.fixture(scope="module")
 def puma560_kinbody() -> Any:
-    from ikfastpy._urdf import load_urdf_kinbody_normalized
+    from ssik._urdf import load_urdf_kinbody_normalized
 
     return load_urdf_kinbody_normalized(URDF_PATH, "base_link", "wrist_3_link")
 
@@ -59,7 +59,7 @@ def puma560_chaintree(puma560_kinbody: Any) -> Any:
     """Generate the Transform6D chaintree once (~30s) and share it across
     tests in this module. Caching via pickle would be nice, but 30s is
     tolerable for a slow-marked test."""
-    from ikfastpy._vendor.ikfast import IKFastSolver
+    from ssik._vendor.ikfast import IKFastSolver
 
     solver = IKFastSolver(kinbody=puma560_kinbody)
     # maxcasedepth=1 matches andyzeng/ikfastpy's empirical choice for UR5;

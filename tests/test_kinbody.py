@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from ikfastpy._kinbody import JointSpec, KinBody, Link, build_kinbody
+from ssik._kinbody import JointSpec, KinBody, Link, build_kinbody
 
 
 def _spec(joint_type: str = "revolute") -> JointSpec:

@@ -1,3 +1,3 @@
 # API
 
-::: ikfastpy
+::: ssik

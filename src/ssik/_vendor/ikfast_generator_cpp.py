@@ -31,7 +31,7 @@ try:
 except ImportError:
     from io import StringIO
 
-# The AutoReloader stub and the IkType enum are kept inline because ikfastpy
+# The AutoReloader stub and the IkType enum are kept inline because ssik
 # is OpenRAVE-free by design. Constants below are the canonical ikfast type
 # IDs preserved from upstream.
 class AutoReloader:
@@ -71,7 +71,7 @@ except ImportError:
     using_swiginac = False
 
 import logging
-log = logging.getLogger('ikfastpy.ikfast')
+log = logging.getLogger('ssik.ikfast')
 
 from sympy.core import function # for sympy 0.7.1+
 class fmod(function.Function):

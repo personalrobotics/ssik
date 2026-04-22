@@ -28,11 +28,11 @@ EXPECTED_IKTYPES: dict[str, int] = {
 
 
 def test_vendored_modules_import() -> None:
-    from ikfastpy._vendor import ikfast, ikfast_generator_cpp  # noqa: F401
+    from ssik._vendor import ikfast, ikfast_generator_cpp  # noqa: F401
 
 
 def test_iksolver_class_present() -> None:
-    from ikfastpy._vendor.ikfast import IKFastSolver
+    from ssik._vendor.ikfast import IKFastSolver
 
     assert callable(IKFastSolver)
     assert hasattr(IKFastSolver, "GetSolvers")
@@ -40,7 +40,7 @@ def test_iksolver_class_present() -> None:
 
 
 def test_solver_dispatch_table_complete() -> None:
-    from ikfastpy._vendor.ikfast import IKFastSolver
+    from ssik._vendor.ikfast import IKFastSolver
 
     solvers = IKFastSolver.GetSolvers()
     expected_lower_keys = {
@@ -65,7 +65,7 @@ def test_solver_dispatch_table_complete() -> None:
 
 
 def test_iktype_constants_intact() -> None:
-    from ikfastpy._vendor.ikfast_generator_cpp import IkType
+    from ssik._vendor.ikfast_generator_cpp import IkType
 
     for name, expected_hex in EXPECTED_IKTYPES.items():
         assert getattr(IkType, name) == expected_hex, (

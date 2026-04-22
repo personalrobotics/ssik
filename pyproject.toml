@@ -3,13 +3,13 @@ requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
-name = "ikfastpy"
-description = "Standalone Python implementation of the IKFast analytic inverse kinematics solver."
+name = "ssik"
+description = "Pluggable analytical inverse-kinematics library for Python."
 readme = "README.md"
 license = { text = "LGPL-3.0-or-later" }
 requires-python = ">=3.11"
 authors = [{ name = "Siddhartha Srinivasa" }]
-keywords = ["robotics", "inverse-kinematics", "ikfast", "kinematics"]
+keywords = ["robotics", "inverse-kinematics", "ikfast", "ik-geo", "kinematics"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Science/Research",
@@ -54,16 +54,16 @@ docs = [
 source = "vcs"
 
 [tool.hatch.build.hooks.vcs]
-version-file = "src/ikfastpy/_version.py"
+version-file = "src/ssik/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ikfastpy"]
+packages = ["src/ssik"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["src/ikfastpy/_vendor"]
+extend-exclude = ["src/ssik/_vendor"]
 
 [tool.ruff.lint]
 select = [
@@ -81,12 +81,12 @@ select = [
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
-exclude = ["src/ikfastpy/_vendor/"]
+exclude = ["src/ssik/_vendor/"]
 
 # Vendored modules are not type-checked. Treat anything imported from them
 # as Any in our typed code so strict mode doesn't flag every call site.
 [[tool.mypy.overrides]]
-module = "ikfastpy._vendor.*"
+module = "ssik._vendor.*"
 follow_imports = "skip"
 follow_imports_for_stubs = true
 
@@ -111,6 +111,6 @@ filterwarnings = [
     # Upstream ikfast.py uses unraw regex literals like '\d', '\g'. They render
     # correctly at runtime but emit SyntaxWarning on Python 3.12+. Out of scope
     # to fix in vendored code; would resurface on every upstream re-pin.
-    "ignore::SyntaxWarning:ikfastpy._vendor",
-    "ignore::SyntaxWarning:ikfastpy",
+    "ignore::SyntaxWarning:ssik._vendor",
+    "ignore::SyntaxWarning:ssik",
 ]

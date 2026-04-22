@@ -1,5 +1,5 @@
-site_name: ikfastpy
-site_description: Standalone Python implementation of the IKFast analytic inverse kinematics solver.
+site_name: ssik
+site_description: Pluggable analytical inverse-kinematics library for Python.
 site_url: https://siddhss5.github.io/ikfastpy/
 repo_url: https://github.com/siddhss5/ikfastpy
 repo_name: siddhss5/ikfastpy

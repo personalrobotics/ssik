@@ -1,6 +1,6 @@
-import ikfastpy
+import ssik
 
 
 def test_version_is_present() -> None:
-    assert isinstance(ikfastpy.__version__, str)
-    assert ikfastpy.__version__
+    assert isinstance(ssik.__version__, str)
+    assert ssik.__version__

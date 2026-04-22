@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ikfastpy._urdf import load_urdf_kinbody, load_urdf_kinbody_normalized
+from ssik._urdf import load_urdf_kinbody, load_urdf_kinbody_normalized
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

@@ -3,7 +3,7 @@
 The upstream `ikfast.py` solver was written against OpenRAVE's `KinBody` API.
 This module provides *exactly* the subset of that API that the solver actually
 calls, nothing more. The surface was established by auditing every call site
-in `ikfastpy/_vendor/ikfast.py`; see the issue #5 for the catalog.
+in `ssik/_vendor/ikfast.py`; see the issue #5 for the catalog.
 
 Input format is a flat list of :class:`JointSpec` (one per joint). For each
 joint the spec gives:
@@ -15,7 +15,7 @@ joint the spec gives:
 
 The factory :func:`build_kinbody` assembles a linear chain of ``N + 1`` links
 bracketing the ``N`` joints and returns a :class:`KinBody` ready to hand to
-:class:`ikfastpy._vendor.ikfast.IKFastSolver`.
+:class:`ssik._vendor.ikfast.IKFastSolver`.
 
 This module is private. The public API (``Manipulator``) will wrap it; see #12.
 """
