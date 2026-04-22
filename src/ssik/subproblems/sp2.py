@@ -38,7 +38,8 @@ Each resulting ``z`` is used to recover ``theta1 = SP1(k1, p, z)`` and
 **Degenerate case (parallel axes, k1 || k2).** ``c^2 == 1`` makes the 2x2
 system singular; infinitely many ``(theta1, theta2)`` pairs satisfy the
 equation (only their sum or difference is fixed). The implementation flags
-this as LS and returns a canonical choice with ``theta2 = 0``.
+this as LS (via ``subproblem_degeneracy``) and returns a canonical choice
+with ``theta2 = 0``.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.subproblems import sp1
 
 __all__ = ["solve"]
@@ -56,6 +58,7 @@ def solve(
     k2: NDArray[np.float64],
     p: NDArray[np.float64],
     q: NDArray[np.float64],
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
 ) -> tuple[list[tuple[float, float]], bool]:
     """Solve SP2.
 
@@ -63,20 +66,17 @@ def solve(
     :param k2: second rotation axis, shape ``(3,)``.
     :param p: source vector rotated by ``(k1, theta1)``.
     :param q: target vector rotated by ``(k2, theta2)``.
-    :returns: ``(solutions, is_ls)`` where ``solutions`` is a list of
-        ``(theta1, theta2)`` tuples (0, 1, or 2 entries in the feasible
-        case; exactly 1 in the LS case) and ``is_ls`` is ``True`` when the
-        input is infeasible or the axes are parallel.
+    :param policy: tolerances. ``subproblem_degeneracy`` gates the
+        parallel-axis fallback; ``subproblem_feasibility`` gates is_ls
+        on magnitude and sphere mismatches.
+    :returns: ``(solutions, is_ls)``.
     """
     c = float(np.dot(k1, k2))
     s_sq = 1.0 - c * c
 
-    # Parallel-axis degenerate case: infinitely many solutions. Flag LS and
-    # return a canonical choice with theta2 = 0 (so Rot(k1, theta1) p = q
-    # becomes a plain SP1). Anti-parallel is handled by SP1 itself since
-    # k2 ~= -k1 gives the correct sign.
-    if s_sq < 1e-12:
-        theta1, _ = sp1.solve(k1, p, q)
+    if s_sq < policy.subproblem_degeneracy:
+        # Parallel-axis case: infinitely many solutions; canonical choice.
+        theta1, _ = sp1.solve(k1, p, q, policy)
         return [(theta1, 0.0)], True
 
     d1 = float(np.dot(k1, p))
@@ -85,32 +85,30 @@ def solve(
     beta = (d2 - c * d1) / s_sq
     kxk = np.cross(k1, k2)  # |kxk|^2 = s_sq
 
-    # gamma^2 * s_sq = |z|^2 - alpha^2 - beta^2 - 2 alpha beta c, where
-    # |z|^2 should equal both |p|^2 and |q|^2 in the feasible case. In the
-    # infeasible case take the mean to keep the LS form symmetric.
     pp = float(np.dot(p, p))
     qq = float(np.dot(q, q))
     z_sq_target = 0.5 * (pp + qq)
     gamma_sq_scaled = z_sq_target - alpha * alpha - beta * beta - 2 * alpha * beta * c
 
-    mag_mismatch = abs(pp - qq) > 1e-9
-    infeasible_sphere = gamma_sq_scaled < -1e-9
+    feas_tol = policy.subproblem_feasibility
+    mag_mismatch = abs(pp - qq) > feas_tol
+    infeasible_sphere = gamma_sq_scaled < -feas_tol
     is_ls = mag_mismatch or infeasible_sphere
 
     if gamma_sq_scaled <= 0.0:
-        # Tangent or LS: a single representative z with gamma = 0.
+        # Tangent or LS: single representative z with gamma = 0.
         z = alpha * k1 + beta * k2
-        theta1, _ = sp1.solve(k1, p, z)
-        theta2, _ = sp1.solve(k2, q, z)
+        theta1, _ = sp1.solve(k1, p, z, policy)
+        theta2, _ = sp1.solve(k2, q, z, policy)
         return [(theta1, theta2)], is_ls
 
     gamma = float(np.sqrt(gamma_sq_scaled / s_sq))
     z_a = alpha * k1 + beta * k2 + gamma * kxk
     z_b = alpha * k1 + beta * k2 - gamma * kxk
 
-    theta1_a, _ = sp1.solve(k1, p, z_a)
-    theta2_a, _ = sp1.solve(k2, q, z_a)
-    theta1_b, _ = sp1.solve(k1, p, z_b)
-    theta2_b, _ = sp1.solve(k2, q, z_b)
+    theta1_a, _ = sp1.solve(k1, p, z_a, policy)
+    theta2_a, _ = sp1.solve(k2, q, z_a, policy)
+    theta1_b, _ = sp1.solve(k1, p, z_b, policy)
+    theta2_b, _ = sp1.solve(k2, q, z_b, policy)
 
     return [(theta1_a, theta2_a), (theta1_b, theta2_b)], is_ls
