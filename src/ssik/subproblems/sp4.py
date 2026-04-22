@@ -82,15 +82,18 @@ def solve(
 
     r = float(np.sqrt(r_sq))
     rhs = d - coef_c
-    rhs_over_r = rhs / r
     phi = float(np.arctan2(coef_b, coef_a))
 
-    if abs(rhs_over_r) > 1.0 + _FEASIBILITY_TOL:
+    # Feasibility: |rhs| must not exceed r beyond floating-point noise. Use
+    # an absolute tolerance on the excess (|rhs| - r) so tiny r values do not
+    # trigger false infeasibility from ratio inflation.
+    if abs(rhs) - r > _FEASIBILITY_TOL:
         # Infeasible. LS projection: cos(theta - phi) = +/- 1 matching sign.
         theta = phi if rhs > 0 else phi + float(np.pi)
         return [theta], True
 
-    # Exact. Clip to [-1, 1] before acos for numerical safety.
+    # Exact. Clip the ratio to [-1, 1] before acos for numerical safety.
+    rhs_over_r = rhs / r
     rhs_clipped = max(-1.0, min(1.0, rhs_over_r))
     delta = float(np.arccos(rhs_clipped))
     if delta < 1e-9:
