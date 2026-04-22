@@ -64,17 +64,24 @@ def _dedup(pairs: list[tuple[float, float]], tol: float) -> list[tuple[float, fl
     return unique
 
 
-def _degenerate(
+def _all_p_collinear_with_k(
     k: Sequence[NDArray[np.float64]],
     p: Sequence[NDArray[np.float64]],
     deg_tol: float,
 ) -> bool:
-    """Return True if any ``p_i`` is collinear with ``k_i``."""
+    """Return True when *every* ``p_i`` is collinear with ``k_i``.
+
+    When only one or two terms are collinear the overall 2D system can still
+    be solvable -- the non-collinear terms provide the missing constraints.
+    We only short-circuit when the entire system is trivially degenerate
+    (every rotation is effectively identity). For other degeneracies we rely
+    on the rank check of the stacked QR diagonals and on post-verification.
+    """
     for k_i, p_i in zip(k, p, strict=True):
         p_perp_sq = float(np.dot(p_i, p_i)) - float(np.dot(k_i, p_i)) ** 2
-        if p_perp_sq < deg_tol:
-            return True
-    return False
+        if p_perp_sq >= deg_tol:
+            return False
+    return True
 
 
 def _residual(
@@ -119,7 +126,7 @@ def solve(
     deg_tol = policy.subproblem_degeneracy
     num_tol = policy.subproblem_numerical
 
-    if _degenerate(k, p, deg_tol):
+    if _all_p_collinear_with_k(k, p, deg_tol):
         return [], True
 
     a_cols = []

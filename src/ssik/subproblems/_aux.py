@@ -124,6 +124,58 @@ def solve_lower_triangular_system_2x2(
     return np.array([x0, (q - x0 * b0) / c], dtype=np.float64)
 
 
+def _quadratic_real_roots(a: float, b: float, c: float, tol: float) -> list[float]:
+    """Real roots of ``a x^2 + b x + c = 0``; linear or empty if degenerate."""
+    if abs(a) < tol:
+        if abs(b) < tol:
+            return []
+        return [-c / b]
+    disc = b * b - 4.0 * a * c
+    if disc < -tol:
+        return []
+    root_disc = float(np.sqrt(max(0.0, disc)))
+    return [(-b + root_disc) / (2.0 * a), (-b - root_disc) / (2.0 * a)]
+
+
+def _solve_two_ellipse_degenerate(
+    coef1: tuple[float, float, float, float, float, float],
+    coef2: tuple[float, float, float, float, float, float],
+    tol: float,
+    *,
+    primary: str,
+) -> list[tuple[float, float]]:
+    """Intersection when one conic decouples to a 1-variable quadratic.
+
+    ``coef_i = (a, b, c, d, e, f)`` for ``a x^2 + b x y + c y^2 + d x + e y + f = 0``.
+    ``primary='y'`` means ``coef1`` is a conic in y alone (a=b=d=0, solve for y);
+    ``primary='x'`` means it is in x alone (b=c=e=0, solve for x).
+    For each root of the 1-variable conic, substitute into ``coef2`` and solve
+    the resulting quadratic in the other variable.
+    """
+    if primary == "y":
+        _a, _b, c, _d, e, f = coef1
+        primary_roots = _quadratic_real_roots(c, e, f, tol)
+        a2, b2, c2, d2, e2, f2 = coef2
+        solutions: list[tuple[float, float]] = []
+        for y in primary_roots:
+            # a2 x^2 + (b2 y + d2) x + (c2 y^2 + e2 y + f2) = 0
+            other_roots = _quadratic_real_roots(a2, b2 * y + d2, c2 * y * y + e2 * y + f2, tol)
+            for x in other_roots:
+                solutions.append((float(x), float(y)))
+        return solutions
+
+    # primary == "x"
+    a, _b, _c, d, _e, f = coef1
+    primary_roots = _quadratic_real_roots(a, d, f, tol)
+    a2, b2, c2, d2, e2, f2 = coef2
+    solutions = []
+    for x in primary_roots:
+        other_roots = _quadratic_real_roots(c2, b2 * x + e2, a2 * x * x + d2 * x + f2, tol)
+        for y in other_roots:
+            solutions.append((float(x), float(y)))
+    return solutions
+
+
 def solve_two_ellipse_numeric(
     xm1: NDArray[np.float64],
     xn1: NDArray[np.float64],
@@ -138,10 +190,17 @@ def solve_two_ellipse_numeric(
     via :func:`solve_quartic_roots`, filters to real roots, and back-substitutes
     ``x`` linearly. Up to four real solution pairs.
 
+    **Degenerate-conic fallback**: when one of the null-space matrices is
+    rank-deficient (e.g. when a caller-level collinearity in SP6 makes one
+    of the two unit-circle constraints decouple into a 1D equation), the
+    standard ``x`` back-substitution divides 0 by 0. We detect that case
+    via the conic coefficients and fall back to solving each quadratic
+    separately, substituting between them. This is strictly beyond the
+    upstream [ik-geo Rust reference][src], which silently produces NaN on
+    this input class.
+
     ``policy.subproblem_degeneracy`` gates the imaginary-part filter and the
     near-zero denominator check in the ``x`` back-substitution.
-
-    See [ik-geo subproblems/auxiliary.rs][src] for the coefficient derivation.
 
     [src]: https://github.com/rpiRobotics/ik-geo/blob/main/rust/src/subproblems/auxiliary.rs
     """
@@ -164,6 +223,23 @@ def solve_two_ellipse_numeric(
     d1 = float(b_2[0])
     e1 = float(b_2[1])
     fq = float(xm2 @ xm2) - 1.0
+
+    # Degenerate-ellipse fallbacks: when one conic decouples to a 1-variable
+    # quadratic, the Bezout-resultant back-substitution divides 0/0. Solve
+    # the decoupled constraint first and substitute into the full conic.
+    coef1 = (a, b, c, d, e, f)
+    coef2 = (a1, b1, c1, d1, e1, fq)
+    if abs(a) < epsilon and abs(b) < epsilon and abs(d) < epsilon:
+        return _solve_two_ellipse_degenerate(coef1, coef2, epsilon, primary="y")
+    if abs(c) < epsilon and abs(b) < epsilon and abs(e) < epsilon:
+        return _solve_two_ellipse_degenerate(coef1, coef2, epsilon, primary="x")
+    if abs(a1) < epsilon and abs(b1) < epsilon and abs(d1) < epsilon:
+        return _solve_two_ellipse_degenerate(coef2, coef1, epsilon, primary="y")
+    if abs(c1) < epsilon and abs(b1) < epsilon and abs(e1) < epsilon:
+        # Coef2 is x-only; solve it for x, substitute into coef1 for y.
+        # We need the output to be (x, y), not (y, x), so map accordingly.
+        swapped = _solve_two_ellipse_degenerate(coef2, coef1, epsilon, primary="x")
+        return [(x, y) for x, y in swapped]
 
     z0 = (
         f * a * d1 * d1
