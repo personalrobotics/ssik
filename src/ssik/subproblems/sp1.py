@@ -29,6 +29,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+
 __all__ = ["solve"]
 
 
@@ -36,12 +38,15 @@ def solve(
     k: NDArray[np.float64],
     p: NDArray[np.float64],
     q: NDArray[np.float64],
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
 ) -> tuple[float, bool]:
     """Solve SP1.
 
     :param k: unit rotation axis, shape ``(3,)``.
     :param p: vector to rotate, shape ``(3,)``.
     :param q: target vector, shape ``(3,)``.
+    :param policy: tolerances. ``subproblem_feasibility`` gates the
+        ``is_ls`` boundary between exact and LS regimes.
     :returns: ``(theta, is_ls)`` where ``theta`` is the solution angle in
         radians and ``is_ls`` is ``True`` when the exact feasibility
         conditions do not hold (so ``theta`` is the LS optimum).
@@ -51,10 +56,9 @@ def solve(
     kq = float(np.dot(k, q))
     theta = float(np.arctan2(np.dot(kxp, q), np.dot(p, q) - kp * kq))
 
-    # Feasibility check: |p_perp| = |q_perp| and k.p = k.q. Equivalently
-    # |p| = |q| and k.p = k.q (the axial components cancel in the LS
-    # analysis but differ in raw magnitude -- use the projected form).
+    # Feasibility: |p_perp| = |q_perp| and k.p = k.q.
     p_perp_sq = float(np.dot(p, p)) - kp * kp
     q_perp_sq = float(np.dot(q, q)) - kq * kq
-    is_ls = abs(p_perp_sq - q_perp_sq) > 1e-9 or abs(kp - kq) > 1e-9
+    tol = policy.subproblem_feasibility
+    is_ls = abs(p_perp_sq - q_perp_sq) > tol or abs(kp - kq) > tol
     return theta, is_ls

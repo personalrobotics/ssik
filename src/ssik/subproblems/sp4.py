@@ -32,12 +32,14 @@ and ``phi = atan2(B, A)``:
 
     theta = phi +/- acos((d - C) / R)
 
-Exact solutions exist when ``|d - C| <= R``; otherwise the LS extension
-projects onto the feasible range (``cos(theta - phi) = sign(d - C)``).
+Exact solutions exist when ``|d - C| <= R + subproblem_feasibility``;
+otherwise the LS extension projects onto the feasible range
+(``cos(theta - phi) = sign(d - C)``).
 
-**Degenerate case (``p`` along ``k``).** ``R = 0`` means ``p`` is collinear
-with ``k``, so ``h . Rot(k, theta) p = C`` for all ``theta``. Returns
-``theta = 0`` with ``is_ls`` reflecting whether ``C == d``.
+**Degenerate case (``p`` along ``k``).** ``R ~ 0`` (below
+``subproblem_degeneracy``) means ``p`` is collinear with ``k``, so
+``h . Rot(k, theta) p = C`` for all ``theta``. Returns ``theta = 0`` with
+``is_ls`` reflecting whether ``C == d``.
 """
 
 from __future__ import annotations
@@ -45,9 +47,9 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["solve"]
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 
-_FEASIBILITY_TOL = 1e-9
+__all__ = ["solve"]
 
 
 def solve(
@@ -55,6 +57,7 @@ def solve(
     k: NDArray[np.float64],
     p: NDArray[np.float64],
     d: float,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
 ) -> tuple[list[float], bool]:
     """Solve SP4.
 
@@ -62,10 +65,10 @@ def solve(
     :param k: unit rotation axis.
     :param p: source vector to rotate.
     :param d: target scalar projection value.
-    :returns: ``(solutions, is_ls)`` where ``solutions`` is a list of
-        ``theta`` values (0, 1, or 2 entries in the feasible case; exactly 1
-        in the LS / degenerate cases) and ``is_ls`` is ``True`` when the
-        problem is infeasible (the ``theta`` returned is the LS projection).
+    :param policy: tolerances. ``subproblem_feasibility`` gates is_ls vs
+        exact; ``subproblem_degeneracy`` gates the ``p`` collinear with
+        ``k`` fallback.
+    :returns: ``(solutions, is_ls)``.
     """
     hp = float(np.dot(h, p))
     kp = float(np.dot(k, p))
@@ -75,28 +78,26 @@ def solve(
     coef_c = kp * hk
     r_sq = coef_a * coef_a + coef_b * coef_b
 
-    if r_sq < 1e-20:
-        # p is collinear with k: rotation has no effect on h . Rot(k, .) p.
-        # The projection is always C; exact iff C == d.
-        return [0.0], abs(coef_c - d) > _FEASIBILITY_TOL
+    # Scale-aware degeneracy threshold: r_sq is squared magnitude.
+    deg_sq = policy.subproblem_degeneracy * policy.subproblem_degeneracy
+    if r_sq < deg_sq:
+        # p collinear with k: rotation doesn't change the projection.
+        return [0.0], abs(coef_c - d) > policy.subproblem_feasibility
 
     r = float(np.sqrt(r_sq))
     rhs = d - coef_c
     phi = float(np.arctan2(coef_b, coef_a))
 
-    # Feasibility: |rhs| must not exceed r beyond floating-point noise. Use
-    # an absolute tolerance on the excess (|rhs| - r) so tiny r values do not
-    # trigger false infeasibility from ratio inflation.
-    if abs(rhs) - r > _FEASIBILITY_TOL:
-        # Infeasible. LS projection: cos(theta - phi) = +/- 1 matching sign.
+    # Absolute-tolerance feasibility: |rhs| must not exceed R by more than
+    # subproblem_feasibility. Ratio tolerance is unstable for small r.
+    if abs(rhs) - r > policy.subproblem_feasibility:
         theta = phi if rhs > 0 else phi + float(np.pi)
         return [theta], True
 
-    # Exact. Clip the ratio to [-1, 1] before acos for numerical safety.
     rhs_over_r = rhs / r
     rhs_clipped = max(-1.0, min(1.0, rhs_over_r))
     delta = float(np.arccos(rhs_clipped))
-    if delta < 1e-9:
+    if delta < policy.subproblem_feasibility:
         # Tangent: single solution.
         return [phi], False
     return [phi + delta, phi - delta], False

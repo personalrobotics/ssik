@@ -24,6 +24,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.subproblems import sp4
 
 __all__ = ["solve"]
@@ -34,6 +35,7 @@ def solve(
     p: NDArray[np.float64],
     q: NDArray[np.float64],
     d: float,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
 ) -> tuple[list[float], bool]:
     """Solve SP3.
 
@@ -41,10 +43,8 @@ def solve(
     :param p: source vector rotated by ``(k, theta)``.
     :param q: target point whose distance to the rotated ``p`` must equal ``d``.
     :param d: target distance (non-negative).
-    :returns: ``(solutions, is_ls)`` with 0, 1, or 2 ``theta`` entries;
-        ``is_ls`` is ``True`` when ``d`` is outside the reachable range of
-        distances from any rotation of ``p`` (the returned ``theta`` is the
-        closest feasible approximation).
+    :param policy: tolerances (forwarded to :func:`sp4.solve`).
+    :returns: ``(solutions, is_ls)`` with 0, 1, or 2 ``theta`` entries.
     """
     target = 0.5 * (float(np.dot(p, p)) + float(np.dot(q, q)) - d * d)
-    return sp4.solve(q, k, p, target)
+    return sp4.solve(q, k, p, target, policy)
