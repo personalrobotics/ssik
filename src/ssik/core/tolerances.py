@@ -58,6 +58,13 @@ class TolerancePolicy:
             coefficient or sin-of-angle-between-axes below this value
             marks the input as degenerate and SP6/aux return
             ``([], is_ls=True)`` rather than produce nonsense.
+        subproblem_dedup: angle-space tolerance for deduplicating SP5/SP6
+            solutions. Two solutions within this radian distance (on every
+            joint, mod 2pi) collapse to one. Larger than
+            ``subproblem_numerical`` because the quartic-root backsolve
+            amplifies residual-level error into coarser angle-level error;
+            default ``1e-3`` (~0.06 degrees) is the physical
+            indistinguishability threshold for robot kinematics.
     """
 
     axis_parallel: float = 1e-8
@@ -65,6 +72,7 @@ class TolerancePolicy:
     subproblem_feasibility: float = 1e-9
     subproblem_numerical: float = 1e-5
     subproblem_degeneracy: float = 1e-12
+    subproblem_dedup: float = 1e-3
 
 
 DEFAULT_TOLERANCE_POLICY = TolerancePolicy()

@@ -98,8 +98,9 @@ def test_roundtrip_seeded_triple_in_solution_set(case: _Sp5Case) -> None:
     def wrap(a: float) -> float:
         return float(((a + np.pi) % (2 * np.pi)) - np.pi)
 
-    # Quartic-root + sign-branch recovery loses precision on random-position
-    # inputs; IK-Geo's reference tests use the same class of tolerances.
+    # Quartic-root precision bounds the seed-recovery tolerance; the
+    # stricter "every returned solution satisfies the equation" property
+    # in test_every_solution_satisfies_equation uses 1e-5.
     found = any(
         abs(wrap(s1 - t1)) < 1e-3 and abs(wrap(s2 - t2)) < 1e-3 and abs(wrap(s3 - t3)) < 1e-3
         for s1, s2, s3 in solutions

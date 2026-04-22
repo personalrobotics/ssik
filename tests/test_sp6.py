@@ -81,7 +81,9 @@ def test_roundtrip_seeded_pair_in_solution_set(case: _Sp6Case) -> None:
     def wrap(a: float) -> float:
         return float(((a + np.pi) % (2 * np.pi)) - np.pi)
 
-    found = any(abs(wrap(s1 - t1)) < 1e-5 and abs(wrap(s2 - t2)) < 1e-5 for s1, s2 in solutions)
+    # Use the policy's dedup tolerance: two solutions within this radian
+    # distance are considered the same (matches SP6's internal dedup).
+    found = any(abs(wrap(s1 - t1)) < 1e-3 and abs(wrap(s2 - t2)) < 1e-3 for s1, s2 in solutions)
     assert found, f"seeded (t1={t1}, t2={t2}) not in recovered solutions {solutions}"
 
 

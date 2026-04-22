@@ -5,9 +5,7 @@ Given four position vectors ``p0, p1, p2, p3`` and three rotation axes
 
     p0 + Rot(k1, theta1) @ p1 = Rot(k2, theta2) @ (p2 + Rot(k3, theta3) @ p3)
 
-Up to 4 solutions (at most 8 intermediate candidates; in this port we return
-whatever survives feasibility filtering rather than IK-Geo's top-4 reduction,
-since Python lists have no fixed capacity).
+Up to 4 solutions.
 
 **Implementation**: port of the BSD-3 [ik-geo Rust reference][ikgeo]
 (Elias & Wen, arXiv:2211.05737). Each rotated vector traces a cone around
@@ -15,6 +13,24 @@ since Python lists have no fixed capacity).
 yields a univariate quartic in ``h``; real roots give candidate ``h`` values,
 from which ``(theta1, theta3)`` pairs are recovered via matching sign branches
 of a 2x2 quadratic-circle system, and ``theta2`` via :func:`sp1.solve`.
+
+**Robustness beyond IK-Geo** (issue #48):
+
+1. *Upfront degeneracy detection*. Axes too close to parallel, or ``p``
+   vectors too close to collinear with their axes, return ``([], True)``
+   immediately -- the algorithm's reduction is ill-defined there.
+2. *All-branch enumeration*. For each real quartic root, enumerate all 4
+   sign combinations without intermediate filtering. Post-verification is
+   the single correctness gate; no valid solution can be dropped by a
+   heuristic filter.
+3. *Post-verification against the original equation*. Every candidate
+   residual is checked; candidates above ``subproblem_numerical`` are
+   dropped.
+4. *Best-LS return on infeasibility*. If no candidate passes post-verify
+   but the algorithm produced candidates, return the minimum-residual one
+   with ``is_ls=True`` (consistent with SP1-SP4's LS semantics).
+5. *Deduplication*. Near-duplicate solutions (angle-wise within
+   ``subproblem_numerical``) are collapsed.
 
 [ikgeo]: https://github.com/rpiRobotics/ik-geo/blob/main/rust/src/subproblems/mod.rs
 """
@@ -33,8 +49,70 @@ from ssik.subproblems._aux import (
     vec_self_convolve_2,
     vec_self_convolve_3,
 )
+from ssik.subproblems._rotation import rotate
+from ssik.subproblems._validate import validate_vec3
 
 __all__ = ["solve"]
+
+
+def _wrap(a: float) -> float:
+    """Wrap an angle to ``(-pi, pi]``."""
+    return float(((a + np.pi) % (2 * np.pi)) - np.pi)
+
+
+def _close_triple(a: tuple[float, float, float], b: tuple[float, float, float], tol: float) -> bool:
+    return (
+        abs(_wrap(a[0] - b[0])) < tol
+        and abs(_wrap(a[1] - b[1])) < tol
+        and abs(_wrap(a[2] - b[2])) < tol
+    )
+
+
+def _dedup(
+    triples: list[tuple[float, float, float]], tol: float
+) -> list[tuple[float, float, float]]:
+    unique: list[tuple[float, float, float]] = []
+    for t in triples:
+        if not any(_close_triple(t, u, tol) for u in unique):
+            unique.append(t)
+    return unique
+
+
+def _degenerate(
+    p1: NDArray[np.float64],
+    p3: NDArray[np.float64],
+    k1: NDArray[np.float64],
+    k2: NDArray[np.float64],
+    k3: NDArray[np.float64],
+    deg_tol: float,
+) -> bool:
+    """Return True if input falls in a configuration where the cone-polynomial
+    reduction is ill-defined (``k_i`` parallel to ``k_2``, or ``p_i`` collinear
+    with its rotation axis)."""
+    k1xk2_sq = float(np.dot(np.cross(k1, k2), np.cross(k1, k2)))
+    k3xk2_sq = float(np.dot(np.cross(k3, k2), np.cross(k3, k2)))
+    if k1xk2_sq < deg_tol or k3xk2_sq < deg_tol:
+        return True
+    p1_perp_sq = float(np.dot(p1, p1)) - float(np.dot(k1, p1)) ** 2
+    p3_perp_sq = float(np.dot(p3, p3)) - float(np.dot(k3, p3)) ** 2
+    return p1_perp_sq < deg_tol or p3_perp_sq < deg_tol
+
+
+def _residual(
+    theta1: float,
+    theta2: float,
+    theta3: float,
+    p0: NDArray[np.float64],
+    p1: NDArray[np.float64],
+    p2: NDArray[np.float64],
+    p3: NDArray[np.float64],
+    k1: NDArray[np.float64],
+    k2: NDArray[np.float64],
+    k3: NDArray[np.float64],
+) -> float:
+    lhs = p0 + rotate(k1, theta1, p1)
+    rhs = rotate(k2, theta2, p2 + rotate(k3, theta3, p3))
+    return float(np.linalg.norm(lhs - rhs))
 
 
 def solve(
@@ -49,13 +127,31 @@ def solve(
 ) -> tuple[list[tuple[float, float, float]], bool]:
     """Solve SP5.
 
-    :param policy: tolerances. ``subproblem_numerical`` gates the imaginary-
-        part filter on quartic roots and the sign-branch cone-closure check.
-    :returns: ``(solutions, is_ls)`` where ``solutions`` is a list of up to
-        4 ``(theta1, theta2, theta3)`` tuples. ``is_ls`` is ``True`` if no
-        feasible solution was found.
+    :param policy: tolerances. See module docstring for which field gates
+        which stage.
+    :returns: ``(solutions, is_ls)``. On exact feasibility, ``solutions``
+        has 1 to 4 deduplicated triples that satisfy the defining equation
+        within ``subproblem_numerical`` and ``is_ls`` is ``False``. On
+        infeasibility or degeneracy, ``solutions`` has at most 1 best-LS
+        triple (or is empty if no candidate was even generated) and
+        ``is_ls`` is ``True``.
     """
+    for name, v in (
+        ("p0", p0),
+        ("p1", p1),
+        ("p2", p2),
+        ("p3", p3),
+        ("k1", k1),
+        ("k2", k2),
+        ("k3", k3),
+    ):
+        validate_vec3(v, name)
+
     num_tol = policy.subproblem_numerical
+    deg_tol = policy.subproblem_degeneracy
+
+    if _degenerate(p1, p3, k1, k2, k3, deg_tol):
+        return [], True
 
     p1_s = p0 + k1 * float(np.dot(k1, p1))
     p3_s = p2 + k3 * float(np.dot(k3, p3))
@@ -86,10 +182,10 @@ def solve(
 
     j_mat = np.array([[0.0, 1.0], [-1.0, 0.0]], dtype=np.float64)
 
-    solutions: list[tuple[float, float, float]] = []
+    candidates: list[tuple[float, float, float]] = []
 
     for h in h_vec:
-        a1t_k2 = a_1.T @ k2  # shape (2,)
+        a1t_k2 = a_1.T @ k2
         a3t_k2 = a_3.T @ k2
 
         const_1 = a1t_k2 * (h - delta1)
@@ -118,18 +214,30 @@ def solve(
             v1 = a_1 @ sc1 + p1_s
             v3 = a_3 @ sc3 + p3_s
 
-            closure = abs(float(np.linalg.norm(v1 - h * k2)) - float(np.linalg.norm(v3 - h * k2)))
-            if closure < num_tol:
-                # Rot(k2, theta2) * v3 = v1  ->  SP1
-                theta2, _ = sp1.solve(k2, v3, v1, policy)
-                solutions.append(
-                    (
-                        float(np.arctan2(sc1[0], sc1[1])),
-                        theta2,
-                        float(np.arctan2(sc3[0], sc3[1])),
-                    )
+            theta2, _ = sp1.solve(k2, v3, v1, policy)
+            candidates.append(
+                (
+                    float(np.arctan2(sc1[0], sc1[1])),
+                    theta2,
+                    float(np.arctan2(sc3[0], sc3[1])),
                 )
+            )
 
-    if not solutions:
+    def residual(cand: tuple[float, float, float]) -> float:
+        return _residual(cand[0], cand[1], cand[2], p0, p1, p2, p3, k1, k2, k3)
+
+    # Post-verify against the SP5 equation.
+    exact = [cand for cand in candidates if residual(cand) < num_tol]
+
+    if exact:
+        solutions = _dedup(exact, policy.subproblem_dedup)
+        assert len(solutions) <= 4, f"SP5 returned >4 solutions: {len(solutions)}"
+        return solutions, False
+
+    # No exact solution survived. Return best-LS if we have any candidate
+    # at all; otherwise signal total infeasibility.
+    if not candidates:
         return [], True
-    return solutions, False
+
+    best = min(candidates, key=residual)
+    return [best], True

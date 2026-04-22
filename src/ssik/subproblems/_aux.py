@@ -100,10 +100,15 @@ def solve_quartic_roots(coeffs: NDArray[np.float64]) -> NDArray[np.complex128]:
 
     ``coeffs`` is ``[a, b, c, d, e]`` in decreasing-power order. Degrades
     gracefully to a cubic when the leading coefficient is near zero; delegates
-    to :func:`numpy.roots` for numerical stability over the analytic quartic
-    formula.
+    to :func:`numpy.roots`. Returns an empty complex array if the coefficient
+    magnitudes overflow the companion-matrix computation (callers treat this
+    as "no real roots, signal LS").
     """
-    return np.roots(coeffs).astype(np.complex128)
+    try:
+        with np.errstate(over="ignore", invalid="ignore"):
+            return np.roots(coeffs).astype(np.complex128)
+    except np.linalg.LinAlgError:
+        return np.array([], dtype=np.complex128)
 
 
 def solve_lower_triangular_system_2x2(
