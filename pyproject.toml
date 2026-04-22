@@ -43,6 +43,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "urchin>=0.0.27",  # exercised by the URDF-adapter tests
+    "hypothesis>=6.112",  # property-based fuzzing of the URDF loader
 ]
 docs = [
     "mkdocs-material>=9.5",
