@@ -15,6 +15,13 @@ Current contents:
   intersecting axes at joints ``(3, 4, 5)`` and two parallel axes at
   ``(1, 2)`` -- Puma 560, Fanuc, KUKA KR, and anything else with the
   same kinematic structure.
+- :mod:`ssik.solvers.ikgeo.spherical_two_intersecting` -- generic
+  spherical-wrist + intersecting-shoulder 6R solver built on
+  SP1/SP2/SP3/SP4 composition. Handles any arm with three consecutive
+  intersecting axes at joints ``(3, 4, 5)`` and joints ``(0, 1)``
+  sharing an origin (``p[1] = 0``) -- compact arms where the waist
+  and shoulder pivots coincide (Puma 560, ABB IRB smaller variants,
+  uFactory lite6/xArm6 family).
 
 Future: Husty-Pfurner universal fallback, specialist 7R, dispatcher.
 """

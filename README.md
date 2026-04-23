@@ -26,6 +26,9 @@ The dispatcher routes each chain to the best-matching analytical solver:
 
 Third-party packages register new solvers via the `ssik.solvers` entry-point group; no core patching required.
 
+Per-robot support (URDF source + which solver handles each arm) is tracked in
+[SUPPORTED_ROBOTS.md](SUPPORTED_ROBOTS.md).
+
 ## Relation to prior work
 
 Unlike the other Python packages named `ikfastpy` (e.g. [andyzeng/ikfastpy](https://github.com/andyzeng/ikfastpy), [yijiangh/ikfast_pybind](https://github.com/yijiangh/ikfast_pybind)), `ssik` is not a runtime wrapper around pre-generated C++. It is a Python-native analytical IK framework that combines subproblem decomposition with specialist solvers under one public API.
