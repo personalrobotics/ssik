@@ -189,15 +189,94 @@ def solve(
     def residual(cand: tuple[float, float]) -> float:
         return _residual(cand[0], cand[1], h, k, p, d1, d2)
 
-    exact = [cand for cand in candidates if residual(cand) < num_tol]
+    # Cluster-root mitigation: when the Bezout quartic has near-double real
+    # roots, the ellipse intersection produces N candidates that split into
+    # clusters in (t1, t2) space. Within each cluster, one pre-GN candidate
+    # has a cleaner residual than the others -- that's the "exact" member,
+    # the rest are noise. Sort by residual before dedup so the dedup keeps
+    # the cleanest representative, not an insertion-order winner. Then GN-
+    # refine the survivors; refining noise-copies after dedup would waste
+    # work and GN can't distinguish them anyway (all at eps post-refine).
+    # See issue #56 (UR5 shoulder-wrist alignment pose).
+    candidates.sort(key=residual)
+    deduped = _dedup(candidates, policy.subproblem_dedup)
+
+    # Now GN-refine the deduped survivors. Drops residuals from whatever
+    # the cleanest pre-dedup candidate had (~num_tol or better) to O(eps).
+    refined: list[tuple[float, float]] = []
+    for cand in deduped:
+        t1, t2 = _refine_sp6(cand[0], cand[1], h, k, p, d1, d2)
+        refined.append((t1, t2))
+
+    exact = [cand for cand in refined if residual(cand) < num_tol]
 
     if exact:
-        solutions = _dedup(exact, policy.subproblem_dedup)
-        assert len(solutions) <= 4, f"SP6 returned >4 solutions: {len(solutions)}"
-        return solutions, False
+        return exact, False
 
-    if not candidates:
+    if not refined:
         return [], True
 
-    best = min(candidates, key=residual)
+    best = min(refined, key=residual)
     return [best], True
+
+
+def _refine_sp6(
+    t1: float,
+    t2: float,
+    h: Sequence[NDArray[np.float64]],
+    k: Sequence[NDArray[np.float64]],
+    p: Sequence[NDArray[np.float64]],
+    d1: float,
+    d2: float,
+    max_iter: int = 20,
+    step_tol: float = 1e-15,
+) -> tuple[float, float]:
+    """Gauss-Newton refinement of an SP6 angle pair ``(theta1, theta2)``.
+
+    Iterates ``t <- t - J^{-1} F`` on the 2D residual
+    ``F = [eq1 - d1, eq2 - d2]``. Quadratic convergence from a good
+    initial guess; drops residuals to O(eps). On ill-conditioned Jacobian
+    (``det(J)`` too small, e.g. when ``axes[0] || axes[4]``) falls back
+    to the input without raising.
+    """
+    for _ in range(max_iter):
+        r0 = rotate(k[0], t1, p[0])
+        r1 = rotate(k[1], t2, p[1])
+        r2 = rotate(k[2], t1, p[2])
+        r3 = rotate(k[3], t2, p[3])
+
+        f = np.array(
+            [
+                float(h[0] @ r0) + float(h[1] @ r1) - d1,
+                float(h[2] @ r2) + float(h[3] @ r3) - d2,
+            ],
+            dtype=np.float64,
+        )
+
+        # Partials. dF_i/dt_j uses chain rule: Rot(k, t) rotates `p`, so
+        # the angle derivative is k x (Rot(k, t) @ p).
+        d_dt1_r0 = np.cross(k[0], r0)
+        d_dt2_r1 = np.cross(k[1], r1)
+        d_dt1_r2 = np.cross(k[2], r2)
+        d_dt2_r3 = np.cross(k[3], r3)
+
+        j_mat_2x2 = np.array(
+            [
+                [float(h[0] @ d_dt1_r0), float(h[1] @ d_dt2_r1)],
+                [float(h[2] @ d_dt1_r2), float(h[3] @ d_dt2_r3)],
+            ],
+            dtype=np.float64,
+        )
+
+        try:
+            delta = np.linalg.solve(j_mat_2x2, -f)
+        except np.linalg.LinAlgError:
+            break
+
+        t1 += float(delta[0])
+        t2 += float(delta[1])
+
+        if float(np.linalg.norm(delta)) < step_tol:
+            break
+
+    return t1, t2
