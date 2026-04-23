@@ -134,7 +134,7 @@ def test_generic_pose_all_solutions_fk_match(puma_kb: Any, q_star: np.ndarray) -
     assert 1 <= len(solutions) <= 8
     for i, q in enumerate(solutions):
         T_check = _fk(puma_kb, q)
-        assert np.allclose(T_check, T_star, atol=1e-8), (
+        assert np.allclose(T_check, T_star, atol=1e-10), (
             f"solution {i} fails FK: max|diff|={np.max(np.abs(T_check - T_star))}"
         )
 
@@ -215,7 +215,7 @@ def test_synthetic_spherical_two_intersecting_fk_roundtrip(
     assert 1 <= len(solutions) <= 8
     for i, q in enumerate(solutions):
         T_check = _fk(synthetic_spherical_two_intersecting_kb, q)
-        assert np.allclose(T_check, T_star, atol=1e-8), f"synthetic solution {i} fails FK"
+        assert np.allclose(T_check, T_star, atol=1e-10), f"synthetic solution {i} fails FK"
     assert any(_q_matches(q, q_star) for q in solutions), "seeded q* not recovered"
 
 
@@ -248,7 +248,7 @@ def test_random_q_roundtrip_fk(puma_kb: Any, q_star: np.ndarray) -> None:
     assert not is_ls
     assert 1 <= len(solutions) <= 8
     for q in solutions:
-        assert np.allclose(_fk(puma_kb, q), T_star, atol=1e-8), f"FK mismatch at q={q.tolist()}"
+        assert np.allclose(_fk(puma_kb, q), T_star, atol=1e-10), f"FK mismatch at q={q.tolist()}"
     assert any(_q_matches(q, q_star, tol=1e-4) for q in solutions), (
         f"seeded q*={q_star.tolist()} not recovered"
     )
