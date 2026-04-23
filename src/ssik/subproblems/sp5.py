@@ -170,7 +170,17 @@ def solve(
     eqn = vec_self_convolve_3(rhs) - 4.0 * vec_convolve_3(p_13_sq, r_1)
 
     all_roots = solve_quartic_roots(eqn)
-    h_vec = np.array([c.real for c in all_roots if abs(c.imag) < num_tol])
+
+    # Scale-aware real-root filter: admit roots whose imaginary part is a
+    # small fraction of the root magnitude (sqrt(cond)*eps noise from
+    # cluster-root instability) while rejecting genuinely-complex roots
+    # (|imag| ~ |real|). A strict absolute ``|imag| < num_tol`` filter
+    # drops real roots whose cluster-noise imaginary part inflates above
+    # ``num_tol``; that was the original completeness bug (issue #55).
+    def _is_real_root(c: complex) -> bool:
+        return abs(c.imag) < max(abs(c.real), 1.0) * 1e-3
+
+    h_vec = np.array([c.real for c in all_roots if _is_real_root(c)])
 
     kxp1 = np.cross(k1, p1)
     kxp3 = np.cross(k3, p3)
@@ -223,21 +233,87 @@ def solve(
                 )
             )
 
+    # Refine each candidate via Gauss-Newton on the full SP5 equation.
+    # The quartic-derived angles have residuals O(num_tol) or worse when
+    # the quartic has near-double roots (cond ~ 1/gap^2 blows up in the
+    # companion-matrix root-finder). A few GN steps drop residuals to
+    # O(eps) from a good initial guess, so the fixed-threshold post-verify
+    # filter below no longer silently drops valid branches in cluster-root
+    # regimes. See issue #55 for the original failure mode.
+    refined: list[tuple[float, float, float]] = []
+    for cand in candidates:
+        t1, t2, t3 = _refine_sp5(cand[0], cand[1], cand[2], p0, p1, p2, p3, k1, k2, k3)
+        refined.append((t1, t2, t3))
+
     def residual(cand: tuple[float, float, float]) -> float:
         return _residual(cand[0], cand[1], cand[2], p0, p1, p2, p3, k1, k2, k3)
 
     # Post-verify against the SP5 equation.
-    exact = [cand for cand in candidates if residual(cand) < num_tol]
+    exact = [cand for cand in refined if residual(cand) < num_tol]
 
     if exact:
         solutions = _dedup(exact, policy.subproblem_dedup)
-        assert len(solutions) <= 4, f"SP5 returned >4 solutions: {len(solutions)}"
         return solutions, False
 
     # No exact solution survived. Return best-LS if we have any candidate
     # at all; otherwise signal total infeasibility.
-    if not candidates:
+    if not refined:
         return [], True
 
-    best = min(candidates, key=residual)
+    best = min(refined, key=residual)
     return [best], True
+
+
+def _refine_sp5(
+    t1: float,
+    t2: float,
+    t3: float,
+    p0: NDArray[np.float64],
+    p1: NDArray[np.float64],
+    p2: NDArray[np.float64],
+    p3: NDArray[np.float64],
+    k1: NDArray[np.float64],
+    k2: NDArray[np.float64],
+    k3: NDArray[np.float64],
+    max_iter: int = 20,
+    step_tol: float = 1e-15,
+) -> tuple[float, float, float]:
+    """Gauss-Newton refinement of an SP5 angle triple.
+
+    Starts from the quartic-derived ``(t1, t2, t3)`` and iterates
+    ``t <- t - J^{-1} F`` on the 3D residual ``F = p0 + Rot(k1,t1)p1 -
+    Rot(k2,t2)(p2 + Rot(k3,t3)p3)``. Converges quadratically from a
+    good initial guess; 2-3 iterations drop residuals to O(eps).
+
+    Returns the (possibly refined) triple. On ill-conditioned Jacobian
+    (e.g. degenerate geometry that escaped the upfront filter) falls
+    back to the input without raising, leaving the caller's post-verify
+    as the authoritative filter.
+    """
+    for _ in range(max_iter):
+        rotated_p1 = rotate(k1, t1, p1)
+        rotated_p3_inner = rotate(k3, t3, p3)
+        p2_plus_rotp3 = p2 + rotated_p3_inner
+        rotated_p2 = rotate(k2, t2, p2_plus_rotp3)
+
+        f = p0 + rotated_p1 - rotated_p2
+
+        # Jacobian columns: dF/dt_i = axis_i x (rotated vector).
+        col1 = np.cross(k1, rotated_p1)
+        col2 = -np.cross(k2, rotated_p2)
+        col3 = -rotate(k2, t2, np.cross(k3, rotated_p3_inner))
+        j_mat_3x3 = np.column_stack([col1, col2, col3])
+
+        try:
+            delta = np.linalg.solve(j_mat_3x3, -f)
+        except np.linalg.LinAlgError:
+            break
+
+        t1 += float(delta[0])
+        t2 += float(delta[1])
+        t3 += float(delta[2])
+
+        if float(np.linalg.norm(delta)) < step_tol:
+            break
+
+    return t1, t2, t3

@@ -99,6 +99,62 @@ def test_sp6_scale_invariance(scale: float) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Regression: issue #55 -- SP5 dropped valid shoulder branches on cluster-
+# root quartic inputs. Specific inputs are the generic-spherical synthetic
+# arm from that issue; q* is a known-good shoulder triple that must be
+# in the returned set with ~machine-precision accuracy after the GN
+# refinement + scale-aware imag filter fix.
+# ---------------------------------------------------------------------------
+
+
+def test_sp5_recovers_branch_on_cluster_root_input_issue_55() -> None:
+    """Regression for #55.
+
+    Inputs triggering a quartic with 4 real roots in 2 tight clusters
+    (pairs at ~0.289 and ~0.291 with sub-1e-4 within-pair gap). Before
+    the fix:
+    - Strict ``|imag| < num_tol`` filter rejected all 4 roots (they had
+      imaginary noise ~1.4e-5 from cluster-root instability).
+    - ``is_ls=True, n=0`` on a pose with machine-precision feasibility.
+
+    After the fix (GN refinement + scale-aware imag filter), all 4
+    shoulder branches are recovered with residuals ~1e-16.
+    """
+    p0 = np.array([-0.04, 0.0, -0.2])
+    p1 = np.array([0.09465323025635985, 0.13533313301312702, 0.820393479567193])
+    p2 = np.array([0.5, 0.0, 0.0])
+    p3 = np.array([0.08, -0.12, 0.4])
+    k1 = np.array([0.0, 0.0, -1.0])
+    k2 = np.array([0.0, -1.0, 0.0])
+    k3 = np.array([0.42261826174069944, -0.9063077870366499, 0.0])
+    t1_star, t2_star, t3_star = (
+        2.5551774074770233,
+        0.9606710392420222,
+        0.26805465802396483,
+    )
+
+    solutions, is_ls = sp5.solve(p0, p1, p2, p3, k1, k2, k3)
+    assert not is_ls
+    assert len(solutions) == 4, f"expected 4 shoulder branches, got {len(solutions)}"
+
+    # All four must satisfy the SP5 equation at machine precision.
+    for s1, s2, s3 in solutions:
+        lhs = p0 + rotate(k1, s1, p1)
+        rhs = rotate(k2, s2, p2 + rotate(k3, s3, p3))
+        assert np.allclose(lhs, rhs, atol=1e-10), (
+            f"solution ({s1},{s2},{s3}) residual = {float(np.linalg.norm(lhs - rhs))}"
+        )
+
+    # The seeded branch must be in the set (to 1e-6 rad per joint).
+    assert any(
+        abs(_wrap(s1 - t1_star)) < 1e-6
+        and abs(_wrap(s2 - t2_star)) < 1e-6
+        and abs(_wrap(s3 - t3_star)) < 1e-6
+        for s1, s2, s3 in solutions
+    ), "seeded q* shoulder branch not in returned set"
+
+
+# ---------------------------------------------------------------------------
 # (3) Input validation.
 # ---------------------------------------------------------------------------
 
