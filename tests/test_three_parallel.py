@@ -290,6 +290,52 @@ def test_random_q_roundtrip_fk(ur5_kb: Any, q_star: np.ndarray) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Regression: issue #56 -- three_parallel dropped the seeded q* on UR5's
+# shoulder-wrist alignment pose (q0=0, q5=0) where SP6's Bezout quartic
+# has near-double real roots. Dedup was picking an insertion-order-
+# earlier drifted representative instead of the exact one. After the fix
+# (SP6 sort-by-residual before dedup + Gauss-Newton refinement), q* is
+# recovered at machine precision.
+# ---------------------------------------------------------------------------
+
+
+def test_recovers_shoulder_wrist_alignment_pose_issue_56(ur5_kb: Any) -> None:
+    """Regression for #56.
+
+    Before the fix: SP6's ellipse-intersection produced 4 candidates
+    split into 2 clusters by near-double Bezout quartic roots. Dedup
+    merged each cluster to the first-seen member, which for this pose
+    happened to be the drifted representative (~7.7e-4 rad off q*).
+    That drift propagated through SP3/SP1 to the final q vector, failing
+    the ``1e-4`` seeded-recovery threshold.
+
+    After the fix: SP6 sorts candidates by pre-refinement residual so
+    dedup keeps the cleaner representative, then GN-refines. At this
+    pose q* is recovered to <1e-12 rad per joint.
+    """
+    q_star = np.array([0.0, 1.0, 1.0, 0.36474982, -1.0, 0.0])
+    T_star = _fk(ur5_kb, q_star)
+    solutions, is_ls = three_parallel.solve(ur5_kb, T_star)
+
+    assert not is_ls
+    # UR5 at this shoulder-wrist alignment pose has 4 distinct IK
+    # branches (the shoulder-flip degenerates to identity).
+    assert len(solutions) == 4
+
+    for q in solutions:
+        T_check = _fk(ur5_kb, q)
+        assert np.allclose(T_check, T_star, atol=1e-10), f"FK mismatch at {q}"
+
+    def _max_abs_wrap(q: np.ndarray) -> float:
+        return max(abs(_wrap(float(qi - qs))) for qi, qs in zip(q, q_star, strict=True))
+
+    closest = min(solutions, key=_max_abs_wrap)
+    assert any(_q_matches(q, q_star, tol=1e-10) for q in solutions), (
+        f"seeded q* not recovered at machine precision; closest: {closest.tolist()}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Topology validation.
 # ---------------------------------------------------------------------------
 

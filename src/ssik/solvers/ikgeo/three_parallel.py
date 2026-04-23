@@ -168,14 +168,37 @@ def solve(
 
     # Post-verify each candidate against the target pose. Only candidates
     # that actually recover T_target within subproblem_numerical survive.
+    # Also dedup at the q-vector level (wrap-to-pi per joint, cleanest
+    # FK-residual wins) so near-singular poses that split a physical
+    # branch into numerically-distinct SP6 candidates collapse back to
+    # the single physical solution. See issue #56.
     num_tol = policy.subproblem_numerical
-    solutions: list[NDArray[np.float64]] = []
+    dedup_tol = policy.subproblem_dedup
+    verified: list[tuple[NDArray[np.float64], float]] = []
     for q in candidates:
         t = _forward_kinematics(kb, q)
-        if float(np.linalg.norm(t - t_target)) < num_tol:
+        fk_err = float(np.linalg.norm(t - t_target))
+        if fk_err < num_tol:
+            verified.append((q, fk_err))
+
+    # Sort ascending by FK residual so when we merge clusters we keep the
+    # cleanest representative deterministically (platform-independent).
+    verified.sort(key=lambda pair: pair[1])
+    solutions: list[NDArray[np.float64]] = []
+    for q, _ in verified:
+        if not any(_q_close(q, existing, dedup_tol) for existing in solutions):
             solutions.append(q)
 
     return solutions, len(solutions) == 0
+
+
+def _q_close(a: NDArray[np.float64], b: NDArray[np.float64], tol: float) -> bool:
+    """Element-wise wrap-to-pi closeness for joint-angle vectors."""
+    for ai, bi in zip(a, b, strict=True):
+        diff = float(((float(ai) - float(bi) + np.pi) % (2 * np.pi)) - np.pi)
+        if abs(diff) > tol:
+            return False
+    return True
 
 
 def _forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float64]:
