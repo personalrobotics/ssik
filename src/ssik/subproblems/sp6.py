@@ -186,28 +186,26 @@ def solve(
         theta2 = float(np.arctan2(x[2], x[3]))
         candidates.append((theta1, theta2))
 
-    def residual(cand: tuple[float, float]) -> float:
-        return _residual(cand[0], cand[1], h, k, p, d1, d2)
-
-    # Cluster-root mitigation: when the Bezout quartic has near-double real
-    # roots, the ellipse intersection produces N candidates that split into
-    # clusters in (t1, t2) space. Within each cluster, one pre-GN candidate
-    # has a cleaner residual than the others -- that's the "exact" member,
-    # the rest are noise. Sort by residual before dedup so the dedup keeps
-    # the cleanest representative, not an insertion-order winner. Then GN-
-    # refine the survivors; refining noise-copies after dedup would waste
-    # work and GN can't distinguish them anyway (all at eps post-refine).
-    # See issue #56 (UR5 shoulder-wrist alignment pose).
-    candidates.sort(key=residual)
-    deduped = _dedup(candidates, policy.subproblem_dedup)
-
-    # Now GN-refine the deduped survivors. Drops residuals from whatever
-    # the cleanest pre-dedup candidate had (~num_tol or better) to O(eps).
+    # Refine each candidate via Gauss-Newton on the 2x2 SP6 residual.
+    # The ellipse-intersection + QR-nullspace machinery produces candidates
+    # with accumulated numerical drift O(num_tol) near critical geometries.
+    # 2-3 GN steps drop residuals to ~eps from a good initial guess.
     refined: list[tuple[float, float]] = []
-    for cand in deduped:
+    for cand in candidates:
         t1, t2 = _refine_sp6(cand[0], cand[1], h, k, p, d1, d2)
         refined.append((t1, t2))
 
+    def residual(cand: tuple[float, float]) -> float:
+        return _residual(cand[0], cand[1], h, k, p, d1, d2)
+
+    # Return the full set of refined candidates. A caller-level dedup (e.g.
+    # in ikgeo.three_parallel, based on full-FK residual) is the correct
+    # place to merge physically-equivalent candidates: SP6's Bezout quartic
+    # can split one physical solution into two numerically-close candidates
+    # (~7e-4 rad apart) on near-singular poses; angular dedup at this
+    # subproblem level would merge them by insertion order, which is
+    # platform-unstable (different LAPACK backends pick different winners).
+    # See issue #56 for the UR5 shoulder-wrist alignment repro.
     exact = [cand for cand in refined if residual(cand) < num_tol]
 
     if exact:
