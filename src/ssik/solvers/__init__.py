@@ -31,6 +31,11 @@ Current contents:
   (``p[5] = 0``). Uses 1D ``search_1d`` over ``theta_3`` with an
   inner SP5 shoulder solve per sample. Rare topology in commercial
   arms; dispatcher fallback when no spherical-wrist sibling matches.
+- :mod:`ssik.solvers.ikgeo.two_parallel` -- tier-1 univariate-search
+  solver for 6R arms where joints ``(1, 2)`` are parallel. Uses 1D
+  ``search_1d`` over ``theta_0`` with an inner SP6 coupling (q4, q6)
+  per sample. Narrower applicability than ``three_parallel`` and
+  fewer returned solutions due to tier-1 search sparsity.
 
 Future: Husty-Pfurner universal fallback, specialist 7R, dispatcher.
 """
