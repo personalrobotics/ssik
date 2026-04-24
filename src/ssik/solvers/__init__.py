@@ -26,6 +26,11 @@ Current contents:
   solver built on SP1/SP4/SP5 composition. Fallback for spherical-
   wrist arms that match neither shoulder specialization (rare in
   commercial arms; typically custom / research geometries).
+- :mod:`ssik.solvers.ikgeo.two_intersecting` -- tier-1 univariate-
+  search solver for 6R arms where joints ``(4, 5)`` share an origin
+  (``p[5] = 0``). Uses 1D ``search_1d`` over ``theta_3`` with an
+  inner SP5 shoulder solve per sample. Rare topology in commercial
+  arms; dispatcher fallback when no spherical-wrist sibling matches.
 
 Future: Husty-Pfurner universal fallback, specialist 7R, dispatcher.
 """
