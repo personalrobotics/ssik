@@ -34,6 +34,7 @@ alongside each solver PR.
 | (synthetic three-parallel) | 6 | inline in `tests/test_three_parallel.py` | `ikgeo.three_parallel` | three parallel | 📐 |
 | (synthetic spherical + two-parallel) | 6 | inline in `tests/test_spherical_two_parallel.py` | `ikgeo.spherical_two_parallel` | spherical wrist + parallel shoulder | 📐 |
 | (synthetic spherical + intersecting) | 6 | inline in `tests/test_spherical_two_intersecting.py` | `ikgeo.spherical_two_intersecting` | spherical wrist + intersecting shoulder | 📐 |
+| (synthetic generic spherical) | 6 | inline in `tests/test_ikgeo_spherical.py` (two variants) | `ikgeo.spherical` | spherical wrist, shoulder neither parallel nor intersecting | 📐 |
 
 ## 6R non-Pieper (tier-1 / tier-2, future)
 
