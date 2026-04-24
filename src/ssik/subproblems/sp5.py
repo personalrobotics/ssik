@@ -233,20 +233,28 @@ def solve(
                 )
             )
 
+    def residual(cand: tuple[float, float, float]) -> float:
+        return _residual(cand[0], cand[1], cand[2], p0, p1, p2, p3, k1, k2, k3)
+
+    # Sort by pre-GN residual. When the Bezout/quartic cluster-root
+    # pathology splits one physical solution into two numerically-close
+    # candidates, the "cleaner" one has residual ~eps and the "drifted"
+    # one has residual ~1e-8 or larger -- many orders apart, so this
+    # ordering is platform-stable. After GN, all surviving candidates
+    # converge to local minima at ~eps; downstream callers that dedup
+    # by insertion order will keep the cleaner representative.
+    candidates.sort(key=residual)
+
     # Refine each candidate via Gauss-Newton on the full SP5 equation.
     # The quartic-derived angles have residuals O(num_tol) or worse when
     # the quartic has near-double roots (cond ~ 1/gap^2 blows up in the
     # companion-matrix root-finder). A few GN steps drop residuals to
-    # O(eps) from a good initial guess, so the fixed-threshold post-verify
-    # filter below no longer silently drops valid branches in cluster-root
-    # regimes. See issue #55 for the original failure mode.
+    # O(eps) from a good initial guess. See issue #55 for the original
+    # failure mode.
     refined: list[tuple[float, float, float]] = []
     for cand in candidates:
         t1, t2, t3 = _refine_sp5(cand[0], cand[1], cand[2], p0, p1, p2, p3, k1, k2, k3)
         refined.append((t1, t2, t3))
-
-    def residual(cand: tuple[float, float, float]) -> float:
-        return _residual(cand[0], cand[1], cand[2], p0, p1, p2, p3, k1, k2, k3)
 
     # Post-verify against the SP5 equation.
     exact = [cand for cand in refined if residual(cand) < num_tol]
@@ -309,11 +317,19 @@ def _refine_sp5(
         except np.linalg.LinAlgError:
             break
 
-        t1 += float(delta[0])
-        t2 += float(delta[1])
-        t3 += float(delta[2])
+        # Clip per-iteration step to pi/4 so an ill-conditioned Jacobian
+        # doesn't launch us to a far-away minimum; quadratic convergence is
+        # preserved near the true solution where |delta| is already small.
+        step_norm = float(np.linalg.norm(delta))
+        max_step = np.pi / 4.0
+        if step_norm > max_step:
+            delta = delta * (max_step / step_norm)
 
-        if float(np.linalg.norm(delta)) < step_tol:
+        t1 = _wrap(t1 + float(delta[0]))
+        t2 = _wrap(t2 + float(delta[1]))
+        t3 = _wrap(t3 + float(delta[2]))
+
+        if step_norm < step_tol:
             break
 
     return t1, t2, t3

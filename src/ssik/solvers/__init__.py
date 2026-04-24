@@ -22,6 +22,10 @@ Current contents:
   sharing an origin (``p[1] = 0``) -- compact arms where the waist
   and shoulder pivots coincide (Puma 560, ABB IRB smaller variants,
   uFactory lite6/xArm6 family).
+- :mod:`ssik.solvers.ikgeo.spherical` -- generic spherical-wrist 6R
+  solver built on SP1/SP4/SP5 composition. Fallback for spherical-
+  wrist arms that match neither shoulder specialization (rare in
+  commercial arms; typically custom / research geometries).
 
 Future: Husty-Pfurner universal fallback, specialist 7R, dispatcher.
 """

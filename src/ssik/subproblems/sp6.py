@@ -186,17 +186,26 @@ def solve(
         theta2 = float(np.arctan2(x[2], x[3]))
         candidates.append((theta1, theta2))
 
+    def residual(cand: tuple[float, float]) -> float:
+        return _residual(cand[0], cand[1], h, k, p, d1, d2)
+
+    # Sort by pre-GN residual BEFORE refinement. When Bezout near-doubles
+    # split one physical solution into two close candidates, the "cleaner"
+    # one has residual ~eps and the "drifted" one has residual ~1e-8 or
+    # larger -- many orders apart, so this ordering is stable across
+    # LAPACK backends. After GN, all surviving candidates converge to
+    # local minima at ~eps and become indistinguishable by residual; we
+    # rely on the pre-GN ordering to keep the cleaner representative
+    # earlier so downstream caller dedup picks it.
+    candidates.sort(key=residual)
+
     # Refine each candidate via Gauss-Newton on the 2x2 SP6 residual.
-    # The ellipse-intersection + QR-nullspace machinery produces candidates
-    # with accumulated numerical drift O(num_tol) near critical geometries.
-    # 2-3 GN steps drop residuals to ~eps from a good initial guess.
+    # Quadratic convergence drops residuals to O(eps) from a good initial
+    # guess; cluster-root cases with ~O(1e-8) pre-GN residuals also drop.
     refined: list[tuple[float, float]] = []
     for cand in candidates:
         t1, t2 = _refine_sp6(cand[0], cand[1], h, k, p, d1, d2)
         refined.append((t1, t2))
-
-    def residual(cand: tuple[float, float]) -> float:
-        return _residual(cand[0], cand[1], h, k, p, d1, d2)
 
     # Return the full set of refined candidates. A caller-level dedup (e.g.
     # in ikgeo.three_parallel, based on full-FK residual) is the correct
@@ -271,10 +280,18 @@ def _refine_sp6(
         except np.linalg.LinAlgError:
             break
 
-        t1 += float(delta[0])
-        t2 += float(delta[1])
+        # Clip per-iteration step to pi/4 so ill-conditioned Jacobians
+        # don't launch us to a far-away minimum; quadratic convergence is
+        # preserved near the true solution where |delta| is already small.
+        step_norm = float(np.linalg.norm(delta))
+        max_step = np.pi / 4.0
+        if step_norm > max_step:
+            delta = delta * (max_step / step_norm)
 
-        if float(np.linalg.norm(delta)) < step_tol:
+        t1 = _wrap(t1 + float(delta[0]))
+        t2 = _wrap(t2 + float(delta[1]))
+
+        if step_norm < step_tol:
             break
 
     return t1, t2

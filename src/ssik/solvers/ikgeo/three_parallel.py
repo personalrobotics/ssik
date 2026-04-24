@@ -166,26 +166,23 @@ def solve(
             q4 = _wrap_to_pi(theta14 - q2 - q3)
             candidates.append(np.array([q1, q2, q3, q4, q5, q6]))
 
-    # Post-verify each candidate against the target pose. Only candidates
-    # that actually recover T_target within subproblem_numerical survive.
-    # Also dedup at the q-vector level (wrap-to-pi per joint, cleanest
-    # FK-residual wins) so near-singular poses that split a physical
-    # branch into numerically-distinct SP6 candidates collapse back to
-    # the single physical solution. See issue #56.
+    # Post-verify each candidate against the target pose and dedup at the
+    # q-vector level (wrap-to-pi per joint). SP6 already sorted its
+    # outputs by pre-GN residual so the cleanest representative of each
+    # Bezout cluster comes first; we preserve that insertion order here
+    # and let dedup keep the earliest-inserted member of each cluster.
+    # Sorting by full-FK residual at this stage would tie-break
+    # non-deterministically (all surviving candidates are at ~eps FK
+    # error and can reorder across LAPACK backends); see issue #56.
     num_tol = policy.subproblem_numerical
     dedup_tol = policy.subproblem_dedup
-    verified: list[tuple[NDArray[np.float64], float]] = []
+    verified: list[NDArray[np.float64]] = []
     for q in candidates:
-        t = _forward_kinematics(kb, q)
-        fk_err = float(np.linalg.norm(t - t_target))
-        if fk_err < num_tol:
-            verified.append((q, fk_err))
+        if float(np.linalg.norm(_forward_kinematics(kb, q) - t_target)) < num_tol:
+            verified.append(q)
 
-    # Sort ascending by FK residual so when we merge clusters we keep the
-    # cleanest representative deterministically (platform-independent).
-    verified.sort(key=lambda pair: pair[1])
     solutions: list[NDArray[np.float64]] = []
-    for q, _ in verified:
+    for q in verified:
         if not any(_q_close(q, existing, dedup_tol) for existing in solutions):
             solutions.append(q)
 
