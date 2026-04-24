@@ -37,6 +37,7 @@ alongside each solver PR.
 | (synthetic generic spherical) | 6 | inline in `tests/test_ikgeo_spherical.py` (two variants) | `ikgeo.spherical` | spherical wrist, shoulder neither parallel nor intersecting | 📐 |
 | (synthetic two-intersecting) | 6 | inline in `tests/test_ikgeo_two_intersecting.py` (two variants) | `ikgeo.two_intersecting` (tier-1) | joints (4, 5) share origin, no spherical wrist | 📐 |
 | (synthetic two-parallel) | 6 | inline in `tests/test_ikgeo_two_parallel.py` (IK-Geo-style random axes with axes[2]=axes[1]) | `ikgeo.two_parallel` (tier-1) | only joints (1, 2) parallel, no spherical wrist or other specialization | 📐 |
+| (synthetic generic 6R) | 6 | inline in `tests/test_ikgeo_gen_six_dof.py` (IK-Geo-style random axes and offsets) | `ikgeo.gen_six_dof` (tier-2) | no special structure; any 6R arm (slow: ~100s per IK in Python) | 📐 |
 
 ## 6R non-Pieper (tier-1 / tier-2, future)
 
