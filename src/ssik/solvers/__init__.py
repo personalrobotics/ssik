@@ -42,6 +42,13 @@ Current contents:
   SP5 solve per grid cell. Handles any 6R but is slow (seconds per
   IK in pure Python); dispatcher uses this only as a fallback when
   no tier-0 or tier-1 specialisation matches.
+- :mod:`ssik.solvers.jointlock.seven_r` -- universal 7R wrapper that
+  locks one joint (auto-selected by topology) and dispatches the
+  resulting 6R sub-chain to the best-matching ikgeo solver. Covers
+  Franka Panda, KUKA iiwa, Flexiv Rizon, Kinova Gen3, uFactory xArm7
+  and any other 7R arm by reusing the tier-0 6R speed. ms-scale
+  per-pose; user can supply explicit lock-joint samples or default
+  to a uniform sweep.
 
 Future: Husty-Pfurner universal fallback, specialist 7R, dispatcher.
 """
