@@ -36,6 +36,12 @@ Current contents:
   ``search_1d`` over ``theta_0`` with an inner SP6 coupling (q4, q6)
   per sample. Narrower applicability than ``three_parallel`` and
   fewer returned solutions due to tier-1 search sparsity.
+- :mod:`ssik.solvers.ikgeo.gen_six_dof` -- tier-2 general 6R solver
+  for arms with no special structure. Uses a 100x100 grid over
+  ``(theta_0, theta_1)`` + Nelder-Mead refinement, with an inner
+  SP5 solve per grid cell. Handles any 6R but is slow (seconds per
+  IK in pure Python); dispatcher uses this only as a fallback when
+  no tier-0 or tier-1 specialisation matches.
 
 Future: Husty-Pfurner universal fallback, specialist 7R, dispatcher.
 """
