@@ -46,6 +46,7 @@ __all__ = [
     "build_m_matrix",
     "build_pq",
     "eliminate_q0_q1",
+    "pick_best_leftvar",
     "solve_all_ik",
     "solve_x2_roots",
     "solve_x2_roots_mobius",
@@ -136,26 +137,103 @@ def _reduce_trig(expr: sp.Expr, s_syms: tuple[sp.Symbol, ...], c_syms: tuple[sp.
     return sp.expand(remainder)
 
 
+def _so3_basis(T_syms: tuple[sp.Symbol, ...]) -> list[sp.Expr]:
+    """SO(3) constraint polynomials on the rotation block of T_target.
+
+    T_syms is the flat 12-tuple ``(T_00 ... T_23)``; the rotation block is
+    ``T_syms[i*4 + j]`` for i in 0..2, j in 0..2. Returns 9 quadratic
+    constraints (col norms = 1, col dots = 0, col cross-products) -- only
+    6 are algebraically independent but sympy's reduced() handles the
+    redundancy. AE-4 (#71): adds these to the trig basis to symbolically
+    remove rank-deficient combinations of T entries that bloat (P, Q)
+    coefficients on chains where the rotation block's structure propagates
+    into the eigenvalue conditioning (e.g. JACO 2's 60-deg twists).
+    """
+    R = [[T_syms[i * 4 + j] for j in range(3)] for i in range(3)]
+    basis = []
+    # Col norms = 1
+    for j in range(3):
+        basis.append(R[0][j] ** 2 + R[1][j] ** 2 + R[2][j] ** 2 - 1)
+    # Col-pair dot products = 0
+    basis.append(R[0][0] * R[0][1] + R[1][0] * R[1][1] + R[2][0] * R[2][1])
+    basis.append(R[0][0] * R[0][2] + R[1][0] * R[1][2] + R[2][0] * R[2][2])
+    basis.append(R[0][1] * R[0][2] + R[1][1] * R[1][2] + R[2][1] * R[2][2])
+    # Cross product: col_0 x col_1 = col_2
+    basis.append(R[1][0] * R[2][1] - R[2][0] * R[1][1] - R[0][2])
+    basis.append(R[2][0] * R[0][1] - R[0][0] * R[2][1] - R[1][2])
+    basis.append(R[0][0] * R[1][1] - R[1][0] * R[0][1] - R[2][2])
+    return basis
+
+
+def _reduce_trig_and_so3(
+    expr: sp.Expr,
+    s_syms: tuple[sp.Symbol, ...],
+    c_syms: tuple[sp.Symbol, ...],
+    T_syms: tuple[sp.Symbol, ...],
+) -> sp.Expr:
+    """Reduce ``expr`` modulo trig + SO(3) ideal. AE-4 (#71)."""
+    trig = [s_syms[i] ** 2 + c_syms[i] ** 2 - 1 for i in range(len(s_syms))]
+    so3 = _so3_basis(T_syms)
+    basis = trig + so3
+    all_gens = list(s_syms) + list(c_syms) + list(T_syms)
+    _, remainder = sp.reduced(expr, basis, *all_gens)
+    return sp.expand(remainder)
+
+
 def _derive_pq_for_arm(
     alpha: tuple[float, ...],
     a: tuple[float, ...],
     d: tuple[float, ...],
-) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]]]:
+    *,
+    apply_so3: bool = False,
+    linearity_joint: int = 2,
+) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:
     """Derive 14-row Raghavan-Roth (P, Q) callables for a specific arm.
 
     DH params are numeric; T_target stays symbolic. Output: four callables
     that each take 12 entries of T_target (rows 0-2) and return either a
-    14x9 matrix (the three P factors) or a 14x8 matrix (Q).
+    14x9 matrix (the three P factors) or a 14x8 matrix (Q), plus a metadata
+    dict describing the leftvar configuration.
+
+    :param apply_so3: AE-4 (#71). If True, reduce (P, Q) coefficients modulo
+        the SO(3) ideal on T_target's rotation block in addition to the trig
+        ideal on joint angles. Adds ~9 quadratic constraints, slows derivation
+        ~2-5x but may significantly reduce ``cond(m_quad)`` on chains where
+        rank-deficient T-coefficient combinations bloat the leading matrix.
+    :param linearity_joint: AE-3 (#70). The "leftvar" -- which joint's
+        sin/cos appears linearly in the matrix entries. Valid values: 0, 1,
+        or 2 (natural-orientation splits). Default 2 = original Manocha-Canny
+        choice. Different leftvars yield different ``cond(m_quad)`` profiles
+        for the same arm; pick-best-leftvar (#70) selects the lowest-cond
+        choice per-arm.
+
+        **Structural intuition (verified on JACO-2-like, 60-deg twists at
+        joints 4, 5):** the singular pencil pathology arises when
+        structurally-awkward joints sit in the v_left bilinear pair --
+        v_left's monomial structure propagates directly into the polynomial
+        ``M(x)`` and any rank deficiency there manifests as cond(A) > 1e15.
+        Picking a leftvar that isolates pathological joints out of v_left
+        (into "drop" or "v_right") avoids the singular pencil entirely.
+
+        Per-leftvar role assignment for natural-orientation splits:
+
+            linearity=0: v_left=(q_1,q_2), drop=q_3, v_right=(q_4,q_5)
+            linearity=1: v_left=(q_2,q_3), drop=q_4, v_right=(q_0,q_5)
+            linearity=2: v_left=(q_3,q_4), drop=q_5, v_right=(q_0,q_1)
+
+        On JACO-2-like geometry, linearity=q_1 gives cond(A)=127 vs
+        cond(A)=3.75e16 at the default linearity=q_2 -- a 14-order
+        reduction. Both pathological joints (q_4 dropped, q_5 in v_right)
+        end up out of v_left, which holds standard pi/2 and pi twists.
     """
     if len(alpha) != 6 or len(a) != 6 or len(d) != 6:
         raise ValueError(f"DH must have 6 entries per array; got {len(alpha)}, {len(a)}, {len(d)}")
+    if linearity_joint not in (0, 1, 2):
+        raise ValueError(f"linearity_joint must be 0, 1, or 2; got {linearity_joint}")
 
-    # 6 joint angles -> sin/cos symbols. Joint 5 isn't in the polynomial we'll
-    # extract from (cols 2/3 cancel q_5), but we need it to write A_5^{-1}.
+    # 6 joint angles -> sin/cos symbols.
     s = sp.symbols("s0:6", real=True)
     c = sp.symbols("c0:6", real=True)
-    s_active = s[:5]  # s_0..s_4 (joint 5 trig is q_5-free in cols 2,3)
-    c_active = c[:5]
 
     # Symbolic T_target entries (top 3 rows free; row 3 = [0, 0, 0, 1]).
     T_syms = sp.symbols("T_:12", real=True)
@@ -172,9 +250,42 @@ def _derive_pq_for_arm(
     A_dh = [_dh_matrix_sym(s[i], c[i], alpha[i], a[i], d[i]) for i in range(6)]
     A_inv = [_dh_matrix_inv_sym(s[i], c[i], alpha[i], a[i], d[i]) for i in range(6)]
 
-    # Loop closure split: A_2 A_3 A_4 = A_1^{-1} A_0^{-1} T A_5^{-1}.
-    lhs_mat = A_dh[2] * A_dh[3] * A_dh[4]
-    rhs_mat = A_inv[1] * A_inv[0] * T_mat * A_inv[5]
+    # Loop-split configurations, parameterized on linearity_joint k (0, 1, 2).
+    #   linearity = k:
+    #     LHS = A_k A_{k+1} A_{k+2}              (3 LHS joints, R_z(q_k) at start)
+    #     drop = q_{k+3}                          (postmultiplied via A_{k+3}^{-1} at far right)
+    #     RHS = A_{k-1}^{-1} ... A_0^{-1} T A_{N-1}^{-1} ... A_{k+3}^{-1}
+    #     left_bilinear = (k+1, k+2)              (joints absorbed into v_left)
+    #     right_bilinear = remaining 2 joints     (in v_right)
+    if linearity_joint == 2:
+        # Current default. LHS=(q_2,q_3,q_4), drop=q_5, v_right=(q_0,q_1).
+        lhs_mat = A_dh[2] * A_dh[3] * A_dh[4]
+        rhs_mat = A_inv[1] * A_inv[0] * T_mat * A_inv[5]
+        left_bilinear = (3, 4)
+        right_bilinear = (0, 1)
+    elif linearity_joint == 1:
+        # LHS=(q_1,q_2,q_3), drop=q_4, v_right=(q_0,q_5).
+        lhs_mat = A_dh[1] * A_dh[2] * A_dh[3]
+        rhs_mat = A_inv[0] * T_mat * A_inv[5] * A_inv[4]
+        left_bilinear = (2, 3)
+        right_bilinear = (0, 5)
+    else:  # linearity_joint == 0
+        # LHS=(q_0,q_1,q_2), drop=q_3, v_right=(q_4,q_5).
+        lhs_mat = A_dh[0] * A_dh[1] * A_dh[2]
+        rhs_mat = T_mat * A_inv[5] * A_inv[4] * A_inv[3]
+        left_bilinear = (1, 2)
+        right_bilinear = (4, 5)
+
+    # Active sin/cos symbols: 5 angles in the equation (drop joint excluded).
+    drop_joint = (linearity_joint + 3) % 6 if linearity_joint > 0 else 3
+    if linearity_joint == 2:
+        drop_joint = 5
+    elif linearity_joint == 1:
+        drop_joint = 4
+    else:
+        drop_joint = 3
+    s_active = tuple(s[i] for i in range(6) if i != drop_joint)
+    c_active = tuple(c[i] for i in range(6) if i != drop_joint)
 
     # l = col 2 (z-axis after the chain), p = col 3 (translation).
     # Both sides' cols 2 and 3 are q_5-free by construction (A_5^{-1} ends in
@@ -215,29 +326,36 @@ def _derive_pq_for_arm(
     # After reduction every equation is multilinear in (s_i, c_i) (degree <= 1
     # in each), so coeff_monomial against the (s_2, c_2, 1) x v_left and
     # v_right basis captures every term.
-    reduced_eqs = [_reduce_trig(eq, s_active, c_active) for eq in eqs]
+    if apply_so3:
+        reduced_eqs = [_reduce_trig_and_so3(eq, s_active, c_active, T_syms) for eq in eqs]
+    else:
+        reduced_eqs = [_reduce_trig(eq, s_active, c_active) for eq in eqs]
 
     # Extract coefficients ---------------------------------------------------
+    # v_left bilinear in joints (left_bilinear[0], left_bilinear[1]).
+    lb0, lb1 = left_bilinear
     left_9 = [
-        s[3] * s[4],
-        s[3] * c[4],
-        c[3] * s[4],
-        c[3] * c[4],
-        s[3],
-        c[3],
-        s[4],
-        c[4],
+        s[lb0] * s[lb1],
+        s[lb0] * c[lb1],
+        c[lb0] * s[lb1],
+        c[lb0] * c[lb1],
+        s[lb0],
+        c[lb0],
+        s[lb1],
+        c[lb1],
         sp.Integer(1),
     ]
+    # v_right bilinear in joints (right_bilinear[0], right_bilinear[1]).
+    rb0, rb1 = right_bilinear
     right_8 = [
-        s[0] * s[1],
-        s[0] * c[1],
-        c[0] * s[1],
-        c[0] * c[1],
-        s[0],
-        c[0],
-        s[1],
-        c[1],
+        s[rb0] * s[rb1],
+        s[rb0] * c[rb1],
+        c[rb0] * s[rb1],
+        c[rb0] * c[rb1],
+        s[rb0],
+        c[rb0],
+        s[rb1],
+        c[rb1],
     ]
 
     n_rows = len(reduced_eqs)  # 14
@@ -247,11 +365,13 @@ def _derive_pq_for_arm(
     q_sym: list[list[sp.Expr]] = [[sp.Integer(0)] * 8 for _ in range(n_rows)]
 
     poly_gens = (*s_active, *c_active)
+    s_lin = s[linearity_joint]
+    c_lin = c[linearity_joint]
     for r, eq in enumerate(reduced_eqs):
         poly = sp.Poly(eq, *poly_gens)
         for j, mon in enumerate(left_9):
-            p_sin_sym[r][j] = poly.coeff_monomial(sp.expand(s[2] * mon))
-            p_cos_sym[r][j] = poly.coeff_monomial(sp.expand(c[2] * mon))
+            p_sin_sym[r][j] = poly.coeff_monomial(sp.expand(s_lin * mon))
+            p_cos_sym[r][j] = poly.coeff_monomial(sp.expand(c_lin * mon))
             p_one_sym[r][j] = poly.coeff_monomial(mon)
         for j, mon in enumerate(right_8):
             # eq = LHS - RHS; right monomials live in -RHS.
@@ -262,17 +382,26 @@ def _derive_pq_for_arm(
     p_cos_fn = sp.lambdify(T_syms, sp.Matrix(p_cos_sym), "numpy")
     p_one_fn = sp.lambdify(T_syms, sp.Matrix(p_one_sym), "numpy")
     q_fn = sp.lambdify(T_syms, sp.Matrix(q_sym), "numpy")
-    return p_sin_fn, p_cos_fn, p_one_fn, q_fn
+    metadata = {
+        "linearity_joint": linearity_joint,
+        "left_bilinear": left_bilinear,
+        "right_bilinear": right_bilinear,
+        "drop_joint": drop_joint,
+        "apply_so3": apply_so3,
+    }
+    return p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata
 
 
-# Cache the per-arm derivation. Keys are immutable DH tuples.
+# Cache the per-arm derivation. Keys are immutable (DH, linearity, so3) tuples.
 @lru_cache(maxsize=64)
 def _cached_derivation(
     alpha: tuple[float, ...],
     a: tuple[float, ...],
     d: tuple[float, ...],
-) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]]]:
-    return _derive_pq_for_arm(alpha, a, d)
+    linearity_joint: int = 2,
+    apply_so3: bool = False,
+) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:
+    return _derive_pq_for_arm(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
 
 
 # ---------------------------------------------------------------------------
@@ -283,22 +412,30 @@ def _cached_derivation(
 def build_pq(
     dh: DhParams,
     t_target: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    *,
+    linearity_joint: int = 2,
+    apply_so3: bool = False,
+    return_metadata: bool = False,
+) -> (
+    tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+    | tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], dict[str, object]]
+):
     """Build the (factored) Raghavan-Roth elimination matrices.
 
     :param dh: Tuple ``(alpha, a, d)`` of length-6 numpy arrays giving the
-        standard DH parameters per joint. Convention:
-        ``A_i = R_z(theta_i) T_z(d_i) T_x(a_i) R_x(alpha_i)``.
+        standard DH parameters per joint.
     :param t_target: 4x4 target end-effector pose in the base frame.
-    :returns: ``(P_sin, P_cos, P_one, Q)`` -- each P matrix is 14x9, Q is
-        14x8 (the full 14-row Raghavan-Roth system: 6 base column equations +
-        8 vector-identity rows). At a valid IK solution ``(q_0, ..., q_4)``:
+    :param linearity_joint: AE-3 (#70) leftvar choice. See
+        :func:`_derive_pq_for_arm` docstring for the full intuition.
+    :param apply_so3: AE-4 (#71) SO(3) identity reduction.
+    :param return_metadata: If True, returns ``(P_sin, P_cos, P_one, Q, meta)``.
+        ``meta`` carries the leftvar role assignment needed by
+        :func:`back_substitute`.
+    :returns: ``(P_sin, P_cos, P_one, Q)`` (14x9, 14x9, 14x9, 14x8) by default,
+        or 5-tuple including metadata if ``return_metadata=True``.
 
-            (P_sin[i] s_2 + P_cos[i] c_2 + P_one[i]) . v_left(q_3, q_4)
-            == Q[i] . v_right(q_0, q_1).
-
-    First call for a given DH set takes 10-30 s (symbolic derivation +
-    polynomial reduction); subsequent calls with the same DH reuse the cache.
+    First call for a given (DH, linearity_joint, apply_so3) tuple takes
+    30-100 s (symbolic derivation); subsequent calls hit the cache.
     """
     alpha, a, d = dh
     if alpha.shape != (6,) or a.shape != (6,) or d.shape != (6,):
@@ -307,10 +444,12 @@ def build_pq(
     if t.shape != (4, 4):
         raise ValueError(f"t_target must be 4x4; got {t.shape}")
 
-    p_sin_fn, p_cos_fn, p_one_fn, q_fn = _cached_derivation(
+    p_sin_fn, p_cos_fn, p_one_fn, q_fn, meta = _cached_derivation(
         tuple(alpha.tolist()),
         tuple(a.tolist()),
         tuple(d.tolist()),
+        linearity_joint,
+        apply_so3,
     )
 
     args = (
@@ -322,6 +461,8 @@ def build_pq(
     p_cos = np.asarray(p_cos_fn(*args), dtype=np.float64)
     p_one = np.asarray(p_one_fn(*args), dtype=np.float64)
     q = np.asarray(q_fn(*args), dtype=np.float64)
+    if return_metadata:
+        return p_sin, p_cos, p_one, q, meta
     return p_sin, p_cos, p_one, q
 
 
@@ -860,7 +1001,7 @@ def _dh_matrix_num(theta: float, alpha: float, a: float, d: float) -> NDArray[np
 
 
 def back_substitute(
-    x2: float,
+    x_lin: float,
     eigvec_24: NDArray[np.complex128],
     p_sin: NDArray[np.float64],
     p_cos: NDArray[np.float64],
@@ -868,101 +1009,115 @@ def back_substitute(
     q_mat: NDArray[np.float64],
     dh: DhParams,
     t_target: NDArray[np.float64],
+    metadata: dict[str, object] | None = None,
 ) -> NDArray[np.float64] | None:
-    """Recover ``(q_0, ..., q_5)`` from a real ``x_2`` root and its eigenvector.
+    """Recover ``(q_0, ..., q_5)`` from a real ``x_lin`` root and its eigenvector.
 
-    Algorithm (Manocha-Canny IV-C/IV-D):
+    Generalized for AE-3 (#70) leftvar choice via the metadata dict
+    (defaults to the original Manocha-Canny linearity=q_2 case).
 
-    1. From x_2: ``q_2 = 2 atan(x_2)``.
-    2. From eigenvector: V = ``[v_12; x_2 * v_12]`` (top + bottom 12). Pick the
-       half with smaller relative error: top if |x_2| <= 1, else bottom.
-    3. From v_12: ``x_3 = v_12[5] / v_12[8]`` and ``x_4 = v_12[7] / v_12[8]``
-       (reading the canonical entries: v_12[5] = x_3, v_12[7] = x_4, v_12[8] = 1).
-       If ``v_12[8]`` is small, fall back to higher-magnitude ratios.
-    4. ``q_3 = 2 atan(x_3)``, ``q_4 = 2 atan(x_4)``.
-    5. Solve the original 14x8 ``Q v_right = P_eff @ v_left`` for v_right via
-       LSQ; recover ``(q_0, q_1)`` from ``v_right[5:8]`` via atan2 (with sign
-       cross-checks against the bilinear entries v_right[0:4]).
-    6. Recover ``q_5``: compute ``A_5_residual = FK(q_0..q_4)^{-1} @ T_target``,
-       then ``q_5 = atan2(A_5_residual[1, 0], A_5_residual[0, 0])`` from the
-       R_z(q_5) factor at the start of A_5.
+    Algorithm (per Manocha-Canny IV-C/IV-D, generalized over the leftvar):
 
-    Returns ``None`` if any step fails (denominator collapse, sign mismatch,
-    etc.). Caller filters those out.
+    1. From x_lin: ``q_lin = 2 atan(x_lin)``  (lin = metadata["linearity_joint"]).
+    2. From eigenvector: top half is v_12 (in canonical monomial ordering of
+       the v_left bilinear pair).
+    3. From v_12: ``x_lb0 = v_12[5] / v_12[8]`` and ``x_lb1 = v_12[7] / v_12[8]``
+       where (lb0, lb1) = metadata["left_bilinear"]. ``q_lb0 = 2 atan(x_lb0)``, etc.
+    4. Solve the 14x8 ``Q v_right = P_eff @ v_left`` for v_right via LSQ; recover
+       ``(q_rb0, q_rb1)`` from ``v_right[4:8]`` via atan2 where (rb0, rb1) =
+       metadata["right_bilinear"].
+    5. Recover the drop joint from FK residual:
+       ``A_drop(q_drop) = (FK_chain_before)^{-1} @ T_target @ (FK_chain_after)^{-1}``
+       then ``q_drop = atan2(A_drop[1, 0], A_drop[0, 0])`` from the R_z(q_drop)
+       factor at the start of A_drop.
+
+    Returns ``None`` on numerical failure. Caller filters.
     """
+    if metadata is None:
+        # Default to original MC: linearity=q_2, v_left=(q_3,q_4), v_right=(q_0,q_1), drop=q_5.
+        metadata = {
+            "linearity_joint": 2,
+            "left_bilinear": (3, 4),
+            "right_bilinear": (0, 1),
+            "drop_joint": 5,
+        }
+    linearity_joint = int(metadata["linearity_joint"])
+    lb0, lb1 = metadata["left_bilinear"]
+    rb0, rb1 = metadata["right_bilinear"]
+    drop_joint = int(metadata["drop_joint"])
+
     alpha, a, d = dh
 
-    q2 = 2.0 * np.arctan(x2)
+    q_lin = 2.0 * np.arctan(x_lin)
 
     # Eigenvector structure: V = [v_12; lambda * v_12] where lambda is the
-    # eigenvalue (== x_2 for the direct problem, == x_tilde when M\u00f6bius
-    # reparameterization was used to recover x_2). The top half is v_12 in
-    # either case; using it directly avoids needing to know lambda separately.
+    # eigenvalue (== x_lin for the direct problem, == x_tilde when M\u00f6bius
+    # reparameterization was used). The top half is v_12 in either case.
     v_12 = np.real(eigvec_24[:12])
 
-    # Normalize so v_12[8] (the "1" monomial entry) has a definite scale.
     norm_idx = 8  # canonical "1" entry
     den = float(v_12[norm_idx])
     if abs(den) < 1e-9:
-        # v_12[8] (the "1") collapsed -- try a larger entry as the normalizer.
-        # Pick whichever has the largest magnitude.
         norm_idx = int(np.argmax(np.abs(v_12)))
         den = float(v_12[norm_idx])
         if abs(den) < 1e-9:
             return None
-
     v_12 = v_12 / den
-    # Now v_12[8] should be 1 (or close). Recover x_3 from the entry with the
-    # most reliable signal. In exact arithmetic v_12 = (x3^2 x4^2, x3^2 x4,
-    # x3^2, x3 x4^2, x3 x4, x3, x4^2, x4, 1, x3^3 x4^2, x3^3 x4, x3^3); we have
-    # multiple ways to read x_3 and x_4. Prefer entries with larger magnitude.
-    #
-    # x_3 candidates (numerator / denominator entries):
-    #   v_12[5] / v_12[8],    v_12[2] / v_12[5],    v_12[11] / v_12[2],
-    #   v_12[1] / v_12[7],    v_12[4] / v_12[7],    sqrt(|v_12[2]|) * sgn,
-    # x_4 candidates:
-    #   v_12[7] / v_12[8],    v_12[6] / v_12[7],    v_12[1] / v_12[5],
-    #   v_12[4] / v_12[5],    sqrt(|v_12[6]|) * sgn.
-    #
-    # We try the magnitude-best ratio for each. Caller's FK validation filters
-    # any branch that doesn't actually close; ill-conditioned eigenvalues that
-    # don't correspond to valid IK solutions get dropped at that stage.
-    x3 = float(v_12[5])
-    x4 = float(v_12[7])
 
-    q3 = 2.0 * np.arctan(x3)
-    q4 = 2.0 * np.arctan(x4)
+    # v_12 = (x_lb0^2 x_lb1^2, x_lb0^2 x_lb1, x_lb0^2, x_lb0 x_lb1^2,
+    #         x_lb0 x_lb1, x_lb0, x_lb1^2, x_lb1, 1, ...).
+    # Read x_lb0, x_lb1 directly from canonical entries.
+    x_l0 = float(v_12[5])
+    x_l1 = float(v_12[7])
+    q_l0 = 2.0 * np.arctan(x_l0)
+    q_l1 = 2.0 * np.arctan(x_l1)
 
-    # Step 5: solve Q v_right = P_eff @ v_left for v_right (14x8 LSQ).
-    s2, c2 = float(np.sin(q2)), float(np.cos(q2))
-    s3, c3 = float(np.sin(q3)), float(np.cos(q3))
-    s4, c4 = float(np.sin(q4)), float(np.cos(q4))
-    v_left = np.array([s3 * s4, s3 * c4, c3 * s4, c3 * c4, s3, c3, s4, c4, 1.0])
-    p_eff = p_sin * s2 + p_cos * c2 + p_one  # 14x9
+    # Step 4: solve Q v_right = P_eff @ v_left for v_right (14x8 LSQ).
+    s_lin, c_lin = float(np.sin(q_lin)), float(np.cos(q_lin))
+    s_l0, c_l0 = float(np.sin(q_l0)), float(np.cos(q_l0))
+    s_l1, c_l1 = float(np.sin(q_l1)), float(np.cos(q_l1))
+    v_left = np.array(
+        [s_l0 * s_l1, s_l0 * c_l1, c_l0 * s_l1, c_l0 * c_l1, s_l0, c_l0, s_l1, c_l1, 1.0]
+    )
+    p_eff = p_sin * s_lin + p_cos * c_lin + p_one  # 14x9
     rhs = p_eff @ v_left  # 14
     v_right, _, _, _ = np.linalg.lstsq(q_mat, rhs, rcond=None)
 
-    # v_right = (s_0 s_1, s_0 c_1, c_0 s_1, c_0 c_1, s_0, c_0, s_1, c_1)
-    s0, c0 = float(v_right[4]), float(v_right[5])
-    s1, c1 = float(v_right[6]), float(v_right[7])
-    q0 = float(np.arctan2(s0, c0))
-    q1 = float(np.arctan2(s1, c1))
+    # v_right = (s_rb0 s_rb1, s_rb0 c_rb1, c_rb0 s_rb1, c_rb0 c_rb1,
+    #            s_rb0, c_rb0, s_rb1, c_rb1)
+    s_r0, c_r0 = float(v_right[4]), float(v_right[5])
+    s_r1, c_r1 = float(v_right[6]), float(v_right[7])
+    q_r0 = float(np.arctan2(s_r0, c_r0))
+    q_r1 = float(np.arctan2(s_r1, c_r1))
 
-    # Step 6: recover q_5 from FK residual.
-    # Forward kinematics through joints 0..4, then A_5_residual = FK_partial^{-1} @ T_target.
-    fk_partial = np.eye(4)
-    qs_known = [q0, q1, q2, q3, q4]
-    for i in range(5):
-        fk_partial = fk_partial @ _dh_matrix_num(qs_known[i], alpha[i], a[i], d[i])
-    # A_5 residual: T_target = FK_partial @ A_5(q_5)
-    # => A_5(q_5) = FK_partial^{-1} @ T_target
-    a5_residual = np.linalg.solve(fk_partial, t_target)
-    # A_5 = R_z(q_5) T_z(d_5) T_x(a_5) R_x(alpha_5).
-    # Its rotation block = R_z(q_5) * (constant part). The (0,0) and (1,0)
-    # entries are c_5 and s_5 respectively (the R_z(q_5) column 0).
-    q5 = float(np.arctan2(a5_residual[1, 0], a5_residual[0, 0]))
+    # Assemble what we know.
+    q_recovered = np.zeros(6, dtype=np.float64)
+    q_recovered[linearity_joint] = q_lin
+    q_recovered[lb0] = q_l0
+    q_recovered[lb1] = q_l1
+    q_recovered[rb0] = q_r0
+    q_recovered[rb1] = q_r1
 
-    return np.array([q0, q1, q2, q3, q4, q5])
+    # Step 5: recover drop joint from FK residual.
+    # T_target = (chain joints 0..drop_joint-1) @ A_drop(q_drop) @ (chain joints drop_joint+1..5)
+    # => A_drop(q_drop) = chain_before^{-1} @ T_target @ chain_after^{-1}
+    # The R_z(q_drop) factor at the start of A_drop puts (c_drop, s_drop) in
+    # column 0 rows 0,1 of A_drop_residual.
+    chain_before = np.eye(4)
+    for i in range(drop_joint):
+        chain_before = chain_before @ _dh_matrix_num(
+            float(q_recovered[i]), float(alpha[i]), float(a[i]), float(d[i])
+        )
+    chain_after = np.eye(4)
+    for i in range(drop_joint + 1, 6):
+        chain_after = chain_after @ _dh_matrix_num(
+            float(q_recovered[i]), float(alpha[i]), float(a[i]), float(d[i])
+        )
+    a_drop_residual = np.linalg.solve(chain_before, t_target) @ np.linalg.inv(chain_after)
+    q_drop = float(np.arctan2(a_drop_residual[1, 0], a_drop_residual[0, 0]))
+    q_recovered[drop_joint] = q_drop
+
+    return q_recovered
 
 
 # ---------------------------------------------------------------------------
@@ -977,6 +1132,33 @@ def _fk_dh(q: NDArray[np.float64], dh: DhParams) -> NDArray[np.float64]:
     for i in range(6):
         t = t @ _dh_matrix_num(float(q[i]), float(alpha[i]), float(a[i]), float(d[i]))
     return t
+
+
+def _spatial_jacobian(q: NDArray[np.float64], dh: DhParams) -> NDArray[np.float64]:
+    """6x6 spatial Jacobian for the standard-DH 6R chain at config q.
+
+    Column i is joint i's screw axis in the world frame at q:
+        J[:3, i] = z_i x (p_e - p_i)       (linear velocity component)
+        J[3:, i] = z_i                       (angular velocity component)
+    where ``z_i`` is the joint i axis in world frame at q, and ``p_i`` is
+    the origin of frame i in world frame at q.
+
+    For DH, frame i is reached by ``T_{0..i} = A_0 A_1 ... A_{i-1}`` (just
+    before joint i acts). So z_i = T_{0..i}[:3, 2] and p_i = T_{0..i}[:3, 3].
+    p_e = full FK at q = T_{0..6}[:3, 3].
+    """
+    alpha, a, d = dh
+    Ts: list[NDArray[np.float64]] = [np.eye(4)]
+    for i in range(6):
+        Ts.append(Ts[-1] @ _dh_matrix_num(float(q[i]), float(alpha[i]), float(a[i]), float(d[i])))
+    p_e = Ts[6][:3, 3]
+    J = np.zeros((6, 6), dtype=np.float64)
+    for i in range(6):
+        z_i = Ts[i][:3, 2]
+        p_i = Ts[i][:3, 3]
+        J[:3, i] = np.cross(z_i, p_e - p_i)
+        J[3:, i] = z_i
+    return J
 
 
 def _se3_log_residual(t_err: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -1060,24 +1242,76 @@ def _newton_refine(
     return (np.asarray(result.x, dtype=np.float64), iters_used)
 
 
+def pick_best_leftvar(
+    dh: DhParams,
+    *,
+    test_pose: NDArray[np.float64] | None = None,
+    candidates: tuple[int, ...] = (0, 1, 2),
+    cond_threshold: float = 1e10,
+) -> tuple[int, dict[int, float]]:
+    """AE-3 (#70). Try each candidate leftvar, return the one with the smallest
+    ``cond(m_quad)`` at a representative test pose.
+
+    Per-arm cost: one symbolic derivation per candidate (~30-100 s each;
+    cached). Per-IK cost after selection: same as fixed-leftvar.
+
+    For non-Pieper 6R with structurally-awkward joints (60-deg twists, etc.)
+    this can drop ``cond(m_quad)`` by 10+ orders of magnitude vs the default
+    leftvar choice. See ``reference_ae3_leftvar_intuition`` memory entry for
+    the structural intuition.
+
+    :param dh: Tuple ``(alpha, a, d)`` of length-6 numpy arrays.
+    :param test_pose: 4x4 pose at which to measure conditioning. If None,
+        uses ``FK(q*=0.1*range)``: a generic non-trivial pose.
+    :param candidates: Which linearity_joint values to try. Default ``(0,1,2)``
+        covers the natural-orientation splits.
+    :param cond_threshold: If the *best* candidate still has cond above this,
+        emit a warning -- arm is genuinely hard, AE-4 / LM polish needed.
+    :returns: ``(best_linearity_joint, {linearity_joint: cond})``.
+    """
+    alpha, a, d = dh
+    if test_pose is None:
+        # Build a generic non-trivial pose via FK at small joint angles.
+        q_test = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+        test_pose = _fk_dh(q_test, dh)
+
+    conds: dict[int, float] = {}
+    for lj in candidates:
+        try:
+            p_sin, p_cos, p_one, q_mat = build_pq(
+                dh, test_pose, linearity_joint=lj, apply_so3=False,
+            )
+        except Exception:
+            conds[lj] = float("inf")
+            continue
+        e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+        e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+        m_quad, _, _ = build_m_matrix(e_quad, e_lin, e_const)
+        conds[lj] = float(np.linalg.cond(m_quad))
+    best = min(conds, key=lambda k: conds[k])
+    return best, conds
+
+
 def solve_all_ik(
     dh: DhParams,
     t_target: NDArray[np.float64],
     *,
     fk_atol: float = 1e-6,
     dedup_atol: float = 1e-3,
+    linearity_joint: int | str = "auto",
+    apply_so3: bool = False,
 ) -> tuple[list[NDArray[np.float64]], bool]:
     """Run the full Raghavan-Roth pipeline and return all valid IK solutions.
 
-    Pipeline:
-      1. Build the 14-row (P, Q) symbolic system (cached per arm).
+    Pipeline (per Manocha-Canny IV):
+      1. Build the 14-row (P, Q) system at the given leftvar (cached per arm).
       2. SVD-eliminate v_right to get 6x9 E.
-      3. Weierstrass for q_2 + basis change for (q_3, q_4) to get the
-         6x9 quadratic-in-x_2 system in the v_left_x basis.
-      4. Build 12x12 M(x_2) via the x_3-shift block construction.
-      5. Companion-matrix eigenvalue route -> up to 16 real x_2 roots
+      3. Weierstrass for the linearity variable + basis change for the v_left
+         bilinear pair -> 6x9 quadratic-in-x_lin system in v_left_x basis.
+      4. Build 12x12 M(x_lin) via the x_lb0-shift block construction.
+      5. Companion-matrix eigenvalue route -> up to 16 real x_lin roots
          (filtering 8 spurious near +/-i and complex-conjugate pairs).
-      6. Back-substitute each root -> candidate (q_0, ..., q_5).
+      6. Back-substitute each root + leftvar metadata -> candidate (q_0..q_5).
       7. FK-validate each candidate; drop those with residual > ``fk_atol``.
       8. Deduplicate via wrap-to-pi joint-distance threshold.
 
@@ -1086,10 +1320,26 @@ def solve_all_ik(
     :param fk_atol: max allowed ``||FK(q) - t_target||_F`` for a solution to be kept.
     :param dedup_atol: per-joint wrap-to-pi tolerance below which two
         solutions collapse to one.
+    :param linearity_joint: AE-3 (#70) leftvar choice (0, 1, or 2). For
+        non-Pieper arms with structurally-awkward joints, picking the right
+        leftvar can drop ``cond(m_quad)`` by 14+ orders of magnitude (see
+        JACO 2 case in #70 / `reference_ae3_leftvar_intuition`).
+    :param apply_so3: AE-4 (#71) SO(3) identity reduction.
     :returns: ``(solutions, is_ls)`` where solutions is a list of 6-vectors
         and ``is_ls`` is True if no solution survived FK validation.
     """
-    p_sin, p_cos, p_one, q_mat = build_pq(dh, t_target)
+    if linearity_joint == "auto":
+        # AE-3 (#70): pick the best leftvar at the test pose. Cached per arm.
+        best_lj, _ = pick_best_leftvar(dh, test_pose=t_target)
+        linearity_joint = best_lj
+    if not isinstance(linearity_joint, int):
+        raise ValueError(f"linearity_joint must be int or 'auto'; got {linearity_joint!r}")
+
+    p_sin, p_cos, p_one, q_mat, meta = build_pq(
+        dh, t_target,
+        linearity_joint=linearity_joint, apply_so3=apply_so3,
+        return_metadata=True,
+    )
     e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
     e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
     m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
@@ -1098,22 +1348,28 @@ def solve_all_ik(
     roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
 
     candidates: list[NDArray[np.float64]] = []
-    for x2_root, eigvec in zip(roots, eigvecs, strict=True):
+    for x_lin_root, eigvec in zip(roots, eigvecs, strict=True):
         q_cand = back_substitute(
-            x2_root, eigvec, p_sin, p_cos, p_one, q_mat, dh, t_target,
+            x_lin_root, eigvec, p_sin, p_cos, p_one, q_mat, dh, t_target,
+            metadata=meta,
         )
         if q_cand is None:
             continue
-        # Always run Newton refinement: the eigenvalue route gives ~1-2 digits
-        # of precision in well-conditioned cases (tighter near machine eps);
-        # in ill-conditioned cases (cond(m_quad) > 1e10, M\u00f6bius / generalized
-        # path) precision degrades to ~1%, so the back_substitute output is
-        # only a *seed* for Newton.
+        # First try the algebraic candidate as-is. If it already meets fk_atol
+        # (well-conditioned case: AE-3 picked a leftvar that avoided the
+        # singular pencil; eigenvalues are ~machine precision), we're done.
+        # Otherwise fall back to Newton/LM polish (last resort, opt-in by the
+        # very fact that conditioning required it).
+        t_check_alg = _fk_dh(q_cand, dh)
+        fk_err_alg = float(np.linalg.norm(t_check_alg - t_target))
+        if fk_err_alg <= fk_atol:
+            candidates.append(q_cand)
+            continue
+        # Algebraic precision insufficient -- LS polish.
         refined = _newton_refine(q_cand, dh, t_target, fk_atol=fk_atol)
         if refined is None:
             continue
         q_refined, _iters = refined
-        # FK closure check on the refined candidate.
         t_check = _fk_dh(q_refined, dh)
         if float(np.linalg.norm(t_check - t_target)) > fk_atol:
             continue

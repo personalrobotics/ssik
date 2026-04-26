@@ -36,6 +36,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (
     weierstrass_eliminate_trig,
     _newton_refine,
     _fk_dh,
+    _derive_pq_for_arm,
 )
 
 
@@ -117,6 +118,58 @@ def main() -> None:
     a_eq, b_eq, c_eq, _, _ = _equilibrate_pencil(m_quad, m_lin, m_const)
     print(f"  cond(A_eq) [AE-1]   = {np.linalg.cond(a_eq):.3e}  "
           f"(\u00d7 {cond_a / np.linalg.cond(a_eq):.2e} reduction)")
+
+    # AE-3 (#70): try alternative leftvar choices (linearity_joint = 0, 1, 2).
+    # AE-4 (#71): also test SO(3) reduction on the best leftvar.
+    from ssik.solvers.ikgeo._raghavan_roth import _derive_pq_for_arm
+
+    def _build_at_leftvar(linearity_joint: int, apply_so3: bool):
+        fns = _derive_pq_for_arm(
+            tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist()),
+            linearity_joint=linearity_joint, apply_so3=apply_so3,
+        )
+        p_sin_fn, p_cos_fn, p_one_fn, q_fn, _meta = fns
+        args = [*t_target[0, :].tolist(), *t_target[1, :].tolist(), *t_target[2, :].tolist()]
+        return (
+            np.asarray(p_sin_fn(*args), dtype=np.float64),
+            np.asarray(p_cos_fn(*args), dtype=np.float64),
+            np.asarray(p_one_fn(*args), dtype=np.float64),
+            np.asarray(q_fn(*args), dtype=np.float64),
+        )
+
+    print("\n--- AE-3 alternative leftvars (no SO(3)) ---")
+    for lj in (0, 1, 2):
+        if lj == 2:
+            ps, pc, po, qm = p_sin, p_cos, p_one, q_mat  # already computed
+        else:
+            t0 = time.time()
+            ps, pc, po, qm = _build_at_leftvar(lj, apply_so3=False)
+            print(f"  build_pq(linearity={lj}): {time.time()-t0:5.1f}s")
+        es, ec, eo = eliminate_q0_q1(ps, pc, po, qm)
+        eq, el, ec_const = weierstrass_eliminate_trig(es, ec, eo)
+        mq, ml, mc = build_m_matrix(eq, el, ec_const)
+        cond_lj = float(np.linalg.cond(mq))
+        print(f"  linearity={lj}: cond(A) = {cond_lj:.3e}  "
+              f"(vs baseline {cond_a:.3e}: \u00d7 {cond_a / cond_lj:.2e})")
+    print()
+
+    # Full pipeline at linearity=q_1 -- expect pure-algebraic FK closure
+    print("--- Full pipeline at linearity=q_1 (pure algebraic) ---")
+    from ssik.solvers.ikgeo._raghavan_roth import solve_all_ik
+    t0 = time.time()
+    sols_q1, is_ls_q1 = solve_all_ik(
+        (alpha, a, d), t_target,
+        fk_atol=1e-9,  # tight target -- expect pass with no LM polish
+        linearity_joint=1,
+    )
+    elapsed_q1 = time.time() - t0
+    print(f"solve_all_ik(linearity=1):   {elapsed_q1:6.2f}s  -> {len(sols_q1)} solutions, is_ls={is_ls_q1}")
+    if sols_q1:
+        best_q1 = min(sols_q1, key=lambda q: _max_diff(q, q_star))
+        print(f"  best |q-q*|: {_max_diff(best_q1, q_star):.3e}")
+        fk_errs_q1 = [float(np.linalg.norm(_fk_dh(q, (alpha, a, d)) - t_target)) for q in sols_q1]
+        print(f"  FK errors: max={max(fk_errs_q1):.3e}, all<1e-9: {all(e<1e-9 for e in fk_errs_q1)}")
+    print()
 
     # Stage 5: eigenvalue route
     t0 = time.time()
