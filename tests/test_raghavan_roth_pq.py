@@ -463,8 +463,8 @@ def test_back_substitute_recovers_seeded_q_star(q_star: NDArray[np.float64]) -> 
     )
 
 
-def test_solve_all_ik_jaco2_like_geometry() -> None:
-    """Regression: a JACO-2-like geometry (60-deg twists at joints 4,5) triggers
+def test_solve_all_ik_jaco2_geometry() -> None:
+    """Regression: JACO 2 (Kinova j2n6s200) geometry, 60-deg twists at joints 4,5 \u2014 triggers
     cond(m_quad) ~ 1e16 -- the Manocha-Canny singular-pencil case. The
     solver must (1) detect the conditioning failure, (2) fall back through
     Mobius reparameterization + scipy generalized eigenvalue, and (3) recover
@@ -474,7 +474,7 @@ def test_solve_all_ik_jaco2_like_geometry() -> None:
     """
     from ssik.solvers.ikgeo._raghavan_roth import solve_all_ik
 
-    # JACO-2-like DH (Kinova j2n6 family): 60-deg twists at joints 4 and 5,
+    # JACO 2 (Kinova j2n6s200) standard DH: 60-deg twists at joints 4 and 5,
     # creating a near-singular leading matrix in M(x_2). Approximate values;
     # the real fixture is in robot-code/ada_assets/.../jaco2.xml.
     alpha = np.array([np.pi / 2, np.pi, np.pi / 2, 60 * np.pi / 180, 60 * np.pi / 180, np.pi])

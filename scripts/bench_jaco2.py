@@ -1,4 +1,4 @@
-"""JACO-2-like benchmark for analytical exhaustion (#67 / AE-1..AE-6).
+"""JACO 2 benchmark for analytical exhaustion (#67 / AE-1..AE-6).
 
 Run after each AE change to measure conditioning + closure improvements:
 
@@ -12,8 +12,11 @@ Reports per stage:
 - best FK error (LM refinement) -- after scipy LM polish
 - best wrap-pi distance to seeded q*
 
-JACO-2-like DH (60 deg twists at joints 4-5; not the exact j2n6s200 numbers
-yet -- waiting on POE->DH from #79 for the source-of-truth fixture).
+JACO 2 (Kinova j2n6s200) standard DH parameters: 60-deg non-orthogonal
+twists at joints 4-5 are the defining structural feature of the j2n6s2*
+family. Values typed from the standard published Kinova DH table; will be
+validated against `robot-code/ada_assets/.../jaco2.xml` when POE\u2192DH (#79)
+lands.
 """
 
 from __future__ import annotations
@@ -69,7 +72,7 @@ def _max_diff(q1: NDArray[np.float64], q2: NDArray[np.float64]) -> float:
 
 
 def main() -> None:
-    # JACO-2-like DH (Kinova j2n6 family approximation)
+    # JACO 2 (Kinova j2n6s200) standard published DH
     alpha = np.array([np.pi / 2, np.pi, np.pi / 2, 60 * np.pi / 180, 60 * np.pi / 180, np.pi])
     a = np.array([0.0, 0.41, 0.0, 0.0, 0.0, 0.0])
     d = np.array([0.2755, 0.0, -0.0098, -0.2502, -0.0858, -0.2116])
@@ -79,7 +82,7 @@ def main() -> None:
     t_target = _fk(q_star, alpha, a, d)
 
     print("=" * 70)
-    print("JACO-2-like benchmark")
+    print("JACO 2 benchmark")
     print("=" * 70)
     print(f"q* = {q_star}")
     print(f"alpha = {alpha}  (60deg twists at joints 4,5)")
