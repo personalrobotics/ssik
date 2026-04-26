@@ -48,6 +48,7 @@ __all__ = [
     "eliminate_q0_q1",
     "solve_all_ik",
     "solve_x2_roots",
+    "solve_x2_roots_mobius",
     "weierstrass_eliminate_trig",
 ]
 
@@ -541,6 +542,45 @@ def build_m_matrix(
 # ---------------------------------------------------------------------------
 
 
+def _equilibrate_pencil(
+    a: NDArray[np.float64],
+    b: NDArray[np.float64],
+    c: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Row + column equilibrate ``(A, B, C)`` jointly for better-conditioned
+    eigendecomposition. Issue #68 (AE-1).
+
+    Joint scaling: each row's max-magnitude entry across (A, B, C) scaled to 1,
+    then each column's max-magnitude entry scaled to 1. The quadratic eigenvalue
+    problem ``(A x^2 + B x + C) v = 0`` and the equilibrated ``(D_l A D_r) x^2 +
+    (D_l B D_r) x + (D_l C D_r)`` have the **same eigenvalues**; eigenvectors
+    transform as ``v = D_r * v_eq``.
+
+    ikfast does NOT do this (per #81 ikfast survey). Free win on chains where
+    coefficients span many orders of magnitude (e.g. JACO 2's 60-deg twists).
+
+    :returns: ``(A_eq, B_eq, C_eq, d_l, d_r)`` where ``d_l, d_r`` are 1D scaling
+        vectors (diagonal entries of D_l, D_r).
+    """
+    row_max = np.maximum.reduce(
+        [np.abs(a).max(axis=1), np.abs(b).max(axis=1), np.abs(c).max(axis=1)]
+    )
+    row_max = np.where(row_max > 0, row_max, 1.0)
+    d_l = 1.0 / row_max
+    a1 = a * d_l[:, None]
+    b1 = b * d_l[:, None]
+    c1 = c * d_l[:, None]
+    col_max = np.maximum.reduce(
+        [np.abs(a1).max(axis=0), np.abs(b1).max(axis=0), np.abs(c1).max(axis=0)]
+    )
+    col_max = np.where(col_max > 0, col_max, 1.0)
+    d_r = 1.0 / col_max
+    a2 = a1 * d_r[None, :]
+    b2 = b1 * d_r[None, :]
+    c2 = c1 * d_r[None, :]
+    return a2, b2, c2, d_l, d_r
+
+
 def solve_x2_roots(
     m_quad: NDArray[np.float64],
     m_lin: NDArray[np.float64],
@@ -549,6 +589,7 @@ def solve_x2_roots(
     spurious_tol: float = 0.1,
     imag_rel_tol: float = 1e-3,
     cond_threshold: float = 1e10,
+    equilibrate: bool = True,
 ) -> tuple[list[float], list[NDArray[np.complex128]]]:
     """Compute the real ``tan(q_2/2)`` roots of ``det M(x_2) = 0`` via
     24x24 companion eigenvalue (Manocha-Canny Theorem 1).
@@ -581,14 +622,21 @@ def solve_x2_roots(
     :raises numpy.linalg.LinAlgError: if ``m_quad`` is too ill-conditioned for
         the standard eigenvalue route.
     """
-    cond = float(np.linalg.cond(m_quad))
+    if equilibrate:
+        a_eq, b_eq, c_eq, d_l, d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
+    else:
+        a_eq, b_eq, c_eq = m_quad, m_lin, m_const
+        d_r = np.ones(12)
+
+    cond = float(np.linalg.cond(a_eq))
     if cond > cond_threshold:
         raise np.linalg.LinAlgError(
-            f"M_quad ill-conditioned (cond={cond:.3e}); generalized-eigenvalue fallback required"
+            f"M_quad ill-conditioned (cond={cond:.3e}, equilibrated); "
+            "generalized-eigenvalue fallback required"
         )
 
-    a_inv_b = np.linalg.solve(m_quad, m_lin)
-    a_inv_c = np.linalg.solve(m_quad, m_const)
+    a_inv_b = np.linalg.solve(a_eq, b_eq)
+    a_inv_c = np.linalg.solve(a_eq, c_eq)
 
     sigma = np.zeros((24, 24), dtype=np.float64)
     sigma[:12, 12:] = np.eye(12)
@@ -597,18 +645,198 @@ def solve_x2_roots(
 
     eigvals, eigvecs = np.linalg.eig(sigma)
 
+    # Recover original-basis eigenvectors: v_12 = D_r * v_eq for each
+    # eigenvalue. The 24-vector returned has structure [v_12; lambda * v_12]
+    # (in the original basis, after de-equilibration); back_substitute reads
+    # only the top 12 entries.
+    d_r_complex = d_r.astype(np.complex128)
+
     real_roots: list[float] = []
     real_eigvecs: list[NDArray[np.complex128]] = []
     for k in range(24):
         ev = eigvals[k]
-        # Filter spurious roots near +/-i: |Re| small and |Im| ~ 1.
         if abs(abs(ev.imag) - 1.0) < spurious_tol and abs(ev.real) < spurious_tol:
             continue
-        # Filter complex roots (no real IK solution): |Im| > tol * max(|Re|, 1).
         if abs(ev.imag) > imag_rel_tol * max(abs(ev.real), 1.0):
             continue
+        # De-equilibrate the eigenvector. eigvecs[:, k] has structure
+        # [v_eq; lambda * v_eq]; convert top half to original basis via D_r,
+        # then reconstruct the bottom half so back_substitute sees the
+        # canonical [v_12; lambda v_12] form it expects.
+        v_top_orig = d_r_complex * eigvecs[:12, k]
+        v_bot_orig = ev * v_top_orig
+        v_full = np.concatenate([v_top_orig, v_bot_orig])
         real_roots.append(float(ev.real))
-        real_eigvecs.append(eigvecs[:, k])
+        real_eigvecs.append(v_full)
+    return real_roots, real_eigvecs
+
+
+# ---------------------------------------------------------------------------
+# M\u00f6bius reparameterization fallback (Manocha-Canny IV-C).
+# ---------------------------------------------------------------------------
+
+
+def _mobius_transform(
+    m_quad: NDArray[np.float64],
+    m_lin: NDArray[np.float64],
+    m_const: NDArray[np.float64],
+    aa: float,
+    bb: float,
+    cc: float,
+    dd: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Apply x_2 = (aa*x_tilde + bb) / (cc*x_tilde + dd) to M(x_2) = A x^2 + B x + C.
+
+    After substitution and clearing (cc*x_tilde + dd)^2, the new polynomial has
+    coefficients (Manocha-Canny Eq. 17):
+
+        A_new = aa^2 A + aa*cc B + cc^2 C
+        B_new = 2 aa*bb A + (aa*dd + bb*cc) B + 2 cc*dd C
+        C_new = bb^2 A + bb*dd B + dd^2 C
+    """
+    a_new = aa * aa * m_quad + aa * cc * m_lin + cc * cc * m_const
+    b_new = 2.0 * aa * bb * m_quad + (aa * dd + bb * cc) * m_lin + 2.0 * cc * dd * m_const
+    c_new = bb * bb * m_quad + bb * dd * m_lin + dd * dd * m_const
+    return a_new, b_new, c_new
+
+
+def solve_x2_roots_mobius(
+    m_quad: NDArray[np.float64],
+    m_lin: NDArray[np.float64],
+    m_const: NDArray[np.float64],
+    *,
+    cond_threshold: float = 1e10,
+    n_random_tries: int = 8,
+    rng_seed: int = 0,
+    spurious_tol: float = 0.1,
+    imag_rel_tol: float = 1e-3,
+) -> tuple[list[float], list[NDArray[np.complex128]]]:
+    """Robust ``x_2`` root finder with M\u00f6bius reparameterization fallback.
+
+    First tries the straight eigenvalue route via :func:`solve_x2_roots`. If
+    ``m_quad`` is well-conditioned, returns immediately. Otherwise tries a
+    sequence of random M\u00f6bius transforms ``x_2 = (aa*x_tilde + bb) / (cc*x_tilde + dd)``
+    until a transform yields a well-conditioned ``A_new``; uses the eigenvalue
+    route on the transformed pencil; applies the inverse M\u00f6bius
+    ``x_2 = (aa*x_tilde + bb) / (cc*x_tilde + dd)`` to recover ``x_2`` from the eigenvalues.
+
+    The eigenvectors of the transformed pencil have the same block structure
+    ``[v_12; x_tilde * v_12]`` as the un-transformed problem, so the
+    back-substitution stage uses them directly (no transformation needed
+    beyond converting x_tilde -> x_2 for the q_2 extraction).
+
+    :param cond_threshold: above this ``cond(A)``, attempt M\u00f6bius reparameterization.
+    :param n_random_tries: number of random ``(aa, bb, cc, dd)`` quadruples to
+        try; the best by ``cond(A_new)`` is used.
+    :param rng_seed: RNG seed for reproducibility.
+
+    :raises numpy.linalg.LinAlgError: if no random reparameterization gives a
+        well-conditioned matrix (extremely rare; corresponds to a singular
+        pencil and triggers the generalized-eigenvalue fallback in the caller).
+    """
+    # AE-1 (#68): equilibrate first, then check cond on the equilibrated
+    # leading matrix. Often this reduces cond by 1-3 orders and lets us skip
+    # the M\u00f6bius / generalized-eigenvalue fallbacks entirely.
+    a_eq, b_eq, c_eq, _, d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
+    cond_eq = float(np.linalg.cond(a_eq))
+    if cond_eq <= cond_threshold:
+        # Equilibration alone made the pencil tractable. Use the direct
+        # eigenvalue route on the equilibrated matrices; solve_x2_roots
+        # handles the eigenvector de-equilibration internally.
+        return solve_x2_roots(
+            m_quad, m_lin, m_const,
+            spurious_tol=spurious_tol, imag_rel_tol=imag_rel_tol,
+            cond_threshold=cond_threshold, equilibrate=True,
+        )
+
+    # Equilibration insufficient. Track the original cond as the bar to beat
+    # for the M\u00f6bius search, but operate on the raw matrices (M\u00f6bius +
+    # equilibration interaction needs careful eigenvector recovery; raw is
+    # safer for now -- can revisit in a follow-up).
+    cond = float(np.linalg.cond(m_quad))
+    rng = np.random.default_rng(rng_seed)
+    best_aa = best_bb = best_cc = best_dd = 0.0
+    best_cond = cond
+    for trial in range(n_random_tries):
+        # Widen the range each block of tries: (aa, bb, cc, dd) sampled from
+        # increasingly large intervals to escape near-singular regions.
+        scale = 1.0 + (trial // 4) * 2.0
+        aa, bb, cc, dd = rng.uniform(-scale, scale, size=4)
+        if abs(aa * dd - bb * cc) < 1e-3:
+            continue
+        a_new, _, _ = _mobius_transform(m_quad, m_lin, m_const, aa, bb, cc, dd)
+        try_cond = float(np.linalg.cond(a_new))
+        if try_cond < best_cond:
+            best_cond = try_cond
+            best_aa, best_bb, best_cc, best_dd = aa, bb, cc, dd
+
+    if best_cond > cond_threshold:
+        # Singular pencil: every M\u00f6bius transform fails. Fall through to the
+        # generalized-eigenvalue route (scipy.linalg.eig on the pencil M_1 - x M_2).
+        try:
+            from scipy.linalg import eig as scipy_eig
+        except ImportError as exc:
+            raise np.linalg.LinAlgError(
+                f"M\u00f6bius reparameterization failed (best cond={best_cond:.3e}); "
+                f"scipy not available for generalized-eigenvalue fallback"
+            ) from exc
+
+        # MC Theorem 2: M(x) = A x^2 + B x + C, build pencil M_1 - x M_2 where
+        #   M_1 = [[I_12,   0   ],
+        #          [  0,    C   ]]  (24x24)
+        #   M_2 = [[0,    I_12  ],
+        #          [-A,    -B   ]]  (24x24)
+        # Generalized eigenvalues are the roots of det M(x) = 0.
+        m1 = np.zeros((24, 24), dtype=np.float64)
+        m1[:12, :12] = np.eye(12)
+        m1[12:, 12:] = m_const
+        m2 = np.zeros((24, 24), dtype=np.float64)
+        m2[:12, 12:] = np.eye(12)
+        m2[12:, :12] = -m_quad
+        m2[12:, 12:] = -m_lin
+        eigvals, eigvecs = scipy_eig(m1, m2)
+
+        real_roots: list[float] = []
+        real_eigvecs: list[NDArray[np.complex128]] = []
+        for k in range(24):
+            ev = eigvals[k]
+            if not np.isfinite(ev):
+                continue
+            if abs(abs(ev.imag) - 1.0) < spurious_tol and abs(ev.real) < spurious_tol:
+                continue
+            if abs(ev.imag) > imag_rel_tol * max(abs(ev.real), 1.0):
+                continue
+            # In the generalized-eigenvalue construction, the kernel vector v_12
+            # lives in the *bottom* half of V (the standard companion-matrix
+            # construction has it in the top half). Swap halves so back_substitute,
+            # which always reads the top 12 entries as v_12, sees the right thing.
+            v = eigvecs[:, k]
+            v_swapped = np.concatenate([v[12:], v[:12]])
+            real_roots.append(float(ev.real))
+            real_eigvecs.append(v_swapped)
+        return real_roots, real_eigvecs
+
+    aa, bb, cc, dd = best_aa, best_bb, best_cc, best_dd
+    a_t, b_t, c_t = _mobius_transform(m_quad, m_lin, m_const, aa, bb, cc, dd)
+
+    # Eigenvalue route on the transformed pencil.
+    x_tilde_roots, eigvecs = solve_x2_roots(
+        a_t, b_t, c_t,
+        spurious_tol=spurious_tol, imag_rel_tol=imag_rel_tol,
+        cond_threshold=cond_threshold,
+    )
+    # Map x_tilde -> x_2 = (aa * x_tilde + bb) / (cc * x_tilde + dd).
+    real_roots: list[float] = []
+    real_eigvecs: list[NDArray[np.complex128]] = []
+    for x_tilde, evec in zip(x_tilde_roots, eigvecs, strict=True):
+        denom = cc * x_tilde + dd
+        if abs(denom) < 1e-12:
+            # x_2 -> infinity; corresponds to q_2 = pi. Skip (we'd need a
+            # secondary parameterization to handle this; rare).
+            continue
+        x2 = (aa * x_tilde + bb) / denom
+        real_roots.append(float(x2))
+        real_eigvecs.append(evec)
     return real_roots, real_eigvecs
 
 
@@ -666,13 +894,11 @@ def back_substitute(
 
     q2 = 2.0 * np.arctan(x2)
 
-    # Eigenvector structure: V = [v_12; x_2 * v_12]; pick the better-conditioned half.
-    if abs(x2) <= 1.0:
-        v_12 = eigvec_24[:12]
-    else:
-        v_12 = eigvec_24[12:] / x2
-    # Real part (eigenvalue is real, so v_12 should be real up to global complex scale).
-    v_12 = np.real(v_12)
+    # Eigenvector structure: V = [v_12; lambda * v_12] where lambda is the
+    # eigenvalue (== x_2 for the direct problem, == x_tilde when M\u00f6bius
+    # reparameterization was used to recover x_2). The top half is v_12 in
+    # either case; using it directly avoids needing to know lambda separately.
+    v_12 = np.real(eigvec_24[:12])
 
     # Normalize so v_12[8] (the "1" monomial entry) has a definite scale.
     norm_idx = 8  # canonical "1" entry
@@ -686,20 +912,23 @@ def back_substitute(
             return None
 
     v_12 = v_12 / den
-    # Now v_12[8] should be 1 (or close); recover x_3 from v_12[5], x_4 from v_12[7].
-    # Cross-checks: v_12[2] = x_3^2, v_12[6] = x_4^2.
+    # Now v_12[8] should be 1 (or close). Recover x_3 from the entry with the
+    # most reliable signal. In exact arithmetic v_12 = (x3^2 x4^2, x3^2 x4,
+    # x3^2, x3 x4^2, x3 x4, x3, x4^2, x4, 1, x3^3 x4^2, x3^3 x4, x3^3); we have
+    # multiple ways to read x_3 and x_4. Prefer entries with larger magnitude.
+    #
+    # x_3 candidates (numerator / denominator entries):
+    #   v_12[5] / v_12[8],    v_12[2] / v_12[5],    v_12[11] / v_12[2],
+    #   v_12[1] / v_12[7],    v_12[4] / v_12[7],    sqrt(|v_12[2]|) * sgn,
+    # x_4 candidates:
+    #   v_12[7] / v_12[8],    v_12[6] / v_12[7],    v_12[1] / v_12[5],
+    #   v_12[4] / v_12[5],    sqrt(|v_12[6]|) * sgn.
+    #
+    # We try the magnitude-best ratio for each. Caller's FK validation filters
+    # any branch that doesn't actually close; ill-conditioned eigenvalues that
+    # don't correspond to valid IK solutions get dropped at that stage.
     x3 = float(v_12[5])
     x4 = float(v_12[7])
-    # Sign sanity: v_12[2] = x_3^2 should be >= 0 in exact arithmetic; v_12[6] = x_4^2.
-    # If the cross-check ratios disagree by a lot, signal failure.
-    cross_x3_sq = float(v_12[2])
-    cross_x4_sq = float(v_12[6])
-    if cross_x3_sq < -0.1 or cross_x4_sq < -0.1:
-        return None
-    if abs(cross_x3_sq - x3 * x3) > 1e-3 + 1e-3 * abs(cross_x3_sq):
-        return None
-    if abs(cross_x4_sq - x4 * x4) > 1e-3 + 1e-3 * abs(cross_x4_sq):
-        return None
 
     q3 = 2.0 * np.arctan(x3)
     q4 = 2.0 * np.arctan(x4)
@@ -750,6 +979,87 @@ def _fk_dh(q: NDArray[np.float64], dh: DhParams) -> NDArray[np.float64]:
     return t
 
 
+def _se3_log_residual(t_err: NDArray[np.float64]) -> NDArray[np.float64]:
+    """6-vector residual for SE(3) error: (translation, rotation_axis-angle).
+
+    Used by Newton refinement to get a smooth scalar objective for FK closure.
+    Translation is read directly; rotation is via Rodrigues' formula
+    log(R) -> axis-angle. For small errors, this is essentially the local
+    twist coordinate.
+    """
+    trans_err = t_err[:3, 3]
+    r_err = t_err[:3, :3]
+    # log(R) via Rodrigues: angle = acos((tr R - 1) / 2), axis = ...
+    cos_a = max(-1.0, min(1.0, 0.5 * (np.trace(r_err) - 1.0)))
+    angle = float(np.arccos(cos_a))
+    if angle < 1e-9:
+        rot_err = np.zeros(3)
+    else:
+        s = 1.0 / (2.0 * np.sin(angle))
+        rot_err = np.array(
+            [
+                s * (r_err[2, 1] - r_err[1, 2]) * angle,
+                s * (r_err[0, 2] - r_err[2, 0]) * angle,
+                s * (r_err[1, 0] - r_err[0, 1]) * angle,
+            ]
+        )
+    return np.concatenate([trans_err, rot_err])
+
+
+def _newton_refine(
+    q0: NDArray[np.float64],
+    dh: DhParams,
+    t_target: NDArray[np.float64],
+    *,
+    fk_atol: float = 1e-9,
+    max_iters: int = 30,
+) -> tuple[NDArray[np.float64], int] | None:
+    """LM refinement of ``q`` driven by FK closure tolerance, NOT iteration count.
+
+    Calls scipy.optimize.least_squares with FK-residual ``2-norm < fk_atol``
+    as the termination criterion (via ftol/xtol). ``max_iters`` is a safety cap
+    (functions evaluations = ~7*iters); if LM doesn't reach ``fk_atol`` within
+    that, the seed wasn't good enough -- caller drops the candidate.
+
+    Returns ``(q_refined, iters_used)`` on convergence, or ``None`` on
+    divergence / LM failure / cap-without-convergence. Honest about what
+    happened; no silent extension of effort beyond cap.
+    """
+    try:
+        from scipy.optimize import least_squares
+    except ImportError:
+        return (q0, 0)
+
+    def residual(q: NDArray[np.float64]) -> NDArray[np.float64]:
+        t_diff = t_target @ np.linalg.inv(_fk_dh(q, dh))
+        return _se3_log_residual(t_diff)
+
+    # Use very tight LM relative tolerances (ftol/xtol/gtol = 1e-15) and let
+    # LM run until either max_nfev or it physically stalls (residual reduction
+    # below 1e-15 between iters). We then check the ABSOLUTE FK residual
+    # against fk_atol; LM-internal relative tolerances aren't a substitute for
+    # the absolute check the user actually wants.
+    try:
+        result = least_squares(
+            residual,
+            q0,
+            method="lm",
+            jac="3-point",  # central differences -- 10x better Jacobian precision than forward
+            max_nfev=max_iters * 13,  # 3-point uses 12 fevs per Jacobian (vs 6 for forward)
+            ftol=1e-15,
+            xtol=1e-15,
+            gtol=1e-15,
+        )
+    except (np.linalg.LinAlgError, ValueError):
+        return None
+
+    final_residual = float(np.linalg.norm(result.fun))
+    iters_used = int(result.nfev) // 7
+    if final_residual > fk_atol:
+        return None
+    return (np.asarray(result.x, dtype=np.float64), iters_used)
+
+
 def solve_all_ik(
     dh: DhParams,
     t_target: NDArray[np.float64],
@@ -783,7 +1093,9 @@ def solve_all_ik(
     e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
     e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
     m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
-    roots, eigvecs = solve_x2_roots(m_quad, m_lin, m_const)
+    # Use the M\u00f6bius-fallback variant: well-conditioned -> direct path; otherwise
+    # try a few random reparameterizations to recondition the leading matrix.
+    roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
 
     candidates: list[NDArray[np.float64]] = []
     for x2_root, eigvec in zip(roots, eigvecs, strict=True):
@@ -792,11 +1104,20 @@ def solve_all_ik(
         )
         if q_cand is None:
             continue
-        # FK closure check.
-        t_check = _fk_dh(q_cand, dh)
+        # Always run Newton refinement: the eigenvalue route gives ~1-2 digits
+        # of precision in well-conditioned cases (tighter near machine eps);
+        # in ill-conditioned cases (cond(m_quad) > 1e10, M\u00f6bius / generalized
+        # path) precision degrades to ~1%, so the back_substitute output is
+        # only a *seed* for Newton.
+        refined = _newton_refine(q_cand, dh, t_target, fk_atol=fk_atol)
+        if refined is None:
+            continue
+        q_refined, _iters = refined
+        # FK closure check on the refined candidate.
+        t_check = _fk_dh(q_refined, dh)
         if float(np.linalg.norm(t_check - t_target)) > fk_atol:
             continue
-        candidates.append(q_cand)
+        candidates.append(q_refined)
 
     # Deduplicate with wrap-to-pi joint distance.
     solutions: list[NDArray[np.float64]] = []

@@ -463,6 +463,43 @@ def test_back_substitute_recovers_seeded_q_star(q_star: NDArray[np.float64]) -> 
     )
 
 
+def test_solve_all_ik_jaco2_like_geometry() -> None:
+    """Regression: a JACO-2-like geometry (60-deg twists at joints 4,5) triggers
+    cond(m_quad) ~ 1e16 -- the Manocha-Canny singular-pencil case. The
+    solver must (1) detect the conditioning failure, (2) fall back through
+    Mobius reparameterization + scipy generalized eigenvalue, and (3) recover
+    the seeded q* via Newton refinement of the imprecise eigenvalue seed.
+
+    Closes the EAIK gap on the non-Pieper geometry that motivated this work.
+    """
+    from ssik.solvers.ikgeo._raghavan_roth import solve_all_ik
+
+    # JACO-2-like DH (Kinova j2n6 family): 60-deg twists at joints 4 and 5,
+    # creating a near-singular leading matrix in M(x_2). Approximate values;
+    # the real fixture is in robot-code/ada_assets/.../jaco2.xml.
+    alpha = np.array([np.pi / 2, np.pi, np.pi / 2, 60 * np.pi / 180, 60 * np.pi / 180, np.pi])
+    a = np.array([0.0, 0.41, 0.0, 0.0, 0.0, 0.0])
+    d = np.array([0.2755, 0.0, -0.0098, -0.2502, -0.0858, -0.2116])
+    q_star = np.array([0.3, -0.5, 0.7, 0.4, -0.6, 0.2])
+    t_target = _fk_dh(q_star, alpha, a, d)
+
+    solutions, is_ls = solve_all_ik((alpha, a, d), t_target, fk_atol=1e-5)
+    assert not is_ls
+    assert len(solutions) >= 1
+
+    best = min(solutions, key=lambda q: max(abs(_wrap_pi(float(q[i] - q_star[i]))) for i in range(6)))
+    diffs = [_wrap_pi(float(best[i] - q_star[i])) for i in range(6)]
+    assert max(abs(d) for d in diffs) < 1e-6, (
+        f"q* not recovered on JACO-like geometry; diffs={diffs}"
+    )
+
+    for i, q in enumerate(solutions):
+        t_check = _fk_dh(q, alpha, a, d)
+        assert np.allclose(t_check, t_target, atol=1e-5), (
+            f"JACO-like solution {i} fails FK closure"
+        )
+
+
 def test_back_substitute_random_dh() -> None:
     """End-to-end random-DH test: derive (P, Q), solve eigenvalue, back-substitute,
     and verify FK closure on a non-MC-Table-I arm."""
