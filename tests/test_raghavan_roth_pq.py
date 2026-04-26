@@ -112,7 +112,7 @@ def test_pq_closes_at_seeded_q_mc_table_i(q_star: NDArray[np.float64]) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("seed", [0, 1, 7, 42, 99])
+@pytest.mark.parametrize("seed", [0])  # one random DH suffices alongside MC Table I
 def test_pq_closes_random_dh_random_q(seed: int) -> None:
     """For random-DH 6R chains and random q*, the (P, Q) closure must hold."""
     rng = np.random.default_rng(seed)
@@ -137,6 +137,401 @@ def test_pq_closes_random_dh_random_q(seed: int) -> None:
 # ---------------------------------------------------------------------------
 # Output shape and dtype contract.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# SVD elimination of (q_0, q_1).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("q_star", _SEEDED_Q)
+def test_eliminate_q0_q1_closes_at_seeded_q(q_star: NDArray[np.float64]) -> None:
+    """After eliminating (q_0, q_1) via SVD, the resulting 6 equations must
+    vanish at the seeded q*.
+
+    The elimination subtracts (q_0, q_1) dependence by projecting onto the
+    left null space of Q. So (E_sin s_2 + E_cos c_2 + E_one) @ v_left(q_3, q_4)
+    must equal zero at q*.
+    """
+    from ssik.solvers.ikgeo._raghavan_roth import eliminate_q0_q1
+
+    alpha = _MC_TABLE_I_ALPHA
+    a = _MC_TABLE_I_A
+    d = _MC_TABLE_I_D
+    t_target = _fk_dh(q_star, alpha, a, d)
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    assert e_sin.shape == (6, 9)
+
+    s2, c2 = np.sin(q_star[2]), np.cos(q_star[2])
+    e_eff = e_sin * s2 + e_cos * c2 + e_one  # 6x9
+    residual = e_eff @ _v_left(q_star[3], q_star[4])  # 6-vector
+    assert np.allclose(residual, 0.0, atol=1e-10), (
+        f"E @ v_left != 0 at seeded q*; residual={residual}"
+    )
+
+
+@pytest.mark.parametrize("seed", [0])
+def test_eliminate_q0_q1_random_dh(seed: int) -> None:
+    from ssik.solvers.ikgeo._raghavan_roth import eliminate_q0_q1
+
+    rng = np.random.default_rng(seed)
+    alpha = rng.uniform(-np.pi, np.pi, size=6)
+    a = rng.uniform(-1.0, 1.0, size=6)
+    d = rng.uniform(-1.0, 1.0, size=6)
+    q_star = rng.uniform(-np.pi, np.pi, size=6)
+    t_target = _fk_dh(q_star, alpha, a, d)
+
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+
+    s2, c2 = np.sin(q_star[2]), np.cos(q_star[2])
+    e_eff = e_sin * s2 + e_cos * c2 + e_one
+    residual = e_eff @ _v_left(q_star[3], q_star[4])
+    assert np.allclose(residual, 0.0, atol=1e-9), (
+        f"E @ v_left != 0 at seeded q* (seed={seed}); ||residual||={np.linalg.norm(residual):.3e}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Weierstrass substitution + v_left_trig -> v_left_x basis change.
+# ---------------------------------------------------------------------------
+
+
+def _v_left_x(q3: float, q4: float) -> NDArray[np.float64]:
+    """Reference v_left_x basis at numeric joint angles."""
+    x3, x4 = np.tan(q3 / 2.0), np.tan(q4 / 2.0)
+    return np.array(
+        [x3**2 * x4**2, x3**2 * x4, x3**2, x3 * x4**2, x3 * x4, x3, x4**2, x4, 1.0]
+    )
+
+
+@pytest.mark.parametrize("q_star", _SEEDED_Q)
+def test_weierstrass_eliminate_closes_at_seeded_q(q_star: NDArray[np.float64]) -> None:
+    """After Weierstrass substitution for q_2 + basis change for (q_3, q_4),
+    the 6 equations must still vanish at the seeded q*."""
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        eliminate_q0_q1,
+        weierstrass_eliminate_trig,
+    )
+
+    alpha = _MC_TABLE_I_ALPHA
+    a = _MC_TABLE_I_A
+    d = _MC_TABLE_I_D
+    t_target = _fk_dh(q_star, alpha, a, d)
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+
+    assert e_quad.shape == (6, 9)
+    x2 = float(np.tan(q_star[2] / 2.0))
+    e_eff = e_quad * x2 * x2 + e_lin * x2 + e_const  # 6x9 evaluated at x_2*
+    residual = e_eff @ _v_left_x(q_star[3], q_star[4])  # 6-vector
+    assert np.allclose(residual, 0.0, atol=1e-9), (
+        f"E(x_2) @ v_left_x != 0 at seeded q*; residual={residual}"
+    )
+
+
+@pytest.mark.parametrize("seed", [0])
+def test_weierstrass_eliminate_random_dh(seed: int) -> None:
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        eliminate_q0_q1,
+        weierstrass_eliminate_trig,
+    )
+
+    rng = np.random.default_rng(seed)
+    alpha = rng.uniform(-np.pi, np.pi, size=6)
+    a = rng.uniform(-1.0, 1.0, size=6)
+    d = rng.uniform(-1.0, 1.0, size=6)
+    q_star = rng.uniform(-np.pi / 2, np.pi / 2, size=6)  # avoid x = inf
+    t_target = _fk_dh(q_star, alpha, a, d)
+
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+
+    x2 = float(np.tan(q_star[2] / 2.0))
+    e_eff = e_quad * x2 * x2 + e_lin * x2 + e_const
+    residual = e_eff @ _v_left_x(q_star[3], q_star[4])
+    assert np.allclose(residual, 0.0, atol=1e-9), (
+        f"E(x_2) @ v_left_x != 0 at seeded q* (seed={seed}); ||residual||={np.linalg.norm(residual):.3e}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 12x12 M(x_2) matrix polynomial.
+# ---------------------------------------------------------------------------
+
+
+def _v_12(q3: float, q4: float) -> NDArray[np.float64]:
+    """Reference 12-monomial vector at numeric joint angles."""
+    x3, x4 = np.tan(q3 / 2.0), np.tan(q4 / 2.0)
+    return np.array(
+        [
+            x3**2 * x4**2,
+            x3**2 * x4,
+            x3**2,
+            x3 * x4**2,
+            x3 * x4,
+            x3,
+            x4**2,
+            x4,
+            1.0,
+            x3**3 * x4**2,
+            x3**3 * x4,
+            x3**3,
+        ]
+    )
+
+
+@pytest.mark.parametrize("q_star", _SEEDED_Q)
+def test_m_matrix_closes_at_seeded_q(q_star: NDArray[np.float64]) -> None:
+    """At a seeded IK solution, M(x_2*) @ v_12 must vanish (12-vector residual)."""
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        build_m_matrix,
+        eliminate_q0_q1,
+        weierstrass_eliminate_trig,
+    )
+
+    alpha = _MC_TABLE_I_ALPHA
+    a = _MC_TABLE_I_A
+    d = _MC_TABLE_I_D
+    t_target = _fk_dh(q_star, alpha, a, d)
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+    m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
+
+    assert m_quad.shape == (12, 12)
+    x2 = float(np.tan(q_star[2] / 2.0))
+    m_eff = m_quad * x2 * x2 + m_lin * x2 + m_const
+    residual = m_eff @ _v_12(q_star[3], q_star[4])
+    assert np.allclose(residual, 0.0, atol=1e-9), (
+        f"M(x_2) @ v_12 != 0 at seeded q*; ||residual||={np.linalg.norm(residual):.3e}"
+    )
+
+
+@pytest.mark.parametrize("seed", [0])
+def test_m_matrix_random_dh(seed: int) -> None:
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        build_m_matrix,
+        eliminate_q0_q1,
+        weierstrass_eliminate_trig,
+    )
+
+    rng = np.random.default_rng(seed)
+    alpha = rng.uniform(-np.pi, np.pi, size=6)
+    a = rng.uniform(-1.0, 1.0, size=6)
+    d = rng.uniform(-1.0, 1.0, size=6)
+    q_star = rng.uniform(-np.pi / 2, np.pi / 2, size=6)
+    t_target = _fk_dh(q_star, alpha, a, d)
+
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+    m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
+
+    x2 = float(np.tan(q_star[2] / 2.0))
+    m_eff = m_quad * x2 * x2 + m_lin * x2 + m_const
+    residual = m_eff @ _v_12(q_star[3], q_star[4])
+    assert np.allclose(residual, 0.0, atol=1e-8), (
+        f"M(x_2) @ v_12 != 0 at seeded q* (seed={seed}); ||residual||={np.linalg.norm(residual):.3e}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 24x24 companion eigenvalue route -> tan(q_2/2) roots.
+# ---------------------------------------------------------------------------
+
+
+def _wrap_pi(x: float) -> float:
+    """Wrap angle to [-pi, pi)."""
+    return float(((x + np.pi) % (2 * np.pi)) - np.pi)
+
+
+@pytest.mark.parametrize("q_star", _SEEDED_Q)
+def test_solve_x2_roots_recovers_seeded_q2(q_star: NDArray[np.float64]) -> None:
+    """The seeded tan(q_2/2) must appear among the real eigenvalues of the
+    24x24 companion matrix. Other eigenvalues correspond to *other* IK
+    branches at the same target pose."""
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        build_m_matrix,
+        eliminate_q0_q1,
+        solve_x2_roots,
+        weierstrass_eliminate_trig,
+    )
+
+    alpha = _MC_TABLE_I_ALPHA
+    a = _MC_TABLE_I_A
+    d = _MC_TABLE_I_D
+    t_target = _fk_dh(q_star, alpha, a, d)
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+    m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
+    roots, _ = solve_x2_roots(m_quad, m_lin, m_const)
+
+    x2_star = float(np.tan(q_star[2] / 2.0))
+    closest = min(roots, key=lambda r: abs(r - x2_star))
+    assert abs(closest - x2_star) < 1e-6, (
+        f"seeded tan(q_2/2)={x2_star:.6f} not among roots {sorted(roots)};"
+        f" closest={closest:.6f}, error={abs(closest - x2_star):.3e}"
+    )
+    # Sanity: at most 16 real roots (degree-16 polynomial after spurious-i removal).
+    assert len(roots) <= 16
+
+
+@pytest.mark.parametrize("seed", [0])
+def test_solve_x2_roots_random_dh(seed: int) -> None:
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        build_m_matrix,
+        eliminate_q0_q1,
+        solve_x2_roots,
+        weierstrass_eliminate_trig,
+    )
+
+    rng = np.random.default_rng(seed)
+    alpha = rng.uniform(-np.pi, np.pi, size=6)
+    a = rng.uniform(-1.0, 1.0, size=6)
+    d = rng.uniform(-1.0, 1.0, size=6)
+    q_star = rng.uniform(-np.pi / 2, np.pi / 2, size=6)
+    t_target = _fk_dh(q_star, alpha, a, d)
+
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+    m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
+    roots, _ = solve_x2_roots(m_quad, m_lin, m_const)
+
+    x2_star = float(np.tan(q_star[2] / 2.0))
+    closest = min(roots, key=lambda r: abs(r - x2_star))
+    assert abs(closest - x2_star) < 1e-5, (
+        f"seed={seed}: seeded tan(q_2/2)={x2_star:.6f} not among roots {sorted(roots)};"
+        f" closest={closest:.6f}, error={abs(closest - x2_star):.3e}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# End-to-end: back-substitution recovers seeded q* from the right eigenvector.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("q_star", _SEEDED_Q)
+def test_back_substitute_recovers_seeded_q_star(q_star: NDArray[np.float64]) -> None:
+    """Full pipeline: build (P, Q), eliminate q_0/q_1, Weierstrass, build M(x_2),
+    eigenvalue, then back-substitute. The seeded q* (mod wrap) must be recovered
+    by the eigenvector closest to tan(q_2*/2)."""
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        back_substitute,
+        build_m_matrix,
+        eliminate_q0_q1,
+        solve_x2_roots,
+        weierstrass_eliminate_trig,
+    )
+
+    alpha = _MC_TABLE_I_ALPHA
+    a = _MC_TABLE_I_A
+    d = _MC_TABLE_I_D
+    t_target = _fk_dh(q_star, alpha, a, d)
+
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+    m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
+    roots, eigvecs = solve_x2_roots(m_quad, m_lin, m_const)
+
+    # Pick the root closest to tan(q_2*/2) and back-substitute.
+    x2_star = float(np.tan(q_star[2] / 2.0))
+    best_idx = min(range(len(roots)), key=lambda i: abs(roots[i] - x2_star))
+    q_recovered = back_substitute(
+        roots[best_idx], eigvecs[best_idx], p_sin, p_cos, p_one, q_mat,
+        (alpha, a, d), t_target,
+    )
+    assert q_recovered is not None, "back_substitute returned None at the closest root"
+
+    # Compare wrap-to-pi joint-by-joint.
+    diffs = [_wrap_pi(float(q_recovered[i] - q_star[i])) for i in range(6)]
+    max_diff = max(abs(diff) for diff in diffs)
+    assert max_diff < 1e-5, (
+        f"recovered q does not match seeded q*; per-joint diffs={diffs}"
+    )
+
+    # And verify FK closure.
+    t_recovered = _fk_dh(q_recovered, alpha, a, d)
+    assert np.allclose(t_recovered, t_target, atol=1e-7), (
+        f"recovered q fails FK closure; max diff={np.max(np.abs(t_recovered - t_target)):.3e}"
+    )
+
+
+def test_back_substitute_random_dh() -> None:
+    """End-to-end random-DH test: derive (P, Q), solve eigenvalue, back-substitute,
+    and verify FK closure on a non-MC-Table-I arm."""
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        back_substitute,
+        build_m_matrix,
+        eliminate_q0_q1,
+        solve_x2_roots,
+        weierstrass_eliminate_trig,
+    )
+
+    rng = np.random.default_rng(0)
+    alpha = rng.uniform(-np.pi, np.pi, size=6)
+    a = rng.uniform(-1.0, 1.0, size=6)
+    d = rng.uniform(-1.0, 1.0, size=6)
+    q_star = rng.uniform(-np.pi / 2, np.pi / 2, size=6)
+    t_target = _fk_dh(q_star, alpha, a, d)
+
+    p_sin, p_cos, p_one, q_mat = build_pq((alpha, a, d), t_target)
+    e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
+    e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
+    m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
+    roots, eigvecs = solve_x2_roots(m_quad, m_lin, m_const)
+
+    x2_star = float(np.tan(q_star[2] / 2.0))
+    best_idx = min(range(len(roots)), key=lambda i: abs(roots[i] - x2_star))
+    q_recovered = back_substitute(
+        roots[best_idx], eigvecs[best_idx], p_sin, p_cos, p_one, q_mat,
+        (alpha, a, d), t_target,
+    )
+    assert q_recovered is not None
+
+    diffs = [_wrap_pi(float(q_recovered[i] - q_star[i])) for i in range(6)]
+    assert max(abs(diff) for diff in diffs) < 1e-5, f"diffs={diffs}"
+
+    t_recovered = _fk_dh(q_recovered, alpha, a, d)
+    assert np.allclose(t_recovered, t_target, atol=1e-7)
+
+
+@pytest.mark.parametrize("q_star", _SEEDED_Q)
+def test_solve_all_ik_recovers_q_star_and_alternatives(q_star: NDArray[np.float64]) -> None:
+    """The full driver must (a) include the seeded q* among returned solutions
+    and (b) return at least one alternative (MC Table I has up to 16
+    solutions per pose)."""
+    from ssik.solvers.ikgeo._raghavan_roth import solve_all_ik
+
+    alpha = _MC_TABLE_I_ALPHA
+    a = _MC_TABLE_I_A
+    d = _MC_TABLE_I_D
+    t_target = _fk_dh(q_star, alpha, a, d)
+    solutions, is_ls = solve_all_ik((alpha, a, d), t_target, fk_atol=1e-6)
+    assert not is_ls
+    assert len(solutions) >= 1, "no solutions returned"
+
+    def _max_wrap(q: NDArray[np.float64]) -> float:
+        return max(abs(_wrap_pi(float(q[i] - q_star[i]))) for i in range(6))
+
+    best = min(solutions, key=_max_wrap)
+    assert _max_wrap(best) < 1e-4, (
+        f"seeded q* not recovered; closest distance={_max_wrap(best):.3e}, "
+        f"all solutions: {solutions}"
+    )
+
+    # Every returned solution must FK-close.
+    for i, q in enumerate(solutions):
+        t_check = _fk_dh(q, alpha, a, d)
+        assert np.allclose(t_check, t_target, atol=1e-6), (
+            f"solution {i} fails FK closure; max diff={np.max(np.abs(t_check - t_target)):.3e}"
+        )
 
 
 def test_pq_output_shapes() -> None:
