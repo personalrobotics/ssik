@@ -41,6 +41,9 @@ import numpy as np
 import sympy as sp
 from numpy.typing import NDArray
 
+from ssik.core.solution import Solution
+from ssik.refinement import lm_refine
+
 __all__ = [
     "back_substitute",
     "build_m_matrix",
@@ -1343,7 +1346,10 @@ def solve_all_ik(
     dedup_atol: float = 1e-3,
     linearity_joint: int | str = "auto",
     apply_so3: bool = False,
-) -> tuple[list[NDArray[np.float64]], bool]:
+    allow_refinement: bool = False,
+    refinement_max_iters: int = 15,
+    solver_name: str = "ikgeo._raghavan_roth",
+) -> tuple[list[Solution], bool]:
     """Run the full Raghavan-Roth pipeline and return all valid IK solutions.
 
     Pipeline (per Manocha-Canny IV):
@@ -1356,6 +1362,10 @@ def solve_all_ik(
          (filtering 8 spurious near +/-i and complex-conjugate pairs).
       6. Back-substitute each root + leftvar metadata -> candidate (q_0..q_5).
       7. FK-validate each candidate; drop those with residual > ``fk_atol``.
+         When ``allow_refinement=True``, candidates that miss ``fk_atol``
+         algebraically get one :func:`~ssik.refinement.lm_refine` pass before
+         the drop decision; the resulting :class:`Solution` records
+         ``refinement_used="lm"`` and ``refinement_iters``.
       8. Deduplicate via wrap-to-pi joint-distance threshold.
 
     :param dh: Tuple ``(alpha, a, d)`` of length-6 numpy arrays.
@@ -1368,8 +1378,16 @@ def solve_all_ik(
         leftvar can drop ``cond(m_quad)`` by 14+ orders of magnitude (see
         JACO 2 case in #70 / `reference_ae3_leftvar_intuition`).
     :param apply_so3: AE-4 (#71) SO(3) identity reduction.
-    :returns: ``(solutions, is_ls)`` where solutions is a list of 6-vectors
-        and ``is_ls`` is True if no solution survived FK validation.
+    :param allow_refinement: opt into Newton-on-spatial-Jacobian polish for
+        candidates that don't meet ``fk_atol`` algebraically. Default off
+        per #74 (refinement is a separate, transparent layer).
+    :param refinement_max_iters: cap on Newton iterations per candidate
+        when ``allow_refinement=True``.
+    :param solver_name: tag stored on each returned :class:`Solution` for
+        provenance when results pass through a dispatcher.
+    :returns: ``(solutions, is_ls)`` where solutions is a list of
+        :class:`~ssik.core.solution.Solution` and ``is_ls`` is True iff no
+        candidate survived FK validation.
     """
     if linearity_joint == "auto":
         # AE-3 (#70): pick the best leftvar (cached per arm; the structural
@@ -1394,44 +1412,66 @@ def solve_all_ik(
     # try a few random reparameterizations to recondition the leading matrix.
     roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
 
-    candidates: list[NDArray[np.float64]] = []
-    for x_lin_root, eigvec in zip(roots, eigvecs, strict=True):
+    fk_fn = lambda q: _fk_dh(q, dh)  # noqa: E731
+    jacobian_fn = lambda q: _spatial_jacobian(q, dh)  # noqa: E731
+
+    candidates: list[Solution] = []
+    for branch_idx, (x_lin_root, eigvec) in enumerate(zip(roots, eigvecs, strict=True)):
         q_cand = back_substitute(
             x_lin_root, eigvec, p_sin, p_cos, p_one, q_mat, dh, t_target,
             metadata=meta,
         )
         if q_cand is None:
             continue
-        # First try the algebraic candidate as-is. If it already meets fk_atol
-        # (well-conditioned case: AE-3 picked a leftvar that avoided the
-        # singular pencil; eigenvalues are ~machine precision), we're done.
-        # Otherwise fall back to Newton/LM polish (last resort, opt-in by the
-        # very fact that conditioning required it).
-        t_check_alg = _fk_dh(q_cand, dh)
-        fk_err_alg = float(np.linalg.norm(t_check_alg - t_target))
+        # Algebraic candidate FK error.
+        fk_err_alg = float(np.linalg.norm(_fk_dh(q_cand, dh) - t_target))
         if fk_err_alg <= fk_atol:
-            candidates.append(q_cand)
+            candidates.append(Solution(
+                q=q_cand,
+                fk_residual=fk_err_alg,
+                refinement_used="none",
+                refinement_iters=0,
+                branch_id=branch_idx,
+                solver_name=solver_name,
+            ))
             continue
-        # Algebraic precision insufficient -- LS polish.
-        refined = _newton_refine(q_cand, dh, t_target, fk_atol=fk_atol)
+        if not allow_refinement:
+            # Default path: drop candidates that miss fk_atol algebraically.
+            continue
+        # Opt-in refinement: lm_refine polishes the algebraic seed.
+        refined = lm_refine(
+            q_cand, fk_fn, t_target,
+            fk_atol=fk_atol, max_iters=refinement_max_iters,
+            jacobian_fn=jacobian_fn,
+        )
         if refined is None:
             continue
-        q_refined, _iters = refined
-        t_check = _fk_dh(q_refined, dh)
-        if float(np.linalg.norm(t_check - t_target)) > fk_atol:
-            continue
-        candidates.append(q_refined)
+        q_refined, fk_resid, iters = refined
+        candidates.append(Solution(
+            q=q_refined,
+            fk_residual=fk_resid,
+            refinement_used="lm",
+            refinement_iters=iters,
+            branch_id=branch_idx,
+            solver_name=solver_name,
+        ))
 
-    # Deduplicate with wrap-to-pi joint distance.
-    solutions: list[NDArray[np.float64]] = []
-    for q in candidates:
-        is_dup = False
-        for existing in solutions:
-            diffs = [abs(((float(q[i] - existing[i]) + np.pi) % (2 * np.pi)) - np.pi) for i in range(6)]
+    # Deduplicate with wrap-to-pi joint distance. Keep the lower-fk_residual
+    # candidate when two collapse.
+    solutions: list[Solution] = []
+    for cand in candidates:
+        dup_idx = None
+        for j, existing in enumerate(solutions):
+            diffs = [
+                abs(((float(cand.q[i] - existing.q[i]) + np.pi) % (2 * np.pi)) - np.pi)
+                for i in range(len(cand.q))
+            ]
             if max(diffs) < dedup_atol:
-                is_dup = True
+                dup_idx = j
                 break
-        if not is_dup:
-            solutions.append(q)
+        if dup_idx is None:
+            solutions.append(cand)
+        elif cand.fk_residual < solutions[dup_idx].fk_residual:
+            solutions[dup_idx] = cand
 
     return solutions, len(solutions) == 0

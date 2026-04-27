@@ -69,17 +69,23 @@ def _q_close(a: np.ndarray, b: np.ndarray, tol: float) -> bool:
 
 
 def _solution_sets_equal(
-    set_a: list[np.ndarray], set_b: list[np.ndarray], tol: float
+    set_a: list, set_b: list, tol: float
 ) -> tuple[bool, str]:
     """Return (equal, diagnostic). Two sets are equal iff same length and
-    every element of A matches some unused element of B."""
+    every element of A matches some unused element of B. Accepts either
+    plain ``np.ndarray`` joint vectors or :class:`ssik.core.solution.Solution`
+    objects (auto-extracts ``.q``)."""
+    def _q(item: object) -> np.ndarray:
+        return item.q if hasattr(item, "q") else item  # type: ignore[union-attr]
+
     if len(set_a) != len(set_b):
         return False, f"|A|={len(set_a)} vs |B|={len(set_b)}"
     remaining = list(range(len(set_b)))
-    for qa in set_a:
+    for a in set_a:
+        qa = _q(a)
         matched = None
         for idx in remaining:
-            if _q_close(qa, set_b[idx], tol):
+            if _q_close(qa, _q(set_b[idx]), tol):
                 matched = idx
                 break
         if matched is None:
@@ -122,7 +128,8 @@ def test_both_solvers_agree_on_hand_picked_pose(puma_kb: Any, q_star: np.ndarray
     assert equal, f"solver solution-set mismatch at q*={q_star.tolist()}: {diag}"
 
     # Every solution from each solver must invert under FK with margin.
-    for qs in (*sols_par, *sols_int):
+    for sol in (*sols_par, *sols_int):
+        qs = sol.q
         T_check = _fk(puma_kb, qs)
         assert np.allclose(T_check, T_star, atol=1e-10), (
             f"FK error > 1e-10 at q={qs.tolist()}: {np.max(np.abs(T_check - T_star))}"
@@ -166,7 +173,8 @@ def test_both_solvers_agree_on_random_pose(puma_kb: Any, q_star: np.ndarray) -> 
     equal, diag = _solution_sets_equal(sols_par, sols_int, tol=1e-6)
     assert equal, f"mismatch at q*={q_star.tolist()}: {diag}"
 
-    for qs in (*sols_par, *sols_int):
+    for sol in (*sols_par, *sols_int):
+        qs = sol.q
         T_check = _fk(puma_kb, qs)
         assert np.allclose(T_check, T_star, atol=1e-10), (
             f"FK error > 1e-10: {np.max(np.abs(T_check - T_star))}"

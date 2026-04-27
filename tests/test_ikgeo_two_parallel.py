@@ -111,7 +111,8 @@ def test_random_pose_returned_solutions_fk_match(synth_a: KinBody, seed: int) ->
     if is_ls:
         return
     assert len(solutions) >= 1
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(synth_a, q)
         assert np.allclose(T_check, T_star, atol=1e-8), (
             f"solution {i} fails FK: max|diff|={np.max(np.abs(T_check - T_star))}"
@@ -129,7 +130,8 @@ def test_second_synthetic_arm_returned_solutions_fk_match(synth_b: KinBody, seed
     if is_ls:
         return
     assert len(solutions) >= 1
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(synth_b, q)
         assert np.allclose(T_check, T_star, atol=1e-8), f"synth_b sol {i} fails FK"
 

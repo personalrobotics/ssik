@@ -37,6 +37,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik._kinbody import Joint, KinBody
+from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.predicates import (
     axis_parallel,
@@ -56,6 +57,7 @@ from ssik.solvers.ikgeo import (
 __all__ = ["choose_lock_joint", "solve"]
 
 _DEFAULT_SAMPLES = 16
+_SOLVER_NAME = "jointlock.seven_r"
 
 
 def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
@@ -222,7 +224,10 @@ def _dispatch(
     sub_kb: KinBody,
     T_target: NDArray[np.float64],
     policy: TolerancePolicy,
-) -> tuple[list[NDArray[np.float64]], bool]:
+    *,
+    allow_refinement: bool,
+    refinement_max_iters: int,
+) -> tuple[list[Solution], bool]:
     """Call the named ikgeo solver on ``sub_kb``. Returns ``(solutions, is_ls)``."""
     table = {
         "three_parallel": three_parallel.solve,
@@ -233,7 +238,11 @@ def _dispatch(
         "two_parallel": two_parallel.solve,
         "gen_six_dof": gen_six_dof.solve,
     }
-    return table[solver_name](sub_kb, T_target, policy)
+    return table[solver_name](
+        sub_kb, T_target, policy,
+        allow_refinement=allow_refinement,
+        refinement_max_iters=refinement_max_iters,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +256,9 @@ def solve(
     *,
     lock_samples: int | Sequence[float] = _DEFAULT_SAMPLES,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-) -> tuple[list[NDArray[np.float64]], bool]:
+    allow_refinement: bool = False,
+    refinement_max_iters: int = 15,
+) -> tuple[list[Solution], bool]:
     """Analytic IK for any 7R arm via joint-locking + inner 6R solver.
 
     :param kb: POE-normalized :class:`KinBody` with 7 revolute joints.
@@ -256,9 +267,14 @@ def solve(
         ``[-pi, pi]`` with N samples), or an explicit sequence of
         lock-joint values. Default 16.
     :param policy: tolerances (forwarded to inner 6R solver).
-    :returns: ``(solutions, is_ls)``. Each solution is a 7-vector
-        including the locked joint's value. Solutions are deduplicated
-        in wrap-to-pi joint-angle distance.
+    :param allow_refinement: opt into Newton polish on each inner-solver
+        candidate (#74). Default off.
+    :param refinement_max_iters: cap on Newton iterations per candidate.
+    :returns: ``(solutions, is_ls)``. Each :class:`Solution.q` is a
+        7-vector including the locked joint's value. ``branch_id``
+        encodes the lock-sample index (in the order ``samples`` enumerates
+        them). Solutions are deduplicated in wrap-to-pi joint-angle
+        distance.
     """
     if len(kb.joints) != 7:
         raise ValueError(f"jointlock.seven_r requires a 7-DOF chain; got {len(kb.joints)}")
@@ -271,28 +287,48 @@ def solve(
         samples = np.array(list(lock_samples), dtype=np.float64)
 
     dedup_tol = policy.subproblem_dedup
-    solutions: list[NDArray[np.float64]] = []
+    solutions: list[Solution] = []
 
-    for q_lock in samples:
+    for sample_idx, q_lock in enumerate(samples):
         sub_kb = _lock_joint(kb, lock_idx, float(q_lock))
         # Re-check topology per sample: rotating downstream axes by
         # R_lock can switch which tier-0/1 specialization matches.
         _, solver_name = _topology_rank(sub_kb, policy)
         try:
-            sub_sols, is_ls = _dispatch(solver_name, sub_kb, T_target, policy)
+            sub_sols, is_ls = _dispatch(
+                solver_name, sub_kb, T_target, policy,
+                allow_refinement=allow_refinement,
+                refinement_max_iters=refinement_max_iters,
+            )
         except ValueError:
             # Topology may fail marginally on some lock values (e.g.
             # near-parallel becoming exactly parallel). Skip.
             continue
         if is_ls or not sub_sols:
             continue
-        for sub_q in sub_sols:
+        for inner in sub_sols:
+            sub_q = inner.q
             full_q = np.empty(7, dtype=np.float64)
             full_q[:lock_idx] = sub_q[:lock_idx]
             full_q[lock_idx] = float(q_lock)
             full_q[lock_idx + 1 :] = sub_q[lock_idx:]
-            if not any(_q_close(full_q, existing, dedup_tol) for existing in solutions):
-                solutions.append(full_q)
+            cand = Solution(
+                q=full_q,
+                fk_residual=inner.fk_residual,
+                refinement_used=inner.refinement_used,
+                refinement_iters=inner.refinement_iters,
+                branch_id=sample_idx,
+                solver_name=_SOLVER_NAME,
+            )
+            dup_idx: int | None = None
+            for j, existing in enumerate(solutions):
+                if _q_close(cand.q, existing.q, dedup_tol):
+                    dup_idx = j
+                    break
+            if dup_idx is None:
+                solutions.append(cand)
+            elif cand.fk_residual < solutions[dup_idx].fk_residual:
+                solutions[dup_idx] = cand
 
     return solutions, len(solutions) == 0
 

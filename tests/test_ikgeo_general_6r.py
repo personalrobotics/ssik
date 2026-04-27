@@ -64,16 +64,19 @@ def test_general_6r_ur5_recovers_seed(ur5_kb: KinBody) -> None:
     assert not is_ls, "general_6r should find at least one solution for a feasible UR5 pose"
     assert len(solutions) >= 1
 
-    for q in solutions:
-        T_check = _fk_poe(ur5_kb, q)
+    for sol in solutions:
+        T_check = _fk_poe(ur5_kb, sol.q)
         assert np.allclose(T_check, T_star, atol=1e-5), (
             f"FK round-trip violated; max|diff|={np.max(np.abs(T_check - T_star)):.3e}"
         )
+        # Default-off refinement: pure-algebraic path on UR5.
+        assert sol.refinement_used == "none", sol
+        assert sol.solver_name == "ikgeo.general_6r"
 
     def _wrap_max(q: NDArray[np.float64]) -> float:
         return float(max(abs(((float(qi - qs) + np.pi) % (2*np.pi)) - np.pi)
                          for qi, qs in zip(q, q_star, strict=True)))
-    best = min(_wrap_max(q) for q in solutions)
+    best = min(_wrap_max(sol.q) for sol in solutions)
     assert best < 1e-3, f"seeded q* not recovered; best wrap-max diff = {best:.3e}"
 
 
@@ -87,8 +90,8 @@ def test_general_6r_ur5_fk_roundtrip(ur5_kb: KinBody, seed: int) -> None:
         T_star = _fk_poe(ur5_kb, q_star)
         solutions, is_ls = general_6r.solve(ur5_kb, T_star)
         assert not is_ls, f"no solution for seed={seed}, q_star={q_star}"
-        for q in solutions:
-            T_check = _fk_poe(ur5_kb, q)
+        for sol in solutions:
+            T_check = _fk_poe(ur5_kb, sol.q)
             assert np.allclose(T_check, T_star, atol=1e-5)
 
 

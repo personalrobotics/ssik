@@ -55,11 +55,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik._kinbody import KinBody
+from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.predicates import axis_parallel, three_consecutive_intersecting
+from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.subproblems import sp1, sp3, sp4
 
 __all__ = ["solve"]
+
+_SOLVER_NAME = "ikgeo.spherical_two_parallel"
 
 
 def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
@@ -82,7 +86,10 @@ def solve(
     kb: KinBody,
     T_target: NDArray[np.float64],
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-) -> tuple[list[NDArray[np.float64]], bool]:
+    *,
+    allow_refinement: bool = False,
+    refinement_max_iters: int = 15,
+) -> tuple[list[Solution], bool]:
     """Analytic IK for spherical-wrist + two-parallel-shoulder 6R chains.
 
     :param kb: POE-normalized :class:`KinBody` with 6 revolute joints, three
@@ -91,10 +98,11 @@ def solve(
     :param T_target: 4x4 target end-effector pose in the base frame.
     :param policy: tolerances (forwarded to the subproblems and topology
         predicates).
-    :returns: ``(solutions, is_ls)``. ``solutions`` is a list of up to 8
-        length-6 joint vectors, each reproducing ``T_target`` under FK to
-        within the subproblem-residual tolerance. ``is_ls=True`` iff no
-        solution survived post-verification.
+    :param allow_refinement: opt into Newton polish (#74). Default off.
+    :param refinement_max_iters: cap on Newton iterations per candidate.
+    :returns: ``(solutions, is_ls)``. Up to 8 :class:`Solution` candidates
+        reproducing ``T_target`` under FK to within
+        ``policy.subproblem_numerical``.
     """
     if len(kb.joints) != 6:
         raise ValueError(
@@ -199,13 +207,17 @@ def solve(
                 )
                 candidates.append(np.array([q1, q2, q3, q4, q5, q6]))
 
-    num_tol = policy.subproblem_numerical
-    solutions: list[NDArray[np.float64]] = []
-    for q in candidates:
-        t = _forward_kinematics(kb, q)
-        if float(np.linalg.norm(t - t_target)) < num_tol:
-            solutions.append(q)
-
+    solutions = verify_candidates(
+        candidates,
+        fk_fn=lambda q: _forward_kinematics(kb, q),
+        jacobian_fn=lambda q: kinbody_jacobian(kb, q),
+        t_target=t_target,
+        fk_atol=policy.subproblem_numerical,
+        dedup_atol=policy.subproblem_dedup,
+        solver_name=_SOLVER_NAME,
+        allow_refinement=allow_refinement,
+        refinement_max_iters=refinement_max_iters,
+    )
     return solutions, len(solutions) == 0
 
 

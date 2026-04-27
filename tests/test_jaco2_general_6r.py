@@ -86,16 +86,20 @@ def test_jaco2_general_6r_recovers_seed(jaco2_kb: KinBody, seed: int) -> None:
     assert not is_ls, f"general_6r returned no solution for JACO 2 seed={seed}, q_star={q_star}"
     assert len(solutions) >= 1
 
-    for q in solutions:
-        T_check = _fk_poe(jaco2_kb, q)
+    for sol in solutions:
+        T_check = _fk_poe(jaco2_kb, sol.q)
         assert np.allclose(T_check, T_star, atol=1e-5), (
             f"FK round-trip violated; max|diff|={np.max(np.abs(T_check - T_star)):.3e}"
         )
+        # JACO 2's AE-3 leftvar avoids the singular pencil; algebraic FK
+        # is exact and refinement should not fire by default.
+        assert sol.refinement_used == "none", sol
+        assert sol.solver_name == "ikgeo.general_6r"
 
     def _wrap_max(q: NDArray[np.float64]) -> float:
         return float(max(abs(((float(qi - qs) + np.pi) % (2*np.pi)) - np.pi)
                          for qi, qs in zip(q, q_star, strict=True)))
-    best = min(_wrap_max(q) for q in solutions)
+    best = min(_wrap_max(sol.q) for sol in solutions)
     assert best < 1e-3, f"seeded q* not recovered; best wrap-max diff = {best:.3e}"
 
 
@@ -108,15 +112,15 @@ def test_jaco2_general_6r_at_keyframes(jaco2_kb: KinBody, name: str) -> None:
 
     solutions, is_ls = general_6r.solve(jaco2_kb, T_star)
     assert not is_ls, f"general_6r returned no solution at keyframe {name!r}"
-    for q in solutions:
-        T_check = _fk_poe(jaco2_kb, q)
+    for sol in solutions:
+        T_check = _fk_poe(jaco2_kb, sol.q)
         assert np.allclose(T_check, T_star, atol=1e-5)
 
     # The seeded keyframe must be among the recovered solutions (mod 2pi).
     def _wrap_max(q: NDArray[np.float64]) -> float:
         return float(max(abs(((float(qi - qs) + np.pi) % (2*np.pi)) - np.pi)
                          for qi, qs in zip(q, q_star, strict=True)))
-    best = min(_wrap_max(q) for q in solutions)
+    best = min(_wrap_max(sol.q) for sol in solutions)
     assert best < 1e-3, (
         f"keyframe {name!r} q* not recovered; best wrap-max diff = {best:.3e}"
     )

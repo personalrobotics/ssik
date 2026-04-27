@@ -168,9 +168,9 @@ def main() -> None:
     elapsed_q1 = time.time() - t0
     print(f"solve_all_ik(linearity=1):   {elapsed_q1:6.2f}s  -> {len(sols_q1)} solutions, is_ls={is_ls_q1}")
     if sols_q1:
-        best_q1 = min(sols_q1, key=lambda q: _max_diff(q, q_star))
-        print(f"  best |q-q*|: {_max_diff(best_q1, q_star):.3e}")
-        fk_errs_q1 = [float(np.linalg.norm(_fk_dh(q, (alpha, a, d)) - t_target)) for q in sols_q1]
+        best_q1 = min(sols_q1, key=lambda s: _max_diff(s.q, q_star))
+        print(f"  best |q-q*|: {_max_diff(best_q1.q, q_star):.3e}")
+        fk_errs_q1 = [float(np.linalg.norm(_fk_dh(s.q, (alpha, a, d)) - t_target)) for s in sols_q1]
         print(f"  FK errors: max={max(fk_errs_q1):.3e}, all<1e-9: {all(e<1e-9 for e in fk_errs_q1)}")
     print()
 
