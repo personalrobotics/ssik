@@ -161,21 +161,30 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     axes_world, origins_world, t_home = _kinbody_world_axes_origins(kb)
 
     # Build n+1 frames (z, x, origin) in world coords:
-    # - z_i for i=0..n-1: joint (i+1)'s axis = joints[i].axis (POE)
+    # - z_i for i=0..n-1: joint (i+1)'s axis in world frame = axes_world[i]
     # - z_n: tool flange z-axis (from T_home rotation block)
-    # - origin_i for i=0..n-1: foot of common perpendicular between z_{i-1} and z_i,
-    #   on z_i's line. (For i=0, no z_{-1}; pick origin = world origin.)
+    # - origin_i for i=1..n-1: foot of common perpendicular between z_{i-1} and
+    #   z_i, on z_i's line.
     # - origin_n: tool flange origin = T_home[:3, 3]
+    # - origin_0: free choice on z_0's line; we pick origins_world[0] (the
+    #   actual joint-1 origin in world coords) so that for arms with joint 1
+    #   at world origin (UR5-style) we recover the conventional placement.
     z_axes: list[NDArray[np.float64]] = []
     x_axes: list[NDArray[np.float64]] = []
     origins: list[NDArray[np.float64]] = []
 
-    # Frame 0 = base/world (free choice). Pick z_0 = world z, x_0 = world x.
-    # Then T_pre will be identity if joints[0].axis happens to be world z.
-    # If not, T_pre absorbs the rotation/translation difference.
-    z_axes.append(np.array([0.0, 0.0, 1.0]))
-    x_axes.append(np.array([1.0, 0.0, 0.0]))
-    origins.append(np.zeros(3))
+    # Frame 0: z_0 = joint-1's axis (in world frame). x_0 free perpendicular to
+    # z_0; align with world x as much as possible (project + renormalize). T_pre
+    # then bridges the user's world frame to this DH frame 0.
+    z_0 = axes_world[0] / np.linalg.norm(axes_world[0])
+    ref = np.array([1.0, 0.0, 0.0])
+    if abs(np.dot(ref, z_0)) > 0.99:
+        ref = np.array([0.0, 1.0, 0.0])
+    x_0 = ref - float(np.dot(ref, z_0)) * z_0
+    x_0 /= np.linalg.norm(x_0)
+    z_axes.append(z_0)
+    x_axes.append(x_0)
+    origins.append(origins_world[0].copy())
 
     # Frames 1..n-1: positioned at common perpendicular between z_{i-1} = joints[i-1].axis
     # and z_i = joints[i].axis. Origin at foot on z_i line.
@@ -255,10 +264,18 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
         # after subtracting d_i z_a should lie along x_b.
         a_arr[k] = float(np.dot(delta, x_b))
 
-    # T_pre: world to frame 0. Frame 0 is z=world_z, x=world_x, origin=0.
-    # If joints[0].axis happens to be world z (commercial-arm convention),
-    # this is identity; otherwise T_pre absorbs the rotation.
+    # T_pre: maps the user's world frame -> DH frame 0.
+    # Frame 0 sits at origin_0 = joints[0] origin in world, with axes
+    # (x_0, y_0=z_0xx_0, z_0). T_pre's columns are these axes expressed in the
+    # user's world frame plus the origin translation. For commercial arms whose
+    # joint 1 axis is world +z and whose joint 1 sits at the world origin (UR5,
+    # Puma 560), T_pre collapses to identity.
+    y_0 = np.cross(z_0, x_0)
     t_pre = np.eye(4, dtype=np.float64)
+    t_pre[:3, 0] = x_0
+    t_pre[:3, 1] = y_0
+    t_pre[:3, 2] = z_0
+    t_pre[:3, 3] = origins[0]
 
     # T_post: from "where DH FK ends at theta=offset" to "where POE FK ends
     # at q=0". DH ends at frame n (z_axes[n], x_axes[n], origins[n]). The
