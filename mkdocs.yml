@@ -80,6 +80,16 @@ nav:
   - Home: index.md
   - Tutorial:
       - tutorial/index.md
+      - 1. The IK problem: tutorial/01_ik_problem.md
+      - 2. The Pieper class: tutorial/02_pieper_subproblems.md
+      - 3. The EAIK gap: tutorial/03_eaik_gap.md
+      - 4. Raghavan–Roth in 8 stages: tutorial/04_raghavan_roth.md
+      - 5. Conditioning is the hard part: tutorial/05_conditioning.md
+      - 6. Algebraic-first refinement: tutorial/06_refinement.md
+      - 7. KinBody-input bridge: tutorial/07_kinbody_bridge.md
+      - 8. Bulletproof validation: tutorial/08_bulletproof.md
+      - 9. Practical guide: tutorial/09_practical_guide.md
+      - 10. Roadmap: tutorial/10_whats_next.md
   - Reference:
       - reference/index.md
       - IK modes:
