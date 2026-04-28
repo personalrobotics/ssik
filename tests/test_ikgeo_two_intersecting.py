@@ -128,7 +128,8 @@ def test_generic_pose_all_solutions_fk_match(synth_a: KinBody, q_star: np.ndarra
     solutions, is_ls = two_intersecting.solve(synth_a, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(synth_a, q)
         # FK tolerance 1e-8: univariate-search introduces ~1e-5 error in
         # the refined q3; propagates through SP5 back-substitution to the
@@ -143,7 +144,7 @@ def test_generic_pose_all_solutions_fk_match(synth_a: KinBody, q_star: np.ndarra
 def test_seeded_q_star_is_recovered(synth_a: KinBody, q_star: np.ndarray) -> None:
     T_star = _fk(synth_a, q_star)
     solutions, _ = two_intersecting.solve(synth_a, T_star)
-    assert any(_q_matches(q, q_star, tol=1e-4) for q in solutions), (
+    assert any(_q_matches(s.q, q_star, tol=1e-4) for s in solutions), (
         f"q_star={q_star.tolist()} not recovered"
     )
 
@@ -159,10 +160,11 @@ def test_second_synthetic_arm_fk_roundtrip(synth_b: KinBody, q_star: np.ndarray)
     solutions, is_ls = two_intersecting.solve(synth_b, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(synth_b, q)
         assert np.allclose(T_check, T_star, atol=1e-8), f"synth_b solution {i} fails FK"
-    assert any(_q_matches(q, q_star, tol=1e-4) for q in solutions), "seeded q* not recovered"
+    assert any(_q_matches(s.q, q_star, tol=1e-4) for s in solutions), "seeded q* not recovered"
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +187,8 @@ def test_near_singular_pose_returned_solutions_fk_match(
     T_star = _fk(synth_a, q_star)
     solutions, _ = two_intersecting.solve(synth_a, T_star)
     assert len(solutions) >= 1, "no solutions at near-singular pose"
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(synth_a, q)
         # atol=1e-5 matches the subproblem_numerical post-verify gate;
         # univariate-search accumulation plus near-singular geometry can
@@ -250,8 +253,10 @@ def test_random_q_roundtrip_fk(synth_a: KinBody, q_star: np.ndarray) -> None:
     solutions, is_ls = two_intersecting.solve(synth_a, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
-    for q in solutions:
-        assert np.allclose(_fk(synth_a, q), T_star, atol=1e-8), f"FK mismatch at q={q.tolist()}"
+    for sol in solutions:
+        assert np.allclose(_fk(synth_a, sol.q), T_star, atol=1e-8), (
+            f"FK mismatch at q={sol.q.tolist()}"
+        )
 
 
 # ---------------------------------------------------------------------------

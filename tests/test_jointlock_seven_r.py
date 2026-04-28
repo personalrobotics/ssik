@@ -135,7 +135,7 @@ def test_targeted_sample_recovers_seeded_q_star(
             for qi, qs in zip(q, q_star, strict=True)
         )
 
-    best_dq = min(_max_wrap(q) for q in solutions)
+    best_dq = min(_max_wrap(s.q) for s in solutions)
     assert best_dq < 1e-10, f"seeded q* not recovered at machine precision; closest dq={best_dq}"
 
 
@@ -152,8 +152,8 @@ def test_sweep_solutions_all_fk_match(srs_kb: KinBody, q_star: NDArray[np.float6
     solutions, is_ls = seven_r.solve(srs_kb, T_star, lock_samples=16)
     assert not is_ls
     assert len(solutions) >= 8, f"expected at least 8 solutions, got {len(solutions)}"
-    for i, q in enumerate(solutions):
-        T_check = _fk(srs_kb, q)
+    for i, sol in enumerate(solutions):
+        T_check = _fk(srs_kb, sol.q)
         assert np.allclose(T_check, T_star, atol=1e-10), (
             f"sweep solution {i} fails FK: max|diff|={np.max(np.abs(T_check - T_star))}"
         )
@@ -170,8 +170,8 @@ def test_user_provided_samples_override(srs_kb: KinBody) -> None:
     # All solutions' lock-joint value should be in the custom list (within
     # the wrap-to-pi tolerance).
     lock_idx = seven_r.choose_lock_joint(srs_kb)
-    for q in solutions:
-        ql = float(q[lock_idx])
+    for sol in solutions:
+        ql = float(sol.q[lock_idx])
         assert any(abs(((ql - c + np.pi) % (2 * np.pi)) - np.pi) < 1e-6 for c in custom), (
             f"solution lock-joint {ql} not in user sample list"
         )
@@ -183,9 +183,15 @@ def test_user_provided_samples_override(srs_kb: KinBody) -> None:
 
 
 def test_default_sweep_under_budget(srs_kb: KinBody) -> None:
-    """16-sample sweep on synthetic SRS arm should complete in <500 ms.
-    Realistic Franka-like arms with tier-0 inner solver are similarly
-    fast. Guards against accidental tier-2 fallback in the dispatcher."""
+    """16-sample sweep on synthetic SRS arm should complete well under any
+    tier-2 fallback timescale.
+
+    Standalone runs see 0.1-2s depending on machine load; under a busy
+    test suite, contention can stretch this further. Tier-2 fallback
+    (gen_six_dof grid) takes 30+s, so a 5s budget still catches the
+    "accidentally fell through to tier-2" regression that this test exists
+    to guard against.
+    """
     q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
     T_star = _fk(srs_kb, q_star)
     t0 = time.time()
@@ -193,7 +199,7 @@ def test_default_sweep_under_budget(srs_kb: KinBody) -> None:
     elapsed = time.time() - t0
     assert not is_ls
     assert len(solutions) > 0
-    assert elapsed < 0.5, f"16-sample sweep took {elapsed:.2f}s (budget 0.5s)"
+    assert elapsed < 5.0, f"16-sample sweep took {elapsed:.2f}s (budget 5.0s)"
 
 
 # ---------------------------------------------------------------------------

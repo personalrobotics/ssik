@@ -54,11 +54,15 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik._kinbody import KinBody
+from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.predicates import three_consecutive_intersecting
+from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.subproblems import sp1, sp4, sp5
 
 __all__ = ["solve"]
+
+_SOLVER_NAME = "ikgeo.spherical"
 
 
 def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
@@ -81,19 +85,24 @@ def solve(
     kb: KinBody,
     T_target: NDArray[np.float64],
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-) -> tuple[list[NDArray[np.float64]], bool]:
+    *,
+    allow_refinement: bool = False,
+    refinement_max_iters: int = 15,
+) -> tuple[list[Solution], bool]:
     """Analytic IK for generic spherical-wrist 6R chains.
 
     :param kb: POE-normalized :class:`KinBody` with 6 revolute joints and
         three consecutive intersecting axes at positions ``(3, 4, 5)``.
     :param T_target: 4x4 target end-effector pose in the base frame.
     :param policy: tolerances (forwarded to the subproblems).
-    :returns: ``(solutions, is_ls)``. ``solutions`` is a list of up to 8
-        length-6 joint vectors reproducing ``T_target`` under FK to within
-        the subproblem-residual tolerance. ``is_ls=True`` iff no solution
-        survived post-verification -- this also happens when SP5's
-        shoulder reduction is degenerate (e.g., ``axes[1] || axes[2]``,
-        meaning the arm actually belongs to ``spherical_two_parallel``).
+    :param allow_refinement: opt into Newton polish (#74). Default off;
+        closed-form spherical-wrist solves don't normally need it.
+    :param refinement_max_iters: cap on Newton iterations per candidate.
+    :returns: ``(solutions, is_ls)``. Up to 8 :class:`Solution` candidates
+        reproducing ``T_target`` to within ``policy.subproblem_numerical``.
+        ``is_ls=True`` iff no candidate survived (also happens when SP5's
+        shoulder reduction is degenerate -- the arm actually belongs to
+        ``spherical_two_parallel``).
     """
     if len(kb.joints) != 6:
         raise ValueError(f"spherical requires a 6-DOF chain; got {len(kb.joints)} joints")
@@ -166,31 +175,21 @@ def solve(
 
     # Post-verify and dedup at the q-vector level. SP5 has pre-sorted its
     # outputs by pre-GN residual (cluster-root clean-vs-drifted tiebreak);
-    # we preserve that order here so dedup keeps the cleanest cluster
-    # representative. See issue #56 for the analogous three_parallel
-    # rationale.
-    num_tol = policy.subproblem_numerical
-    dedup_tol = policy.subproblem_dedup
-    verified: list[NDArray[np.float64]] = []
-    for q in candidates:
-        if float(np.linalg.norm(_forward_kinematics(kb, q) - t_target)) < num_tol:
-            verified.append(q)
-
-    solutions: list[NDArray[np.float64]] = []
-    for q in verified:
-        if not any(_q_close(q, existing, dedup_tol) for existing in solutions):
-            solutions.append(q)
-
+    # verify_candidates preserves first-pass order then keeps the lower-
+    # fk_residual representative on collision. See #56 for the analogous
+    # three_parallel rationale.
+    solutions = verify_candidates(
+        candidates,
+        fk_fn=lambda q: _forward_kinematics(kb, q),
+        jacobian_fn=lambda q: kinbody_jacobian(kb, q),
+        t_target=t_target,
+        fk_atol=policy.subproblem_numerical,
+        dedup_atol=policy.subproblem_dedup,
+        solver_name=_SOLVER_NAME,
+        allow_refinement=allow_refinement,
+        refinement_max_iters=refinement_max_iters,
+    )
     return solutions, len(solutions) == 0
-
-
-def _q_close(a: NDArray[np.float64], b: NDArray[np.float64], tol: float) -> bool:
-    """Element-wise wrap-to-pi closeness for joint-angle vectors."""
-    for ai, bi in zip(a, b, strict=True):
-        diff = float(((float(ai) - float(bi) + np.pi) % (2 * np.pi)) - np.pi)
-        if abs(diff) > tol:
-            return False
-    return True
 
 
 def _forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float64]:

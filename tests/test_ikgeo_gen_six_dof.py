@@ -93,12 +93,13 @@ def test_generic_pose_solutions_fk_match(synth_a: KinBody) -> None:
     solutions, is_ls = gen_six_dof.solve(synth_a, T_star)
     assert not is_ls, "gen_six_dof should find at least one solution"
     assert len(solutions) >= 1
-    for i, q in enumerate(solutions):
-        T_check = _fk(synth_a, q)
+    for i, sol in enumerate(solutions):
+        T_check = _fk(synth_a, sol.q)
         # FK tolerance 1e-5 reflects SP5 + Nelder-Mead precision floor.
         assert np.allclose(T_check, T_star, atol=1e-5), (
             f"solution {i} fails FK: max|diff|={np.max(np.abs(T_check - T_star))}"
         )
+        assert sol.solver_name == "ikgeo.gen_six_dof"
 
     def _wrap_max(q: np.ndarray) -> float:
         diffs = [
@@ -107,7 +108,7 @@ def test_generic_pose_solutions_fk_match(synth_a: KinBody) -> None:
         ]
         return max(diffs)
 
-    best_dq = min(_wrap_max(q) for q in solutions)
+    best_dq = min(_wrap_max(sol.q) for sol in solutions)
     # 1e-3 rad reflects tier-2's Nelder-Mead precision on a 100x100 seed grid.
     assert best_dq < 1e-3, f"seeded q* not recovered within 1e-3 rad; closest dq={best_dq:.2e}"
 
@@ -123,8 +124,8 @@ def test_second_synthetic_arm_solutions_fk_match() -> None:
     if is_ls:
         pytest.skip("synth_b pose happens to fall in a gen_six_dof infeasible region")
     assert len(solutions) >= 1
-    for i, q in enumerate(solutions):
-        T_check = _fk(synth_b, q)
+    for i, sol in enumerate(solutions):
+        T_check = _fk(synth_b, sol.q)
         assert np.allclose(T_check, T_star, atol=1e-5), f"synth_b sol {i} fails FK"
 
 

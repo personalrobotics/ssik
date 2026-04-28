@@ -159,7 +159,8 @@ def test_generic_pose_all_solutions_fk_match(ur5_kb: Any, q_star: np.ndarray) ->
     solutions, is_ls = three_parallel.solve(ur5_kb, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(ur5_kb, q)
         assert np.allclose(T_check, T_star, atol=1e-8), (
             f"solution {i} fails FK: max|diff|={np.max(np.abs(T_check - T_star))}"
@@ -177,7 +178,7 @@ def test_generic_pose_all_solutions_fk_match(ur5_kb: Any, q_star: np.ndarray) ->
 def test_seeded_q_star_is_recovered(ur5_kb: Any, q_star: np.ndarray) -> None:
     T_star = _fk(ur5_kb, q_star)
     solutions, _ = three_parallel.solve(ur5_kb, T_star)
-    assert any(_q_matches(q, q_star) for q in solutions), (
+    assert any(_q_matches(s.q, q_star) for s in solutions), (
         f"q_star={q_star.tolist()} not recovered in {len(solutions)} solutions"
     )
 
@@ -216,7 +217,8 @@ def test_near_singular_pose_returned_solutions_fk_match(ur5_kb: Any, q_star: np.
     T_star = _fk(ur5_kb, q_star)
     solutions, _ = three_parallel.solve(ur5_kb, T_star)
     assert len(solutions) >= 1, "no solutions at near-singular pose"
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(ur5_kb, q)
         assert np.allclose(T_check, T_star, atol=1e-6), (
             f"singular-pose solution {i} fails FK: max|diff|={np.max(np.abs(T_check - T_star))}"
@@ -245,10 +247,11 @@ def test_synthetic_three_parallel_fk_roundtrip(
     solutions, is_ls = three_parallel.solve(synthetic_three_parallel_kb, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
-    for i, q in enumerate(solutions):
+    for i, sol in enumerate(solutions):
+        q = sol.q
         T_check = _fk(synthetic_three_parallel_kb, q)
         assert np.allclose(T_check, T_star, atol=1e-8), f"synthetic solution {i} fails FK"
-    assert any(_q_matches(q, q_star) for q in solutions), "seeded q* not recovered"
+    assert any(_q_matches(s.q, q_star) for s in solutions), "seeded q* not recovered"
 
 
 # ---------------------------------------------------------------------------
@@ -282,9 +285,11 @@ def test_random_q_roundtrip_fk(ur5_kb: Any, q_star: np.ndarray) -> None:
     solutions, is_ls = three_parallel.solve(ur5_kb, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
-    for q in solutions:
-        assert np.allclose(_fk(ur5_kb, q), T_star, atol=1e-8), f"FK mismatch at q={q.tolist()}"
-    assert any(_q_matches(q, q_star, tol=1e-4) for q in solutions), (
+    for sol in solutions:
+        assert np.allclose(_fk(ur5_kb, sol.q), T_star, atol=1e-8), (
+            f"FK mismatch at q={sol.q.tolist()}"
+        )
+    assert any(_q_matches(s.q, q_star, tol=1e-4) for s in solutions), (
         f"seeded q*={q_star.tolist()} not recovered"
     )
 
@@ -333,16 +338,16 @@ def test_recovers_shoulder_wrist_alignment_pose_issue_56(ur5_kb: Any) -> None:
     # branches (the shoulder-flip degenerates to identity).
     assert len(solutions) == 4
 
-    for q in solutions:
-        T_check = _fk(ur5_kb, q)
-        assert np.allclose(T_check, T_star, atol=1e-10), f"FK mismatch at {q}"
+    for sol in solutions:
+        T_check = _fk(ur5_kb, sol.q)
+        assert np.allclose(T_check, T_star, atol=1e-10), f"FK mismatch at {sol.q}"
 
-    def _max_abs_wrap(q: np.ndarray) -> float:
-        return max(abs(_wrap(float(qi - qs))) for qi, qs in zip(q, q_star, strict=True))
+    def _max_abs_wrap(sol: object) -> float:
+        return max(abs(_wrap(float(qi - qs))) for qi, qs in zip(sol.q, q_star, strict=True))  # type: ignore[attr-defined]
 
     closest = min(solutions, key=_max_abs_wrap)
-    assert any(_q_matches(q, q_star, tol=1e-3) for q in solutions), (
-        f"seeded q* not recovered within 1e-3 rad; closest: {closest.tolist()}"
+    assert any(_q_matches(s.q, q_star, tol=1e-3) for s in solutions), (
+        f"seeded q* not recovered within 1e-3 rad; closest: {closest.q.tolist()}"
     )
 
 
