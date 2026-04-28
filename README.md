@@ -1,43 +1,85 @@
 # ssik
 
-Analytical inverse kinematics for Python, built around the **EAIK gap** — the arms whose IK isn't a one-line call against EAIK or IK-Geo.
+Analytical inverse kinematics for non-Pieper 6R arms — the **EAIK gap**. The arms whose IK isn't a one-line call against EAIK or IK-Geo (Kinova JACO 2, Agilex Piper, Flexiv Rizon, custom geometries with no parallel or intersecting axis triples).
 
-> **Status: pre-alpha, mid-rebuild.** See the [umbrella rebuild issue](https://github.com/siddhss5/ikfastpy/issues/37) for the current architecture.
+> **Private repository.** This codebase is proprietary. Source distribution is not authorised; see [`LICENSE`](LICENSE). The user-facing artifact is a per-arm compiled wheel built from this codebase; users do not run this source directly. See [#95](https://github.com/siddhss5/ikfastpy/issues/95) for the distribution model.
 
-> **Renamed from `ikfastpy`.** The package was originally a port of OpenRAVE's [IKFast](https://www.openrave.org/docs/0.8.2/openravepy/ikfast/) symbolic IK generator. The IKFast general-solver path turned out unfixable on modern sympy for non-Pieper 6R arms, so the project was rebuilt around the **subproblem-decomposition approach** ([IK-Geo](https://github.com/rpiRobotics/ik-geo), [EAIK](https://github.com/OstermD/EAIK)) for Pieper-class arms, plus a **numeric Raghavan–Roth + Manocha–Canny** pipeline for the EAIK gap (non-Pieper arms like Kinova JACO 2, Agilex Piper, Flexiv Rizon). The PyPI name change reflects the algorithmic rewrite.
+> **History.** Originally a port of OpenRAVE's [IKFast](https://www.openrave.org/docs/0.8.2/openravepy/ikfast/) named `ikfastpy`. The IKFast general-solver path turned out unfixable on modern sympy for non-Pieper 6R arms, so the project was rebuilt around (1) tier-0 subproblem-composition solvers ported from BSD-3 [IK-Geo](https://github.com/rpiRobotics/ik-geo) (Elias–Wen 2022/2025) for Pieper-class arms, and (2) a tier-2 numeric Raghavan–Roth + Manocha–Canny pipeline for non-Pieper arms. The vendored LGPL IKFast tree was removed in [#84](https://github.com/siddhss5/ikfastpy/issues/84). The repo was renamed to `ssik` and made private at the same time the proprietary licensing landed.
 
-## What this is
+## What ssik does that the alternatives don't
 
-For Pieper-class arms (UR5, Puma 560, Fanuc, KUKA KR, ABB IRB) ssik bundles tier-0 closed-form solvers ported from IK-Geo and runs them at ~50–200 µs warm-cache, machine-precision FK closure.
+| arm class | EAIK / IK-Geo | mink / KDL (numeric) | ssik |
+|---|---|---|---|
+| Pieper-class (UR5, Puma 560, Fanuc, KUKA KR) | ~0.2 ms, all branches | ~20 ms, one solution | ~50-200 µs, all branches |
+| Non-Pieper 6R (JACO 2, Piper) | not supported | ~20 ms, one solution | **~2.25 ms median, all branches** |
+| Non-SRS 7R (Flexiv Rizon) | not supported | ~30 ms, one solution | ~ms range via joint-locking |
 
-For non-Pieper arms (JACO 2, Piper, Rizon 4, custom geometries with no parallel/intersecting axis triples) ssik runs a tier-2 numeric Raghavan–Roth pipeline at ~2.25 ms median warm-cache, FK error 3.7e-13, **all branches at once**.
+The differentiator is the **non-Pieper 6R analytical solver**. No other library in the ecosystem ships analytical IK for arms whose geometry deliberately violates Pieper's condition for mechanical-design reasons. ssik does, with all branches recovered at machine precision in single-digit milliseconds. See `docs/tutorial/04_raghavan_roth.md` for the math and `docs/tutorial/05_conditioning.md` for the four robustness fixes (AE-1, AE-3, AE-4, Möbius reparameterisation) that make the textbook Raghavan–Roth pipeline survive on real ill-conditioned arms.
 
-```python
-import ssik
+## Repository layout
 
-arm = ssik.Manipulator.from_urdf("ur5.urdf", base_link="base", ee_link="tool0")
-T = arm.fk(q)              # forward kinematics: (4, 4) ndarray
-solutions = arm.ik(T)      # inverse kinematics: list of Solutions with provenance
+This is the **internal development codebase**. Public users never see this; they receive a per-arm wheel built from this source. Layout:
+
+- `src/ssik/` — solver implementations.
+  - `core/` — `Solution` dataclass, tolerance policies.
+  - `kinematics/` — POE → DH bridge, predicates.
+  - `subproblems/` — SP1–SP6 closed-form primitives.
+  - `solvers/ikgeo/` — tier-0/1/2 solver modules.
+  - `solvers/jointlock/` — 7R wrapper.
+  - `refinement/` — universal opt-in Newton polish layer.
+- `tests/` — unit + hypothesis fuzz + cross-solver agreement + slow round-trips.
+  - `tests/fixtures/` — UR5, Puma 560, JACO 2 (real MJCF), synthetic arms.
+- `scripts/` — bench, profile, diagnostic harnesses.
+- `docs/` — internal documentation.
+  - `docs/tutorial/` — ten chapters covering the IK problem, the Pieper class, the EAIK gap, the Raghavan–Roth pipeline, conditioning fixes, refinement architecture, KinBody bridge, bulletproof validation, practical guide, roadmap. **Internal only**; the public marketing site (per [#95](https://github.com/siddhss5/ikfastpy/issues/95)) is a stripped subset hosted in a separate public repo.
+
+## Development quick-start
+
+```bash
+# Install dev dependencies
+uv sync
+
+# Fast tests (excludes slow symbolic-preprocessing tests)
+uv run pytest
+
+# Slow tests (sympy preprocessing for tier-2 RR; ~5 min)
+uv run pytest -m slow
+
+# Lint, format, typecheck
+uv run ruff check
+uv run ruff format --check
+uv run mypy src tests
+
+# Build internal docs
+uv run mkdocs serve
 ```
 
-The dispatcher routes each kb to the best-matching solver:
+## Solver coverage
 
-- **Tier 0** (closed-form): spherical wrist (Pieper), three-parallel axes (UR-style). Puma 560, UR5, UR10, KUKA KR.
-- **Tier 1** (1D search): any chain with one intersecting or parallel axis pair.
-- **Tier 2** (numeric Raghavan–Roth + AE-3 leftvar selection): non-Pieper 6R. JACO 2, Piper.
-- **Universal fallback**: Husty–Pfurner degree-16 univariate (planned).
-- **7R via joint-locking**: Franka Panda, KUKA iiwa, Flexiv Rizon.
+| solver module | algorithm | fixtures |
+|---|---|---|
+| `ikgeo.three_parallel` | tier-0 SP6 + SP1 + SP3 | UR5, UR10 (URDF), synthetic |
+| `ikgeo.spherical_two_parallel` | tier-0 SP4 + SP3 + SP1 | Puma 560 (URDF), synthetic |
+| `ikgeo.spherical_two_intersecting` | tier-0 SP3 + SP2 + SP4 + SP1 | Puma 560 (URDF), synthetic |
+| `ikgeo.spherical` | tier-0 SP5 + SP4 + SP1 | synthetic |
+| `ikgeo.two_parallel` | tier-1 univariate-search SP6 | synthetic |
+| `ikgeo.two_intersecting` | tier-1 univariate-search SP5 | synthetic |
+| `ikgeo.gen_six_dof` | tier-2 100×100 grid + Nelder–Mead | synthetic (legacy oracle) |
+| `ikgeo.general_6r` | tier-2 numeric Raghavan–Roth + AE-3 | **JACO 2 j2n6s200 (real MJCF)**, UR5 |
+| `jointlock.seven_r` | 7R via joint-locking + 6R inner solve | synthetic SRS arm |
 
-Third-party packages register new solvers via the `ssik.solvers` entry-point group; no core patching required.
+## Distribution model
 
-Per-robot support (URDF source + which solver handles each arm) is tracked in [SUPPORTED_ROBOTS.md](SUPPORTED_ROBOTS.md).
-
-## Relation to prior work
-
-Unlike the other Python packages named `ikfastpy` (e.g. [andyzeng/ikfastpy](https://github.com/andyzeng/ikfastpy), [yijiangh/ikfast_pybind](https://github.com/yijiangh/ikfast_pybind)), `ssik` is **not** a runtime wrapper around pre-generated C++. It is a Python-native analytical IK framework that combines subproblem decomposition with the Raghavan–Roth numeric pipeline under one public API.
-
-[EAIK](https://github.com/OstermD/EAIK) is a closely related project — C++/pybind11, built directly on [IK-Geo](https://github.com/rpiRobotics/ik-geo). EAIK's subproblem catalog is the initial bundled algorithm in `ssik`'s registry; what `ssik` adds is the tier-2 RR numeric solver for non-Pieper arms (the EAIK gap), the `Solution` dataclass with transparent refinement diagnostics, and a plugin surface for future specialist solvers.
+Customers submit a URDF / MJCF via [#95](https://github.com/siddhss5/ikfastpy/issues/95)'s intake mechanism. We run the cold-cache build pipeline (`poe_to_dh` → `pick_best_leftvar` AE-3 selection → symbolic preprocessing → compile to `.so`), produce a per-arm wheel, and deliver. The wheel exposes `solve(T_target) -> tuple[list[Solution], bool]` with the same `Solution` shape used internally. Customer source-code never includes ssik internals — they call into the compiled binary.
 
 ## License
 
-LGPL-3.0-or-later ([`LICENSE`](LICENSE)). The license stems from the original `ikfastpy` port; the codebase no longer contains the vendored OpenRAVE IKFast tree (removed in [#84](https://github.com/siddhss5/ikfastpy/issues/84)). Re-licensing to a more permissive option (BSD-3 to match IK-Geo's upstream license) is on the roadmap pending audit.
+Proprietary. See [`LICENSE`](LICENSE) for full terms; in summary: all rights reserved, no public reproduction or distribution without prior written permission. The library incorporates clean-room reimplementations of algorithms from BSD-3-licensed [IK-Geo](https://github.com/rpiRobotics/ik-geo) (Elias–Wen 2022/2025) and from the academic publications of Raghavan–Roth (1990) and Manocha–Canny (1994); the BSD-3 attribution is preserved in `LICENSE` for the algorithmic lineage.
+
+## Tracking
+
+- Strategic distribution model: [#95](https://github.com/siddhss5/ikfastpy/issues/95).
+- Speed work across all solver pathways: [#93](https://github.com/siddhss5/ikfastpy/issues/93).
+- Tier-2 RR speed (already 2× since baseline): [#86](https://github.com/siddhss5/ikfastpy/issues/86).
+- Tutorial / internal docs: [#87](https://github.com/siddhss5/ikfastpy/issues/87).
+- Known coverage gap on synthetic MC Table I: [#82](https://github.com/siddhss5/ikfastpy/issues/82).

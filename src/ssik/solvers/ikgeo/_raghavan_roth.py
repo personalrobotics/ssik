@@ -16,7 +16,7 @@ References (clean-room from open-access pubs only):
   ordering used for ``P`` and ``Q``; Section IV gives the eigenvalue route.
 
 Provenance: this file is clean-room from Tsai App. C and Manocha-Canny 1994
-only. No code or structure from any LGPL-licensed prior implementation.
+only. No source-code lineage from any prior implementation.
 
 Algorithmic specifics chosen here:
 
