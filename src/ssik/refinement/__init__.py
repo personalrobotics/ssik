@@ -209,6 +209,41 @@ def _q_close(a: NDArray[np.float64], b: NDArray[np.float64], tol: float) -> bool
     return True
 
 
+def dedup_by_wrap_close(candidates: list[Solution], tol: float) -> list[Solution]:
+    """Vectorised dedup of :class:`Solution` candidates by wrap-to-pi joint-
+    angle closeness.
+
+    For each cluster of solutions whose joint vectors agree (mod 2pi) within
+    ``tol`` per joint, keeps the candidate with the lowest ``fk_residual``.
+    Streaming order matches the previous Python-loop implementation
+    (``_q_close`` first-match-wins) so output ordering is preserved.
+
+    Implementation: maintains the deduped joint vectors as a stacked
+    ``(M, N_dof)`` numpy array; per-candidate dedup is one broadcasted
+    ``mod 2pi`` + ``argwhere`` instead of an inner Python loop. Replaces
+    the dominant cost (~24% of total) in 7R jointlock solves.
+    """
+    if not candidates:
+        return []
+    deduped: list[Solution] = []
+    n_dof = candidates[0].q.shape[0]
+    arr = np.empty((0, n_dof), dtype=np.float64)
+    for cand in candidates:
+        if arr.shape[0] > 0:
+            diffs = (cand.q - arr + np.pi) % (2 * np.pi) - np.pi
+            matches = np.all(np.abs(diffs) < tol, axis=1)
+            idxs = np.where(matches)[0]
+            if len(idxs) > 0:
+                j = int(idxs[0])
+                if cand.fk_residual < deduped[j].fk_residual:
+                    deduped[j] = cand
+                    arr[j] = cand.q
+                continue
+        deduped.append(cand)
+        arr = np.vstack([arr, cand.q[np.newaxis, :]])
+    return deduped
+
+
 def verify_candidates(
     candidates: Iterable[NDArray[np.float64]],
     *,
@@ -296,15 +331,4 @@ def verify_candidates(
 
     if dedup_atol is None:
         return verified
-    deduped: list[Solution] = []
-    for cand in verified:
-        dup_idx: int | None = None
-        for j, existing in enumerate(deduped):
-            if _q_close(cand.q, existing.q, dedup_atol):
-                dup_idx = j
-                break
-        if dup_idx is None:
-            deduped.append(cand)
-        elif cand.fk_residual < deduped[dup_idx].fk_residual:
-            deduped[dup_idx] = cand
-    return deduped
+    return dedup_by_wrap_close(verified, dedup_atol)
