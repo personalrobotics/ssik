@@ -41,6 +41,11 @@ def _dot3(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
     return float(a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
 
 
+def _norm3(a: NDArray[np.float64]) -> float:
+    """3-vector L2 norm, no dispatch overhead. Faster than ``np.linalg.norm``."""
+    return float(np.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]))
+
+
 def rotate(k: NDArray[np.float64], theta: float, v: NDArray[np.float64]) -> NDArray[np.float64]:
     """Rotate vector ``v`` by angle ``theta`` about unit axis ``k`` (Rodrigues).
 
