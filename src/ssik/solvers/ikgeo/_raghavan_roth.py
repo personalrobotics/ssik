@@ -1064,47 +1064,26 @@ def _dh_matrix_num(theta: float, alpha: float, a: float, d: float) -> NDArray[np
     )
 
 
-def back_substitute(
+def _back_substitute_inner(
     x_lin: float,
     eigvec_24: NDArray[np.complex128],
     p_sin: NDArray[np.float64],
     p_cos: NDArray[np.float64],
     p_one: NDArray[np.float64],
-    q_mat: NDArray[np.float64],
+    q_pinv: NDArray[np.float64],
     dh: DhParams,
     t_target: NDArray[np.float64],
-    metadata: dict[str, object] | None = None,
-) -> NDArray[np.float64] | None:
-    """Recover ``(q_0, ..., q_5)`` from a real ``x_lin`` root and its eigenvector.
+    metadata: dict[str, object],
+) -> tuple[NDArray[np.float64], float] | None:
+    """Branch-level back-substitution worker.
 
-    Generalized for AE-3 (#70) leftvar choice via the metadata dict
-    (defaults to the original Manocha-Canny linearity=q_2 case).
-
-    Algorithm (per Manocha-Canny IV-C/IV-D, generalized over the leftvar):
-
-    1. From x_lin: ``q_lin = 2 atan(x_lin)``  (lin = metadata["linearity_joint"]).
-    2. From eigenvector: top half is v_12 (in canonical monomial ordering of
-       the v_left bilinear pair).
-    3. From v_12: ``x_lb0 = v_12[5] / v_12[8]`` and ``x_lb1 = v_12[7] / v_12[8]``
-       where (lb0, lb1) = metadata["left_bilinear"]. ``q_lb0 = 2 atan(x_lb0)``, etc.
-    4. Solve the 14x8 ``Q v_right = P_eff @ v_left`` for v_right via LSQ; recover
-       ``(q_rb0, q_rb1)`` from ``v_right[4:8]`` via atan2 where (rb0, rb1) =
-       metadata["right_bilinear"].
-    5. Recover the drop joint from FK residual:
-       ``A_drop(q_drop) = (FK_chain_before)^{-1} @ T_target @ (FK_chain_after)^{-1}``
-       then ``q_drop = atan2(A_drop[1, 0], A_drop[0, 0])`` from the R_z(q_drop)
-       factor at the start of A_drop.
-
-    Returns ``None`` on numerical failure. Caller filters.
+    Same algorithm as :func:`back_substitute`, but takes the precomputed
+    ``q_pinv = pinv(q_mat)`` (so that ``solve_all_ik`` can compute it once
+    per pose and amortise across branches), and returns ``(q, fk_err)``
+    where ``fk_err = ||FK(q) - T_target||_F`` so the caller doesn't pay
+    for a redundant standalone FK call. This shape is internal; the
+    public :func:`back_substitute` wraps this function.
     """
-    if metadata is None:
-        # Default to original MC: linearity=q_2, v_left=(q_3,q_4), v_right=(q_0,q_1), drop=q_5.
-        metadata = {
-            "linearity_joint": 2,
-            "left_bilinear": (3, 4),
-            "right_bilinear": (0, 1),
-            "drop_joint": 5,
-        }
     linearity_joint = cast(int, metadata["linearity_joint"])
     lb0, lb1 = cast(tuple[int, int], metadata["left_bilinear"])
     rb0, rb1 = cast(tuple[int, int], metadata["right_bilinear"])
@@ -1148,7 +1127,8 @@ def back_substitute(
     q_l0 = 2.0 * np.arctan(x_l0)
     q_l1 = 2.0 * np.arctan(x_l1)
 
-    # Step 4: solve Q v_right = P_eff @ v_left for v_right (14x8 LSQ).
+    # Step 4: solve Q v_right = P_eff @ v_left for v_right via the
+    # precomputed pseudoinverse (faster than per-branch lstsq).
     s_lin, c_lin = float(np.sin(q_lin)), float(np.cos(q_lin))
     s_l0, c_l0 = float(np.sin(q_l0)), float(np.cos(q_l0))
     s_l1, c_l1 = float(np.sin(q_l1)), float(np.cos(q_l1))
@@ -1157,7 +1137,7 @@ def back_substitute(
     )
     p_eff = p_sin * s_lin + p_cos * c_lin + p_one  # 14x9
     rhs = p_eff @ v_left  # 14
-    v_right, _, _, _ = np.linalg.lstsq(q_mat, rhs, rcond=None)
+    v_right = q_pinv @ rhs
 
     # v_right = (s_rb0 s_rb1, s_rb0 c_rb1, c_rb0 s_rb1, c_rb0 c_rb1,
     #            s_rb0, c_rb0, s_rb1, c_rb1)
@@ -1193,7 +1173,70 @@ def back_substitute(
     q_drop = float(np.arctan2(a_drop_residual[1, 0], a_drop_residual[0, 0]))
     q_recovered[drop_joint] = q_drop
 
-    return q_recovered
+    # FK closure check using the chain matrices we already have. This
+    # replaces the redundant ``_fk_dh(q, dh)`` call that used to live in
+    # ``solve_all_ik`` -- re-using ``chain_before`` and ``chain_after``
+    # plus a fresh ``A_drop`` matmul is one matmul instead of six.
+    a_drop = _dh_matrix_num(
+        q_drop, float(alpha[drop_joint]), float(a[drop_joint]), float(d[drop_joint])
+    )
+    fk = chain_before @ a_drop @ chain_after
+    fk_err = float(np.linalg.norm(fk - t_target))
+    return q_recovered, fk_err
+
+
+def back_substitute(
+    x_lin: float,
+    eigvec_24: NDArray[np.complex128],
+    p_sin: NDArray[np.float64],
+    p_cos: NDArray[np.float64],
+    p_one: NDArray[np.float64],
+    q_mat: NDArray[np.float64],
+    dh: DhParams,
+    t_target: NDArray[np.float64],
+    metadata: dict[str, object] | None = None,
+) -> NDArray[np.float64] | None:
+    """Recover ``(q_0, ..., q_5)`` from a real ``x_lin`` root and its eigenvector.
+
+    Generalized for AE-3 (#70) leftvar choice via the metadata dict
+    (defaults to the original Manocha-Canny linearity=q_2 case).
+
+    Algorithm (per Manocha-Canny IV-C/IV-D, generalized over the leftvar):
+
+    1. From x_lin: ``q_lin = 2 atan(x_lin)``  (lin = metadata["linearity_joint"]).
+    2. From eigenvector: top half is v_12 (in canonical monomial ordering of
+       the v_left bilinear pair).
+    3. From v_12: ``x_lb0 = v_12[5] / v_12[8]`` and ``x_lb1 = v_12[7] / v_12[8]``
+       where (lb0, lb1) = metadata["left_bilinear"]. ``q_lb0 = 2 atan(x_lb0)``, etc.
+    4. Solve the 14x8 ``Q v_right = P_eff @ v_left`` for v_right via LSQ; recover
+       ``(q_rb0, q_rb1)`` from ``v_right[4:8]`` via atan2 where (rb0, rb1) =
+       metadata["right_bilinear"].
+    5. Recover the drop joint from FK residual:
+       ``A_drop(q_drop) = (FK_chain_before)^{-1} @ T_target @ (FK_chain_after)^{-1}``
+       then ``q_drop = atan2(A_drop[1, 0], A_drop[0, 0])`` from the R_z(q_drop)
+       factor at the start of A_drop.
+
+    Returns ``None`` on numerical failure. Caller filters.
+
+    Hot-path callers should prefer :func:`_back_substitute_inner` directly,
+    passing the precomputed ``q_pinv = pinv(q_mat)`` so the SVD doesn't
+    repeat per branch (``solve_all_ik`` already does this).
+    """
+    if metadata is None:
+        # Default to original MC: linearity=q_2, v_left=(q_3,q_4), v_right=(q_0,q_1), drop=q_5.
+        metadata = {
+            "linearity_joint": 2,
+            "left_bilinear": (3, 4),
+            "right_bilinear": (0, 1),
+            "drop_joint": 5,
+        }
+    q_pinv = np.linalg.pinv(q_mat).astype(np.float64)
+    result = _back_substitute_inner(
+        x_lin, eigvec_24, p_sin, p_cos, p_one, q_pinv, dh, t_target, metadata
+    )
+    if result is None:
+        return None
+    return result[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1481,23 +1524,29 @@ def solve_all_ik(
     fk_fn = lambda q: _fk_dh(q, dh)  # noqa: E731
     jacobian_fn = lambda q: _spatial_jacobian(q, dh)  # noqa: E731
 
+    # Precompute pinv(q_mat) once; reused across all back-substitution
+    # branches. Saves the SVD per branch (#86 Tier 2).
+    q_pinv = np.linalg.pinv(q_mat).astype(np.float64)
+
     candidates: list[Solution] = []
     for branch_idx, (x_lin_root, eigvec) in enumerate(zip(roots, eigvecs, strict=True)):
-        q_cand = back_substitute(
+        bs_result = _back_substitute_inner(
             x_lin_root,
             eigvec,
             p_sin,
             p_cos,
             p_one,
-            q_mat,
+            q_pinv,
             dh,
             t_target,
-            metadata=meta,
+            meta,
         )
-        if q_cand is None:
+        if bs_result is None:
             continue
-        # Algebraic candidate FK error.
-        fk_err_alg = float(np.linalg.norm(_fk_dh(q_cand, dh) - t_target))
+        # ``_back_substitute_inner`` already computed ``fk_err_alg`` from
+        # the chain matrices it had to build for drop-joint recovery, so
+        # we don't pay for a separate ``_fk_dh(q_cand, dh)`` here (#86).
+        q_cand, fk_err_alg = bs_result
         if fk_err_alg <= fk_atol:
             candidates.append(
                 Solution(
