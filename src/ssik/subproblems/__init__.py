@@ -13,8 +13,7 @@ critical for numerical robustness. Each ``solve`` function returns an
 ``is_ls`` flag so downstream solvers can propagate the distinction.
 
 All subproblems are implemented clean-room from the Elias-Wen paper and the
-BSD-3 IK-Geo reference at https://github.com/rpiRobotics/ik-geo -- no code
-or structure is copied from ``ssik._vendor.ikfast`` (which is LGPL).
+BSD-3 IK-Geo reference at https://github.com/rpiRobotics/ik-geo.
 """
 
 from ssik.subproblems import sp1, sp2, sp3, sp4, sp5, sp6

@@ -64,7 +64,6 @@ packages = ["src/ssik"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["src/ssik/_vendor"]
 
 [tool.ruff.lint]
 select = [
@@ -82,17 +81,9 @@ select = [
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
-exclude = ["src/ssik/_vendor/"]
 
-# Vendored modules are not type-checked. Treat anything imported from them
-# as Any in our typed code so strict mode doesn't flag every call site.
-[[tool.mypy.overrides]]
-module = "ssik._vendor.*"
-follow_imports = "skip"
-follow_imports_for_stubs = true
-
-# sympy ships no type stubs and is only used inside tests (for roundtrip
-# correctness checks against the vendored generator).
+# sympy ships no type stubs; used at module-import time for offline
+# per-arm symbolic preprocessing in ssik.solvers.ikgeo._raghavan_roth.
 [[tool.mypy.overrides]]
 module = "sympy.*"
 ignore_missing_imports = true
@@ -107,11 +98,4 @@ testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "-m", "not slow"]
 markers = [
     "slow: symbolic IK generation tests that run on the order of seconds to minutes; opt in with `-m slow`",
-]
-filterwarnings = [
-    # Upstream ikfast.py uses unraw regex literals like '\d', '\g'. They render
-    # correctly at runtime but emit SyntaxWarning on Python 3.12+. Out of scope
-    # to fix in vendored code; would resurface on every upstream re-pin.
-    "ignore::SyntaxWarning:ssik._vendor",
-    "ignore::SyntaxWarning:ssik",
 ]

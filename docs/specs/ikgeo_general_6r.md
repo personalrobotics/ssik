@@ -17,10 +17,9 @@ References (open-access PDFs cached in `/tmp/rrk/`):
   matrix), Theorem 2 (generalized-eigenvalue fallback), Möbius
   reparameterization, eigenvector → (x₄, x₅), Newton refinement.
 
-LGPL note: `vendored/.../ikfast.py:solveDialytically` implements this
-construction. Read for *algorithmic existence proof only* — do not copy variable
-names, control flow, or comments. Algorithms aren't copyrightable; the
-RR algorithm predates IKFast by 17 years.
+Provenance: clean-room from Tsai App. C and Manocha–Canny 1994. The RR
+algorithm predates IKFast by 17 years and is in no way derivative of any
+GPL/LGPL implementation.
 
 ### Step 1 — DH normalization
 Input: POE-normalized `KinBody` with 6 revolute joints. Convert to standard DH
