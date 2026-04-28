@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.subproblems._rotation import _cross3, _dot3, _norm3
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
     from numpy.typing import NDArray
@@ -70,7 +71,7 @@ def axis_parallel(
     Implementation: ``||a x b||`` is ``sin(theta)`` for unit vectors, which
     small-angle approximates to the angular misalignment in radians.
     """
-    return float(np.linalg.norm(np.cross(a, b))) < policy.axis_parallel
+    return _norm3(_cross3(a, b)) < policy.axis_parallel
 
 
 def axis_intersect(
@@ -89,15 +90,15 @@ def axis_intersect(
     coincident or disjoint; the distance is then the perpendicular component
     of ``(ob - oa)`` after projecting out ``a``.
     """
-    cross = np.cross(a, b)
-    cross_norm = float(np.linalg.norm(cross))
+    cross = _cross3(a, b)
+    cross_norm = _norm3(cross)
     delta = ob - oa
     if cross_norm < policy.axis_parallel:
         # Parallel case: shortest distance is the perpendicular component
         # of delta relative to a (equivalently b -- they're parallel).
-        perp = delta - np.dot(delta, a) * a
-        return float(np.linalg.norm(perp)) < policy.axis_intersect
-    distance = abs(float(np.dot(cross, delta))) / cross_norm
+        perp = delta - _dot3(delta, a) * a
+        return _norm3(perp) < policy.axis_intersect
+    distance = abs(_dot3(cross, delta)) / cross_norm
     return distance < policy.axis_intersect
 
 
@@ -177,7 +178,7 @@ def three_consecutive_intersecting(
         p = oa + t * a
 
         delta = p - oc
-        perp = delta - np.dot(delta, c) * c
-        if float(np.linalg.norm(perp)) < policy.axis_intersect:
+        perp = delta - _dot3(delta, c) * c
+        if _norm3(perp) < policy.axis_intersect:
             return (i, i + 1, i + 2)
     return None

@@ -15,7 +15,9 @@ same parallel-trio axis structure at joints (1, 2, 3).
 
 from __future__ import annotations
 
+import cProfile
 import functools
+import pstats
 import sys
 import time
 
@@ -24,8 +26,11 @@ import numpy as np
 print = functools.partial(print, flush=True)
 
 sys.path.insert(0, "/Users/siddh/code/ikfastpy/tests")
+sys.path.insert(0, "/Users/siddh/code/ikfastpy/scripts")
 
 from pathlib import Path  # noqa: E402
+
+from _flop_budget import flop_budget, print_flop_summary  # noqa: E402
 
 from ssik._urdf import load_urdf_kinbody_normalized  # noqa: E402
 from ssik.solvers.ikgeo import three_parallel  # noqa: E402
@@ -88,7 +93,25 @@ print(f"  median  {np.median(ts):>8.3f} ms")
 print(f"  mean    {ts.mean():>8.3f} ms")
 print(f"  p95     {np.percentile(ts, 95):>8.3f} ms")
 print(f"  max     {ts.max():>8.3f} ms")
-print(f"\nsolutions per pose: median={int(np.median(n_sols))}, "
-      f"min={min(n_sols)}, max={max(n_sols)}")
+print(
+    f"\nsolutions per pose: median={int(np.median(n_sols))}, min={min(n_sols)}, max={max(n_sols)}"
+)
 print(f"FK error: median={np.median(fk_errs):.2e}, max={max(fk_errs):.2e}")
 print(f"failures (is_ls=True): {n_fail}/100")
+
+# FLOP-budget pass: cProfile a fresh sweep so call counts are deterministic;
+# wall-clock under cProfile is not comparable to the timing run above.
+rng_p = np.random.default_rng(1)
+poses = [fk_poe(kb, rng_p.uniform(-1.0, 1.0, size=6)) for _ in range(100)]
+pr = cProfile.Profile()
+t0 = time.perf_counter()
+pr.enable()
+for tt in poses:
+    three_parallel.solve(kb, tt)
+pr.disable()
+profile_s = time.perf_counter() - t0
+total_flops, breakdown = flop_budget(pstats.Stats(pr))
+# Wall-clock for the FLOP/s rate uses the unprofiled timing-run total to
+# match what users would see; cProfile adds ~30-50% overhead.
+unprofiled_total_s = float(ts.sum()) / 1000.0
+print_flop_summary(total_flops, len(poses), unprofiled_total_s, breakdown)
