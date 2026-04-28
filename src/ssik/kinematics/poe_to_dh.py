@@ -30,6 +30,8 @@ collapse to identity.
 
 from __future__ import annotations
 
+import contextlib
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -150,13 +152,26 @@ def _signed_angle(
     return float(np.arctan2(sin_a, cos_a))
 
 
+_KB_DH_CACHE_ATTR = "_ssik_dh_with_offset_cache"
+
+
 def poe_to_dh(kb: KinBody) -> DhWithOffset:
     """Convert a 6R POE KinBody to standard distal DH parameters.
 
     Returns a :class:`DhWithOffset` carrying ``(alpha, a, d, theta_offset)``
     of length 6 plus the boundary ``T_pre, T_post`` transforms needed to
     bridge POE-world to DH-frame-0 and DH-frame-n to POE-end.
+
+    Result is cached on the ``KinBody`` instance (attribute
+    ``_ssik_dh_with_offset_cache``). The conversion depends only on the
+    chain's geometry, not on any IK target pose, so callers in a hot IK
+    loop hit the cache after the first call. The cache evicts naturally
+    with the kb (garbage-collected as a normal instance attribute).
     """
+    cached = getattr(kb, _KB_DH_CACHE_ATTR, None)
+    if cached is not None:
+        return cached  # type: ignore[no-any-return]
+
     joints = kb.joints
     n = len(joints)
     if n != 6:
@@ -299,7 +314,7 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     # We need: t_dh_end @ t_post = t_home  ->  t_post = t_dh_end^{-1} @ t_home
     t_post = np.linalg.solve(t_dh_end, t_home).astype(np.float64)
 
-    return DhWithOffset(
+    result = DhWithOffset(
         alpha=alpha,
         a=a_arr,
         d=d_arr,
@@ -307,3 +322,9 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
         t_pre=t_pre,
         t_post=t_post,
     )
+    # Slots-defined or otherwise attribute-restricted KinBody subclasses:
+    # silently skip caching. Correctness preserved; per-call cost of
+    # ~1-2ms accepted in that edge case.
+    with contextlib.suppress(AttributeError, TypeError):
+        setattr(kb, _KB_DH_CACHE_ATTR, result)
+    return result
