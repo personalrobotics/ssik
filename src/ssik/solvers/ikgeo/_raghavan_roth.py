@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import lru_cache
+from typing import Literal, cast, overload
 
 import numpy as np
 import sympy as sp
@@ -428,6 +429,38 @@ def _cached_derivation(
 # ---------------------------------------------------------------------------
 
 
+_PQ4 = tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+_PQ5 = tuple[
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    dict[str, object],
+]
+
+
+@overload
+def build_pq(
+    dh: DhParams,
+    t_target: NDArray[np.float64],
+    *,
+    linearity_joint: int = ...,
+    apply_so3: bool = ...,
+    return_metadata: Literal[False] = ...,
+) -> _PQ4: ...
+
+
+@overload
+def build_pq(
+    dh: DhParams,
+    t_target: NDArray[np.float64],
+    *,
+    linearity_joint: int = ...,
+    apply_so3: bool = ...,
+    return_metadata: Literal[True],
+) -> _PQ5: ...
+
+
 def build_pq(
     dh: DhParams,
     t_target: NDArray[np.float64],
@@ -435,16 +468,7 @@ def build_pq(
     linearity_joint: int = 2,
     apply_so3: bool = False,
     return_metadata: bool = False,
-) -> (
-    tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
-    | tuple[
-        NDArray[np.float64],
-        NDArray[np.float64],
-        NDArray[np.float64],
-        NDArray[np.float64],
-        dict[str, object],
-    ]
-):
+) -> _PQ4 | _PQ5:
     """Build the (factored) Raghavan-Roth elimination matrices.
 
     :param dh: Tuple ``(alpha, a, d)`` of length-6 numpy arrays giving the
@@ -952,7 +976,7 @@ def solve_x2_roots_mobius(
         # Singular pencil: every M\u00f6bius transform fails. Fall through to the
         # generalized-eigenvalue route (scipy.linalg.eig on the pencil M_1 - x M_2).
         try:
-            from scipy.linalg import eig as scipy_eig
+            from scipy.linalg import eig as scipy_eig  # type: ignore[import-untyped]
         except ImportError as exc:
             raise np.linalg.LinAlgError(
                 f"M\u00f6bius reparameterization failed (best cond={best_cond:.3e}); "
@@ -1007,8 +1031,8 @@ def solve_x2_roots_mobius(
         cond_threshold=cond_threshold,
     )
     # Map x_tilde -> x_2 = (aa * x_tilde + bb) / (cc * x_tilde + dd).
-    real_roots: list[float] = []
-    real_eigvecs: list[NDArray[np.complex128]] = []
+    real_roots = []
+    real_eigvecs = []
     for x_tilde, evec in zip(x_tilde_roots, eigvecs, strict=True):
         denom = cc * x_tilde + dd
         if abs(denom) < 1e-12:
@@ -1081,10 +1105,10 @@ def back_substitute(
             "right_bilinear": (0, 1),
             "drop_joint": 5,
         }
-    linearity_joint = int(metadata["linearity_joint"])
-    lb0, lb1 = metadata["left_bilinear"]
-    rb0, rb1 = metadata["right_bilinear"]
-    drop_joint = int(metadata["drop_joint"])
+    linearity_joint = cast(int, metadata["linearity_joint"])
+    lb0, lb1 = cast(tuple[int, int], metadata["left_bilinear"])
+    rb0, rb1 = cast(tuple[int, int], metadata["right_bilinear"])
+    drop_joint = cast(int, metadata["drop_joint"])
 
     alpha, a, d = dh
 

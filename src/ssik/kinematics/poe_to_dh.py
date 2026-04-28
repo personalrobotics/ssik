@@ -297,7 +297,7 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     t_dh_end[:3, 2] = z_n
     t_dh_end[:3, 3] = origins[n]
     # We need: t_dh_end @ t_post = t_home  ->  t_post = t_dh_end^{-1} @ t_home
-    t_post = np.linalg.solve(t_dh_end, t_home)
+    t_post = np.linalg.solve(t_dh_end, t_home).astype(np.float64)
 
     return DhWithOffset(
         alpha=alpha,

@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from fixtures.ur5 import ur5_specs
-from ssik._kinbody import build_kinbody
+from ssik._kinbody import KinBody, build_kinbody
 from ssik.core.solution import Solution
 from ssik.refinement import (
     kinbody_jacobian,
@@ -47,7 +48,7 @@ def _rot_axis(axis: np.ndarray, angle: float) -> np.ndarray:
     return T
 
 
-def _fk_poe(kb, q):
+def _fk_poe(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float64]:
     T = np.eye(4)
     for j, qi in zip(kb.joints, q, strict=True):
         T = T @ j.T_left @ _rot_axis(j.axis, float(qi)) @ j.T_right
@@ -95,11 +96,11 @@ def test_se3_log_residual_small_angle_clamped_to_zero_rotation() -> None:
 
 
 @pytest.fixture(scope="module")
-def ur5_kb():
+def ur5_kb() -> KinBody:
     return build_kinbody(ur5_specs())
 
 
-def test_lm_refine_converges_on_perturbed_seed(ur5_kb) -> None:
+def test_lm_refine_converges_on_perturbed_seed(ur5_kb: KinBody) -> None:
     """Seed within ~10 deg of a true q; should converge to machine precision."""
     rng = np.random.default_rng(0)
     q_true = rng.uniform(-1.0, 1.0, size=6)
@@ -117,7 +118,7 @@ def test_lm_refine_converges_on_perturbed_seed(ur5_kb) -> None:
     assert np.allclose(_fk_poe(ur5_kb, q_ref), T_target, atol=1e-10)
 
 
-def test_lm_refine_with_numerical_jacobian(ur5_kb) -> None:
+def test_lm_refine_with_numerical_jacobian(ur5_kb: KinBody) -> None:
     """Same convergence even without an analytical Jacobian (slow path)."""
     rng = np.random.default_rng(7)
     q_true = rng.uniform(-1.0, 1.0, size=6)
@@ -132,7 +133,7 @@ def test_lm_refine_with_numerical_jacobian(ur5_kb) -> None:
     assert resid < 1e-9
 
 
-def test_lm_refine_returns_none_on_hopeless_seed(ur5_kb) -> None:
+def test_lm_refine_returns_none_on_hopeless_seed(ur5_kb: KinBody) -> None:
     """A seed nowhere near a solution shouldn't converge in 5 iters."""
     rng = np.random.default_rng(0)
     q_true = rng.uniform(-1.0, 1.0, size=6)
@@ -155,7 +156,7 @@ def test_lm_refine_returns_none_on_hopeless_seed(ur5_kb) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_kinbody_jacobian_angular_block_matches_world_axes(ur5_kb) -> None:
+def test_kinbody_jacobian_angular_block_matches_world_axes(ur5_kb: KinBody) -> None:
     """The angular block J[3:, i] is the i-th joint axis in the world
     frame at config ``q`` -- this is invariant of hybrid-vs-spatial
     convention. (The linear block differs by ``z_i x p_e`` between the
@@ -180,7 +181,7 @@ def test_kinbody_jacobian_angular_block_matches_world_axes(ur5_kb) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_verify_candidates_passes_through_exact_match(ur5_kb) -> None:
+def test_verify_candidates_passes_through_exact_match(ur5_kb: KinBody) -> None:
     """A candidate at machine precision should be wrapped as ``refinement_used="none"``."""
     rng = np.random.default_rng(0)
     q_true = rng.uniform(-1.0, 1.0, size=6)
@@ -202,7 +203,7 @@ def test_verify_candidates_passes_through_exact_match(ur5_kb) -> None:
     assert s.branch_id == 0
 
 
-def test_verify_candidates_drops_misses_when_refinement_off(ur5_kb) -> None:
+def test_verify_candidates_drops_misses_when_refinement_off(ur5_kb: KinBody) -> None:
     rng = np.random.default_rng(0)
     q_true = rng.uniform(-1.0, 1.0, size=6)
     T_target = _fk_poe(ur5_kb, q_true)
@@ -219,7 +220,7 @@ def test_verify_candidates_drops_misses_when_refinement_off(ur5_kb) -> None:
     assert sols == []
 
 
-def test_verify_candidates_polishes_misses_when_refinement_on(ur5_kb) -> None:
+def test_verify_candidates_polishes_misses_when_refinement_on(ur5_kb: KinBody) -> None:
     rng = np.random.default_rng(0)
     q_true = rng.uniform(-1.0, 1.0, size=6)
     T_target = _fk_poe(ur5_kb, q_true)
@@ -243,7 +244,7 @@ def test_verify_candidates_polishes_misses_when_refinement_on(ur5_kb) -> None:
     assert s.fk_residual < 1e-10
 
 
-def test_verify_candidates_dedup_keeps_lower_residual(ur5_kb) -> None:
+def test_verify_candidates_dedup_keeps_lower_residual(ur5_kb: KinBody) -> None:
     rng = np.random.default_rng(0)
     q_true = rng.uniform(-1.0, 1.0, size=6)
     T_target = _fk_poe(ur5_kb, q_true)

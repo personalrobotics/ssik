@@ -68,14 +68,15 @@ def _q_close(a: np.ndarray, b: np.ndarray, tol: float) -> bool:
     return all(abs(_wrap(float(ai - bi))) < tol for ai, bi in zip(a, b, strict=True))
 
 
-def _solution_sets_equal(set_a: list, set_b: list, tol: float) -> tuple[bool, str]:
+def _solution_sets_equal(set_a: list[Any], set_b: list[Any], tol: float) -> tuple[bool, str]:
     """Return (equal, diagnostic). Two sets are equal iff same length and
     every element of A matches some unused element of B. Accepts either
     plain ``np.ndarray`` joint vectors or :class:`ssik.core.solution.Solution`
     objects (auto-extracts ``.q``)."""
 
-    def _q(item: object) -> np.ndarray:
-        return item.q if hasattr(item, "q") else item  # type: ignore[union-attr]
+    def _q(item: Any) -> np.ndarray:
+        result: np.ndarray = item.q if hasattr(item, "q") else item
+        return result
 
     if len(set_a) != len(set_b):
         return False, f"|A|={len(set_a)} vs |B|={len(set_b)}"
