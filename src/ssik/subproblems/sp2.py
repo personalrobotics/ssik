@@ -49,6 +49,7 @@ from numpy.typing import NDArray
 
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.subproblems import sp1
+from ssik.subproblems._rotation import _cross3, _dot3
 
 __all__ = ["solve"]
 
@@ -71,7 +72,7 @@ def solve(
         on magnitude and sphere mismatches.
     :returns: ``(solutions, is_ls)``.
     """
-    c = float(np.dot(k1, k2))
+    c = _dot3(k1, k2)
     s_sq = 1.0 - c * c
 
     if s_sq < policy.subproblem_degeneracy:
@@ -79,14 +80,14 @@ def solve(
         theta1, _ = sp1.solve(k1, p, q, policy)
         return [(theta1, 0.0)], True
 
-    d1 = float(np.dot(k1, p))
-    d2 = float(np.dot(k2, q))
+    d1 = _dot3(k1, p)
+    d2 = _dot3(k2, q)
     alpha = (d1 - c * d2) / s_sq
     beta = (d2 - c * d1) / s_sq
-    kxk = np.cross(k1, k2)  # |kxk|^2 = s_sq
+    kxk = _cross3(k1, k2)  # |kxk|^2 = s_sq
 
-    pp = float(np.dot(p, p))
-    qq = float(np.dot(q, q))
+    pp = _dot3(p, p)
+    qq = _dot3(q, q)
     z_sq_target = 0.5 * (pp + qq)
     gamma_sq_scaled = z_sq_target - alpha * alpha - beta * beta - 2 * alpha * beta * c
 

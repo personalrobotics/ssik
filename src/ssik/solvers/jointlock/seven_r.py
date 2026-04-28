@@ -54,27 +54,12 @@ from ssik.solvers.ikgeo import (
     two_intersecting,
     two_parallel,
 )
+from ssik.subproblems._rotation import rotation_matrix
 
 __all__ = ["choose_lock_joint", "solve"]
 
 _DEFAULT_SAMPLES = 16
 _SOLVER_NAME = "jointlock.seven_r"
-
-
-def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
-    """3x3 rotation matrix around ``axis`` by ``angle`` (Rodrigues)."""
-    c = float(np.cos(angle))
-    s = float(np.sin(angle))
-    x, y, z = float(axis[0]), float(axis[1]), float(axis[2])
-    oc = 1.0 - c
-    return np.array(
-        [
-            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
-            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
-            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
-        ],
-        dtype=np.float64,
-    )
 
 
 def _lock_joint(kb: KinBody, lock_idx: int, q_lock: float) -> KinBody:
@@ -98,7 +83,7 @@ def _lock_joint(kb: KinBody, lock_idx: int, q_lock: float) -> KinBody:
 
     locked = kb.joints[lock_idx]
     last_idx = len(kb.joints) - 1
-    R_lock = _rot_mat(locked.axis, q_lock)
+    R_lock = rotation_matrix(locked.axis, q_lock)
 
     new_joints: list[Joint] = []
     for i, j in enumerate(kb.joints):
