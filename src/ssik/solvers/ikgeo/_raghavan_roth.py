@@ -833,8 +833,14 @@ def solve_x2_roots(
             "generalized-eigenvalue fallback required"
         )
 
-    a_inv_b = np.linalg.solve(a_eq, b_eq)
-    a_inv_c = np.linalg.solve(a_eq, c_eq)
+    # Stack [B|C] into one 12x24 RHS so LU(A) is computed once instead of
+    # twice (#86 Tier 2.3): a_inv_b and a_inv_c share the same factorisation.
+    bc_stacked = np.empty((12, 24), dtype=np.float64)
+    bc_stacked[:, :12] = b_eq
+    bc_stacked[:, 12:] = c_eq
+    a_inv_bc = np.linalg.solve(a_eq, bc_stacked)
+    a_inv_b = a_inv_bc[:, :12]
+    a_inv_c = a_inv_bc[:, 12:]
 
     sigma = np.zeros((24, 24), dtype=np.float64)
     sigma[:12, 12:] = np.eye(12)
@@ -843,29 +849,24 @@ def solve_x2_roots(
 
     eigvals, eigvecs = np.linalg.eig(sigma)
 
-    # Recover original-basis eigenvectors: v_12 = D_r * v_eq for each
-    # eigenvalue. The 24-vector returned has structure [v_12; lambda * v_12]
-    # (in the original basis, after de-equilibration); back_substitute reads
-    # only the top 12 entries.
-    d_r_complex = d_r.astype(np.complex128)
+    # Vectorised filter + de-equilibration (#86 Tier 2.3): drop the per-
+    # eigenvalue Python loop in favour of mask + array reshape.
+    abs_imag = np.abs(eigvals.imag)
+    abs_real = np.abs(eigvals.real)
+    spurious = (np.abs(abs_imag - 1.0) < spurious_tol) & (abs_real < spurious_tol)
+    too_complex = abs_imag > imag_rel_tol * np.maximum(abs_real, 1.0)
+    keep = ~(spurious | too_complex)
 
-    real_roots: list[float] = []
-    real_eigvecs: list[NDArray[np.complex128]] = []
-    for k in range(24):
-        ev = eigvals[k]
-        if abs(abs(ev.imag) - 1.0) < spurious_tol and abs(ev.real) < spurious_tol:
-            continue
-        if abs(ev.imag) > imag_rel_tol * max(abs(ev.real), 1.0):
-            continue
-        # De-equilibrate the eigenvector. eigvecs[:, k] has structure
-        # [v_eq; lambda * v_eq]; convert top half to original basis via D_r,
-        # then reconstruct the bottom half so back_substitute sees the
-        # canonical [v_12; lambda v_12] form it expects.
-        v_top_orig = d_r_complex * eigvecs[:12, k]
-        v_bot_orig = ev * v_top_orig
-        v_full = np.concatenate([v_top_orig, v_bot_orig])
-        real_roots.append(float(ev.real))
-        real_eigvecs.append(v_full)
+    d_r_complex = d_r.astype(np.complex128)
+    # ``eigvecs[:, k]`` has structure [v_eq; lambda * v_eq]; rebuild as
+    # [D_r * v_eq; lambda * D_r * v_eq] (= [v_12; lambda * v_12] in the
+    # original basis, which back_substitute expects).
+    v_top = d_r_complex[:, None] * eigvecs[:12, keep]  # 12 x K
+    v_bot = eigvals[keep][None, :] * v_top  # 12 x K
+    v_full = np.concatenate([v_top, v_bot], axis=0)  # 24 x K
+
+    real_roots = [float(r) for r in eigvals[keep].real]
+    real_eigvecs = [v_full[:, k] for k in range(v_full.shape[1])]
     return real_roots, real_eigvecs
 
 
