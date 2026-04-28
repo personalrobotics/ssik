@@ -44,6 +44,7 @@ from ssik.kinematics.predicates import (
     three_consecutive_intersecting,
     three_consecutive_parallel,
 )
+from ssik.refinement import dedup_by_wrap_close
 from ssik.solvers.ikgeo import (
     gen_six_dof,
     spherical,
@@ -289,7 +290,7 @@ def solve(
         samples = np.array(list(lock_samples), dtype=np.float64)
 
     dedup_tol = policy.subproblem_dedup
-    solutions: list[Solution] = []
+    candidates: list[Solution] = []
 
     for sample_idx, q_lock in enumerate(samples):
         sub_kb = _lock_joint(kb, lock_idx, float(q_lock))
@@ -317,30 +318,16 @@ def solve(
             full_q[:lock_idx] = sub_q[:lock_idx]
             full_q[lock_idx] = float(q_lock)
             full_q[lock_idx + 1 :] = sub_q[lock_idx:]
-            cand = Solution(
-                q=full_q,
-                fk_residual=inner.fk_residual,
-                refinement_used=inner.refinement_used,
-                refinement_iters=inner.refinement_iters,
-                branch_id=sample_idx,
-                solver_name=_SOLVER_NAME,
+            candidates.append(
+                Solution(
+                    q=full_q,
+                    fk_residual=inner.fk_residual,
+                    refinement_used=inner.refinement_used,
+                    refinement_iters=inner.refinement_iters,
+                    branch_id=sample_idx,
+                    solver_name=_SOLVER_NAME,
+                )
             )
-            dup_idx: int | None = None
-            for j, existing in enumerate(solutions):
-                if _q_close(cand.q, existing.q, dedup_tol):
-                    dup_idx = j
-                    break
-            if dup_idx is None:
-                solutions.append(cand)
-            elif cand.fk_residual < solutions[dup_idx].fk_residual:
-                solutions[dup_idx] = cand
 
+    solutions = dedup_by_wrap_close(candidates, dedup_tol)
     return solutions, len(solutions) == 0
-
-
-def _q_close(a: NDArray[np.float64], b: NDArray[np.float64], tol: float) -> bool:
-    for ai, bi in zip(a, b, strict=True):
-        diff = float(((float(ai) - float(bi) + np.pi) % (2 * np.pi)) - np.pi)
-        if abs(diff) > tol:
-            return False
-    return True
