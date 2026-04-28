@@ -44,27 +44,12 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.solvers.ikgeo._bivariate import search_2d
 from ssik.subproblems import sp1, sp5
+from ssik.subproblems._rotation import rotation_matrix
 
 __all__ = ["solve"]
 
 _GRID_N = 100
 _SOLVER_NAME = "ikgeo.gen_six_dof"
-
-
-def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
-    """3x3 rotation matrix around ``axis`` by ``angle`` (Rodrigues)."""
-    c = float(np.cos(angle))
-    s = float(np.sin(angle))
-    x, y, z = float(axis[0]), float(axis[1]), float(axis[2])
-    oc = 1.0 - c
-    return np.array(
-        [
-            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
-            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
-            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
-        ],
-        dtype=np.float64,
-    )
 
 
 def solve(
@@ -107,15 +92,15 @@ def solve(
     def _alignment_error(q1: float, q2: float) -> NDArray[np.float64]:
         """4-vector of ``|R_05 @ axes[5] - R_06 @ axes[5]|`` per SP5 branch."""
         errors = np.full(4, np.inf, dtype=np.float64)
-        p_63 = _rot_mat(-axes[1], q2) @ (_rot_mat(-axes[0], q1) @ p_16 - p[1]) - p[2]
+        p_63 = rotation_matrix(-axes[1], q2) @ (rotation_matrix(-axes[0], q1) @ p_16 - p[1]) - p[2]
         triples, _ = sp5.solve(-p[3], p_63, p[4], p[5], -axes[2], axes[3], axes[4], policy)
         for i, (q3, q4, q5) in enumerate(triples):
             r_05 = (
-                _rot_mat(axes[0], q1)
-                @ _rot_mat(axes[1], q2)
-                @ _rot_mat(axes[2], q3)
-                @ _rot_mat(axes[3], q4)
-                @ _rot_mat(axes[4], q5)
+                rotation_matrix(axes[0], q1)
+                @ rotation_matrix(axes[1], q2)
+                @ rotation_matrix(axes[2], q3)
+                @ rotation_matrix(axes[3], q4)
+                @ rotation_matrix(axes[4], q5)
             )
             errors[i] = float(np.linalg.norm(r_05 @ axes[5] - target_axis5))
         return errors
@@ -124,18 +109,18 @@ def solve(
 
     candidates: list[NDArray[np.float64]] = []
     for q1, q2, branch_idx in minima:
-        p_63 = _rot_mat(-axes[1], q2) @ (_rot_mat(-axes[0], q1) @ p_16 - p[1]) - p[2]
+        p_63 = rotation_matrix(-axes[1], q2) @ (rotation_matrix(-axes[0], q1) @ p_16 - p[1]) - p[2]
         triples, _ = sp5.solve(-p[3], p_63, p[4], p[5], -axes[2], axes[3], axes[4], policy)
         if branch_idx >= len(triples):
             continue
         q3, q4, q5 = triples[branch_idx]
 
         r_05 = (
-            _rot_mat(axes[0], q1)
-            @ _rot_mat(axes[1], q2)
-            @ _rot_mat(axes[2], q3)
-            @ _rot_mat(axes[3], q4)
-            @ _rot_mat(axes[4], q5)
+            rotation_matrix(axes[0], q1)
+            @ rotation_matrix(axes[1], q2)
+            @ rotation_matrix(axes[2], q3)
+            @ rotation_matrix(axes[3], q4)
+            @ rotation_matrix(axes[4], q5)
         )
         z_axis = np.array([0.0, 0.0, 1.0])
         q6, _ = sp1.solve(axes[5], z_axis, r_05.T @ r_06 @ z_axis, policy)
@@ -161,6 +146,6 @@ def _forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float
     T = np.eye(4)
     for j, qi in zip(kb.joints, q, strict=True):
         rot = np.eye(4)
-        rot[:3, :3] = _rot_mat(j.axis, float(qi))
+        rot[:3, :3] = rotation_matrix(j.axis, float(qi))
         T = T @ j.T_left @ rot @ j.T_right
     return T

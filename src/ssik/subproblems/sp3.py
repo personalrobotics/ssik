@@ -26,6 +26,7 @@ from numpy.typing import NDArray
 
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.subproblems import sp4
+from ssik.subproblems._rotation import _dot3
 
 __all__ = ["solve"]
 
@@ -46,5 +47,5 @@ def solve(
     :param policy: tolerances (forwarded to :func:`sp4.solve`).
     :returns: ``(solutions, is_ls)`` with 0, 1, or 2 ``theta`` entries.
     """
-    target = 0.5 * (float(np.dot(p, p)) + float(np.dot(q, q)) - d * d)
+    target = 0.5 * (_dot3(p, p) + _dot3(q, q) - d * d)
     return sp4.solve(q, k, p, target, policy)

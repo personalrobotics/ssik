@@ -49,7 +49,7 @@ from ssik.subproblems._aux import (
     vec_self_convolve_2,
     vec_self_convolve_3,
 )
-from ssik.subproblems._rotation import rotate
+from ssik.subproblems._rotation import _cross3, _dot3, _norm3, rotate
 from ssik.subproblems._validate import validate_vec3
 
 __all__ = ["solve"]
@@ -89,12 +89,14 @@ def _degenerate(
     """Return True if input falls in a configuration where the cone-polynomial
     reduction is ill-defined (``k_i`` parallel to ``k_2``, or ``p_i`` collinear
     with its rotation axis)."""
-    k1xk2_sq = float(np.dot(np.cross(k1, k2), np.cross(k1, k2)))
-    k3xk2_sq = float(np.dot(np.cross(k3, k2), np.cross(k3, k2)))
+    k1xk2 = _cross3(k1, k2)
+    k3xk2 = _cross3(k3, k2)
+    k1xk2_sq = _dot3(k1xk2, k1xk2)
+    k3xk2_sq = _dot3(k3xk2, k3xk2)
     if k1xk2_sq < deg_tol or k3xk2_sq < deg_tol:
         return True
-    p1_perp_sq = float(np.dot(p1, p1)) - float(np.dot(k1, p1)) ** 2
-    p3_perp_sq = float(np.dot(p3, p3)) - float(np.dot(k3, p3)) ** 2
+    p1_perp_sq = _dot3(p1, p1) - _dot3(k1, p1) ** 2
+    p3_perp_sq = _dot3(p3, p3) - _dot3(k3, p3) ** 2
     return p1_perp_sq < deg_tol or p3_perp_sq < deg_tol
 
 
@@ -112,7 +114,7 @@ def _residual(
 ) -> float:
     lhs = p0 + rotate(k1, theta1, p1)
     rhs = rotate(k2, theta2, p2 + rotate(k3, theta3, p3))
-    return float(np.linalg.norm(lhs - rhs))
+    return _norm3(lhs - rhs)
 
 
 def solve(
@@ -153,11 +155,11 @@ def solve(
     if _degenerate(p1, p3, k1, k2, k3, deg_tol):
         return [], True
 
-    p1_s = p0 + k1 * float(np.dot(k1, p1))
-    p3_s = p2 + k3 * float(np.dot(k3, p3))
+    p1_s = p0 + k1 * _dot3(k1, p1)
+    p3_s = p2 + k3 * _dot3(k3, p3)
 
-    delta1 = float(np.dot(k2, p1_s))
-    delta3 = float(np.dot(k2, p3_s))
+    delta1 = _dot3(k2, p1_s)
+    delta3 = _dot3(k2, p3_s)
 
     p_1, r_1 = cone_polynomials(p0, k1, p1, p1_s, k2)
     p_3, r_3 = cone_polynomials(p2, k3, p3, p3_s, k2)
@@ -182,10 +184,10 @@ def solve(
 
     h_vec = np.array([c.real for c in all_roots if _is_real_root(c)])
 
-    kxp1 = np.cross(k1, p1)
-    kxp3 = np.cross(k3, p3)
-    a_1 = np.column_stack([kxp1, -np.cross(k1, kxp1)])  # 3x2
-    a_3 = np.column_stack([kxp3, -np.cross(k3, kxp3)])
+    kxp1 = _cross3(k1, p1)
+    kxp3 = _cross3(k3, p3)
+    a_1 = np.column_stack([kxp1, -_cross3(k1, kxp1)])  # 3x2
+    a_3 = np.column_stack([kxp3, -_cross3(k3, kxp3)])
 
     signs_1 = [1.0, 1.0, -1.0, -1.0]
     signs_3 = [1.0, -1.0, 1.0, -1.0]
@@ -204,18 +206,17 @@ def solve(
         hd1 = h - delta1
         hd3 = h - delta3
 
-        sq1 = float(np.dot(a1t_k2, a1t_k2)) - hd1 * hd1
+        a1t_k2_ns = float(a1t_k2[0] * a1t_k2[0] + a1t_k2[1] * a1t_k2[1])
+        a3t_k2_ns = float(a3t_k2[0] * a3t_k2[0] + a3t_k2[1] * a3t_k2[1])
+        sq1 = a1t_k2_ns - hd1 * hd1
         if sq1 < 0.0:
             continue
-        sq3 = float(np.dot(a3t_k2, a3t_k2)) - hd3 * hd3
+        sq3 = a3t_k2_ns - hd3 * hd3
         if sq3 < 0.0:
             continue
 
         pm_1 = j_mat @ a1t_k2 * float(np.sqrt(sq1))
         pm_3 = j_mat @ a3t_k2 * float(np.sqrt(sq3))
-
-        a1t_k2_ns = float(np.dot(a1t_k2, a1t_k2))
-        a3t_k2_ns = float(np.dot(a3t_k2, a3t_k2))
 
         for s1, s3 in zip(signs_1, signs_3, strict=True):
             sc1 = (const_1 + s1 * pm_1) / a1t_k2_ns
@@ -306,9 +307,9 @@ def _refine_sp5(
         f = p0 + rotated_p1 - rotated_p2
 
         # Jacobian columns: dF/dt_i = axis_i x (rotated vector).
-        col1 = np.cross(k1, rotated_p1)
-        col2 = -np.cross(k2, rotated_p2)
-        col3 = -rotate(k2, t2, np.cross(k3, rotated_p3_inner))
+        col1 = _cross3(k1, rotated_p1)
+        col2 = -_cross3(k2, rotated_p2)
+        col3 = -rotate(k2, t2, _cross3(k3, rotated_p3_inner))
         j_mat_3x3 = np.column_stack([col1, col2, col3])
 
         try:
@@ -319,7 +320,7 @@ def _refine_sp5(
         # Clip per-iteration step to pi/4 so an ill-conditioned Jacobian
         # doesn't launch us to a far-away minimum; quadratic convergence is
         # preserved near the true solution where |delta| is already small.
-        step_norm = float(np.linalg.norm(delta))
+        step_norm = _norm3(delta)
         max_step = np.pi / 4.0
         if step_norm > max_step:
             delta = delta * (max_step / step_norm)

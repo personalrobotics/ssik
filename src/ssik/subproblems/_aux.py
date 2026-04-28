@@ -16,6 +16,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.subproblems._rotation import _cross3, _dot3
 
 __all__ = [
     "cone_polynomials",
@@ -72,18 +73,18 @@ def cone_polynomials(
 
     [src]: https://github.com/rpiRobotics/ik-geo/blob/main/rust/src/subproblems/auxiliary.rs
     """
-    ki_x_k2 = np.cross(k_i, k2)
-    ki_x_ki_x_k2 = np.cross(k_i, ki_x_k2)
-    norm_ki_x_k2_sq = float(np.dot(ki_x_k2, ki_x_k2))
+    ki_x_k2 = _cross3(k_i, k2)
+    ki_x_ki_x_k2 = _cross3(k_i, ki_x_k2)
+    norm_ki_x_k2_sq = _dot3(ki_x_k2, ki_x_k2)
 
-    ki_x_pi = np.cross(k_i, p_i)
-    norm_ki_x_pi_sq = float(np.dot(ki_x_pi, ki_x_pi))
+    ki_x_pi = _cross3(k_i, p_i)
+    norm_ki_x_pi_sq = _dot3(ki_x_pi, ki_x_pi)
 
-    alpha = float(np.dot(p0_i, ki_x_ki_x_k2)) / norm_ki_x_k2_sq
-    delta = float(np.dot(k2, p_i_s))
-    beta = float(np.dot(p0_i, ki_x_k2)) / norm_ki_x_k2_sq
+    alpha = _dot3(p0_i, ki_x_ki_x_k2) / norm_ki_x_k2_sq
+    delta = _dot3(k2, p_i_s)
+    beta = _dot3(p0_i, ki_x_k2) / norm_ki_x_k2_sq
 
-    p_const = norm_ki_x_pi_sq + float(np.dot(p_i_s, p_i_s)) + 2.0 * alpha * delta
+    p_const = norm_ki_x_pi_sq + _dot3(p_i_s, p_i_s) + 2.0 * alpha * delta
     p = np.array([-2.0 * alpha, p_const], dtype=np.float64)
 
     r = np.array(

@@ -59,26 +59,11 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.predicates import three_consecutive_intersecting
 from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.subproblems import sp1, sp4, sp5
+from ssik.subproblems._rotation import rotation_matrix
 
 __all__ = ["solve"]
 
 _SOLVER_NAME = "ikgeo.spherical"
-
-
-def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
-    """3x3 rotation matrix around ``axis`` by ``angle`` (Rodrigues)."""
-    c = float(np.cos(angle))
-    s = float(np.sin(angle))
-    x, y, z = float(axis[0]), float(axis[1]), float(axis[2])
-    oc = 1.0 - c
-    return np.array(
-        [
-            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
-            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
-            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
-        ],
-        dtype=np.float64,
-    )
 
 
 def solve(
@@ -148,7 +133,12 @@ def solve(
 
     candidates: list[NDArray[np.float64]] = []
     for q1, q2, q3 in t123_solutions:
-        r_36 = _rot_mat(-axes[2], q3) @ _rot_mat(-axes[1], q2) @ _rot_mat(-axes[0], q1) @ r_06
+        r_36 = (
+            rotation_matrix(-axes[2], q3)
+            @ rotation_matrix(-axes[1], q2)
+            @ rotation_matrix(-axes[0], q1)
+            @ r_06
+        )
 
         t5_solutions, _ = sp4.solve(
             axes[3],
@@ -161,13 +151,13 @@ def solve(
         for q5 in t5_solutions:
             q4, _ = sp1.solve(
                 axes[3],
-                _rot_mat(axes[4], q5) @ axes[5],
+                rotation_matrix(axes[4], q5) @ axes[5],
                 r_36 @ axes[5],
                 policy,
             )
             q6, _ = sp1.solve(
                 -axes[5],
-                _rot_mat(-axes[4], q5) @ axes[3],
+                rotation_matrix(-axes[4], q5) @ axes[3],
                 r_36.T @ axes[3],
                 policy,
             )
@@ -197,6 +187,6 @@ def _forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float
     T = np.eye(4)
     for j, qi in zip(kb.joints, q, strict=True):
         rot = np.eye(4)
-        rot[:3, :3] = _rot_mat(j.axis, float(qi))
+        rot[:3, :3] = rotation_matrix(j.axis, float(qi))
         T = T @ j.T_left @ rot @ j.T_right
     return T

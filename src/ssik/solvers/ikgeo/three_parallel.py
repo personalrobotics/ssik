@@ -46,7 +46,7 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.predicates import three_consecutive_parallel
 from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.subproblems import sp1, sp3, sp6
-from ssik.subproblems._rotation import rotate
+from ssik.subproblems._rotation import rotate, rotation_matrix
 
 __all__ = ["solve"]
 
@@ -56,22 +56,6 @@ _SOLVER_NAME = "ikgeo.three_parallel"
 def _wrap_to_pi(angle: float) -> float:
     """Wrap an angle to ``(-pi, pi]``."""
     return float(((angle + np.pi) % (2 * np.pi)) - np.pi)
-
-
-def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
-    """3x3 rotation matrix around ``axis`` by ``angle`` (Rodrigues)."""
-    c = float(np.cos(angle))
-    s = float(np.sin(angle))
-    x, y, z = float(axis[0]), float(axis[1]), float(axis[2])
-    oc = 1.0 - c
-    return np.array(
-        [
-            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
-            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
-            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
-        ],
-        dtype=np.float64,
-    )
 
 
 def solve(
@@ -146,8 +130,8 @@ def solve(
     # derive is_ls purely from the post-verify outcome.
 
     for q1, q5 in theta15_solutions:
-        r_01 = _rot_mat(axes[0], q1)
-        r_45 = _rot_mat(axes[4], q5)
+        r_01 = rotation_matrix(axes[0], q1)
+        r_45 = rotation_matrix(axes[4], q5)
 
         theta14, _ = sp1.solve(
             axes[1],
@@ -162,7 +146,7 @@ def solve(
             policy,
         )
 
-        r_14 = _rot_mat(axes[1], theta14)
+        r_14 = rotation_matrix(axes[1], theta14)
         d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
         d_elbow = float(np.linalg.norm(d_inner))
 
@@ -198,6 +182,6 @@ def _forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float
     T = np.eye(4)
     for j, qi in zip(kb.joints, q, strict=True):
         rot = np.eye(4)
-        rot[:3, :3] = _rot_mat(j.axis, float(qi))
+        rot[:3, :3] = rotation_matrix(j.axis, float(qi))
         T = T @ j.T_left @ rot @ j.T_right
     return T
