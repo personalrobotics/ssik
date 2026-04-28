@@ -1,9 +1,8 @@
-"""Unit tests for the private kinbody shim.
+"""Unit tests for :class:`ssik._kinbody.KinBody`.
 
-These exercise the duck-typed API surface the vendored IKFast solver calls,
-without actually invoking the solver. Full integration (constructing a real
-chain and feeding it to `IKFastSolver.generateIkSolver`) lives in
-`test_kinbody_ur5.py` behind the `slow` marker.
+These exercise the structural invariants of the kinbody chain: link/joint
+counts, name uniqueness, dataclass behaviour. Full integration tests
+through the public solvers live in ``tests/test_ikgeo_*.py``.
 """
 
 from __future__ import annotations
@@ -115,9 +114,10 @@ def test_get_chain_reversed_raises() -> None:
 
 
 def test_joint_parent_link_equality_drives_chain_orientation() -> None:
-    """Critical: `forwardKinematicsChain` uses `==` at ikfast.py:1650 to decide
-    whether the joint is aligned with the traversal direction. Each joint's
-    parent link must compare equal to the corresponding link in `GetChain`.
+    """Each joint's parent link must compare equal (by name) to the
+    corresponding link in :meth:`KinBody.GetChain`. Solvers rely on this
+    equality to align joint orientation with traversal direction when
+    reasoning about which joint connects which two links.
     """
     kb = build_kinbody([_spec(), _spec(), _spec()])
     chainlinks = kb.GetChain("base_link", "ee_link", returnjoints=False)
@@ -127,8 +127,8 @@ def test_joint_parent_link_equality_drives_chain_orientation() -> None:
 
 
 def test_joint_transform_flat_is_row_major_16() -> None:
-    """`IKFastSolver.GetMatrixFromNumpy` does `[x for x in T.flat]` expecting
-    16 row-major scalars.
+    """A 4x4 transform's ``T.flat`` iterator yields 16 row-major scalars,
+    the layout solvers expect when serialising / extracting matrix entries.
     """
     kb = build_kinbody([_spec()])
     j = kb.joints[0]

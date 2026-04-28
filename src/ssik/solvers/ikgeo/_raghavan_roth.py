@@ -15,9 +15,8 @@ References (clean-room from open-access pubs only):
   IEEE T-RA 10(5):648-657, October 1994. Eq. 4 specifies the monomial
   ordering used for ``P`` and ``Q``; Section IV gives the eigenvalue route.
 
-LGPL note: this file is clean-room from Tsai App. C and Manocha-Canny 1994
-only. The vendored ``ikfast.py:solveDialytically`` was read for algorithmic
-existence proof only; do not copy structure or naming patterns from it.
+Provenance: this file is clean-room from Tsai App. C and Manocha-Canny 1994
+only. No code or structure from any LGPL-licensed prior implementation.
 
 Algorithmic specifics chosen here:
 

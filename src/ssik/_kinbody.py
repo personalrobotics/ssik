@@ -1,23 +1,28 @@
-"""Minimal duck-typed kinbody for the vendored IKFast solver.
+"""Linear kinematic chain (POE-form) consumed by every ssik solver.
 
-The upstream `ikfast.py` solver was written against OpenRAVE's `KinBody` API.
-This module provides *exactly* the subset of that API that the solver actually
-calls, nothing more. The surface was established by auditing every call site
-in `ssik/_vendor/ikfast.py`; see the issue #5 for the catalog.
+A :class:`KinBody` is a flat list of :class:`Joint` objects bracketed by
+:class:`Link` objects. Each joint carries the per-joint POE factorisation:
 
-Input format is a flat list of :class:`JointSpec` (one per joint). For each
-joint the spec gives:
-
-* ``parent_link_T`` — 4x4 rigid transform from the parent link's frame to the
-  joint's frame.
-* ``axis`` — unit 3-vector in the joint frame (post-``parent_link_T``).
+* ``T_left`` — 4x4 rigid transform from the parent link's frame to the
+  joint frame.
+* ``axis`` — unit 3-vector in the joint frame (post-``T_left``).
+* ``T_right`` — 4x4 rigid transform from the joint frame to the child
+  link's frame (typically identity except on the last joint, where it
+  carries any tool offset).
 * ``joint_type`` — ``"revolute"`` or ``"prismatic"``.
 
-The factory :func:`build_kinbody` assembles a linear chain of ``N + 1`` links
-bracketing the ``N`` joints and returns a :class:`KinBody` ready to hand to
-:class:`ssik._vendor.ikfast.IKFastSolver`.
+The forward kinematics for joint ``i`` is
+``T_left @ R_axis(joint.axis, q) @ T_right`` for revolute, with the
+analogous translation for prismatic.
 
-This module is private. The public API (``Manipulator``) will wrap it; see #12.
+Input is a flat list of :class:`JointSpec` (one per joint) passed to
+:func:`build_kinbody`, which assembles ``N + 1`` links bracketing the
+``N`` joints and returns a :class:`KinBody`. URDF and MJCF loaders
+build the spec list; users can also build it by hand for prototype
+geometries.
+
+This module is private. The public solver entry points
+(``ikgeo.general_6r.solve``, etc.) accept :class:`KinBody` directly.
 """
 
 from __future__ import annotations
@@ -58,7 +63,8 @@ class Link:
     """Rigid body in the kinematic chain.
 
     Equality is by name so that ``joint.GetHierarchyParentLink() == chainlinks[i]``
-    (see ikfast.py:1650) works across object identities.
+    works across object identities. (Solvers compare links by name when
+    reasoning about which joint connects which links in a topology.)
     """
 
     name: str
