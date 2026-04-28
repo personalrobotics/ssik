@@ -48,6 +48,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.subproblems._rotation import _cross3, _dot3
 
 __all__ = ["solve"]
 
@@ -70,11 +71,11 @@ def solve(
         ``k`` fallback.
     :returns: ``(solutions, is_ls)``.
     """
-    hp = float(np.dot(h, p))
-    kp = float(np.dot(k, p))
-    hk = float(np.dot(h, k))
+    hp = _dot3(h, p)
+    kp = _dot3(k, p)
+    hk = _dot3(h, k)
     coef_a = hp - kp * hk
-    coef_b = float(np.dot(h, np.cross(k, p)))
+    coef_b = _dot3(h, _cross3(k, p))
     coef_c = kp * hk
     r_sq = coef_a * coef_a + coef_b * coef_b
 

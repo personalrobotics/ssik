@@ -30,6 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.subproblems._rotation import _cross3, _dot3
 
 __all__ = ["solve"]
 
@@ -51,14 +52,14 @@ def solve(
         radians and ``is_ls`` is ``True`` when the exact feasibility
         conditions do not hold (so ``theta`` is the LS optimum).
     """
-    kxp = np.cross(k, p)
-    kp = float(np.dot(k, p))
-    kq = float(np.dot(k, q))
-    theta = float(np.arctan2(np.dot(kxp, q), np.dot(p, q) - kp * kq))
+    kxp = _cross3(k, p)
+    kp = _dot3(k, p)
+    kq = _dot3(k, q)
+    theta = float(np.arctan2(_dot3(kxp, q), _dot3(p, q) - kp * kq))
 
     # Feasibility: |p_perp| = |q_perp| and k.p = k.q.
-    p_perp_sq = float(np.dot(p, p)) - kp * kp
-    q_perp_sq = float(np.dot(q, q)) - kq * kq
+    p_perp_sq = _dot3(p, p) - kp * kp
+    q_perp_sq = _dot3(q, q) - kq * kq
     tol = policy.subproblem_feasibility
     is_ls = abs(p_perp_sq - q_perp_sq) > tol or abs(kp - kq) > tol
     return theta, is_ls

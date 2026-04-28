@@ -42,7 +42,7 @@ from ssik.subproblems._aux import (
     solve_lower_triangular_system_2x2,
     solve_two_ellipse_numeric,
 )
-from ssik.subproblems._rotation import rotate
+from ssik.subproblems._rotation import _cross3, _dot3, rotate
 from ssik.subproblems._validate import validate_vec3_iterable
 
 __all__ = ["solve"]
@@ -78,7 +78,7 @@ def _all_p_collinear_with_k(
     on the rank check of the stacked QR diagonals and on post-verification.
     """
     for k_i, p_i in zip(k, p, strict=True):
-        p_perp_sq = float(np.dot(p_i, p_i)) - float(np.dot(k_i, p_i)) ** 2
+        p_perp_sq = _dot3(p_i, p_i) - _dot3(k_i, p_i) ** 2
         if p_perp_sq >= deg_tol:
             return False
     return True
@@ -93,8 +93,8 @@ def _residual(
     d1: float,
     d2: float,
 ) -> float:
-    lhs1 = float(h[0] @ rotate(k[0], theta1, p[0])) + float(h[1] @ rotate(k[1], theta2, p[1]))
-    lhs2 = float(h[2] @ rotate(k[2], theta1, p[2])) + float(h[3] @ rotate(k[3], theta2, p[3]))
+    lhs1 = _dot3(h[0], rotate(k[0], theta1, p[0])) + _dot3(h[1], rotate(k[1], theta2, p[1]))
+    lhs2 = _dot3(h[2], rotate(k[2], theta1, p[2])) + _dot3(h[3], rotate(k[3], theta2, p[3]))
     return max(abs(lhs1 - d1), abs(lhs2 - d2))
 
 
@@ -131,8 +131,8 @@ def solve(
 
     a_cols = []
     for idx in range(4):
-        kxp = np.cross(k[idx], p[idx])
-        a_cols.append(np.column_stack([kxp, -np.cross(k[idx], kxp)]))
+        kxp = _cross3(k[idx], p[idx])
+        a_cols.append(np.column_stack([kxp, -_cross3(k[idx], kxp)]))
 
     h1_a1 = h[0] @ a_cols[0]
     h2_a2 = h[1] @ a_cols[1]
@@ -149,8 +149,8 @@ def solve(
 
     b = np.array(
         [
-            d1 - float(h[0] @ k[0]) * float(k[0] @ p[0]) - float(h[1] @ k[1]) * float(k[1] @ p[1]),
-            d2 - float(h[2] @ k[2]) * float(k[2] @ p[2]) - float(h[3] @ k[3]) * float(k[3] @ p[3]),
+            d1 - _dot3(h[0], k[0]) * _dot3(k[0], p[0]) - _dot3(h[1], k[1]) * _dot3(k[1], p[1]),
+            d2 - _dot3(h[2], k[2]) * _dot3(k[2], p[2]) - _dot3(h[3], k[3]) * _dot3(k[3], p[3]),
         ],
         dtype=np.float64,
     )
@@ -254,23 +254,23 @@ def _refine_sp6(
 
         f = np.array(
             [
-                float(h[0] @ r0) + float(h[1] @ r1) - d1,
-                float(h[2] @ r2) + float(h[3] @ r3) - d2,
+                _dot3(h[0], r0) + _dot3(h[1], r1) - d1,
+                _dot3(h[2], r2) + _dot3(h[3], r3) - d2,
             ],
             dtype=np.float64,
         )
 
         # Partials. dF_i/dt_j uses chain rule: Rot(k, t) rotates `p`, so
         # the angle derivative is k x (Rot(k, t) @ p).
-        d_dt1_r0 = np.cross(k[0], r0)
-        d_dt2_r1 = np.cross(k[1], r1)
-        d_dt1_r2 = np.cross(k[2], r2)
-        d_dt2_r3 = np.cross(k[3], r3)
+        d_dt1_r0 = _cross3(k[0], r0)
+        d_dt2_r1 = _cross3(k[1], r1)
+        d_dt1_r2 = _cross3(k[2], r2)
+        d_dt2_r3 = _cross3(k[3], r3)
 
         j_mat_2x2 = np.array(
             [
-                [float(h[0] @ d_dt1_r0), float(h[1] @ d_dt2_r1)],
-                [float(h[2] @ d_dt1_r2), float(h[3] @ d_dt2_r3)],
+                [_dot3(h[0], d_dt1_r0), _dot3(h[1], d_dt2_r1)],
+                [_dot3(h[2], d_dt1_r2), _dot3(h[3], d_dt2_r3)],
             ],
             dtype=np.float64,
         )
