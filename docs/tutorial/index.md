@@ -33,4 +33,6 @@ This tutorial walks the math step by step, names every robustness trick we neede
 
 ## Status
 
-Chapters 1, 4, 5 are complete. Chapters 2, 3, 6–10 are scaffolded outlines being filled in alongside the public-API stabilisation. See [#87](https://github.com/siddhss5/ikfastpy/issues/87) for the rewrite tracking issue.
+All ten chapters are written. Updates land alongside the library's evolution — when specialist 7R solvers (GeoFIK, Stereographic SEW) ship, the tutorial gets a new specialist chapter between 6 and 7; when the Rust runtime ships, Chapter 9's performance numbers update. The math (Chapter 4), conditioning theory (Chapter 5), and bulletproof discipline (Chapter 8) are the load-bearing material and don't depend on which algorithms ship next.
+
+Tracking issue: [#87](https://github.com/siddhss5/ikfastpy/issues/87).
