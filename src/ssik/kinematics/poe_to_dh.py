@@ -50,7 +50,7 @@ class DhWithOffset:
     solver, and reversing the theta_offset on returned q values.
     """
 
-    __slots__ = ("alpha", "a", "d", "theta_offset", "t_pre", "t_post")
+    __slots__ = ("a", "alpha", "d", "t_post", "t_pre", "theta_offset")
 
     def __init__(
         self,
@@ -73,7 +73,7 @@ class DhWithOffset:
                 f"a={self.a.shape}, d={self.d.shape}, theta_offset={self.theta_offset.shape}"
             )
         if self.t_pre.shape != (4, 4) or self.t_post.shape != (4, 4):
-            raise ValueError(f"t_pre, t_post must be 4x4")
+            raise ValueError("t_pre, t_post must be 4x4")
 
     def to_dh_tuple(self) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
         return (self.alpha.copy(), self.a.copy(), self.d.copy())
@@ -94,7 +94,7 @@ def _rot_axis(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
     )
 
 
-def _kinbody_world_axes_origins(kb: KinBody) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+def _kinbody_world_axes_origins(kb: KinBody) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:  # noqa: E501
     """Joint axes (unit) and origins in world frame at q=0, plus T_home (= POE FK at q=0)."""
     joints = kb.joints
     n = len(joints)
@@ -135,7 +135,7 @@ def _line_line_perpendicular(
     return p1 + t1 * d1, p2 + t2 * d2, False
 
 
-def _signed_angle(v1: NDArray[np.float64], v2: NDArray[np.float64], normal: NDArray[np.float64]) -> float:
+def _signed_angle(v1: NDArray[np.float64], v2: NDArray[np.float64], normal: NDArray[np.float64]) -> float:  # noqa: E501
     v1 = v1 / np.linalg.norm(v1)
     v2 = v2 / np.linalg.norm(v2)
     cos_a = float(np.clip(np.dot(v1, v2), -1.0, 1.0))
@@ -211,7 +211,7 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
             else:
                 x_axes.append(diff / diff_norm)
         else:
-            # Skew/intersecting: x_i = (z_{i-1} x z_i) normalized, oriented from foot_prev to foot_curr.
+            # Skew/intersecting: x_i = (z_{i-1} x z_i) normalized, oriented from foot_prev to foot_curr.  # noqa: E501
             cross = np.cross(z_prev, z_curr)
             cross_norm = float(np.linalg.norm(cross))
             x_dir = cross / cross_norm

@@ -25,7 +25,7 @@ import numpy as np
 
 print = functools.partial(print, flush=True)
 
-from ssik.solvers.ikgeo._raghavan_roth import (
+from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
     _cached_best_leftvar,
     _fk_dh,
     _newton_refine,
@@ -42,7 +42,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (
 def _dh_matrix(theta, alpha, a, d):
     ct, st = np.cos(theta), np.sin(theta)
     ca, sa = np.cos(alpha), np.sin(alpha)
-    return np.array([[ct, -st*ca, st*sa, a*ct], [st, ct*ca, -ct*sa, a*st], [0., sa, ca, d], [0., 0., 0., 1.]])
+    return np.array([[ct, -st*ca, st*sa, a*ct], [st, ct*ca, -ct*sa, a*st], [0., sa, ca, d], [0., 0., 0., 1.]])  # noqa: E501
 
 
 def _fk(q, alpha, a, d):
@@ -108,7 +108,7 @@ def main() -> None:
         t_bs = 0.0
         t_fk = 0.0
         t_lm = 0.0
-        for r, ev in zip(roots, eigvecs):
+        for r, ev in zip(roots, eigvecs, strict=False):
             t = time.perf_counter()
             q_cand = back_substitute(r, ev, p_sin, p_cos, p_one, q_mat, dh, T_target, metadata=meta)
             t_bs += time.perf_counter() - t
@@ -129,7 +129,7 @@ def main() -> None:
         stage_times["total"].append(time.perf_counter() - t_total_start)
 
     # Report
-    print(f"\n{'stage':<26} {'min ms':>9} {'median ms':>11} {'mean ms':>11} {'p95 ms':>9} {'max ms':>9}")
+    print(f"\n{'stage':<26} {'min ms':>9} {'median ms':>11} {'mean ms':>11} {'p95 ms':>9} {'max ms':>9}")  # noqa: E501
     print("-" * 80)
     for name, ts in stage_times.items():
         ts_arr = np.array(ts) * 1000

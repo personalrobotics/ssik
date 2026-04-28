@@ -33,7 +33,7 @@ from numpy.typing import NDArray
 
 from ssik._kinbody import JointSpec
 
-__all__ = ["jaco2_specs", "JACO2_KEYFRAMES"]
+__all__ = ["JACO2_KEYFRAMES", "jaco2_specs"]
 
 
 def _quat_wxyz_to_rot(q: tuple[float, float, float, float]) -> NDArray[np.float64]:
@@ -51,7 +51,7 @@ def _quat_wxyz_to_rot(q: tuple[float, float, float, float]) -> NDArray[np.float6
     )
 
 
-def _xform(pos: tuple[float, float, float], quat: tuple[float, float, float, float]) -> NDArray[np.float64]:
+def _xform(pos: tuple[float, float, float], quat: tuple[float, float, float, float]) -> NDArray[np.float64]:  # noqa: E501
     T = np.eye(4, dtype=np.float64)
     T[:3, :3] = _quat_wxyz_to_rot(quat)
     T[:3, 3] = pos
@@ -59,7 +59,7 @@ def _xform(pos: tuple[float, float, float], quat: tuple[float, float, float, flo
 
 
 # Per-joint (pos, quat_wxyz) from the MJCF, in chain order joint_1..joint_6.
-_JACO2_JOINT_FRAMES: tuple[tuple[tuple[float, float, float], tuple[float, float, float, float]], ...] = (
+_JACO2_JOINT_FRAMES: tuple[tuple[tuple[float, float, float], tuple[float, float, float, float]], ...] = (  # noqa: E501
     ((0.0, 0.0, 0.15675),         (0.0, 0.0, 1.0, 0.0)),
     ((0.0, 0.0016, -0.11875),     (0.0, 0.0, -0.707107, 0.707107)),
     ((0.0, -0.41, 0.0),           (0.0, 0.0, 1.0, 0.0)),

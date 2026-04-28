@@ -42,7 +42,7 @@ def _dh_matrix(theta: float, alpha: float, a: float, d: float) -> NDArray[np.flo
     )
 
 
-def _fk_dh(q: NDArray[np.float64], alpha: NDArray[np.float64], a: NDArray[np.float64], d: NDArray[np.float64]) -> NDArray[np.float64]:
+def _fk_dh(q: NDArray[np.float64], alpha: NDArray[np.float64], a: NDArray[np.float64], d: NDArray[np.float64]) -> NDArray[np.float64]:  # noqa: E501
     """Forward kinematics for a standard-DH 6R chain."""
     T = np.eye(4)
     for i in range(6):
@@ -254,7 +254,7 @@ def test_weierstrass_eliminate_random_dh(seed: int) -> None:
     e_eff = e_quad * x2 * x2 + e_lin * x2 + e_const
     residual = e_eff @ _v_left_x(q_star[3], q_star[4])
     assert np.allclose(residual, 0.0, atol=1e-9), (
-        f"E(x_2) @ v_left_x != 0 at seeded q* (seed={seed}); ||residual||={np.linalg.norm(residual):.3e}"
+        f"E(x_2) @ v_left_x != 0 at seeded q* (seed={seed}); ||residual||={np.linalg.norm(residual):.3e}"  # noqa: E501
     )
 
 
@@ -335,7 +335,7 @@ def test_m_matrix_random_dh(seed: int) -> None:
     m_eff = m_quad * x2 * x2 + m_lin * x2 + m_const
     residual = m_eff @ _v_12(q_star[3], q_star[4])
     assert np.allclose(residual, 0.0, atol=1e-8), (
-        f"M(x_2) @ v_12 != 0 at seeded q* (seed={seed}); ||residual||={np.linalg.norm(residual):.3e}"
+        f"M(x_2) @ v_12 != 0 at seeded q* (seed={seed}); ||residual||={np.linalg.norm(residual):.3e}"  # noqa: E501
     )
 
 

@@ -24,10 +24,10 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+from fixtures.jaco2 import JACO2_KEYFRAMES, jaco2_specs
 from ssik._kinbody import KinBody, build_kinbody
 from ssik.kinematics.poe_to_dh import poe_to_dh
 from ssik.solvers.ikgeo import general_6r
-from fixtures.jaco2 import JACO2_KEYFRAMES, jaco2_specs
 
 
 def _rot_axis(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:

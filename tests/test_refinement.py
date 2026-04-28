@@ -18,6 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from fixtures.ur5 import ur5_specs
 from ssik._kinbody import build_kinbody
 from ssik.core.solution import Solution
 from ssik.refinement import (
@@ -27,7 +28,6 @@ from ssik.refinement import (
     se3_log_residual,
     verify_candidates,
 )
-from fixtures.ur5 import ur5_specs
 
 
 def _rot_axis(axis: np.ndarray, angle: float) -> np.ndarray:
@@ -42,13 +42,14 @@ def _rot_axis(axis: np.ndarray, angle: float) -> np.ndarray:
             [z*x*oc - y*s, z*y*oc + x*s, c+z*z*oc],
         ]
     )
-    T = np.eye(4); T[:3, :3] = R
+    T = np.eye(4)
+    T[:3, :3] = R
     return T
 
 
 def _fk_poe(kb, q):
     T = np.eye(4)
-    for j, qi in zip(kb.joints, q):
+    for j, qi in zip(kb.joints, q, strict=True):
         T = T @ j.T_left @ _rot_axis(j.axis, float(qi)) @ j.T_right
     return T
 
@@ -64,7 +65,8 @@ def test_se3_log_residual_identity_is_zero() -> None:
 
 
 def test_se3_log_residual_pure_translation() -> None:
-    T = np.eye(4); T[:3, 3] = [0.1, -0.2, 0.3]
+    T = np.eye(4)
+    T[:3, 3] = [0.1, -0.2, 0.3]
     r = se3_log_residual(T)
     assert np.allclose(r[:3], [0.1, -0.2, 0.3], atol=1e-15)
     assert np.allclose(r[3:], 0.0, atol=1e-15)
@@ -104,8 +106,8 @@ def test_lm_refine_converges_on_perturbed_seed(ur5_kb) -> None:
     T_target = _fk_poe(ur5_kb, q_true)
 
     q_seed = q_true + rng.uniform(-0.15, 0.15, size=6)
-    fk = lambda q: _fk_poe(ur5_kb, q)
-    jac = lambda q: kinbody_jacobian(ur5_kb, q)
+    fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
+    jac = lambda q: kinbody_jacobian(ur5_kb, q)  # noqa: E731
 
     refined = lm_refine(q_seed, fk, T_target, fk_atol=1e-12, max_iters=20, jacobian_fn=jac)
     assert refined is not None
@@ -122,11 +124,11 @@ def test_lm_refine_with_numerical_jacobian(ur5_kb) -> None:
     T_target = _fk_poe(ur5_kb, q_true)
 
     q_seed = q_true + rng.uniform(-0.1, 0.1, size=6)
-    fk = lambda q: _fk_poe(ur5_kb, q)
+    fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
 
     refined = lm_refine(q_seed, fk, T_target, fk_atol=1e-9, max_iters=30, jacobian_fn=None)
     assert refined is not None
-    q_ref, resid, _ = refined
+    _q_ref, resid, _ = refined
     assert resid < 1e-9
 
 
@@ -137,8 +139,8 @@ def test_lm_refine_returns_none_on_hopeless_seed(ur5_kb) -> None:
     T_target = _fk_poe(ur5_kb, q_true)
 
     q_seed = q_true + np.array([2.5, -2.5, 2.0, 1.5, -1.5, 1.0])  # far away
-    fk = lambda q: _fk_poe(ur5_kb, q)
-    jac = lambda q: kinbody_jacobian(ur5_kb, q)
+    fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
+    jac = lambda q: kinbody_jacobian(ur5_kb, q)  # noqa: E731
 
     refined = lm_refine(q_seed, fk, T_target, fk_atol=1e-12, max_iters=5, jacobian_fn=jac)
     # Either stays None (didn't converge) OR lands on a different IK branch.
@@ -163,7 +165,8 @@ def test_kinbody_jacobian_angular_block_matches_world_axes(ur5_kb) -> None:
     rng = np.random.default_rng(0)
     q = rng.uniform(-1.0, 1.0, size=6)
     j_kb = kinbody_jacobian(ur5_kb, q)
-    j_num = numerical_jacobian(q, lambda x: _fk_poe(ur5_kb, x))
+    fk_for_jac = lambda x: _fk_poe(ur5_kb, x)  # noqa: E731
+    j_num = numerical_jacobian(q, fk_for_jac)
     # Angular block must agree to ~1e-5 (central-diff precision floor).
     assert np.allclose(j_kb[3:], j_num[3:], atol=1e-5)
     # Both Jacobians must be full-rank at a generic config (necessary
@@ -182,7 +185,7 @@ def test_verify_candidates_passes_through_exact_match(ur5_kb) -> None:
     rng = np.random.default_rng(0)
     q_true = rng.uniform(-1.0, 1.0, size=6)
     T_target = _fk_poe(ur5_kb, q_true)
-    fk = lambda q: _fk_poe(ur5_kb, q)
+    fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
     sols = verify_candidates(
         [q_true], fk_fn=fk, t_target=T_target,
         fk_atol=1e-9, solver_name="test",
@@ -201,7 +204,7 @@ def test_verify_candidates_drops_misses_when_refinement_off(ur5_kb) -> None:
     q_true = rng.uniform(-1.0, 1.0, size=6)
     T_target = _fk_poe(ur5_kb, q_true)
     bad = q_true + 0.1
-    fk = lambda q: _fk_poe(ur5_kb, q)
+    fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
     sols = verify_candidates(
         [bad], fk_fn=fk, t_target=T_target,
         fk_atol=1e-9, solver_name="test", allow_refinement=False,
@@ -214,8 +217,8 @@ def test_verify_candidates_polishes_misses_when_refinement_on(ur5_kb) -> None:
     q_true = rng.uniform(-1.0, 1.0, size=6)
     T_target = _fk_poe(ur5_kb, q_true)
     seed = q_true + 0.1
-    fk = lambda q: _fk_poe(ur5_kb, q)
-    jac = lambda q: kinbody_jacobian(ur5_kb, q)
+    fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
+    jac = lambda q: kinbody_jacobian(ur5_kb, q)  # noqa: E731
     sols = verify_candidates(
         [seed], fk_fn=fk, jacobian_fn=jac, t_target=T_target,
         fk_atol=1e-10, solver_name="test", allow_refinement=True, refinement_max_iters=15,
@@ -232,7 +235,7 @@ def test_verify_candidates_dedup_keeps_lower_residual(ur5_kb) -> None:
     q_true = rng.uniform(-1.0, 1.0, size=6)
     T_target = _fk_poe(ur5_kb, q_true)
     perturbed = q_true + 1e-7
-    fk = lambda q: _fk_poe(ur5_kb, q)
+    fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
     # Both candidates dedup-collide; verify the lower-residual one wins.
     sols = verify_candidates(
         [perturbed, q_true], fk_fn=fk, t_target=T_target,

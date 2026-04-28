@@ -19,16 +19,13 @@ distribution at each stage to identify root causes of failure.
 from __future__ import annotations
 
 import functools
-import time
 from collections import Counter
 
 import numpy as np
-from numpy.typing import NDArray
 
 print = functools.partial(print, flush=True)
 
-from ssik.solvers.ikgeo._raghavan_roth import (
-    _fk_dh,
+from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
     _newton_refine,
     back_substitute,
     build_m_matrix,
@@ -43,7 +40,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (
 def _dh_matrix(theta, alpha, a, d):
     ct, st = np.cos(theta), np.sin(theta)
     ca, sa = np.cos(alpha), np.sin(alpha)
-    return np.array([[ct, -st*ca, st*sa, a*ct], [st, ct*ca, -ct*sa, a*st], [0., sa, ca, d], [0., 0., 0., 1.]])
+    return np.array([[ct, -st*ca, st*sa, a*ct], [st, ct*ca, -ct*sa, a*st], [0., sa, ca, d], [0., 0., 0., 1.]])  # noqa: E501
 
 
 def _fk(q, alpha, a, d):
@@ -53,7 +50,7 @@ def _fk(q, alpha, a, d):
     return T
 
 
-def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 1e-6, q_range: float = 1.0) -> None:
+def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 1e-6, q_range: float = 1.0) -> None:  # noqa: E501
     """Run diagnostic on `n_poses` random poses for a given arm."""
     print(f"\n{'='*78}")
     print(f"ARM: {name}")
@@ -66,7 +63,7 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
     rng = np.random.default_rng(0)
 
     # AE-3 leftvar selection
-    print(f"\n--- AE-3 leftvar selection ---")
+    print("\n--- AE-3 leftvar selection ---")
     best_lj, conds = pick_best_leftvar(dh)
     print(f"  best leftvar: q_{best_lj}")
     for lj in sorted(conds.keys()):
@@ -96,7 +93,7 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
     n_roots_per_pose: list[int] = []
 
     print(f"\n--- {n_poses} random poses (q* in [-{q_range}, {q_range}]) ---")
-    for pose_idx in range(n_poses):
+    for _pose_idx in range(n_poses):
         q_star = rng.uniform(-q_range, q_range, size=6)
         T_target = _fk(q_star, alpha, a, d)
 
@@ -127,14 +124,14 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
         n_roots_per_pose.append(len(roots))
 
         pose_succeeded = False
-        for r, ev in zip(roots, eigvecs):
+        for r, ev in zip(roots, eigvecs, strict=False):
             q_cand = back_substitute(r, ev, p_sin, p_cos, p_one, q_mat, dh, T_target, metadata=meta)
             if q_cand is None:
                 candidate_class_counts["back_sub_none"] += 1
                 fk_err_by_class["back_sub_none"].append(np.nan)
                 continue
             fk_err_alg = float(np.linalg.norm(_fk(q_cand, alpha, a, d) - T_target))
-            qdiff_seed = float(max(abs((q_cand[i] - q_star[i] + np.pi) % (2*np.pi) - np.pi) for i in range(6)))
+            qdiff_seed = float(max(abs((q_cand[i] - q_star[i] + np.pi) % (2*np.pi) - np.pi) for i in range(6)))  # noqa: E501
             if fk_err_alg <= fk_atol:
                 candidate_class_counts["algebraic_pass"] += 1
                 fk_err_by_class["algebraic_pass"].append(fk_err_alg)
@@ -174,8 +171,8 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
     print(f"  pose-level: {n_passed}/{n_poses} succeeded ({100*n_passed/n_poses:.0f}%)")
     cond_arr = np.array(cond_at_solve)
     print(f"  cond(A=m_quad)         median={np.median(cond_arr):.3e}, max={cond_arr.max():.3e}")
-    print(f"  cond(B=m_lin)          median={np.median(cond_b_at_solve):.3e}, max={max(cond_b_at_solve):.3e}")
-    print(f"  cond(C=m_const)        median={np.median(cond_c_at_solve):.3e}, max={max(cond_c_at_solve):.3e}")
+    print(f"  cond(B=m_lin)          median={np.median(cond_b_at_solve):.3e}, max={max(cond_b_at_solve):.3e}")  # noqa: E501
+    print(f"  cond(C=m_const)        median={np.median(cond_c_at_solve):.3e}, max={max(cond_c_at_solve):.3e}")  # noqa: E501
     print(f"  ||A^-1 B|| (op-norm)   median={np.median(norm_ainvb):.3e}, max={max(norm_ainvb):.3e}")
     print(f"  ||A^-1 C|| (op-norm)   median={np.median(norm_ainvc):.3e}, max={max(norm_ainvc):.3e}")
     print(f"  cond(\u03a3 companion 24x24) median={np.median(cond_sigma_at_solve):.3e}, "
@@ -185,18 +182,18 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
           f"min={n_roots.min()}, max={n_roots.max()}")
     total_cands = sum(candidate_class_counts.values())
     print(f"  total candidates evaluated: {total_cands}")
-    for cls in ("algebraic_pass", "newton_pass", "back_sub_none", "newton_diverged", "newton_no_converge"):
+    for cls in ("algebraic_pass", "newton_pass", "back_sub_none", "newton_diverged", "newton_no_converge"):  # noqa: E501
         n = candidate_class_counts[cls]
         pct = 100 * n / total_cands if total_cands else 0
         line = f"    {cls:<22} {n:>5} ({pct:5.1f}%)"
-        if cls in fk_err_by_class and fk_err_by_class[cls]:
+        if fk_err_by_class.get(cls):
             errs = np.array([e for e in fk_err_by_class[cls] if not np.isnan(e)])
             if len(errs):
                 line += f"  fk_err: median={np.median(errs):.3e}, max={errs.max():.3e}"
-        if cls in seed_qdiff_by_class and seed_qdiff_by_class[cls]:
+        if seed_qdiff_by_class.get(cls):
             qd = np.array(seed_qdiff_by_class[cls])
             line += f"  |seed-q*|: median={np.median(qd):.3f}"
-        if cls in newton_iters_by_class and newton_iters_by_class[cls]:
+        if newton_iters_by_class.get(cls):
             ni = np.array(newton_iters_by_class[cls])
             line += f"  iters: median={int(np.median(ni))}, max={ni.max()}"
         print(line)

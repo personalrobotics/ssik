@@ -102,7 +102,7 @@ def _dh_matrix_sym(s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d: fl
     )
 
 
-def _dh_matrix_inv_sym(s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d: float) -> sp.Matrix:
+def _dh_matrix_inv_sym(s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d: float) -> sp.Matrix:  # noqa: E501
     """Closed-form A^{-1} for standard DH. Avoids sympy.inv()'s 1/(s^2+c^2) artifacts.
 
     Derivation: A = R_z T_z T_x R_x, so A^{-1} = R_x^T T_x^{-1} T_z^{-1} R_z^T.
@@ -126,7 +126,7 @@ def _dh_matrix_inv_sym(s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d
 # ---------------------------------------------------------------------------
 
 
-def _reduce_trig(expr: sp.Expr, s_syms: tuple[sp.Symbol, ...], c_syms: tuple[sp.Symbol, ...]) -> sp.Expr:
+def _reduce_trig(expr: sp.Expr, s_syms: tuple[sp.Symbol, ...], c_syms: tuple[sp.Symbol, ...]) -> sp.Expr:  # noqa: E501
     """Reduce ``expr`` modulo the trig ideal {s_i^2 + c_i^2 - 1 : i}.
 
     Sympy's ``sp.reduced`` does this canonically. We use it directly; no
@@ -190,7 +190,7 @@ def _derive_pq_for_arm(
     *,
     apply_so3: bool = False,
     linearity_joint: int = 2,
-) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:
+) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:  # noqa: E501
     """Derive 14-row Raghavan-Roth (P, Q) callables for a specific arm.
 
     DH params are numeric; T_target stays symbolic. Output: four callables
@@ -403,7 +403,7 @@ def _cached_derivation(
     d: tuple[float, ...],
     linearity_joint: int = 2,
     apply_so3: bool = False,
-) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:
+) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:  # noqa: E501
     return _derive_pq_for_arm(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
 
 
@@ -421,7 +421,7 @@ def build_pq(
     return_metadata: bool = False,
 ) -> (
     tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
-    | tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], dict[str, object]]
+    | tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], dict[str, object]]  # noqa: E501
 ):
     """Build the (factored) Raghavan-Roth elimination matrices.
 
@@ -442,7 +442,7 @@ def build_pq(
     """
     alpha, a, d = dh
     if alpha.shape != (6,) or a.shape != (6,) or d.shape != (6,):
-        raise ValueError(f"DH params must be length-6 arrays; got {alpha.shape}, {a.shape}, {d.shape}")
+        raise ValueError(f"DH params must be length-6 arrays; got {alpha.shape}, {a.shape}, {d.shape}")  # noqa: E501
     t = np.asarray(t_target, dtype=np.float64)
     if t.shape != (4, 4):
         raise ValueError(f"t_target must be 4x4; got {t.shape}")
@@ -690,7 +690,7 @@ def _equilibrate_pencil(
     a: NDArray[np.float64],
     b: NDArray[np.float64],
     c: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:  # noqa: E501
     """Row + column equilibrate ``(A, B, C)`` jointly for better-conditioned
     eigendecomposition. Issue #68 (AE-1).
 
@@ -767,7 +767,7 @@ def solve_x2_roots(
         the standard eigenvalue route.
     """
     if equilibrate:
-        a_eq, b_eq, c_eq, d_l, d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
+        a_eq, b_eq, c_eq, _d_l, d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
     else:
         a_eq, b_eq, c_eq = m_quad, m_lin, m_const
         d_r = np.ones(12)
@@ -881,7 +881,7 @@ def solve_x2_roots_mobius(
     # AE-1 (#68): equilibrate first, then check cond on the equilibrated
     # leading matrix. Often this reduces cond by 1-3 orders and lets us skip
     # the M\u00f6bius / generalized-eigenvalue fallbacks entirely.
-    a_eq, b_eq, c_eq, _, d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
+    a_eq, _b_eq, _c_eq, _, _d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
     cond_eq = float(np.linalg.cond(a_eq))
     if cond_eq <= cond_threshold:
         # Equilibration alone made the pencil tractable. Use the direct
@@ -1315,7 +1315,7 @@ def pick_best_leftvar(
         emit a warning -- arm is genuinely hard, AE-4 / LM polish needed.
     :returns: ``(best_linearity_joint, {linearity_joint: cond})``.
     """
-    alpha, a, d = dh
+    _alpha, _a, _d = dh
     if test_pose is None:
         # Build a generic non-trivial pose via FK at small joint angles.
         q_test = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])

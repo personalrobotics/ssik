@@ -22,24 +22,23 @@ lands.
 from __future__ import annotations
 
 import functools
-import sys
 import time
 
 print = functools.partial(print, flush=True)  # stream output as it happens
 
-import numpy as np
-from numpy.typing import NDArray
+import numpy as np  # noqa: E402
+from numpy.typing import NDArray  # noqa: E402
 
-from ssik.solvers.ikgeo._raghavan_roth import (
+from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
+    _derive_pq_for_arm,
+    _fk_dh,
+    _newton_refine,
     back_substitute,
     build_m_matrix,
     build_pq,
     eliminate_q0_q1,
     solve_x2_roots_mobius,
     weierstrass_eliminate_trig,
-    _newton_refine,
-    _fk_dh,
-    _derive_pq_for_arm,
 )
 
 
@@ -118,13 +117,12 @@ def main() -> None:
 
     # AE-1: log equilibrated cond
     from ssik.solvers.ikgeo._raghavan_roth import _equilibrate_pencil
-    a_eq, b_eq, c_eq, _, _ = _equilibrate_pencil(m_quad, m_lin, m_const)
+    a_eq, _b_eq, _c_eq, _, _ = _equilibrate_pencil(m_quad, m_lin, m_const)
     print(f"  cond(A_eq) [AE-1]   = {np.linalg.cond(a_eq):.3e}  "
           f"(\u00d7 {cond_a / np.linalg.cond(a_eq):.2e} reduction)")
 
     # AE-3 (#70): try alternative leftvar choices (linearity_joint = 0, 1, 2).
     # AE-4 (#71): also test SO(3) reduction on the best leftvar.
-    from ssik.solvers.ikgeo._raghavan_roth import _derive_pq_for_arm
 
     def _build_at_leftvar(linearity_joint: int, apply_so3: bool):
         fns = _derive_pq_for_arm(
@@ -150,7 +148,7 @@ def main() -> None:
             print(f"  build_pq(linearity={lj}): {time.time()-t0:5.1f}s")
         es, ec, eo = eliminate_q0_q1(ps, pc, po, qm)
         eq, el, ec_const = weierstrass_eliminate_trig(es, ec, eo)
-        mq, ml, mc = build_m_matrix(eq, el, ec_const)
+        mq, _ml, _mc = build_m_matrix(eq, el, ec_const)
         cond_lj = float(np.linalg.cond(mq))
         print(f"  linearity={lj}: cond(A) = {cond_lj:.3e}  "
               f"(vs baseline {cond_a:.3e}: \u00d7 {cond_a / cond_lj:.2e})")
@@ -166,12 +164,21 @@ def main() -> None:
         linearity_joint=1,
     )
     elapsed_q1 = time.time() - t0
-    print(f"solve_all_ik(linearity=1):   {elapsed_q1:6.2f}s  -> {len(sols_q1)} solutions, is_ls={is_ls_q1}")
+    print(
+        f"solve_all_ik(linearity=1):   {elapsed_q1:6.2f}s  -> "
+        f"{len(sols_q1)} solutions, is_ls={is_ls_q1}"
+    )
     if sols_q1:
         best_q1 = min(sols_q1, key=lambda s: _max_diff(s.q, q_star))
         print(f"  best |q-q*|: {_max_diff(best_q1.q, q_star):.3e}")
-        fk_errs_q1 = [float(np.linalg.norm(_fk_dh(s.q, (alpha, a, d)) - t_target)) for s in sols_q1]
-        print(f"  FK errors: max={max(fk_errs_q1):.3e}, all<1e-9: {all(e<1e-9 for e in fk_errs_q1)}")
+        fk_errs_q1 = [
+            float(np.linalg.norm(_fk_dh(s.q, (alpha, a, d)) - t_target))
+            for s in sols_q1
+        ]
+        print(
+            f"  FK errors: max={max(fk_errs_q1):.3e}, "
+            f"all<1e-9: {all(e<1e-9 for e in fk_errs_q1)}"
+        )
     print()
 
     # Stage 5: eigenvalue route
@@ -188,7 +195,7 @@ def main() -> None:
     # Stage 6: back-substitution + FK validation, no refinement
     t0 = time.time()
     candidates_alg = []
-    for r, ev in zip(roots, eigvecs):
+    for r, ev in zip(roots, eigvecs, strict=False):
         q_cand = back_substitute(r, ev, p_sin, p_cos, p_one, q_mat, (alpha, a, d), t_target)
         if q_cand is None:
             continue
@@ -205,7 +212,7 @@ def main() -> None:
     t0 = time.time()
     candidates_ref = []
     iters_per_cand = []
-    for r, ev in zip(roots, eigvecs):
+    for r, ev in zip(roots, eigvecs, strict=False):
         q_cand = back_substitute(r, ev, p_sin, p_cos, p_one, q_mat, (alpha, a, d), t_target)
         if q_cand is None:
             continue

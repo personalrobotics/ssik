@@ -85,8 +85,10 @@ def numerical_jacobian(
     j = np.zeros((6, n), dtype=np.float64)
     t_base = fk_fn(q)
     for i in range(n):
-        q_p = q.copy(); q_p[i] += eps
-        q_m = q.copy(); q_m[i] -= eps
+        q_p = q.copy()
+        q_p[i] += eps
+        q_m = q.copy()
+        q_m[i] -= eps
         # Central-difference the SE(3) log residual contribution per axis.
         r_p = se3_log_residual(fk_fn(q_p) @ np.linalg.inv(t_base))
         r_m = se3_log_residual(fk_fn(q_m) @ np.linalg.inv(t_base))
@@ -179,10 +181,7 @@ def lm_refine(
         norm = float(np.linalg.norm(r))
         if norm < fk_atol:
             return (q, norm, it)
-        if jacobian_fn is not None:
-            j_s = jacobian_fn(q)
-        else:
-            j_s = numerical_jacobian(q, fk_fn)
+        j_s = jacobian_fn(q) if jacobian_fn is not None else numerical_jacobian(q, fk_fn)
         try:
             dq = np.linalg.solve(j_s, r)
         except np.linalg.LinAlgError:

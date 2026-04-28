@@ -26,7 +26,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["Solution", "RefinementMode"]
+__all__ = ["RefinementMode", "Solution"]
 
 RefinementMode = Literal["none", "lm"]
 
