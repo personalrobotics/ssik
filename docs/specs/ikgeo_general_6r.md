@@ -18,8 +18,8 @@ References (open-access PDFs cached in `/tmp/rrk/`):
   reparameterization, eigenvector → (x₄, x₅), Newton refinement.
 
 Provenance: clean-room from Tsai App. C and Manocha–Canny 1994. The RR
-algorithm predates IKFast by 17 years and is in no way derivative of any
-GPL/LGPL implementation.
+algorithm predates IKFast by 17 years; ssik's implementation is original
+work, no source-code lineage from any prior implementation.
 
 ### Step 1 — DH normalization
 Input: POE-normalized `KinBody` with 6 revolute joints. Convert to standard DH

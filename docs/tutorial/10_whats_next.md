@@ -10,7 +10,7 @@ This chapter walks through what's *not* in ssik today, ranked by user impact. Ea
 
 The tier-2 RR solver in `ikgeo.general_6r` falls through to a generalised-eigenvalue route (scipy's `linalg.eig` on the matrix pencil $M_1 - x M_2$) when AE-1/3/4 + Möbius all fail. That generalised-eigenvalue route handles most singular-pencil cases. But there exist (rare) 6R configurations where every Möbius transform leaves the pencil singular and the generalised-eigenvalue route still fails. Husty–Pfurner is the universal escape hatch.
 
-Plan: lower registry priority than the tier-2 RR solver; auto-selected on fallback when RR raises `LinAlgError`. Estimated latency ~10 ms (degree-16 polynomial root-finding is cheap; the back-substitution is the cost). Clean-room implementation from the published paper, no LGPL dependency.
+Plan: lower registry priority than the tier-2 RR solver; auto-selected on fallback when RR raises `LinAlgError`. Estimated latency ~10 ms (degree-16 polynomial root-finding is cheap; the back-substitution is the cost). Clean-room implementation from the published paper.
 
 Status: not started. Tracking issue: see umbrella rebuild plan.
 
@@ -44,11 +44,9 @@ Status: not started. Tracked under Phase M of the rewrite plan and called out as
 
 ## Vendored ikfast retirement (Phase K)
 
-The `_legacy/` directory contains the LGPL-licensed vendored OpenRAVE IKFast tree from the abandoned port-and-patch attempt. No code currently imports from it; it exists only because removing it requires a coordinated PR (the legacy conformance tests, the cross-check fixtures, the deprecation shim).
+The vendored OpenRAVE IKFast tree was retired in [#84](https://github.com/siddhss5/ikfastpy/issues/84). No code currently imports from it; the cleanup deleted ~13,725 lines from the codebase, removed the legacy LGPL surface, and switched the project license to proprietary terms.
 
-Once the new pipeline has full conformance against the cases the vendored solver covered (Puma 560 in tier-0 — already proven via the cross-validation in [Chapter 8](08_bulletproof.md)), the legacy tree gets deleted. License hygiene only; doesn't affect runtime behaviour.
-
-Status: tracked in [#84](https://github.com/siddhss5/ikfastpy/issues/84). Low-risk, scoped, ready to ship whenever the queue clears.
+The remaining items in this section are tracked elsewhere — there's no longer a Phase-K to call out.
 
 ## IK modes beyond Transform6D
 
