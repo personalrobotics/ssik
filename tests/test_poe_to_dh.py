@@ -26,9 +26,9 @@ def _rot_axis(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
     oc = 1.0 - c
     return np.array(
         [
-            [c + x*x*oc, x*y*oc - z*s, x*z*oc + y*s, 0],
-            [y*x*oc + z*s, c + y*y*oc, y*z*oc - x*s, 0],
-            [z*x*oc - y*s, z*y*oc + x*s, c + z*z*oc, 0],
+            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s, 0],
+            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s, 0],
+            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc, 0],
             [0, 0, 0, 1],
         ],
         dtype=np.float64,
@@ -44,7 +44,9 @@ def _fk_poe(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def _fk_dh(
-    alpha: NDArray[np.float64], a: NDArray[np.float64], d: NDArray[np.float64],
+    alpha: NDArray[np.float64],
+    a: NDArray[np.float64],
+    d: NDArray[np.float64],
     theta: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     """Spong distal-DH FK."""
@@ -54,8 +56,8 @@ def _fk_dh(
         ca, sa = float(np.cos(alpha[i])), float(np.sin(alpha[i]))
         A_i = np.array(
             [
-                [c, -s*ca, s*sa, a[i]*c],
-                [s, c*ca, -c*sa, a[i]*s],
+                [c, -s * ca, s * sa, a[i] * c],
+                [s, c * ca, -c * sa, a[i] * s],
                 [0, sa, ca, d[i]],
                 [0, 0, 0, 1],
             ],
@@ -75,7 +77,7 @@ def test_poe_to_dh_ur5_alpha_magnitudes(ur5_kb: KinBody) -> None:
     magnitudes (sign may differ due to perpendicular-direction convention at
     intersecting axes; what matters is FK round-trip, validated separately)."""
     dh = poe_to_dh(ur5_kb)
-    expected_alpha_abs = np.array([np.pi/2, 0.0, 0.0, np.pi/2, np.pi/2, 0.0])
+    expected_alpha_abs = np.array([np.pi / 2, 0.0, 0.0, np.pi / 2, np.pi / 2, 0.0])
     np.testing.assert_allclose(np.abs(dh.alpha), expected_alpha_abs, atol=1e-9)
 
 

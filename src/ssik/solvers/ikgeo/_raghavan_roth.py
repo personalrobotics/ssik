@@ -102,7 +102,9 @@ def _dh_matrix_sym(s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d: fl
     )
 
 
-def _dh_matrix_inv_sym(s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d: float) -> sp.Matrix:  # noqa: E501
+def _dh_matrix_inv_sym(
+    s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d: float
+) -> sp.Matrix:
     """Closed-form A^{-1} for standard DH. Avoids sympy.inv()'s 1/(s^2+c^2) artifacts.
 
     Derivation: A = R_z T_z T_x R_x, so A^{-1} = R_x^T T_x^{-1} T_z^{-1} R_z^T.
@@ -126,7 +128,9 @@ def _dh_matrix_inv_sym(s_q: sp.Symbol, c_q: sp.Symbol, alpha: float, a: float, d
 # ---------------------------------------------------------------------------
 
 
-def _reduce_trig(expr: sp.Expr, s_syms: tuple[sp.Symbol, ...], c_syms: tuple[sp.Symbol, ...]) -> sp.Expr:  # noqa: E501
+def _reduce_trig(
+    expr: sp.Expr, s_syms: tuple[sp.Symbol, ...], c_syms: tuple[sp.Symbol, ...]
+) -> sp.Expr:
     """Reduce ``expr`` modulo the trig ideal {s_i^2 + c_i^2 - 1 : i}.
 
     Sympy's ``sp.reduced`` does this canonically. We use it directly; no
@@ -190,7 +194,13 @@ def _derive_pq_for_arm(
     *,
     apply_so3: bool = False,
     linearity_joint: int = 2,
-) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:  # noqa: E501
+) -> tuple[
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    dict[str, object],
+]:
     """Derive 14-row Raghavan-Roth (P, Q) callables for a specific arm.
 
     DH params are numeric; T_target stays symbolic. Output: four callables
@@ -403,7 +413,13 @@ def _cached_derivation(
     d: tuple[float, ...],
     linearity_joint: int = 2,
     apply_so3: bool = False,
-) -> tuple[Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], Callable[..., NDArray[np.float64]], dict[str, object]]:  # noqa: E501
+) -> tuple[
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    dict[str, object],
+]:
     return _derive_pq_for_arm(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
 
 
@@ -421,7 +437,13 @@ def build_pq(
     return_metadata: bool = False,
 ) -> (
     tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
-    | tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], dict[str, object]]  # noqa: E501
+    | tuple[
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        NDArray[np.float64],
+        dict[str, object],
+    ]
 ):
     """Build the (factored) Raghavan-Roth elimination matrices.
 
@@ -442,7 +464,9 @@ def build_pq(
     """
     alpha, a, d = dh
     if alpha.shape != (6,) or a.shape != (6,) or d.shape != (6,):
-        raise ValueError(f"DH params must be length-6 arrays; got {alpha.shape}, {a.shape}, {d.shape}")  # noqa: E501
+        raise ValueError(
+            f"DH params must be length-6 arrays; got {alpha.shape}, {a.shape}, {d.shape}"
+        )
     t = np.asarray(t_target, dtype=np.float64)
     if t.shape != (4, 4):
         raise ValueError(f"t_target must be 4x4; got {t.shape}")
@@ -690,7 +714,13 @@ def _equilibrate_pencil(
     a: NDArray[np.float64],
     b: NDArray[np.float64],
     c: NDArray[np.float64],
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:  # noqa: E501
+) -> tuple[
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    NDArray[np.float64],
+]:
     """Row + column equilibrate ``(A, B, C)`` jointly for better-conditioned
     eigendecomposition. Issue #68 (AE-1).
 
@@ -888,9 +918,13 @@ def solve_x2_roots_mobius(
         # eigenvalue route on the equilibrated matrices; solve_x2_roots
         # handles the eigenvector de-equilibration internally.
         return solve_x2_roots(
-            m_quad, m_lin, m_const,
-            spurious_tol=spurious_tol, imag_rel_tol=imag_rel_tol,
-            cond_threshold=cond_threshold, equilibrate=True,
+            m_quad,
+            m_lin,
+            m_const,
+            spurious_tol=spurious_tol,
+            imag_rel_tol=imag_rel_tol,
+            cond_threshold=cond_threshold,
+            equilibrate=True,
         )
 
     # Equilibration insufficient. Track the original cond as the bar to beat
@@ -965,8 +999,11 @@ def solve_x2_roots_mobius(
 
     # Eigenvalue route on the transformed pencil.
     x_tilde_roots, eigvecs = solve_x2_roots(
-        a_t, b_t, c_t,
-        spurious_tol=spurious_tol, imag_rel_tol=imag_rel_tol,
+        a_t,
+        b_t,
+        c_t,
+        spurious_tol=spurious_tol,
+        imag_rel_tol=imag_rel_tol,
         cond_threshold=cond_threshold,
     )
     # Map x_tilde -> x_2 = (aa * x_tilde + bb) / (cc * x_tilde + dd).
@@ -1325,7 +1362,10 @@ def pick_best_leftvar(
     for lj in candidates:
         try:
             p_sin, p_cos, p_one, q_mat = build_pq(
-                dh, test_pose, linearity_joint=lj, apply_so3=False,
+                dh,
+                test_pose,
+                linearity_joint=lj,
+                apply_so3=False,
             )
         except Exception:
             conds[lj] = float("inf")
@@ -1401,8 +1441,10 @@ def solve_all_ik(
         raise ValueError(f"linearity_joint must be int or 'auto'; got {linearity_joint!r}")
 
     p_sin, p_cos, p_one, q_mat, meta = build_pq(
-        dh, t_target,
-        linearity_joint=linearity_joint, apply_so3=apply_so3,
+        dh,
+        t_target,
+        linearity_joint=linearity_joint,
+        apply_so3=apply_so3,
         return_metadata=True,
     )
     e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
@@ -1418,7 +1460,14 @@ def solve_all_ik(
     candidates: list[Solution] = []
     for branch_idx, (x_lin_root, eigvec) in enumerate(zip(roots, eigvecs, strict=True)):
         q_cand = back_substitute(
-            x_lin_root, eigvec, p_sin, p_cos, p_one, q_mat, dh, t_target,
+            x_lin_root,
+            eigvec,
+            p_sin,
+            p_cos,
+            p_one,
+            q_mat,
+            dh,
+            t_target,
             metadata=meta,
         )
         if q_cand is None:
@@ -1426,35 +1475,42 @@ def solve_all_ik(
         # Algebraic candidate FK error.
         fk_err_alg = float(np.linalg.norm(_fk_dh(q_cand, dh) - t_target))
         if fk_err_alg <= fk_atol:
-            candidates.append(Solution(
-                q=q_cand,
-                fk_residual=fk_err_alg,
-                refinement_used="none",
-                refinement_iters=0,
-                branch_id=branch_idx,
-                solver_name=solver_name,
-            ))
+            candidates.append(
+                Solution(
+                    q=q_cand,
+                    fk_residual=fk_err_alg,
+                    refinement_used="none",
+                    refinement_iters=0,
+                    branch_id=branch_idx,
+                    solver_name=solver_name,
+                )
+            )
             continue
         if not allow_refinement:
             # Default path: drop candidates that miss fk_atol algebraically.
             continue
         # Opt-in refinement: lm_refine polishes the algebraic seed.
         refined = lm_refine(
-            q_cand, fk_fn, t_target,
-            fk_atol=fk_atol, max_iters=refinement_max_iters,
+            q_cand,
+            fk_fn,
+            t_target,
+            fk_atol=fk_atol,
+            max_iters=refinement_max_iters,
             jacobian_fn=jacobian_fn,
         )
         if refined is None:
             continue
         q_refined, fk_resid, iters = refined
-        candidates.append(Solution(
-            q=q_refined,
-            fk_residual=fk_resid,
-            refinement_used="lm",
-            refinement_iters=iters,
-            branch_id=branch_idx,
-            solver_name=solver_name,
-        ))
+        candidates.append(
+            Solution(
+                q=q_refined,
+                fk_residual=fk_resid,
+                refinement_used="lm",
+                refinement_iters=iters,
+                branch_id=branch_idx,
+                solver_name=solver_name,
+            )
+        )
 
     # Deduplicate with wrap-to-pi joint distance. Keep the lower-fk_residual
     # candidate when two collapse.

@@ -97,12 +97,12 @@ def main() -> None:
     # Stage 2: eliminate (q_0, q_1)
     t0 = time.time()
     e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
-    print(f"eliminate_q0_q1:             {time.time()-t0:6.2f}s  -> 6x9 E system")
+    print(f"eliminate_q0_q1:             {time.time() - t0:6.2f}s  -> 6x9 E system")
 
     # Stage 3: Weierstrass for q_2 + W transform for (q_3, q_4)
     t0 = time.time()
     e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
-    print(f"weierstrass_eliminate_trig:  {time.time()-t0:6.2f}s  -> 6x9 quadratic-in-x_2")
+    print(f"weierstrass_eliminate_trig:  {time.time() - t0:6.2f}s  -> 6x9 quadratic-in-x_2")
 
     # Stage 4: build 12x12 M(x_2)
     t0 = time.time()
@@ -110,24 +110,30 @@ def main() -> None:
     cond_a = float(np.linalg.cond(m_quad))
     cond_b = float(np.linalg.cond(m_lin))
     cond_c = float(np.linalg.cond(m_const))
-    print(f"build_m_matrix:              {time.time()-t0:6.2f}s")
+    print(f"build_m_matrix:              {time.time() - t0:6.2f}s")
     print(f"  cond(A=m_quad)  = {cond_a:.3e}")
     print(f"  cond(B=m_lin)   = {cond_b:.3e}")
     print(f"  cond(C=m_const) = {cond_c:.3e}")
 
     # AE-1: log equilibrated cond
     from ssik.solvers.ikgeo._raghavan_roth import _equilibrate_pencil
+
     a_eq, _b_eq, _c_eq, _, _ = _equilibrate_pencil(m_quad, m_lin, m_const)
-    print(f"  cond(A_eq) [AE-1]   = {np.linalg.cond(a_eq):.3e}  "
-          f"(\u00d7 {cond_a / np.linalg.cond(a_eq):.2e} reduction)")
+    print(
+        f"  cond(A_eq) [AE-1]   = {np.linalg.cond(a_eq):.3e}  "
+        f"(\u00d7 {cond_a / np.linalg.cond(a_eq):.2e} reduction)"
+    )
 
     # AE-3 (#70): try alternative leftvar choices (linearity_joint = 0, 1, 2).
     # AE-4 (#71): also test SO(3) reduction on the best leftvar.
 
     def _build_at_leftvar(linearity_joint: int, apply_so3: bool):
         fns = _derive_pq_for_arm(
-            tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist()),
-            linearity_joint=linearity_joint, apply_so3=apply_so3,
+            tuple(alpha.tolist()),
+            tuple(a.tolist()),
+            tuple(d.tolist()),
+            linearity_joint=linearity_joint,
+            apply_so3=apply_so3,
         )
         p_sin_fn, p_cos_fn, p_one_fn, q_fn, _meta = fns
         args = [*t_target[0, :].tolist(), *t_target[1, :].tolist(), *t_target[2, :].tolist()]
@@ -145,21 +151,25 @@ def main() -> None:
         else:
             t0 = time.time()
             ps, pc, po, qm = _build_at_leftvar(lj, apply_so3=False)
-            print(f"  build_pq(linearity={lj}): {time.time()-t0:5.1f}s")
+            print(f"  build_pq(linearity={lj}): {time.time() - t0:5.1f}s")
         es, ec, eo = eliminate_q0_q1(ps, pc, po, qm)
         eq, el, ec_const = weierstrass_eliminate_trig(es, ec, eo)
         mq, _ml, _mc = build_m_matrix(eq, el, ec_const)
         cond_lj = float(np.linalg.cond(mq))
-        print(f"  linearity={lj}: cond(A) = {cond_lj:.3e}  "
-              f"(vs baseline {cond_a:.3e}: \u00d7 {cond_a / cond_lj:.2e})")
+        print(
+            f"  linearity={lj}: cond(A) = {cond_lj:.3e}  "
+            f"(vs baseline {cond_a:.3e}: \u00d7 {cond_a / cond_lj:.2e})"
+        )
     print()
 
     # Full pipeline at linearity=q_1 -- expect pure-algebraic FK closure
     print("--- Full pipeline at linearity=q_1 (pure algebraic) ---")
     from ssik.solvers.ikgeo._raghavan_roth import solve_all_ik
+
     t0 = time.time()
     sols_q1, is_ls_q1 = solve_all_ik(
-        (alpha, a, d), t_target,
+        (alpha, a, d),
+        t_target,
         fk_atol=1e-9,  # tight target -- expect pass with no LM polish
         linearity_joint=1,
     )
@@ -171,13 +181,9 @@ def main() -> None:
     if sols_q1:
         best_q1 = min(sols_q1, key=lambda s: _max_diff(s.q, q_star))
         print(f"  best |q-q*|: {_max_diff(best_q1.q, q_star):.3e}")
-        fk_errs_q1 = [
-            float(np.linalg.norm(_fk_dh(s.q, (alpha, a, d)) - t_target))
-            for s in sols_q1
-        ]
+        fk_errs_q1 = [float(np.linalg.norm(_fk_dh(s.q, (alpha, a, d)) - t_target)) for s in sols_q1]
         print(
-            f"  FK errors: max={max(fk_errs_q1):.3e}, "
-            f"all<1e-9: {all(e<1e-9 for e in fk_errs_q1)}"
+            f"  FK errors: max={max(fk_errs_q1):.3e}, all<1e-9: {all(e < 1e-9 for e in fk_errs_q1)}"
         )
     print()
 
@@ -189,8 +195,10 @@ def main() -> None:
     closest_root = min(roots, key=lambda r: abs(r - x2_star)) if roots else None
     print(f"solve_x2_roots_mobius:       {t_eig:6.2f}s  -> {len(roots)} real roots")
     if closest_root is not None:
-        print(f"  closest root to tan(q_2*/2)={x2_star:.4f}: {closest_root:.4f}  "
-              f"(error {abs(closest_root - x2_star):.3e})")
+        print(
+            f"  closest root to tan(q_2*/2)={x2_star:.4f}: {closest_root:.4f}  "
+            f"(error {abs(closest_root - x2_star):.3e})"
+        )
 
     # Stage 6: back-substitution + FK validation, no refinement
     t0 = time.time()
@@ -233,12 +241,16 @@ def main() -> None:
         print(f"  best FK err  (with LM):       {min(c[1] for c in candidates_ref):.3e}")
 
     print()
-    print(f"VERDICT (algebraic-only): "
-          f"{'PASS' if candidates_alg and min(c[1] for c in candidates_alg) < 1e-9 else 'FAIL'} "
-          f"@ fk_atol=1e-9")
-    print(f"VERDICT (with LM polish): "
-          f"{'PASS' if candidates_ref and min(c[1] for c in candidates_ref) < 1e-9 else 'FAIL'} "
-          f"@ fk_atol=1e-9")
+    print(
+        f"VERDICT (algebraic-only): "
+        f"{'PASS' if candidates_alg and min(c[1] for c in candidates_alg) < 1e-9 else 'FAIL'} "
+        f"@ fk_atol=1e-9"
+    )
+    print(
+        f"VERDICT (with LM polish): "
+        f"{'PASS' if candidates_ref and min(c[1] for c in candidates_ref) < 1e-9 else 'FAIL'} "
+        f"@ fk_atol=1e-9"
+    )
 
 
 if __name__ == "__main__":

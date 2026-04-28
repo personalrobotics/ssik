@@ -239,7 +239,9 @@ def _dispatch(
         "gen_six_dof": gen_six_dof.solve,
     }
     return table[solver_name](
-        sub_kb, T_target, policy,
+        sub_kb,
+        T_target,
+        policy,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
     )
@@ -296,7 +298,10 @@ def solve(
         _, solver_name = _topology_rank(sub_kb, policy)
         try:
             sub_sols, is_ls = _dispatch(
-                solver_name, sub_kb, T_target, policy,
+                solver_name,
+                sub_kb,
+                T_target,
+                policy,
                 allow_refinement=allow_refinement,
                 refinement_max_iters=refinement_max_iters,
             )

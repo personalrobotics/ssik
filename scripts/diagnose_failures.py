@@ -40,7 +40,14 @@ from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
 def _dh_matrix(theta, alpha, a, d):
     ct, st = np.cos(theta), np.sin(theta)
     ca, sa = np.cos(alpha), np.sin(alpha)
-    return np.array([[ct, -st*ca, st*sa, a*ct], [st, ct*ca, -ct*sa, a*st], [0., sa, ca, d], [0., 0., 0., 1.]])  # noqa: E501
+    return np.array(
+        [
+            [ct, -st * ca, st * sa, a * ct],
+            [st, ct * ca, -ct * sa, a * st],
+            [0.0, sa, ca, d],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
 
 
 def _fk(q, alpha, a, d):
@@ -50,11 +57,13 @@ def _fk(q, alpha, a, d):
     return T
 
 
-def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 1e-6, q_range: float = 1.0) -> None:  # noqa: E501
+def diagnose_arm(
+    name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 1e-6, q_range: float = 1.0
+) -> None:
     """Run diagnostic on `n_poses` random poses for a given arm."""
-    print(f"\n{'='*78}")
+    print(f"\n{'=' * 78}")
     print(f"ARM: {name}")
-    print(f"{'='*78}")
+    print(f"{'=' * 78}")
     print(f"alpha = {alpha}")
     print(f"a     = {a}")
     print(f"d     = {d}")
@@ -71,18 +80,24 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
         print(f"    cond(linearity={lj}) = {conds[lj]:.3e}{marker}")
 
     # Per-pose stats
-    pose_outcomes: list[bool] = []           # whether pose has >=1 valid candidate
+    pose_outcomes: list[bool] = []  # whether pose has >=1 valid candidate
     candidate_class_counts: Counter[str] = Counter()
     fk_err_by_class: dict[str, list[float]] = {
-        "algebraic_pass": [], "newton_pass": [], "newton_diverged": [],
-        "newton_no_converge": [], "back_sub_none": []
+        "algebraic_pass": [],
+        "newton_pass": [],
+        "newton_diverged": [],
+        "newton_no_converge": [],
+        "back_sub_none": [],
     }
     seed_qdiff_by_class: dict[str, list[float]] = {
-        "algebraic_pass": [], "newton_pass": [], "newton_diverged": [],
+        "algebraic_pass": [],
+        "newton_pass": [],
+        "newton_diverged": [],
         "newton_no_converge": [],
     }
     newton_iters_by_class: dict[str, list[int]] = {
-        "newton_pass": [], "newton_no_converge": [],
+        "newton_pass": [],
+        "newton_no_converge": [],
     }
     cond_at_solve: list[float] = []
     cond_b_at_solve: list[float] = []
@@ -131,7 +146,9 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
                 fk_err_by_class["back_sub_none"].append(np.nan)
                 continue
             fk_err_alg = float(np.linalg.norm(_fk(q_cand, alpha, a, d) - T_target))
-            qdiff_seed = float(max(abs((q_cand[i] - q_star[i] + np.pi) % (2*np.pi) - np.pi) for i in range(6)))  # noqa: E501
+            qdiff_seed = float(
+                max(abs((q_cand[i] - q_star[i] + np.pi) % (2 * np.pi) - np.pi) for i in range(6))
+            )
             if fk_err_alg <= fk_atol:
                 candidate_class_counts["algebraic_pass"] += 1
                 fk_err_by_class["algebraic_pass"].append(fk_err_alg)
@@ -140,7 +157,11 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
                 continue
             # Need Newton -- with trajectory tracking.
             refined = _newton_refine(
-                q_cand, dh, T_target, fk_atol=fk_atol, return_trajectory=True,
+                q_cand,
+                dh,
+                T_target,
+                fk_atol=fk_atol,
+                return_trajectory=True,
             )
             if refined is None:
                 # Newton hit max_iters without converging. Distinguish:
@@ -168,21 +189,35 @@ def diagnose_arm(name: str, alpha, a, d, *, n_poses: int = 50, fk_atol: float = 
     # Report
     print(f"\nResults over {n_poses} poses:")
     n_passed = sum(pose_outcomes)
-    print(f"  pose-level: {n_passed}/{n_poses} succeeded ({100*n_passed/n_poses:.0f}%)")
+    print(f"  pose-level: {n_passed}/{n_poses} succeeded ({100 * n_passed / n_poses:.0f}%)")
     cond_arr = np.array(cond_at_solve)
     print(f"  cond(A=m_quad)         median={np.median(cond_arr):.3e}, max={cond_arr.max():.3e}")
-    print(f"  cond(B=m_lin)          median={np.median(cond_b_at_solve):.3e}, max={max(cond_b_at_solve):.3e}")  # noqa: E501
-    print(f"  cond(C=m_const)        median={np.median(cond_c_at_solve):.3e}, max={max(cond_c_at_solve):.3e}")  # noqa: E501
+    print(
+        f"  cond(B=m_lin)          median={np.median(cond_b_at_solve):.3e}, max={max(cond_b_at_solve):.3e}"  # noqa: E501
+    )
+    print(
+        f"  cond(C=m_const)        median={np.median(cond_c_at_solve):.3e}, max={max(cond_c_at_solve):.3e}"  # noqa: E501
+    )
     print(f"  ||A^-1 B|| (op-norm)   median={np.median(norm_ainvb):.3e}, max={max(norm_ainvb):.3e}")
     print(f"  ||A^-1 C|| (op-norm)   median={np.median(norm_ainvc):.3e}, max={max(norm_ainvc):.3e}")
-    print(f"  cond(\u03a3 companion 24x24) median={np.median(cond_sigma_at_solve):.3e}, "
-          f"max={max(cond_sigma_at_solve):.3e}")
+    print(
+        f"  cond(\u03a3 companion 24x24) median={np.median(cond_sigma_at_solve):.3e}, "
+        f"max={max(cond_sigma_at_solve):.3e}"
+    )
     n_roots = np.array(n_roots_per_pose)
-    print(f"  num real roots per pose: median={int(np.median(n_roots))}, "
-          f"min={n_roots.min()}, max={n_roots.max()}")
+    print(
+        f"  num real roots per pose: median={int(np.median(n_roots))}, "
+        f"min={n_roots.min()}, max={n_roots.max()}"
+    )
     total_cands = sum(candidate_class_counts.values())
     print(f"  total candidates evaluated: {total_cands}")
-    for cls in ("algebraic_pass", "newton_pass", "back_sub_none", "newton_diverged", "newton_no_converge"):  # noqa: E501
+    for cls in (
+        "algebraic_pass",
+        "newton_pass",
+        "back_sub_none",
+        "newton_diverged",
+        "newton_no_converge",
+    ):
         n = candidate_class_counts[cls]
         pct = 100 * n / total_cands if total_cands else 0
         line = f"    {cls:<22} {n:>5} ({pct:5.1f}%)"
@@ -203,7 +238,7 @@ def main() -> None:
     # JACO 2 (Kinova j2n6s200) -- known good case after AE-3
     diagnose_arm(
         "JACO 2 (j2n6s200, 60-deg twists at joints 4-5)",
-        alpha=np.array([np.pi/2, np.pi, np.pi/2, 60*np.pi/180, 60*np.pi/180, np.pi]),
+        alpha=np.array([np.pi / 2, np.pi, np.pi / 2, 60 * np.pi / 180, 60 * np.pi / 180, np.pi]),
         a=np.array([0.0, 0.41, 0.0, 0.0, 0.0, 0.0]),
         d=np.array([0.2755, 0.0, -0.0098, -0.2502, -0.0858, -0.2116]),
         n_poses=50,
@@ -214,7 +249,7 @@ def main() -> None:
     # MC Table I -- failing case
     diagnose_arm(
         "Manocha-Canny Table I (mixed-alpha synthetic)",
-        alpha=np.array([np.pi/2, 1.0, np.pi/2, 1.0, np.pi/2, 1.0]),
+        alpha=np.array([np.pi / 2, 1.0, np.pi / 2, 1.0, np.pi / 2, 1.0]),
         a=np.array([0.3, 1.0, 0.0, 1.5, 0.0, 0.0]),
         d=np.array([0.0, 0.0, 0.2, 0.0, 0.0, 0.0]),
         n_poses=50,

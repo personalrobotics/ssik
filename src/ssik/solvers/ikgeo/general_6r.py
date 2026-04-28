@@ -103,9 +103,7 @@ def solve(
         raise ValueError(f"general_6r requires a 6-DOF chain; got {len(kb.joints)} joints")
     for joint in kb.joints:
         if joint.joint_type != "revolute":
-            raise ValueError(
-                f"general_6r requires all-revolute joints; got {joint.joint_type}"
-            )
+            raise ValueError(f"general_6r requires all-revolute joints; got {joint.joint_type}")
 
     dh = poe_to_dh(kb)
     t_target = np.asarray(T_target, dtype=np.float64)
@@ -134,13 +132,15 @@ def solve(
         fk_resid_poe = float(np.linalg.norm(_forward_kinematics(kb, q) - t_target))
         if fk_resid_poe > fk_atol:
             continue
-        solutions.append(Solution(
-            q=q,
-            fk_residual=fk_resid_poe,
-            refinement_used=inner.refinement_used,
-            refinement_iters=inner.refinement_iters,
-            branch_id=inner.branch_id,
-            solver_name=_SOLVER_NAME,
-        ))
+        solutions.append(
+            Solution(
+                q=q,
+                fk_residual=fk_resid_poe,
+                refinement_used=inner.refinement_used,
+                refinement_iters=inner.refinement_iters,
+                branch_id=inner.branch_id,
+                solver_name=_SOLVER_NAME,
+            )
+        )
 
     return solutions, len(solutions) == 0

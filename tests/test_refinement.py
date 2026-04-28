@@ -37,9 +37,9 @@ def _rot_axis(axis: np.ndarray, angle: float) -> np.ndarray:
     oc = 1.0 - c
     R = np.array(
         [
-            [c+x*x*oc, x*y*oc - z*s, x*z*oc + y*s],
-            [y*x*oc + z*s, c+y*y*oc, y*z*oc - x*s],
-            [z*x*oc - y*s, z*y*oc + x*s, c+z*z*oc],
+            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
+            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
+            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
         ]
     )
     T = np.eye(4)
@@ -187,8 +187,11 @@ def test_verify_candidates_passes_through_exact_match(ur5_kb) -> None:
     T_target = _fk_poe(ur5_kb, q_true)
     fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
     sols = verify_candidates(
-        [q_true], fk_fn=fk, t_target=T_target,
-        fk_atol=1e-9, solver_name="test",
+        [q_true],
+        fk_fn=fk,
+        t_target=T_target,
+        fk_atol=1e-9,
+        solver_name="test",
     )
     assert len(sols) == 1
     s = sols[0]
@@ -206,8 +209,12 @@ def test_verify_candidates_drops_misses_when_refinement_off(ur5_kb) -> None:
     bad = q_true + 0.1
     fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
     sols = verify_candidates(
-        [bad], fk_fn=fk, t_target=T_target,
-        fk_atol=1e-9, solver_name="test", allow_refinement=False,
+        [bad],
+        fk_fn=fk,
+        t_target=T_target,
+        fk_atol=1e-9,
+        solver_name="test",
+        allow_refinement=False,
     )
     assert sols == []
 
@@ -220,8 +227,14 @@ def test_verify_candidates_polishes_misses_when_refinement_on(ur5_kb) -> None:
     fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
     jac = lambda q: kinbody_jacobian(ur5_kb, q)  # noqa: E731
     sols = verify_candidates(
-        [seed], fk_fn=fk, jacobian_fn=jac, t_target=T_target,
-        fk_atol=1e-10, solver_name="test", allow_refinement=True, refinement_max_iters=15,
+        [seed],
+        fk_fn=fk,
+        jacobian_fn=jac,
+        t_target=T_target,
+        fk_atol=1e-10,
+        solver_name="test",
+        allow_refinement=True,
+        refinement_max_iters=15,
     )
     assert len(sols) == 1
     s = sols[0]
@@ -238,8 +251,12 @@ def test_verify_candidates_dedup_keeps_lower_residual(ur5_kb) -> None:
     fk = lambda q: _fk_poe(ur5_kb, q)  # noqa: E731
     # Both candidates dedup-collide; verify the lower-residual one wins.
     sols = verify_candidates(
-        [perturbed, q_true], fk_fn=fk, t_target=T_target,
-        fk_atol=1e-3, solver_name="test", dedup_atol=1e-3,
+        [perturbed, q_true],
+        fk_fn=fk,
+        t_target=T_target,
+        fk_atol=1e-3,
+        solver_name="test",
+        dedup_atol=1e-3,
     )
     assert len(sols) == 1
     # q_true is exact, perturbed has residual ~1e-7. Lower residual = q_true.

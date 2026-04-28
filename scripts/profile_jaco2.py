@@ -42,7 +42,14 @@ from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
 def _dh_matrix(theta, alpha, a, d):
     ct, st = np.cos(theta), np.sin(theta)
     ca, sa = np.cos(alpha), np.sin(alpha)
-    return np.array([[ct, -st*ca, st*sa, a*ct], [st, ct*ca, -ct*sa, a*st], [0., sa, ca, d], [0., 0., 0., 1.]])  # noqa: E501
+    return np.array(
+        [
+            [ct, -st * ca, st * sa, a * ct],
+            [st, ct * ca, -ct * sa, a * st],
+            [0.0, sa, ca, d],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
 
 
 def _fk(q, alpha, a, d):
@@ -53,9 +60,9 @@ def _fk(q, alpha, a, d):
 
 
 def main() -> None:
-    alpha = np.array([np.pi/2, np.pi, np.pi/2, 60*np.pi/180, 60*np.pi/180, np.pi])
-    a     = np.array([0.0, 0.41, 0.0, 0.0, 0.0, 0.0])
-    d     = np.array([0.2755, 0.0, -0.0098, -0.2502, -0.0858, -0.2116])
+    alpha = np.array([np.pi / 2, np.pi, np.pi / 2, 60 * np.pi / 180, 60 * np.pi / 180, np.pi])
+    a = np.array([0.0, 0.41, 0.0, 0.0, 0.0, 0.0])
+    d = np.array([0.2755, 0.0, -0.0098, -0.2502, -0.0858, -0.2116])
     dh = (alpha, a, d)
 
     # Warm cache
@@ -63,16 +70,22 @@ def main() -> None:
     q_warm = np.array([0.3, -0.5, 0.7, 0.4, -0.6, 0.2])
     T_warm = _fk(q_warm, alpha, a, d)
     t0 = time.time()
-    sols, _ = solve_all_ik(dh, T_warm, fk_atol=1e-9, linearity_joint='auto')
-    print(f"cold-cache: {time.time()-t0:.1f}s, {len(sols)} solutions")
+    sols, _ = solve_all_ik(dh, T_warm, fk_atol=1e-9, linearity_joint="auto")
+    print(f"cold-cache: {time.time() - t0:.1f}s, {len(sols)} solutions")
 
     # Per-stage timing
     print("\n=== per-stage timing (warm cache, 100 random poses) ===")
     rng = np.random.default_rng(42)
     stage_times: dict[str, list[float]] = {
-        "build_pq": [], "eliminate_q0_q1": [], "weierstrass": [],
-        "build_M": [], "eigenvalue": [], "back_substitute_total": [],
-        "fk_validate_total": [], "lm_polish_total": [], "total": [],
+        "build_pq": [],
+        "eliminate_q0_q1": [],
+        "weierstrass": [],
+        "build_M": [],
+        "eigenvalue": [],
+        "back_substitute_total": [],
+        "fk_validate_total": [],
+        "lm_polish_total": [],
+        "total": [],
     }
     leftvar = _cached_best_leftvar(tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist()))
     print(f"cached leftvar: q_{leftvar}")
@@ -129,12 +142,16 @@ def main() -> None:
         stage_times["total"].append(time.perf_counter() - t_total_start)
 
     # Report
-    print(f"\n{'stage':<26} {'min ms':>9} {'median ms':>11} {'mean ms':>11} {'p95 ms':>9} {'max ms':>9}")  # noqa: E501
+    print(
+        f"\n{'stage':<26} {'min ms':>9} {'median ms':>11} {'mean ms':>11} {'p95 ms':>9} {'max ms':>9}"  # noqa: E501
+    )
     print("-" * 80)
     for name, ts in stage_times.items():
         ts_arr = np.array(ts) * 1000
-        print(f"{name:<26} {ts_arr.min():>9.3f} {np.median(ts_arr):>11.3f} "
-              f"{ts_arr.mean():>11.3f} {np.percentile(ts_arr, 95):>9.3f} {ts_arr.max():>9.3f}")
+        print(
+            f"{name:<26} {ts_arr.min():>9.3f} {np.median(ts_arr):>11.3f} "
+            f"{ts_arr.mean():>11.3f} {np.percentile(ts_arr, 95):>9.3f} {ts_arr.max():>9.3f}"
+        )
 
     # cProfile run for top-time identification
     print("\n=== cProfile top-30 by cumtime (50 iters) ===")
@@ -143,7 +160,7 @@ def main() -> None:
     for _ in range(50):
         q_random = rng.uniform(-1, 1, size=6)
         T_target = _fk(q_random, alpha, a, d)
-        solve_all_ik(dh, T_target, fk_atol=1e-9, linearity_joint='auto')
+        solve_all_ik(dh, T_target, fk_atol=1e-9, linearity_joint="auto")
     pr.disable()
     s = StringIO()
     pstats.Stats(pr, stream=s).strip_dirs().sort_stats("cumtime").print_stats(30)

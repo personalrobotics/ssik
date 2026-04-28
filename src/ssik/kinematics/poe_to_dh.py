@@ -86,15 +86,17 @@ def _rot_axis(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
     oc = 1.0 - c
     return np.array(
         [
-            [c + x*x*oc, x*y*oc - z*s, x*z*oc + y*s],
-            [y*x*oc + z*s, c + y*y*oc, y*z*oc - x*s],
-            [z*x*oc - y*s, z*y*oc + x*s, c + z*z*oc],
+            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
+            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
+            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
         ],
         dtype=np.float64,
     )
 
 
-def _kinbody_world_axes_origins(kb: KinBody) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:  # noqa: E501
+def _kinbody_world_axes_origins(
+    kb: KinBody,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """Joint axes (unit) and origins in world frame at q=0, plus T_home (= POE FK at q=0)."""
     joints = kb.joints
     n = len(joints)
@@ -112,9 +114,12 @@ def _kinbody_world_axes_origins(kb: KinBody) -> tuple[NDArray[np.float64], NDArr
 
 
 def _line_line_perpendicular(
-    p1: NDArray[np.float64], d1: NDArray[np.float64],
-    p2: NDArray[np.float64], d2: NDArray[np.float64],
-    *, parallel_tol: float = 1e-9,
+    p1: NDArray[np.float64],
+    d1: NDArray[np.float64],
+    p2: NDArray[np.float64],
+    d2: NDArray[np.float64],
+    *,
+    parallel_tol: float = 1e-9,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], bool]:
     """Closest-point pair on two infinite lines.
 
@@ -135,7 +140,9 @@ def _line_line_perpendicular(
     return p1 + t1 * d1, p2 + t2 * d2, False
 
 
-def _signed_angle(v1: NDArray[np.float64], v2: NDArray[np.float64], normal: NDArray[np.float64]) -> float:  # noqa: E501
+def _signed_angle(
+    v1: NDArray[np.float64], v2: NDArray[np.float64], normal: NDArray[np.float64]
+) -> float:
     v1 = v1 / np.linalg.norm(v1)
     v2 = v2 / np.linalg.norm(v2)
     cos_a = float(np.clip(np.dot(v1, v2), -1.0, 1.0))
@@ -293,6 +300,10 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     t_post = np.linalg.solve(t_dh_end, t_home)
 
     return DhWithOffset(
-        alpha=alpha, a=a_arr, d=d_arr, theta_offset=theta_offset,
-        t_pre=t_pre, t_post=t_post,
+        alpha=alpha,
+        a=a_arr,
+        d=d_arr,
+        theta_offset=theta_offset,
+        t_pre=t_pre,
+        t_post=t_post,
     )

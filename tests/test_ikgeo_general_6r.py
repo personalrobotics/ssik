@@ -32,9 +32,9 @@ def _rot_axis(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
     oc = 1.0 - c
     return np.array(
         [
-            [c + x*x*oc, x*y*oc - z*s, x*z*oc + y*s, 0],
-            [y*x*oc + z*s, c + y*y*oc, y*z*oc - x*s, 0],
-            [z*x*oc - y*s, z*y*oc + x*s, c + z*z*oc, 0],
+            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s, 0],
+            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s, 0],
+            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc, 0],
             [0, 0, 0, 1],
         ],
         dtype=np.float64,
@@ -74,8 +74,13 @@ def test_general_6r_ur5_recovers_seed(ur5_kb: KinBody) -> None:
         assert sol.solver_name == "ikgeo.general_6r"
 
     def _wrap_max(q: NDArray[np.float64]) -> float:
-        return float(max(abs(((float(qi - qs) + np.pi) % (2*np.pi)) - np.pi)
-                         for qi, qs in zip(q, q_star, strict=True)))
+        return float(
+            max(
+                abs(((float(qi - qs) + np.pi) % (2 * np.pi)) - np.pi)
+                for qi, qs in zip(q, q_star, strict=True)
+            )
+        )
+
     best = min(_wrap_max(sol.q) for sol in solutions)
     assert best < 1e-3, f"seeded q* not recovered; best wrap-max diff = {best:.3e}"
 

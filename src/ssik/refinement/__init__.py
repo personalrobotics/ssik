@@ -97,7 +97,7 @@ def numerical_jacobian(
 
 
 def kinbody_jacobian(
-    kb: object,                                  # ssik._kinbody.KinBody (avoid import cycle)
+    kb: object,  # ssik._kinbody.KinBody (avoid import cycle)
     q: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     """Closed-form 6xN spatial Jacobian for a POE-form ``KinBody``.
@@ -124,9 +124,9 @@ def kinbody_jacobian(
         oc = 1.0 - c
         rot[:3, :3] = np.array(
             [
-                [c + x*x*oc, x*y*oc - z*s, x*z*oc + y*s],
-                [y*x*oc + z*s, c + y*y*oc, y*z*oc - x*s],
-                [z*x*oc - y*s, z*y*oc + x*s, c + z*z*oc],
+                [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
+                [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
+                [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
             ]
         )
         cum.append(cum[-1] @ joint.T_left @ rot @ joint.T_right)
@@ -259,33 +259,40 @@ def verify_candidates(
         q = np.asarray(q, dtype=np.float64)
         fk_resid = float(np.linalg.norm(fk_fn(q) - t_target))
         if fk_resid <= fk_atol:
-            verified.append(Solution(
-                q=q,
-                fk_residual=fk_resid,
-                refinement_used="none",
-                refinement_iters=0,
-                branch_id=branch_idx,
-                solver_name=solver_name,
-            ))
+            verified.append(
+                Solution(
+                    q=q,
+                    fk_residual=fk_resid,
+                    refinement_used="none",
+                    refinement_iters=0,
+                    branch_id=branch_idx,
+                    solver_name=solver_name,
+                )
+            )
             continue
         if not allow_refinement:
             continue
         refined = lm_refine(
-            q, fk_fn, t_target,
-            fk_atol=fk_atol, max_iters=refinement_max_iters,
+            q,
+            fk_fn,
+            t_target,
+            fk_atol=fk_atol,
+            max_iters=refinement_max_iters,
             jacobian_fn=jacobian_fn,
         )
         if refined is None:
             continue
         q_ref, resid, iters = refined
-        verified.append(Solution(
-            q=q_ref,
-            fk_residual=resid,
-            refinement_used="lm",
-            refinement_iters=iters,
-            branch_id=branch_idx,
-            solver_name=solver_name,
-        ))
+        verified.append(
+            Solution(
+                q=q_ref,
+                fk_residual=resid,
+                refinement_used="lm",
+                refinement_iters=iters,
+                branch_id=branch_idx,
+                solver_name=solver_name,
+            )
+        )
 
     if dedup_atol is None:
         return verified

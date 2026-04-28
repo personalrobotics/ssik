@@ -42,7 +42,12 @@ def _dh_matrix(theta: float, alpha: float, a: float, d: float) -> NDArray[np.flo
     )
 
 
-def _fk_dh(q: NDArray[np.float64], alpha: NDArray[np.float64], a: NDArray[np.float64], d: NDArray[np.float64]) -> NDArray[np.float64]:  # noqa: E501
+def _fk_dh(
+    q: NDArray[np.float64],
+    alpha: NDArray[np.float64],
+    a: NDArray[np.float64],
+    d: NDArray[np.float64],
+) -> NDArray[np.float64]:
     """Forward kinematics for a standard-DH 6R chain."""
     T = np.eye(4)
     for i in range(6):
@@ -201,9 +206,7 @@ def test_eliminate_q0_q1_random_dh(seed: int) -> None:
 def _v_left_x(q3: float, q4: float) -> NDArray[np.float64]:
     """Reference v_left_x basis at numeric joint angles."""
     x3, x4 = np.tan(q3 / 2.0), np.tan(q4 / 2.0)
-    return np.array(
-        [x3**2 * x4**2, x3**2 * x4, x3**2, x3 * x4**2, x3 * x4, x3, x4**2, x4, 1.0]
-    )
+    return np.array([x3**2 * x4**2, x3**2 * x4, x3**2, x3 * x4**2, x3 * x4, x3, x4**2, x4, 1.0])
 
 
 @pytest.mark.parametrize("q_star", _SEEDED_Q)
@@ -444,17 +447,21 @@ def test_back_substitute_recovers_seeded_q_star(q_star: NDArray[np.float64]) -> 
     x2_star = float(np.tan(q_star[2] / 2.0))
     best_idx = min(range(len(roots)), key=lambda i: abs(roots[i] - x2_star))
     q_recovered = back_substitute(
-        roots[best_idx], eigvecs[best_idx], p_sin, p_cos, p_one, q_mat,
-        (alpha, a, d), t_target,
+        roots[best_idx],
+        eigvecs[best_idx],
+        p_sin,
+        p_cos,
+        p_one,
+        q_mat,
+        (alpha, a, d),
+        t_target,
     )
     assert q_recovered is not None, "back_substitute returned None at the closest root"
 
     # Compare wrap-to-pi joint-by-joint.
     diffs = [_wrap_pi(float(q_recovered[i] - q_star[i])) for i in range(6)]
     max_diff = max(abs(diff) for diff in diffs)
-    assert max_diff < 1e-5, (
-        f"recovered q does not match seeded q*; per-joint diffs={diffs}"
-    )
+    assert max_diff < 1e-5, f"recovered q does not match seeded q*; per-joint diffs={diffs}"
 
     # And verify FK closure.
     t_recovered = _fk_dh(q_recovered, alpha, a, d)
@@ -498,9 +505,7 @@ def test_solve_all_ik_jaco2_geometry() -> None:
 
     for i, sol in enumerate(solutions):
         t_check = _fk_dh(sol.q, alpha, a, d)
-        assert np.allclose(t_check, t_target, atol=1e-5), (
-            f"JACO-like solution {i} fails FK closure"
-        )
+        assert np.allclose(t_check, t_target, atol=1e-5), f"JACO-like solution {i} fails FK closure"
 
 
 def test_back_substitute_random_dh() -> None:
@@ -530,8 +535,14 @@ def test_back_substitute_random_dh() -> None:
     x2_star = float(np.tan(q_star[2] / 2.0))
     best_idx = min(range(len(roots)), key=lambda i: abs(roots[i] - x2_star))
     q_recovered = back_substitute(
-        roots[best_idx], eigvecs[best_idx], p_sin, p_cos, p_one, q_mat,
-        (alpha, a, d), t_target,
+        roots[best_idx],
+        eigvecs[best_idx],
+        p_sin,
+        p_cos,
+        p_one,
+        q_mat,
+        (alpha, a, d),
+        t_target,
     )
     assert q_recovered is not None
 
@@ -549,10 +560,13 @@ def test_back_substitute_random_dh() -> None:
         # 3 valid FK-closing solutions but none near this specific seeded
         # q* (closest is ~1.51 rad off on joint 2). All other seeds recover.
         # Marked xfail so the gap is tracked without blocking the suite.
-        pytest.param(_SEEDED_Q[0], marks=pytest.mark.xfail(
-            reason="MC Table I coverage gap (GitHub #82): solver returns 3 valid IK "
-                   "solutions but seeded q* not among them; investigation pending."
-        )),
+        pytest.param(
+            _SEEDED_Q[0],
+            marks=pytest.mark.xfail(
+                reason="MC Table I coverage gap (GitHub #82): solver returns 3 valid IK "
+                "solutions but seeded q* not among them; investigation pending."
+            ),
+        ),
         _SEEDED_Q[1],
         _SEEDED_Q[2],
         _SEEDED_Q[3],
@@ -574,7 +588,10 @@ def test_solve_all_ik_recovers_q_star_and_alternatives(q_star: NDArray[np.float6
     # Per #74, the test's contract is that *with refinement enabled* the
     # solver recovers q* on every seeded fixture.
     solutions, is_ls = solve_all_ik(
-        (alpha, a, d), t_target, fk_atol=1e-6, allow_refinement=True,
+        (alpha, a, d),
+        t_target,
+        fk_atol=1e-6,
+        allow_refinement=True,
     )
     assert not is_ls
     assert len(solutions) >= 1, "no solutions returned"
