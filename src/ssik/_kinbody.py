@@ -209,10 +209,24 @@ def build_kinbody(
     base_link_name: str = "base_link",
     ee_link_name: str = "ee_link",
 ) -> KinBody:
-    """Assemble a :class:`KinBody` from a linear list of :class:`JointSpec`.
+    """Assemble a POE-normalised :class:`KinBody` from a list of :class:`JointSpec`.
 
-    Each joint gets ``T_left = spec.parent_link_T`` and ``T_right = identity``,
-    with ``dof_index = i`` (contiguous, one DOF per joint).
+    Each joint's ``axis`` in the input ``JointSpec`` is interpreted as the
+    rotation axis in the **post-T_left frame** (the local convention).
+    The output :class:`KinBody` is POE-normalised: ``axis`` is expressed
+    in the **base frame at q=0**, ``T_left`` carries only translation,
+    and the cumulative home rotation lives in the last joint's
+    ``T_right``. This matches the convention produced by
+    :func:`ssik._urdf.load_urdf_kinbody_normalized`, so downstream
+    predicates and solvers can compare ``joint.axis`` directly without
+    having to walk the chain to recover world-frame axes.
+
+    The forward kinematics is preserved bit-exactly: the normalisation
+    is a representation change, not a numerical transform on the chain.
+
+    :param specs: list of :class:`JointSpec`, one per joint.
+    :param base_link_name: name for the chain's base link.
+    :param ee_link_name: name for the end-effector link.
     """
     if not specs:
         raise ValueError("at least one JointSpec is required")
@@ -226,29 +240,76 @@ def build_kinbody(
         )
     links = [Link(name=name) for name in link_names]
 
-    joints: list[Joint] = []
+    # First pass: validate inputs and walk the chain at q=0 accumulating
+    # cumulative rotation R_cum and position pos_cum. At each active joint,
+    # record (axis_world, joint_origin) -- the rotation axis in the base
+    # frame and the world-frame position of the rotation axis.
+    R_cum = np.eye(3, dtype=np.float64)
+    pos_cum = np.zeros(3, dtype=np.float64)
+    records: list[tuple[str, JointType, NDArray[np.float64], NDArray[np.float64]]] = []
     for i, spec in enumerate(specs):
         T_left = np.ascontiguousarray(spec.parent_link_T, dtype=np.float64)
         if T_left.shape != (4, 4):
             raise ValueError(f"spec[{i}].parent_link_T must be 4x4, got {T_left.shape}")
-        axis = np.ascontiguousarray(spec.axis, dtype=np.float64)
-        if axis.shape != (3,):
-            raise ValueError(f"spec[{i}].axis must be shape (3,), got {axis.shape}")
+        axis_local = np.ascontiguousarray(spec.axis, dtype=np.float64)
+        if axis_local.shape != (3,):
+            raise ValueError(f"spec[{i}].axis must be shape (3,), got {axis_local.shape}")
+
+        # Advance through T_left's rotation + translation.
+        pos_cum = pos_cum + R_cum @ T_left[:3, 3]
+        R_cum = R_cum @ T_left[:3, :3]
+
+        # Joint axis in world frame, joint position in world (R(axis, 0) is
+        # identity so neither R_cum nor pos_cum changes from the joint
+        # rotation itself).
+        axis_world = R_cum @ axis_local
+        joint_origin = pos_cum.copy()
+
+        # Advance through T_right's rotation + translation.
         if spec.child_link_T is None:
             T_right = np.eye(4, dtype=np.float64)
         else:
             T_right = np.ascontiguousarray(spec.child_link_T, dtype=np.float64)
             if T_right.shape != (4, 4):
                 raise ValueError(f"spec[{i}].child_link_T must be 4x4, got {T_right.shape}")
+        pos_cum = pos_cum + R_cum @ T_right[:3, 3]
+        R_cum = R_cum @ T_right[:3, :3]
+
+        joint_name = spec.name if spec.name is not None else f"j{i}"
+        records.append((joint_name, spec.joint_type, axis_world, joint_origin))
+
+    # Second pass: emit POE-normalised joints. T_left is pure translation
+    # (offset between consecutive joint origins in world); T_right is
+    # identity except on the last joint, which carries (final_offset,
+    # home_rotation). pos_cum and R_cum at this point are the FK at q=0.
+    joints: list[Joint] = []
+    prev_origin = np.zeros(3, dtype=np.float64)
+    for i, (joint_name, joint_type, axis_world, joint_origin) in enumerate(records):
+        new_T_left = np.eye(4, dtype=np.float64)
+        new_T_left[:3, 3] = joint_origin - prev_origin
+
+        if i == n - 1:
+            # Last joint absorbs the final offset (joint_n -> EE) plus the
+            # cumulative home rotation.
+            new_T_right = np.eye(4, dtype=np.float64)
+            new_T_right[:3, 3] = pos_cum - joint_origin
+            R_part = np.eye(4, dtype=np.float64)
+            R_part[:3, :3] = R_cum
+            new_T_right = new_T_right @ R_part
+        else:
+            new_T_right = np.eye(4, dtype=np.float64)
+
         joints.append(
             Joint(
-                name=spec.name if spec.name is not None else f"j{i}",
+                name=joint_name,
                 dof_index=i,
                 parent_link=links[i],
-                T_left=T_left,
-                T_right=T_right,
-                axis=axis,
-                joint_type=spec.joint_type,
+                T_left=new_T_left,
+                T_right=new_T_right,
+                axis=axis_world,
+                joint_type=joint_type,
             )
         )
+        prev_origin = joint_origin
+
     return KinBody(links=links, joints=joints)
