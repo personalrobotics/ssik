@@ -24,27 +24,12 @@ from ssik.kinematics.predicates import axis_parallel
 from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.solvers.ikgeo._univariate import search_1d_matched
 from ssik.subproblems import sp1, sp6
+from ssik.subproblems._rotation import rotation_matrix
 
 __all__ = ["solve"]
 
 _SEARCH_SAMPLES = 200
 _SOLVER_NAME = "ikgeo.two_parallel"
-
-
-def _rot_mat(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
-    """3x3 rotation matrix around ``axis`` by ``angle`` (Rodrigues)."""
-    c = float(np.cos(angle))
-    s = float(np.sin(angle))
-    x, y, z = float(axis[0]), float(axis[1]), float(axis[2])
-    oc = 1.0 - c
-    return np.array(
-        [
-            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
-            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
-            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
-        ],
-        dtype=np.float64,
-    )
 
 
 def _wrap_to_pi(angle: float) -> float:
@@ -85,7 +70,7 @@ def solve(
         SP6 branch. Used by `search_1d_matched` to track geometric branches
         across adjacent q1 samples by (q6, q4)-proximity rather than index.
         """
-        r_01 = _rot_mat(axes[0], q1)
+        r_01 = rotation_matrix(axes[0], q1)
         h1 = r_06.T @ r_01 @ axes[1]
         sp_h = [h1, axes[1], h1, axes[1]]
         sp_k = [-axes[5], axes[3], -axes[5], axes[3]]
@@ -95,15 +80,15 @@ def solve(
         sols, _ = sp6.solve(sp_h, sp_k, sp_p, d1, d2, policy)
         branches: list[tuple[tuple[float, float], float]] = []
         for q6, q4 in sols:
-            r_34 = _rot_mat(axes[3], q4)
-            r_56 = _rot_mat(axes[5], q6)
+            r_34 = rotation_matrix(axes[3], q4)
+            r_56 = rotation_matrix(axes[5], q6)
             t23, _ = sp1.solve(
                 axes[1],
                 r_34 @ axes[4],
                 r_01.T @ r_06 @ r_56.T @ axes[4],
                 policy,
             )
-            r_13 = _rot_mat(axes[1], t23)
+            r_13 = rotation_matrix(axes[1], t23)
             delta = (
                 r_01.T @ p_16
                 - p[1]
@@ -119,9 +104,9 @@ def solve(
 
     candidates: list[NDArray[np.float64]] = []
     for q1, (q6, q4) in q1_and_branch:
-        r_01 = _rot_mat(axes[0], q1)
-        r_34 = _rot_mat(axes[3], q4)
-        r_56 = _rot_mat(axes[5], q6)
+        r_01 = rotation_matrix(axes[0], q1)
+        r_34 = rotation_matrix(axes[3], q4)
+        r_56 = rotation_matrix(axes[5], q6)
 
         t23, _ = sp1.solve(
             axes[1],
@@ -129,7 +114,7 @@ def solve(
             r_01.T @ r_06 @ r_56.T @ axes[4],
             policy,
         )
-        r_13 = _rot_mat(axes[1], t23)
+        r_13 = rotation_matrix(axes[1], t23)
 
         delta = (
             r_01.T @ p_16 - p[1] - r_13 @ p[3] - r_13 @ r_34 @ p[4] - r_01.T @ r_06 @ r_56.T @ p[5]
@@ -162,6 +147,6 @@ def _forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float
     T = np.eye(4)
     for j, qi in zip(kb.joints, q, strict=True):
         rot = np.eye(4)
-        rot[:3, :3] = _rot_mat(j.axis, float(qi))
+        rot[:3, :3] = rotation_matrix(j.axis, float(qi))
         T = T @ j.T_left @ rot @ j.T_right
     return T
