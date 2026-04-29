@@ -156,8 +156,8 @@ Bulletproof discipline — same standard as `spherical_two_parallel`:
 - `src/ssik/solvers/ikgeo/gen_six_dof.py` → rename module to
   `gen_six_dof_oracle.py`. Vectorize the inner SP5 loop (separate PR
   after this one lands; ~10× faster, useful as the validation oracle).
-- `SUPPORTED_ROBOTS.md` — promote JACO 2, Piper, Rizon 4 to
-  ✅-with-tier-2 / ✅-with-jointlock.
+- `README.md` "Supported arms & solver coverage" section — promote JACO 2,
+  Piper, Rizon 4 to ✅-with-tier-2 / ✅-with-jointlock.
 
 ## Out of scope (track as separate issues)
 
