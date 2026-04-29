@@ -360,6 +360,7 @@ _SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
     ),
     "ikgeo.spherical": _import_composer("ssik.codegen._compose.spherical", "compose"),
     "ikgeo.general_6r": _import_composer("ssik.codegen._compose.general_6r", "compose"),
+    "jointlock.seven_r": _import_composer("ssik.codegen._compose.seven_r", "compose"),
 }
 
 

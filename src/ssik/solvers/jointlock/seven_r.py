@@ -248,6 +248,7 @@ def solve(
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
+    lock_idx: int | None = None,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for any 7R arm via joint-locking + inner 6R solver.
 
@@ -260,6 +261,10 @@ def solve(
     :param allow_refinement: opt into Newton polish on each inner-solver
         candidate (#74). Default off.
     :param refinement_max_iters: cap on Newton iterations per candidate.
+    :param lock_idx: pre-computed lock joint index. When provided, skips
+        the per-call :func:`choose_lock_joint` topology-rank scan over
+        all 7 lock candidates. Codegen artifacts pass the baked value
+        here; runtime callers usually leave ``None``.
     :returns: ``(solutions, is_ls)``. Each :class:`Solution.q` is a
         7-vector including the locked joint's value. ``branch_id``
         encodes the lock-sample index (in the order ``samples`` enumerates
@@ -269,7 +274,8 @@ def solve(
     if len(kb.joints) != 7:
         raise ValueError(f"jointlock.seven_r requires a 7-DOF chain; got {len(kb.joints)}")
 
-    lock_idx = choose_lock_joint(kb, policy)
+    if lock_idx is None:
+        lock_idx = choose_lock_joint(kb, policy)
 
     if isinstance(lock_samples, int):
         samples = np.linspace(-np.pi, np.pi, lock_samples, endpoint=False)
