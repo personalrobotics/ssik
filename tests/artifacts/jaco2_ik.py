@@ -26,12 +26,19 @@ and the returned list is the best-LS approximation (or empty).
 
 from __future__ import annotations
 
+import math
+from ssik.solvers.ikgeo._raghavan_roth import (
+    _cached_derivation as _ssik_cached_derivation,
+    solve_all_ik as _ssik_solve_all_ik,
+)
+
 import numpy as np
 
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.solvers.ikgeo.general_6r import solve as _solver_solve
+from ssik.refinement import kinbody_jacobian as _kinbody_jacobian, lm_refine as _lm_refine
+from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.general_6r"
 SOLVER_TIER = 2
@@ -110,6 +117,64 @@ def _build_kb() -> KinBody:
 _KB = _build_kb()
 
 
+# --- baked DH parameters (from poe_to_dh at build time) ---
+_DH_ALPHA = np.array([1.5707963267948963, 3.141592653589793, 1.5707963267948968, 1.0471979549811776, 1.0471979549811776, 3.141592653589793], dtype=np.float64)
+_DH_A = np.array([0.0, 0.40999999999999986, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+_DH_D = np.array([-0.11874999999999997, -0.0015999999999996351, -0.011399999999999768, -0.250060739468094, -0.08551929043618828, -0.20275855096809398], dtype=np.float64)
+_DH_THETA_OFFSET = np.array([3.141592653589793, 1.5707963267948966, 1.5707963267948966, 0.0, 3.141592653589793, 0.0], dtype=np.float64)
+_T_PRE = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.15675], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+_T_POST = np.array([[2.220446049250311e-16, 0.9999999999999989, 0.0, 0.0], [-1.0000000000000002, -2.220446049250314e-16, 0.0, 0.0], [2.220446049250314e-16, 4.930380657631328e-32, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+_T_PRE_INV = np.linalg.inv(_T_PRE)
+_T_POST_INV = np.linalg.inv(_T_POST)
+
+# Eagerly trigger symbolic precompute at import time so first
+# solve() call has no derivation latency. Returns immediately
+# if already cached.
+_ssik_cached_derivation(
+    tuple(_DH_ALPHA.tolist()),
+    tuple(_DH_A.tolist()),
+    tuple(_DH_D.tolist()),
+    linearity_joint=2,
+    apply_so3=False,
+)
+
+
+def _solve_algebraic(T_target):
+    """Tier-2 Raghavan-Roth IK candidates for this arm.
+
+    Bakes the DH params; routes to ssik.solvers.ikgeo._raghavan_roth.
+    solve_all_ik with linearity_joint='auto' (AE-3 picks per-pose).
+    """
+    T = np.asarray(T_target, dtype=np.float64)
+    T_dh = _T_PRE_INV @ T @ _T_POST_INV
+    inner_solutions, _is_ls = _ssik_solve_all_ik(
+        (_DH_ALPHA, _DH_A, _DH_D),
+        T_dh,
+        fk_atol=1e-9,
+        dedup_atol=1e-3,
+        linearity_joint="auto",
+        allow_refinement=False,
+        refinement_max_iters=15,
+        solver_name=SOLVER_NAME,
+    )
+    # Map DH-frame q back to POE frame.
+    return [list(inner.q - _DH_THETA_OFFSET) for inner in inner_solutions]
+
+
+def _fk(q):
+    """POE forward kinematics using the baked KinBody."""
+    T = np.eye(4)
+    for j, qi in zip(_KB.joints, q, strict=True):
+        rot = np.eye(4)
+        rot[:3, :3] = _rotation_matrix(j.axis, float(qi))
+        T = T @ j.T_left @ rot @ j.T_right
+    return T
+
+
+def _wrap_to_pi(a):
+    return ((a + math.pi) % (2 * math.pi)) - math.pi
+
+
 def solve(
     T_target,
     *,
@@ -119,35 +184,74 @@ def solve(
 ):
     """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
 
-    :param T_target: 4x4 SE(3) target end-effector pose, np.float64.
-    :param policy: tolerance policy. Pass a custom
-        :class:`ssik.TolerancePolicy` to tighten or relax the
-        FK-closure threshold (``subproblem_numerical``), the
-        axis-parallel / axis-intersect predicates, etc. Defaults to
-        :data:`ssik.DEFAULT_TOLERANCE_POLICY`.
+    :param T_target: 4x4 SE(3) target end-effector pose.
+    :param policy: tolerance policy (FK closure + dedup tolerance).
     :param allow_refinement: opt into Newton-on-spatial-Jacobian
-        polish for near-miss algebraic candidates. Default ``False``;
-        turn on to recover candidates that don't quite meet
-        ``policy.subproblem_numerical`` on their own (e.g. near
-        kinematic singularities).
+        polish for near-miss candidates (those whose algebraic q
+        doesn't quite meet ``fk_atol``). Default off.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
-    :returns: ``(solutions, is_ls)``. Each ``solution.q`` is a joint
-        vector matching the source URDF's joint ordering;
-        ``solution.fk_residual`` reports closure against
-        ``T_target``. ``is_ls=True`` iff the algebraic path produced
-        no candidate meeting the FK tolerance -- callers wanting
-        only "exact" solutions check ``is_ls`` and discard.
-
-    Solver: general_6r.
     """
-    return _solver_solve(
-        _KB,
-        T_target,
-        policy=policy,
-        allow_refinement=allow_refinement,
-        refinement_max_iters=refinement_max_iters,
-    )
+    T = np.asarray(T_target, dtype=np.float64)
+    candidates = _solve_algebraic(T)
+
+    fk_atol = policy.subproblem_numerical
+    dedup_atol = policy.subproblem_dedup
+
+    # Three-bucket sort: exact (closes within fk_atol), near-miss
+    # (refinable when allow_refinement=True), or drop.
+    verified: list[tuple[np.ndarray, float, str, int]] = []
+    for cand_q in candidates:
+        q = np.asarray(cand_q, dtype=np.float64)
+        if not np.all(np.isfinite(q)):
+            continue
+        T_check = _fk(q)
+        residual = float(np.linalg.norm(T_check - T))
+        if residual <= fk_atol:
+            verified.append((q, residual, "none", 0))
+            continue
+        if not allow_refinement:
+            continue
+        # Newton polish using the baked KinBody's spatial Jacobian.
+        refined = _lm_refine(
+            q,
+            _fk,
+            T,
+            fk_atol=fk_atol,
+            max_iters=refinement_max_iters,
+            jacobian_fn=lambda qq: _kinbody_jacobian(_KB, qq),
+        )
+        if refined is None:
+            continue
+        q_ref, resid_ref, iters = refined
+        verified.append((q_ref, resid_ref, "lm", iters))
+
+    # Wrap-to-pi dedup; keep lowest fk_residual on collision.
+    deduped: list[tuple[np.ndarray, float, str, int]] = []
+    for cand_q, cand_res, ref_used, ref_iters in verified:
+        dup_idx = None
+        for j, (existing_q, _, _, _) in enumerate(deduped):
+            diffs = np.array([_wrap_to_pi(a - b) for a, b in zip(cand_q, existing_q)])
+            if np.all(np.abs(diffs) < dedup_atol):
+                dup_idx = j
+                break
+        if dup_idx is None:
+            deduped.append((cand_q, cand_res, ref_used, ref_iters))
+        elif cand_res < deduped[dup_idx][1]:
+            deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)
+
+    solutions = [
+        Solution(
+            q=q,
+            fk_residual=residual,
+            refinement_used=ref_used,
+            refinement_iters=ref_iters,
+            branch_id=i,
+            solver_name=SOLVER_NAME,
+        )
+        for i, (q, residual, ref_used, ref_iters) in enumerate(deduped)
+    ]
+    return solutions, len(solutions) == 0
 
 
 __all__ = [

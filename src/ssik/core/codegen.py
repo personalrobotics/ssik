@@ -359,6 +359,7 @@ _SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
         "ssik.codegen._compose.spherical_two_intersecting", "compose"
     ),
     "ikgeo.spherical": _import_composer("ssik.codegen._compose.spherical", "compose"),
+    "ikgeo.general_6r": _import_composer("ssik.codegen._compose.general_6r", "compose"),
 }
 
 

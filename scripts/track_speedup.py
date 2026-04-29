@@ -46,22 +46,35 @@ from ssik.core.codegen import emit_artifact  # noqa: E402
 from ssik.core.dispatcher import dispatch  # noqa: E402
 
 FIXTURES = REPO / "tests" / "fixtures"
+sys.path.insert(0, str(FIXTURES))
 
-# Per-arm fixture metadata.
+# Per-arm fixture metadata. ``loader`` returns a KinBody.
 ARMS = {
     "ur5": {
-        "urdf": FIXTURES / "ur5.urdf",
-        "base": "base_link",
-        "ee": "ee_link",
         "label": "UR5",
+        "loader": lambda: load_urdf_kinbody_normalized(
+            FIXTURES / "ur5.urdf", "base_link", "ee_link"
+        ),
     },
     "puma560": {
-        "urdf": FIXTURES / "puma560.urdf",
-        "base": "base_link",
-        "ee": "wrist_3_link",
         "label": "Puma 560",
+        "loader": lambda: load_urdf_kinbody_normalized(
+            FIXTURES / "puma560.urdf", "base_link", "wrist_3_link"
+        ),
+    },
+    "jaco2": {
+        "label": "Kinova JACO 2 (j2n6s200)",
+        "loader": lambda: _load_jaco2(),
     },
 }
+
+
+def _load_jaco2():
+    """JACO 2 is a Python fixture (real MJCF transcribed); not a URDF."""
+    from ssik._kinbody import build_kinbody
+    from jaco2 import jaco2_specs  # noqa: PLC0415
+
+    return build_kinbody(jaco2_specs())
 
 
 def _emit_module(kb, plan, module_name: str, label: str, output_path: Path):
@@ -157,8 +170,8 @@ def main() -> int:
     args = parser.parse_args()
     arm = ARMS[args.arm]
 
-    print(f"\nLoading {arm['label']} ({arm['urdf'].name}) ...")
-    kb = load_urdf_kinbody_normalized(arm["urdf"], arm["base"], arm["ee"])
+    print(f"\nLoading {arm['label']} ...")
+    kb = arm["loader"]()
     plan = dispatch(kb)
     print(f"Dispatch: {plan.solver_name} (tier {plan.tier})")
     print(f"FLOP budget: {plan.flop_budget:,}")
