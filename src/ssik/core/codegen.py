@@ -151,7 +151,7 @@ def _render_thin_wrapper(
     solver_short = plan.solver_name.split(".")[-1]
 
     buf = StringIO()
-    buf.write(_render_header(module_name, arm_label, plan))
+    buf.write(_render_header(module_name, arm_label, plan, kb))
     buf.write("\n\nfrom __future__ import annotations\n\n")
     buf.write("import numpy as np\n\n")
     buf.write("from ssik._kinbody import Joint, KinBody, Link\n")
@@ -199,7 +199,7 @@ def _render_specialised(
     algebraic_body = compose(kb)
 
     buf = StringIO()
-    buf.write(_render_header(module_name, arm_label, plan))
+    buf.write(_render_header(module_name, arm_label, plan, kb))
     buf.write("\n\nfrom __future__ import annotations\n\n")
     buf.write(render_constants_header())
     buf.write("\nimport numpy as np\n\n")
@@ -363,8 +363,83 @@ _SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
 }
 
 
-def _render_header(module_name: str, arm_label: str, plan: DispatchPlan) -> str:
-    """Top-of-file docstring with provenance + usage."""
+def _ssik_version() -> str:
+    """Return the installed ssik version, with the hatch-vcs dirty-build
+    suffix (``.dYYYYMMDD``) stripped so the artifact's provenance is stable
+    across local regens on a given commit.
+
+    The clean part (``X.Y.devN+gSHORT``) is enough to identify the source
+    commit; the date suffix only signals an uncommitted working tree, which
+    is reproducibility noise, not signal.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        raw = version("ssik")
+    except (ImportError, Exception):
+        return "dev"
+    except PackageNotFoundError:  # pragma: no cover
+        return "dev"
+    # Strip trailing ``.dYYYYMMDD`` dirty-build marker if present (matches
+    # only the date suffix at the end, not the ``.dev`` segment in a
+    # development version).
+    head, sep, tail = raw.rpartition(".d")
+    if sep and len(tail) == 8 and tail.isdigit():
+        return head
+    return raw
+
+
+def _kb_digest(kb: KinBody) -> str:
+    """Deterministic 12-hex-char digest of the KinBody's kinematic structure.
+
+    Hashes the joint axes, ``T_left`` / ``T_right`` matrices, joint types,
+    and link names in chain order. Stable across runs and platforms; lets
+    a reviewer recognise the same fixture even if the artifact has been
+    edited downstream. Identifies fixture changes too: any drift in the
+    chain (axis flip, link rename, transform tweak) shifts the digest.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    h.update(b"ssik-kinbody-v1\n")
+    for link in kb.links:
+        h.update(b"L:")
+        h.update(link.name.encode("utf-8"))
+        h.update(b"\n")
+    for joint in kb.joints:
+        h.update(b"J:")
+        h.update(joint.joint_type.encode("utf-8"))
+        h.update(b":")
+        h.update((joint.name or "").encode("utf-8"))
+        h.update(b":axis=")
+        for v in joint.axis.tolist():
+            h.update(f"{v!r}".encode())
+            h.update(b",")
+        h.update(b":Tl=")
+        for row in joint.T_left.tolist():
+            for v in row:
+                h.update(f"{v!r}".encode())
+                h.update(b",")
+        h.update(b":Tr=")
+        for row in joint.T_right.tolist():
+            for v in row:
+                h.update(f"{v!r}".encode())
+                h.update(b",")
+        h.update(b"\n")
+    return h.hexdigest()[:12]
+
+
+def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: KinBody) -> str:
+    """Top-of-file docstring with provenance + usage.
+
+    The provenance fields (``ssik_version``, ``kb_digest``) are stable across
+    regens on a given fixture + ssik release, so they do not churn the
+    artifact snapshot. They let a reviewer recognise the input fixture +
+    ssik version without re-running codegen, and they pin the artifact to
+    a reproducible source state.
+    """
+    version_str = _ssik_version()
+    digest_str = _kb_digest(kb)
     return textwrap.dedent(
         f'''\
         """Generated IK module for {arm_label}.
@@ -373,6 +448,10 @@ def _render_header(module_name: str, arm_label: str, plan: DispatchPlan) -> str:
         running analytical inverse kinematics on this specific arm. The
         per-arm KinBody constants are baked in below; you do not need to
         load a URDF or MJCF at runtime.
+
+        Provenance (stable across regens; deterministic by construction):
+          ssik version : {version_str}
+          KinBody hash : {digest_str}
 
         Solver: ``{plan.solver_name}`` (tier {plan.tier})
         Expected median IK time: ~{plan.expected_ms_median} ms on commodity

@@ -5,6 +5,10 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
+Provenance (stable across regens; deterministic by construction):
+  ssik version : 0.1.dev68+gea952f27b
+  KinBody hash : 677649eda2c4
+
 Solver: ``ikgeo.general_6r`` (tier 2)
 Expected median IK time: ~5.0 ms on commodity
 single-thread hardware. FLOP budget: 30,000,000 per solve.
@@ -119,11 +123,11 @@ _KB = _build_kb()
 
 # --- baked DH parameters (from poe_to_dh at build time) ---
 _DH_ALPHA = np.array([1.5707963267948963, 3.141592653589793, 1.5707963267948968, 1.0471979549811776, 1.0471979549811776, 3.141592653589793], dtype=np.float64)
-_DH_A = np.array([0.0, 0.40999999999999986, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+_DH_A = np.array([0.0, 0.40999999999999986, 0.0, -0.0, 0.0, 0.0], dtype=np.float64)
 _DH_D = np.array([-0.11874999999999997, -0.0015999999999996351, -0.011399999999999768, -0.250060739468094, -0.08551929043618828, -0.20275855096809398], dtype=np.float64)
-_DH_THETA_OFFSET = np.array([3.141592653589793, 1.5707963267948966, 1.5707963267948966, 0.0, 3.141592653589793, 0.0], dtype=np.float64)
+_DH_THETA_OFFSET = np.array([3.141592653589793, 1.5707963267948966, 1.5707963267948966, -0.0, 3.141592653589793, 0.0], dtype=np.float64)
 _T_PRE = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.15675], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
-_T_POST = np.array([[2.220446049250311e-16, 0.9999999999999989, 0.0, 0.0], [-1.0000000000000002, -2.220446049250314e-16, 0.0, 0.0], [2.220446049250314e-16, 4.930380657631328e-32, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+_T_POST = np.array([[2.220446049250311e-16, 0.9999999999999989, 0.0, 0.0], [-0.9999999999999984, -2.22044604925031e-16, 0.0, 0.0], [2.2204460492503106e-16, 4.9303806576313194e-32, 0.9999999999999982, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 _T_PRE_INV = np.linalg.inv(_T_PRE)
 _T_POST_INV = np.linalg.inv(_T_POST)
 

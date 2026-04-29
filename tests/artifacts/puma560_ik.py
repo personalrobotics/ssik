@@ -5,6 +5,10 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
+Provenance (stable across regens; deterministic by construction):
+  ssik version : 0.1.dev68+gea952f27b
+  KinBody hash : d08202c0ca6c
+
 Solver: ``ikgeo.spherical_two_parallel`` (tier 0)
 Expected median IK time: ~1.2 ms on commodity
 single-thread hardware. FLOP budget: 1,316 per solve.
