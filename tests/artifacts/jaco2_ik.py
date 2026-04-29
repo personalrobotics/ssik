@@ -5,9 +5,7 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
-Provenance (stable across regens; deterministic by construction):
-  ssik version : 0.1.dev68+gea952f27b
-  KinBody hash : 677649eda2c4
+Provenance: KinBody hash 677649eda2c4 (sha256/12 of the input chain).
 
 Solver: ``ikgeo.general_6r`` (tier 2)
 Expected median IK time: ~5.0 ms on commodity

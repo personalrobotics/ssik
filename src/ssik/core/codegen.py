@@ -363,32 +363,6 @@ _SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
 }
 
 
-def _ssik_version() -> str:
-    """Return the installed ssik version, with the hatch-vcs dirty-build
-    suffix (``.dYYYYMMDD``) stripped so the artifact's provenance is stable
-    across local regens on a given commit.
-
-    The clean part (``X.Y.devN+gSHORT``) is enough to identify the source
-    commit; the date suffix only signals an uncommitted working tree, which
-    is reproducibility noise, not signal.
-    """
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-
-        raw = version("ssik")
-    except (ImportError, Exception):
-        return "dev"
-    except PackageNotFoundError:  # pragma: no cover
-        return "dev"
-    # Strip trailing ``.dYYYYMMDD`` dirty-build marker if present (matches
-    # only the date suffix at the end, not the ``.dev`` segment in a
-    # development version).
-    head, sep, tail = raw.rpartition(".d")
-    if sep and len(tail) == 8 and tail.isdigit():
-        return head
-    return raw
-
-
 def _kb_digest(kb: KinBody) -> str:
     """Deterministic 12-hex-char digest of the KinBody's kinematic structure.
 
@@ -432,13 +406,17 @@ def _kb_digest(kb: KinBody) -> str:
 def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: KinBody) -> str:
     """Top-of-file docstring with provenance + usage.
 
-    The provenance fields (``ssik_version``, ``kb_digest``) are stable across
-    regens on a given fixture + ssik release, so they do not churn the
-    artifact snapshot. They let a reviewer recognise the input fixture +
-    ssik version without re-running codegen, and they pin the artifact to
-    a reproducible source state.
+    Provenance is the ``KinBody hash``: a 12-hex-char sha256 digest of the
+    input chain's kinematic structure. Stable across runs and platforms,
+    so it does not churn the artifact snapshot; identifies fixture
+    changes (axis flip, link rename, transform tweak) when they happen.
+
+    The ssik commit is intentionally NOT baked because
+    ``importlib.metadata.version`` reports the install-time pinned value,
+    which drifts between local checkouts and CI -- not actually stable.
+    The artifact's ssik provenance lives in the parent repo's git history
+    (e.g. ``git log -- tests/artifacts/ur5_ik.py``).
     """
-    version_str = _ssik_version()
     digest_str = _kb_digest(kb)
     return textwrap.dedent(
         f'''\
@@ -449,9 +427,7 @@ def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: Kin
         per-arm KinBody constants are baked in below; you do not need to
         load a URDF or MJCF at runtime.
 
-        Provenance (stable across regens; deterministic by construction):
-          ssik version : {version_str}
-          KinBody hash : {digest_str}
+        Provenance: KinBody hash {digest_str} (sha256/12 of the input chain).
 
         Solver: ``{plan.solver_name}`` (tier {plan.tier})
         Expected median IK time: ~{plan.expected_ms_median} ms on commodity
