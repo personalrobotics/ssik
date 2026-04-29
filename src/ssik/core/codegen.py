@@ -151,7 +151,7 @@ def _render_thin_wrapper(
     solver_short = plan.solver_name.split(".")[-1]
 
     buf = StringIO()
-    buf.write(_render_header(module_name, arm_label, plan))
+    buf.write(_render_header(module_name, arm_label, plan, kb))
     buf.write("\n\nfrom __future__ import annotations\n\n")
     buf.write("import numpy as np\n\n")
     buf.write("from ssik._kinbody import Joint, KinBody, Link\n")
@@ -199,7 +199,7 @@ def _render_specialised(
     algebraic_body = compose(kb)
 
     buf = StringIO()
-    buf.write(_render_header(module_name, arm_label, plan))
+    buf.write(_render_header(module_name, arm_label, plan, kb))
     buf.write("\n\nfrom __future__ import annotations\n\n")
     buf.write(render_constants_header())
     buf.write("\nimport numpy as np\n\n")
@@ -363,8 +363,61 @@ _SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
 }
 
 
-def _render_header(module_name: str, arm_label: str, plan: DispatchPlan) -> str:
-    """Top-of-file docstring with provenance + usage."""
+def _kb_digest(kb: KinBody) -> str:
+    """Deterministic 12-hex-char digest of the KinBody's kinematic structure.
+
+    Hashes the joint axes, ``T_left`` / ``T_right`` matrices, joint types,
+    and link names in chain order. Stable across runs and platforms; lets
+    a reviewer recognise the same fixture even if the artifact has been
+    edited downstream. Identifies fixture changes too: any drift in the
+    chain (axis flip, link rename, transform tweak) shifts the digest.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    h.update(b"ssik-kinbody-v1\n")
+    for link in kb.links:
+        h.update(b"L:")
+        h.update(link.name.encode("utf-8"))
+        h.update(b"\n")
+    for joint in kb.joints:
+        h.update(b"J:")
+        h.update(joint.joint_type.encode("utf-8"))
+        h.update(b":")
+        h.update((joint.name or "").encode("utf-8"))
+        h.update(b":axis=")
+        for v in joint.axis.tolist():
+            h.update(f"{v!r}".encode())
+            h.update(b",")
+        h.update(b":Tl=")
+        for row in joint.T_left.tolist():
+            for v in row:
+                h.update(f"{v!r}".encode())
+                h.update(b",")
+        h.update(b":Tr=")
+        for row in joint.T_right.tolist():
+            for v in row:
+                h.update(f"{v!r}".encode())
+                h.update(b",")
+        h.update(b"\n")
+    return h.hexdigest()[:12]
+
+
+def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: KinBody) -> str:
+    """Top-of-file docstring with provenance + usage.
+
+    Provenance is the ``KinBody hash``: a 12-hex-char sha256 digest of the
+    input chain's kinematic structure. Stable across runs and platforms,
+    so it does not churn the artifact snapshot; identifies fixture
+    changes (axis flip, link rename, transform tweak) when they happen.
+
+    The ssik commit is intentionally NOT baked because
+    ``importlib.metadata.version`` reports the install-time pinned value,
+    which drifts between local checkouts and CI -- not actually stable.
+    The artifact's ssik provenance lives in the parent repo's git history
+    (e.g. ``git log -- tests/artifacts/ur5_ik.py``).
+    """
+    digest_str = _kb_digest(kb)
     return textwrap.dedent(
         f'''\
         """Generated IK module for {arm_label}.
@@ -373,6 +426,8 @@ def _render_header(module_name: str, arm_label: str, plan: DispatchPlan) -> str:
         running analytical inverse kinematics on this specific arm. The
         per-arm KinBody constants are baked in below; you do not need to
         load a URDF or MJCF at runtime.
+
+        Provenance: KinBody hash {digest_str} (sha256/12 of the input chain).
 
         Solver: ``{plan.solver_name}`` (tier {plan.tier})
         Expected median IK time: ~{plan.expected_ms_median} ms on commodity

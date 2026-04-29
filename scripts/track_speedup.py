@@ -71,8 +71,9 @@ ARMS = {
 
 def _load_jaco2():
     """JACO 2 is a Python fixture (real MJCF transcribed); not a URDF."""
+    from jaco2 import jaco2_specs
+
     from ssik._kinbody import build_kinbody
-    from jaco2 import jaco2_specs  # noqa: PLC0415
 
     return build_kinbody(jaco2_specs())
 

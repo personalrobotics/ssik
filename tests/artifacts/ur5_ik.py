@@ -5,6 +5,8 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
+Provenance: KinBody hash a914c659b3a3 (sha256/12 of the input chain).
+
 Solver: ``ikgeo.three_parallel`` (tier 0)
 Expected median IK time: ~1.6 ms on commodity
 single-thread hardware. FLOP budget: 2,519 per solve.

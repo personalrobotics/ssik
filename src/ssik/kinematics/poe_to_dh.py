@@ -31,11 +31,20 @@ collapse to identity.
 from __future__ import annotations
 
 import contextlib
+import math
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ssik._kinbody import KinBody
+from ssik.kinematics._scalar3 import (
+    _cross3,
+    _dot3,
+    _mat3_vec3,
+    _mat4_mat4,
+    _norm3,
+    _se3_inv,
+)
 
 __all__ = ["DhWithOffset", "poe_to_dh"]
 
@@ -81,25 +90,16 @@ class DhWithOffset:
         return (self.alpha.copy(), self.a.copy(), self.d.copy())
 
 
-def _rot_axis(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
-    axis = axis / np.linalg.norm(axis)
-    c, s = float(np.cos(angle)), float(np.sin(angle))
-    x, y, z = axis
-    oc = 1.0 - c
-    return np.array(
-        [
-            [c + x * x * oc, x * y * oc - z * s, x * z * oc + y * s],
-            [y * x * oc + z * s, c + y * y * oc, y * z * oc - x * s],
-            [z * x * oc - y * s, z * y * oc + x * s, c + z * z * oc],
-        ],
-        dtype=np.float64,
-    )
-
-
 def _kinbody_world_axes_origins(
     kb: KinBody,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Joint axes (unit) and origins in world frame at q=0, plus T_home (= POE FK at q=0)."""
+    """Joint axes (unit) and origins in world frame at q=0, plus T_home (= POE FK at q=0).
+
+    Hand-rolled scalar 4x4 multiplications (see :mod:`ssik.kinematics._scalar3`)
+    keep the chain accumulation bit-exact across BLAS backends. Codegen
+    artifacts that bake the resulting DH parameters reach byte equality
+    on macOS / Linux / Windows.
+    """
     joints = kb.joints
     n = len(joints)
     axes_world = np.zeros((n, 3), dtype=np.float64)
@@ -107,10 +107,10 @@ def _kinbody_world_axes_origins(
 
     t_acc = np.eye(4, dtype=np.float64)
     for i, joint in enumerate(joints):
-        t_pre = t_acc @ joint.T_left
-        axes_world[i] = t_pre[:3, :3] @ joint.axis
+        t_pre = _mat4_mat4(t_acc, joint.T_left)
+        axes_world[i] = _mat3_vec3(t_pre[:3, :3], joint.axis)
         origins_world[i] = t_pre[:3, 3]
-        t_acc = t_pre @ joint.T_right
+        t_acc = _mat4_mat4(t_pre, joint.T_right)
 
     return axes_world, origins_world, t_acc
 
@@ -127,29 +127,29 @@ def _line_line_perpendicular(
 
     :returns: ``(foot1, foot2, is_parallel)``.
     """
-    cross = np.cross(d1, d2)
-    cross_norm = float(np.linalg.norm(cross))
+    cross = _cross3(d1, d2)
+    cross_norm = _norm3(cross)
     if cross_norm < parallel_tol:
         # Parallel. foot1 = p1; foot2 is closest point on L_2 to p1.
         delta = p1 - p2
-        t2 = -float(np.dot(delta, d2))
+        t2 = -_dot3(delta, d2)
         foot2 = p2 + t2 * d2
         return p1.copy(), foot2, True
-    n2 = float(np.dot(cross, cross))
+    n2 = _dot3(cross, cross)
     delta = p2 - p1
-    t1 = float(np.dot(np.cross(delta, d2), cross)) / n2
-    t2 = float(np.dot(np.cross(delta, d1), cross)) / n2
+    t1 = _dot3(_cross3(delta, d2), cross) / n2
+    t2 = _dot3(_cross3(delta, d1), cross) / n2
     return p1 + t1 * d1, p2 + t2 * d2, False
 
 
 def _signed_angle(
     v1: NDArray[np.float64], v2: NDArray[np.float64], normal: NDArray[np.float64]
 ) -> float:
-    v1 = v1 / np.linalg.norm(v1)
-    v2 = v2 / np.linalg.norm(v2)
-    cos_a = float(np.clip(np.dot(v1, v2), -1.0, 1.0))
-    sin_a = float(np.dot(np.cross(v1, v2), normal))
-    return float(np.arctan2(sin_a, cos_a))
+    v1 = v1 / _norm3(v1)
+    v2 = v2 / _norm3(v2)
+    cos_a = max(-1.0, min(1.0, _dot3(v1, v2)))
+    sin_a = _dot3(_cross3(v1, v2), normal)
+    return math.atan2(sin_a, cos_a)
 
 
 _KB_DH_CACHE_ATTR = "_ssik_dh_with_offset_cache"
@@ -198,12 +198,12 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     # Frame 0: z_0 = joint-1's axis (in world frame). x_0 free perpendicular to
     # z_0; align with world x as much as possible (project + renormalize). T_pre
     # then bridges the user's world frame to this DH frame 0.
-    z_0 = axes_world[0] / np.linalg.norm(axes_world[0])
+    z_0 = axes_world[0] / _norm3(axes_world[0])
     ref = np.array([1.0, 0.0, 0.0])
-    if abs(np.dot(ref, z_0)) > 0.99:
+    if abs(_dot3(ref, z_0)) > 0.99:
         ref = np.array([0.0, 1.0, 0.0])
-    x_0 = ref - float(np.dot(ref, z_0)) * z_0
-    x_0 /= np.linalg.norm(x_0)
+    x_0 = ref - _dot3(ref, z_0) * z_0
+    x_0 = x_0 / _norm3(x_0)
     z_axes.append(z_0)
     x_axes.append(x_0)
     origins.append(origins_world[0].copy())
@@ -221,25 +221,25 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
             # x_i is the perpendicular direction from foot_prev to foot_curr
             # (on the parallel-line plane), normalized.
             diff = foot_curr - foot_prev
-            diff_norm = float(np.linalg.norm(diff))
+            diff_norm = _norm3(diff)
             if diff_norm < 1e-9:
                 # Coincident axes -- degenerate. Pick any perpendicular to z_curr.
                 ref = np.array([1.0, 0.0, 0.0])
-                if abs(np.dot(ref, z_curr)) > 0.99:
+                if abs(_dot3(ref, z_curr)) > 0.99:
                     ref = np.array([0.0, 1.0, 0.0])
-                x_perp = ref - float(np.dot(ref, z_curr)) * z_curr
-                x_perp /= np.linalg.norm(x_perp)
+                x_perp = ref - _dot3(ref, z_curr) * z_curr
+                x_perp = x_perp / _norm3(x_perp)
                 x_axes.append(x_perp)
             else:
                 x_axes.append(diff / diff_norm)
         else:
             # Skew/intersecting: x_i = (z_{i-1} x z_i) normalized, oriented from foot_prev to foot_curr.  # noqa: E501
-            cross = np.cross(z_prev, z_curr)
-            cross_norm = float(np.linalg.norm(cross))
+            cross = _cross3(z_prev, z_curr)
+            cross_norm = _norm3(cross)
             x_dir = cross / cross_norm
             # If foot_curr is "behind" foot_prev in the x_dir sense, flip.
             diff = foot_curr - foot_prev
-            if np.dot(diff, x_dir) < 0:
+            if _dot3(diff, x_dir) < 0:
                 x_dir = -x_dir
             x_axes.append(x_dir)
         origins.append(foot_curr)
@@ -250,14 +250,14 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     o_n = t_home[:3, 3]
     z_axes.append(z_n)
     x_prev = x_axes[-1]
-    x_proj = x_prev - float(np.dot(x_prev, z_n)) * z_n
-    x_proj_norm = float(np.linalg.norm(x_proj))
+    x_proj = x_prev - _dot3(x_prev, z_n) * z_n
+    x_proj_norm = _norm3(x_proj)
     if x_proj_norm < 1e-9:
         ref = np.array([1.0, 0.0, 0.0])
-        if abs(np.dot(ref, z_n)) > 0.99:
+        if abs(_dot3(ref, z_n)) > 0.99:
             ref = np.array([0.0, 1.0, 0.0])
-        x_proj = ref - float(np.dot(ref, z_n)) * z_n
-        x_proj_norm = float(np.linalg.norm(x_proj))
+        x_proj = ref - _dot3(ref, z_n) * z_n
+        x_proj_norm = _norm3(x_proj)
     x_axes.append(x_proj / x_proj_norm)
     origins.append(o_n)
 
@@ -280,11 +280,11 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
         theta_offset[k] = _signed_angle(x_a, x_b, z_a)
         # d_i = (o_b - o_a) projected onto z_a (signed offset along previous joint axis)
         delta = o_b - o_a
-        d_arr[k] = float(np.dot(delta, z_a))
+        d_arr[k] = _dot3(delta, z_a)
         # a_i = (o_b - o_a) projected onto x_b (signed offset along common perp)
         # NB: only valid because o_b is on z_b's line at foot of perp; the residual
         # after subtracting d_i z_a should lie along x_b.
-        a_arr[k] = float(np.dot(delta, x_b))
+        a_arr[k] = _dot3(delta, x_b)
 
     # T_pre: maps the user's world frame -> DH frame 0.
     # Frame 0 sits at origin_0 = joints[0] origin in world, with axes
@@ -292,7 +292,7 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     # user's world frame plus the origin translation. For commercial arms whose
     # joint 1 axis is world +z and whose joint 1 sits at the world origin (UR5,
     # Puma 560), T_pre collapses to identity.
-    y_0 = np.cross(z_0, x_0)
+    y_0 = _cross3(z_0, x_0)
     t_pre = np.eye(4, dtype=np.float64)
     t_pre[:3, 0] = x_0
     t_pre[:3, 1] = y_0
@@ -303,16 +303,20 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
     # at q=0". DH ends at frame n (z_axes[n], x_axes[n], origins[n]). The
     # remaining orientation DOF (y_n = z_n x x_n) is determined; check
     # discrepancy vs t_home.
+    #
+    # ``t_dh_end`` is SE(3) by construction (orthonormal axes), so we use
+    # the closed-form SE(3) inverse + a deterministic 4x4 multiply --
+    # avoiding ``np.linalg.solve``'s BLAS dispatch keeps codegen output
+    # bit-exact across platforms.
     z_n = z_axes[n]
     x_n = x_axes[n]
-    y_n = np.cross(z_n, x_n)
+    y_n = _cross3(z_n, x_n)
     t_dh_end = np.eye(4, dtype=np.float64)
     t_dh_end[:3, 0] = x_n
     t_dh_end[:3, 1] = y_n
     t_dh_end[:3, 2] = z_n
     t_dh_end[:3, 3] = origins[n]
-    # We need: t_dh_end @ t_post = t_home  ->  t_post = t_dh_end^{-1} @ t_home
-    t_post = np.linalg.solve(t_dh_end, t_home).astype(np.float64)
+    t_post = _mat4_mat4(_se3_inv(t_dh_end), t_home)
 
     result = DhWithOffset(
         alpha=alpha,

@@ -80,8 +80,8 @@ def _emit_jaco2() -> str:
     ],
 )
 def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: object) -> None:
-    """Re-emit + byte-compare. Any drift fails the test with a clear pointer
-    to the regen script."""
+    """Re-emit + byte-compare. Any drift fails the test with a unified-diff
+    of the divergence and a pointer to the regen script."""
     rendered = emit_fn()  # type: ignore[operator]
     committed_path = ARTIFACTS / f"{module_name}.py"
     assert committed_path.exists(), (
@@ -90,11 +90,26 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
     )
     committed = committed_path.read_text()
     if rendered != committed:
+        import difflib
+
+        diff = "".join(
+            difflib.unified_diff(
+                committed.splitlines(keepends=True),
+                rendered.splitlines(keepends=True),
+                fromfile=f"committed/{committed_path.name}",
+                tofile=f"regenerated/{committed_path.name}",
+                n=3,
+            )
+        )
+        # Cap diff length so a runaway divergence doesn't drown the CI log.
+        if len(diff) > 4000:
+            diff = diff[:4000] + "\n... (truncated)\n"
         pytest.fail(
             f"committed artifact {committed_path.name} differs from regenerated "
             f"output. The codegen module produced different bytes -- this is "
             f"likely an intentional codegen change. Regenerate with:\n"
             f"    uv run python scripts/regen_artifacts.py\n"
             f"and commit the updated tests/artifacts/*.py alongside your codegen "
-            f"change so reviewers can see the user-facing impact."
+            f"change so reviewers can see the user-facing impact.\n\n"
+            f"Diff (committed -> regenerated):\n{diff}"
         )
