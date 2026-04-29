@@ -18,7 +18,9 @@ import sympy as sp
 from ssik.codegen._symbolic.sp1 import sp1_theta_sym
 from ssik.codegen._symbolic.sp3 import sp3_branches_sym
 from ssik.codegen._symbolic.sp4 import sp4_branches_sym
+from ssik.codegen._symbolic.sp6 import sp6_a_mat_b_sym
 from ssik.subproblems import sp1, sp3, sp4
+from ssik.subproblems._rotation import _cross3, _dot3
 
 # ---------------------------------------------------------------------------
 # Helpers.
@@ -112,6 +114,58 @@ def test_sp4_symbolic_matches_numerical(seed: int) -> None:
 # ---------------------------------------------------------------------------
 # SP3.
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("seed", list(range(10)))
+def test_sp6_a_mat_b_symbolic_matches_numerical(seed: int) -> None:
+    """SP6's setup matrices A (2x4) and b (2x1) must match the numerical
+    SP6 implementation when evaluated with the same inputs. The QR /
+    ellipse-intersection / GN-refinement steps stay runtime; this test
+    verifies only the symbolic setup."""
+    rng = np.random.default_rng(seed + 300)
+    h_list = [rng.standard_normal(3) for _ in range(4)]
+    k_list = [rng.standard_normal(3) for _ in range(4)]
+    for i in range(4):
+        k_list[i] = k_list[i] / np.linalg.norm(k_list[i])
+    p_list = [rng.standard_normal(3) for _ in range(4)]
+    d1, d2 = float(rng.standard_normal()), float(rng.standard_normal())
+
+    # Symbolic A, b.
+    h_sym = tuple(_to_sym(h) for h in h_list)
+    k_sym = tuple(_to_sym(k) for k in k_list)
+    p_sym = tuple(_to_sym(p) for p in p_list)
+    a_sym, b_sym = sp6_a_mat_b_sym(h_sym, k_sym, p_sym, sp.Float(d1), sp.Float(d2))
+    a_num = np.array([[float(a_sym[i, j].evalf()) for j in range(4)] for i in range(2)])
+    b_num = np.array([float(b_sym[i, 0].evalf()) for i in range(2)])
+
+    # Numerical A, b -- mirror sp6.solve's setup.
+    a_cols_ref = []
+    for idx in range(4):
+        kxp = _cross3(k_list[idx], p_list[idx])
+        a_cols_ref.append(np.column_stack([kxp, -_cross3(k_list[idx], kxp)]))
+    h1_a1 = h_list[0] @ a_cols_ref[0]
+    h2_a2 = h_list[1] @ a_cols_ref[1]
+    h3_a3 = h_list[2] @ a_cols_ref[2]
+    h4_a4 = h_list[3] @ a_cols_ref[3]
+    a_ref = np.array(
+        [
+            [h1_a1[0], h1_a1[1], h2_a2[0], h2_a2[1]],
+            [h3_a3[0], h3_a3[1], h4_a4[0], h4_a4[1]],
+        ]
+    )
+    b_ref = np.array(
+        [
+            d1
+            - _dot3(h_list[0], k_list[0]) * _dot3(k_list[0], p_list[0])
+            - _dot3(h_list[1], k_list[1]) * _dot3(k_list[1], p_list[1]),
+            d2
+            - _dot3(h_list[2], k_list[2]) * _dot3(k_list[2], p_list[2])
+            - _dot3(h_list[3], k_list[3]) * _dot3(k_list[3], p_list[3]),
+        ]
+    )
+
+    assert np.allclose(a_num, a_ref, atol=1e-12), "sp6 A_mat mismatch"
+    assert np.allclose(b_num, b_ref, atol=1e-12), "sp6 b_vec mismatch"
 
 
 @pytest.mark.parametrize("seed", list(range(20)))
