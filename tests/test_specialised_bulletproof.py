@@ -184,6 +184,75 @@ def test_bulletproof_jaco2_specialised(tmp_path: Path) -> None:
     )
 
 
+def test_bulletproof_srs_7r_specialised(tmp_path: Path) -> None:
+    """SRS 7R specialised artifact (jointlock.seven_r) bulletproof.
+
+    Synthetic shoulder-pitch / elbow-roll / spherical-wrist 7R. Locking
+    joint 3 yields a tier-0 ``spherical_two_parallel`` 6R sub-chain --
+    the inner solver has machine-precision FK closure.
+
+    Validates that the 7R composer's baked ``_LOCK_IDX`` + ``_KB`` + the
+    runtime ``solve(_KB, T_target, lock_idx=_LOCK_IDX)`` round-trip
+    matches the runtime path. The seeded-q* recovery check is bypassed
+    (``max_miss_seeded_fraction=1.0``) because the 16-sample lock sweep
+    discretises one DOF: a random q*[lock_idx] almost never lands on a
+    sample, so joint-space recovery is structural, not numerical. FK
+    closure (the actual analytical-IK contract) remains at machine
+    precision.
+    """
+    from ssik._kinbody import Joint, KinBody, Link
+
+    axes = [
+        np.array([0.0, 0.0, 1.0]),
+        np.array([0.0, -1.0, 0.0]),
+        np.array([0.0, -1.0, 0.0]),
+        np.array([0.0, 0.0, 1.0]),
+        np.array([0.0, -1.0, 0.0]),
+        np.array([0.0, 0.0, 1.0]),
+        np.array([0.0, -1.0, 0.0]),
+    ]
+    t_lefts = [
+        np.array([0.0, 0.0, 0.0]),
+        np.array([0.0, 0.0, 0.2]),
+        np.array([0.4, 0.0, 0.0]),
+        np.array([0.05, -0.1, 0.0]),
+        np.array([0.0, 0.0, 0.4]),
+        np.array([0.0, 0.0, 0.0]),
+        np.array([0.0, 0.0, 0.0]),
+    ]
+    links = [Link(name=f"l{i}") for i in range(8)]
+    joints = []
+    for i in range(7):
+        T_l = np.eye(4)
+        T_l[:3, 3] = t_lefts[i]
+        joints.append(
+            Joint(
+                name=f"j{i}",
+                dof_index=i,
+                parent_link=links[i],
+                T_left=T_l,
+                T_right=np.eye(4),
+                axis=axes[i],
+                joint_type="revolute",
+            )
+        )
+    kb = KinBody(links=links, joints=joints)
+    artifact = _build_specialised(kb, "srs_7r_bp", tmp_path)
+
+    # Sanity-check that the 7R-specific bake landed in the source.
+    src = (tmp_path / "srs_7r_bp.py").read_text()
+    assert "_LOCK_IDX = " in src, "composer should bake the pre-selected lock index"
+    assert "lock_idx=_LOCK_IDX" in src, "artifact should pass baked _LOCK_IDX to runtime solve()"
+
+    _bulletproof_check(
+        kb,
+        artifact,
+        n_poses=20,
+        fk_atol=1e-8,
+        max_miss_seeded_fraction=1.0,
+    )
+
+
 def test_specialised_artifact_refinement_path_works(tmp_path: Path) -> None:
     """The specialised artifact's ``allow_refinement=True`` path must wire
     through to ``ssik.refinement.lm_refine`` correctly.

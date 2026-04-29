@@ -115,9 +115,8 @@ def test_synth_non_pieper_dispatch_to_general_6r() -> None:
     assert "EAIK" in plan.reason or "Raghavan" in plan.reason
 
 
-def test_dispatch_rejects_non_6dof() -> None:
-    """7R chains aren't supported by this dispatcher iteration -- they
-    route through ``jointlock.seven_r``. The error message should say so."""
+def test_dispatch_routes_7r_to_jointlock() -> None:
+    """7R chains route through ``jointlock.seven_r`` (tier 1)."""
     rng = np.random.default_rng(0)
     links = [Link(name=f"l{i}") for i in range(8)]
     joints = []
@@ -138,7 +137,36 @@ def test_dispatch_rejects_non_6dof() -> None:
             )
         )
     kb = KinBody(links=links, joints=joints)
-    with pytest.raises(ValueError, match="7R support"):
+    plan = dispatch(kb)
+    assert plan.solver_name == "jointlock.seven_r"
+    assert plan.tier == 1
+    assert plan.needs_symbolic_precompute is False
+
+
+def test_dispatch_rejects_non_6r_non_7r() -> None:
+    """Chains other than 6R or 7R are not supported."""
+    rng = np.random.default_rng(0)
+    n = 8
+    links = [Link(name=f"l{i}") for i in range(n + 1)]
+    joints = []
+    for i in range(n):
+        T_l = np.eye(4)
+        T_l[:3, 3] = rng.standard_normal(3)
+        ax = rng.standard_normal(3)
+        ax = ax / float(np.linalg.norm(ax))
+        joints.append(
+            Joint(
+                name=f"j{i}",
+                dof_index=i,
+                parent_link=links[i],
+                T_left=T_l,
+                T_right=np.eye(4),
+                axis=ax,
+                joint_type="revolute",
+            )
+        )
+    kb = KinBody(links=links, joints=joints)
+    with pytest.raises(ValueError, match="6-DOF and 7-DOF"):
         dispatch(kb)
 
 

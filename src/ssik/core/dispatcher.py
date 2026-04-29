@@ -115,6 +115,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "ikgeo.two_intersecting": (1, 1184.0, 2_650_681),
     "ikgeo.general_6r": (2, 5.0, 30_000_000),
     "ikgeo.gen_six_dof": (2, 26_800.0, 31_478_656),
+    "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 
 
@@ -129,15 +130,28 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
         :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
     :returns: a :class:`DispatchPlan` describing the chosen solver, the
         topology evidence, expected speed, and FLOP budget.
-    :raises ValueError: if the chain is not 6R (this iteration). 7R support
-        via :mod:`ssik.solvers.jointlock.seven_r` is a follow-up.
+    :raises ValueError: if the chain is not 6R or 7R.
+
+    7R chains route to :mod:`ssik.solvers.jointlock.seven_r`, which locks
+    one joint (auto-selected by topology rank of the resulting 6R sub-chain)
+    and sweeps it over 16 samples. Covers Franka, iiwa, Rizon, Gen3, xArm7,
+    and any other 7R revolute arm.
     """
-    if len(kb.joints) != 6:
-        raise ValueError(
-            f"dispatch currently supports 6-DOF chains only; "
-            f"got {len(kb.joints)} joints. (7R support via jointlock.seven_r "
-            "lands in a follow-up to #110.)"
+    if len(kb.joints) == 7:
+        plan = _make_plan(
+            "jointlock.seven_r",
+            reason=(
+                "7R revolute chain. Locking one joint (auto-selected by\n"
+                "topology rank of the resulting 6R sub-chain) reduces this\n"
+                "to a series of 6R IK problems. Covers Franka Panda, FR3,\n"
+                "KUKA iiwa, Flexiv Rizon, Kinova Gen3, uFactory xArm7."
+            ),
+            needs_symbolic_precompute=False,
         )
+        _LOG.info("dispatch: chose %s (tier 1, 7R wrapper)", plan.solver_name)
+        return plan
+    if len(kb.joints) != 6:
+        raise ValueError(f"dispatch supports 6-DOF and 7-DOF chains; got {len(kb.joints)} joints.")
 
     parallel_triple = three_consecutive_parallel(kb.joints, policy)
     intersecting_triple = three_consecutive_intersecting(kb.joints, policy)
