@@ -85,6 +85,21 @@ $ ssik build path/to/ur5.urdf --base base_link --ee ee_link
 [ssik]     >>> sols, is_ls = ur5_ik.solve(T_target)
 ```
 
+For tier-0 arms (Pieper-class: UR, Puma, generic spherical-wrist), the artifact body is **per-arm specialised IKFast-style trig**: explicit `sin`, `cos`, `atan2` of target-pose entries with the arm's geometry constants substituted. For tier-2 (non-Pieper, e.g. JACO 2) the artifact is currently a thin wrapper around the runtime solver; specialising tier-2 with build-time symbolic precompute baking is in progress (#112).
+
+A snippet of the emitted Puma 560 artifact:
+
+```python
+# SP4 for q1 (shoulder pan).
+q1_x0 = math.atan2(1.0*p_x, -1.0*p_y)
+q1_x1 = 0.15005 - 6.12e-17*p_z      # 0.15005 = Puma wrist y-offset
+q1_x2 = 1.0*p_x**2 + 1.0*p_y**2
+theta_q1_plus = q1_x0 + math.acos(q1_x1/math.sqrt(q1_x2))
+theta_q1_minus = q1_x0 - math.acos(q1_x1/math.sqrt(q1_x2))
+```
+
+The same for q2/q3/q4/q5/q6 with Puma's link-length constants (0.4318, etc.) substituted throughout.
+
 The emitted artifact wraps the dispatched solver around baked KinBody constants and exposes a rich API:
 
 ```python

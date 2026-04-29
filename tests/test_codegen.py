@@ -59,7 +59,9 @@ def test_emit_ur5_artifact_in_memory(tmp_path: Path) -> None:
         output_path=None,
         arm_label="UR5",
     )
-    # Public-API surface check.
+    # Public-API surface check. UR5 (three_parallel) now uses the
+    # specialised emitter, so the artifact's body is inlined math + a
+    # runtime SP6 import (not a thin wrapper around the full solver).
     for needle in (
         "def solve(",
         'SOLVER_NAME = "ikgeo.three_parallel"',
@@ -68,7 +70,8 @@ def test_emit_ur5_artifact_in_memory(tmp_path: Path) -> None:
         "FLOP_BUDGET =",
         "DISPATCH_REASON =",
         "_KB = _build_kb()",
-        "from ssik.solvers.ikgeo.three_parallel import solve as _solver_solve",
+        "_sp6_runtime",  # specialised three_parallel imports SP6 runtime
+        "_solve_algebraic",  # specialised emitter shape
     ):
         assert needle in result.source, f"missing {needle!r}"
     assert result.module_name == "ur5_ik_test"

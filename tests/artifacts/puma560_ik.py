@@ -26,12 +26,17 @@ and the returned list is the best-LS approximation (or empty).
 
 from __future__ import annotations
 
+import math
+
+_DEG_SQ = 1e-16
+_FEAS_TOL = 1e-08
+
 import numpy as np
 
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.solvers.ikgeo.spherical_two_parallel import solve as _solver_solve
+from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.spherical_two_parallel"
 SOLVER_TIER = 0
@@ -110,6 +115,195 @@ def _build_kb() -> KinBody:
 _KB = _build_kb()
 
 
+def _solve_algebraic(T_target):
+    """Algebraic IK candidates. Up to 8; verify + dedup in solve().
+    """
+    r_00 = T_target[0, 0]
+    r_01 = T_target[0, 1]
+    r_02 = T_target[0, 2]
+    r_10 = T_target[1, 0]
+    r_11 = T_target[1, 1]
+    r_12 = T_target[1, 2]
+    r_20 = T_target[2, 0]
+    r_21 = T_target[2, 1]
+    r_22 = T_target[2, 2]
+    p_x = T_target[0, 3]
+    p_y = T_target[1, 3]
+    p_z = T_target[2, 3]
+    candidates = []
+
+    # SP4 for q1 (shoulder pan).
+    _q1_R_sq = 1.0*p_x**2 + 1.0*p_y**2
+    _q1_rhs = 0.15005 - 6.12323399573677e-17*p_z
+    _q1_phi = math.atan2(1.0*p_x, -1.0*p_y)
+    if _q1_R_sq < _DEG_SQ:
+        theta_q1_plus = 0.0
+        theta_q1_minus = 0.0  # degenerate; verify-step drops
+    else:
+        _q1_R = math.sqrt(_q1_R_sq)
+        if abs(_q1_rhs) > _q1_R + _FEAS_TOL:
+            # LS fallback: theta = phi (or phi + pi if rhs < 0)
+            theta_q1_plus = (
+                _q1_phi if _q1_rhs > 0 else _q1_phi + math.pi
+            )
+            theta_q1_minus = theta_q1_plus
+        else:
+            _q1_clipped = min(1.0, max(-1.0, _q1_rhs / _q1_R))
+            _q1_delta = math.acos(_q1_clipped)
+            theta_q1_plus = _q1_phi + _q1_delta
+            theta_q1_minus = _q1_phi - _q1_delta
+
+    for q1 in (theta_q1_plus, theta_q1_minus):
+        s1 = math.sin(q1)
+        c1 = math.cos(q1)
+        # SP3 for q3 (elbow): reduces to SP4 with target shift.
+        q3_x0 = 1.0*math.sin(q1)
+        q3_x1 = math.cos(q1)
+        _q3_R_sq = 0.0348408995890292
+        _q3_rhs = -0.5*p_z**2 - 1/2*(p_x*q3_x0 - p_y*q3_x1)**2 - 1/2*(-p_x*q3_x1 - p_y*q3_x0)**2 + 0.19791478625
+        _q3_phi = -1.52381841044681 + math.pi
+        if _q3_R_sq < _DEG_SQ:
+            theta_q3_plus = 0.0
+            theta_q3_minus = 0.0  # degenerate; verify-step drops
+        else:
+            _q3_R = math.sqrt(_q3_R_sq)
+            if abs(_q3_rhs) > _q3_R + _FEAS_TOL:
+                # LS fallback: theta = phi (or phi + pi if rhs < 0)
+                theta_q3_plus = (
+                    _q3_phi if _q3_rhs > 0 else _q3_phi + math.pi
+                )
+                theta_q3_minus = theta_q3_plus
+            else:
+                _q3_clipped = min(1.0, max(-1.0, _q3_rhs / _q3_R))
+                _q3_delta = math.acos(_q3_clipped)
+                theta_q3_plus = _q3_phi + _q3_delta
+                theta_q3_minus = _q3_phi - _q3_delta
+
+        for q3 in (theta_q3_plus, theta_q3_minus):
+            s3 = math.sin(q3)
+            c3 = math.cos(q3)
+            # SP1 for q2 (shoulder pitch): closed-form atan2.
+            q2_x0 = math.sin(q3)
+            q2_x1 = math.cos(q3)
+            q2_x2 = 0.4318*q2_x0 - 0.0203*q2_x1 - 0.4318
+            q2_x3 = 1.0*p_z
+            q2_x4 = 0.0203*q2_x0 + 0.4318*q2_x1
+            q2_x5 = math.cos(q1)
+            q2_x6 = math.sin(q1)
+            q2_x7 = 1.0*q2_x6
+            q2_x8 = -p_x*q2_x5 - p_y*q2_x7
+            q2_x9 = p_x*q2_x7 - p_y*q2_x5
+            q2 = math.atan2(-q2_x2*q2_x3 + q2_x4*q2_x8 + q2_x9*(2.64401243935914e-17*q2_x0 - 1.24301650113456e-18*q2_x1 - 2.64401243935914e-17), -0.15005*p_x*q2_x6 + 0.15005*p_y*q2_x5 - 9.18791261060302e-18*p_z + q2_x2*q2_x8 - q2_x3*(-q2_x4 - 9.18791261060302e-18) + q2_x9*(-1.24301650113456e-18*q2_x0 - 2.64401243935914e-17*q2_x1 + 0.15005))
+            s2 = math.sin(q2)
+            c2 = math.cos(q2)
+            # SP4 for q5 (wrist pitch).
+            q5_x0 = math.sin(q2)
+            q5_x1 = math.sin(q3)
+            q5_x2 = math.cos(q2)
+            q5_x3 = 6.12323399573677e-17*q5_x2 - 6.12323399573677e-17
+            q5_x4 = math.cos(q3)
+            q5_x5 = 6.12323399573677e-17*q5_x4 - 6.12323399573677e-17
+            q5_x6 = 1.0*q5_x2
+            q5_x7 = 1.0*q5_x4 + 3.74939945665464e-33
+            q5_x8 = 1.0*q5_x7
+            q5_x9 = 6.12323399573677e-17*q5_x0
+            q5_x10 = -q5_x1*q5_x9 + q5_x3*q5_x7 + q5_x5
+            q5_x11 = 1.0*math.sin(q1)
+            q5_x12 = math.cos(q1)
+            q5_x13 = -q5_x0*q5_x8 - q5_x1*q5_x6 - q5_x5*q5_x9
+            _q5_R_sq = 1.00000000000000
+            _q5_rhs = 1.0*r_02*(-q5_x10*q5_x11 + q5_x12*q5_x13) + 1.0*r_12*(q5_x10*q5_x12 + q5_x11*q5_x13) + 1.0*r_22*(-1.0*q5_x0*q5_x1 + 1.0*q5_x3*q5_x5 + q5_x8*(q5_x6 + 3.74939945665464e-33)) - 3.74939945665464e-33
+            _q5_phi = 0
+            if _q5_R_sq < _DEG_SQ:
+                theta_q5_plus = 0.0
+                theta_q5_minus = 0.0  # degenerate; verify-step drops
+            else:
+                _q5_R = math.sqrt(_q5_R_sq)
+                if abs(_q5_rhs) > _q5_R + _FEAS_TOL:
+                    # LS fallback: theta = phi (or phi + pi if rhs < 0)
+                    theta_q5_plus = (
+                        _q5_phi if _q5_rhs > 0 else _q5_phi + math.pi
+                    )
+                    theta_q5_minus = theta_q5_plus
+                else:
+                    _q5_clipped = min(1.0, max(-1.0, _q5_rhs / _q5_R))
+                    _q5_delta = math.acos(_q5_clipped)
+                    theta_q5_plus = _q5_phi + _q5_delta
+                    theta_q5_minus = _q5_phi - _q5_delta
+
+            for q5 in (theta_q5_plus, theta_q5_minus):
+                s5 = math.sin(q5)
+                c5 = math.cos(q5)
+                # SP1 for q4 (wrist roll-1): closed-form atan2.
+                q4_x0 = 6.12323399573677e-17*math.cos(q5) - 6.12323399573677e-17
+                q4_x1 = math.cos(q3)
+                q4_x2 = math.sin(q2)
+                q4_x3 = 1.0*q4_x2
+                q4_x4 = math.cos(q2)
+                q4_x5 = 6.12323399573677e-17*q4_x4 - 6.12323399573677e-17
+                q4_x6 = math.sin(q3)
+                q4_x7 = 6.12323399573677e-17*q4_x6
+                q4_x8 = 1.0*q4_x4 + 3.74939945665464e-33
+                q4_x9 = 1.0*q4_x6
+                q4_x10 = 1.0*r_22
+                q4_x11 = math.cos(q1)
+                q4_x12 = q4_x1*q4_x4 - q4_x2*q4_x9
+                q4_x13 = 6.12323399573677e-17*q4_x2
+                q4_x14 = q4_x1*q4_x13 + q4_x5*q4_x9 + q4_x7
+                q4_x15 = 1.0*math.sin(q1)
+                q4_x16 = 1.0*r_02
+                q4_x17 = 1.0*r_12
+                q4_x18 = q4_x10*(q4_x1*q4_x3 + q4_x5*q4_x7 + q4_x8*q4_x9) + q4_x16*(q4_x11*q4_x12 - q4_x14*q4_x15) + q4_x17*(q4_x11*q4_x14 + q4_x12*q4_x15)
+                q4_x19 = 6.12323399573677e-17*q4_x1 - 6.12323399573677e-17
+                q4_x20 = q4_x19*q4_x5 - 3.74939945665464e-33*q4_x2*q4_x6 + 1.0
+                q4_x21 = -q4_x13 - q4_x19*q4_x3 - q4_x4*q4_x7
+                q4_x22 = q4_x10*(1.0*q4_x19*q4_x8 - q4_x2*q4_x7 + q4_x5) + q4_x16*(q4_x11*q4_x21 - q4_x15*q4_x20) + q4_x17*(q4_x11*q4_x20 + q4_x15*q4_x21)
+                q4_x23 = 1.0*math.sin(q5)
+                q4 = math.atan2(-q4_x0*q4_x18 - q4_x22*q4_x23, q4_x0*q4_x22 - q4_x18*q4_x23)
+                # SP1 for q6 (wrist roll-2): closed-form atan2.
+                q6_x0 = math.sin(q2)
+                q6_x1 = math.sin(q3)
+                q6_x2 = math.cos(q2)
+                q6_x3 = 6.12323399573677e-17*q6_x2 - 6.12323399573677e-17
+                q6_x4 = math.cos(q3)
+                q6_x5 = 6.12323399573677e-17*q6_x4 - 6.12323399573677e-17
+                q6_x6 = 1.0*q6_x2
+                q6_x7 = 1.0*q6_x4 + 3.74939945665464e-33
+                q6_x8 = 1.0*q6_x7
+                q6_x9 = -1.0*q6_x0*q6_x1 + 1.0*q6_x3*q6_x5 + 1.0*q6_x8*(q6_x6 + 3.74939945665464e-33)
+                q6_x10 = 6.12323399573677e-17*q6_x0
+                q6_x11 = -q6_x1*q6_x10 + q6_x3*q6_x7 + q6_x5
+                q6_x12 = 1.0*math.sin(q1)
+                q6_x13 = math.cos(q1)
+                q6_x14 = -q6_x0*q6_x8 - q6_x1*q6_x6 - q6_x10*q6_x5
+                q6_x15 = -1.0*q6_x11*q6_x12 + 1.0*q6_x13*q6_x14
+                q6_x16 = 1.0*q6_x11*q6_x13 + 1.0*q6_x12*q6_x14
+                q6_x17 = q6_x15*r_01 + q6_x16*r_11 + q6_x9*r_21
+                q6_x18 = 1.0*math.sin(q5)
+                q6_x19 = math.cos(q5)
+                q6_x20 = 6.12323399573677e-17*q6_x19 - 6.12323399573677e-17
+                q6_x21 = q6_x15*r_00 + q6_x16*r_10 + q6_x9*r_20
+                q6_x22 = 1.0*q6_x19 + 3.74939945665464e-33
+                q6_x23 = q6_x15*r_02 + q6_x16*r_12 + q6_x9*r_22
+                q6 = math.atan2(-q6_x17*q6_x18 + q6_x20*q6_x21, q6_x17*q6_x20 + q6_x18*q6_x21)
+                candidates.append([q1, q2, q3, q4, q5, q6])
+    return candidates
+
+
+def _fk(q):
+    """POE forward kinematics using the baked KinBody."""
+    T = np.eye(4)
+    for j, qi in zip(_KB.joints, q, strict=True):
+        rot = np.eye(4)
+        rot[:3, :3] = _rotation_matrix(j.axis, float(qi))
+        T = T @ j.T_left @ rot @ j.T_right
+    return T
+
+
+def _wrap_to_pi(a):
+    return ((a + math.pi) % (2 * math.pi)) - math.pi
+
+
 def solve(
     T_target,
     *,
@@ -119,35 +313,56 @@ def solve(
 ):
     """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
 
-    :param T_target: 4x4 SE(3) target end-effector pose, np.float64.
-    :param policy: tolerance policy. Pass a custom
-        :class:`ssik.TolerancePolicy` to tighten or relax the
-        FK-closure threshold (``subproblem_numerical``), the
-        axis-parallel / axis-intersect predicates, etc. Defaults to
-        :data:`ssik.DEFAULT_TOLERANCE_POLICY`.
-    :param allow_refinement: opt into Newton-on-spatial-Jacobian
-        polish for near-miss algebraic candidates. Default ``False``;
-        turn on to recover candidates that don't quite meet
-        ``policy.subproblem_numerical`` on their own (e.g. near
-        kinematic singularities).
-    :param refinement_max_iters: cap on Newton iterations per
-        candidate when ``allow_refinement=True``.
-    :returns: ``(solutions, is_ls)``. Each ``solution.q`` is a joint
-        vector matching the source URDF's joint ordering;
-        ``solution.fk_residual`` reports closure against
-        ``T_target``. ``is_ls=True`` iff the algebraic path produced
-        no candidate meeting the FK tolerance -- callers wanting
-        only "exact" solutions check ``is_ls`` and discard.
-
-    Solver: spherical_two_parallel.
+    :param T_target: 4x4 SE(3) target end-effector pose.
+    :param policy: tolerance policy (FK closure + dedup tolerance).
+    :param allow_refinement: opt into Newton polish for near-miss
+        algebraic candidates. Currently a no-op in the specialised
+        emitter; a follow-up adds the inlined Newton loop.
+    :param refinement_max_iters: cap when refinement is added.
     """
-    return _solver_solve(
-        _KB,
-        T_target,
-        policy=policy,
-        allow_refinement=allow_refinement,
-        refinement_max_iters=refinement_max_iters,
-    )
+    T = np.asarray(T_target, dtype=np.float64)
+    candidates = _solve_algebraic(T)
+
+    fk_atol = policy.subproblem_numerical
+    dedup_atol = policy.subproblem_dedup
+
+    # Verify each candidate via FK closure.
+    verified = []
+    for cand_q in candidates:
+        q = np.asarray(cand_q, dtype=np.float64)
+        if not np.all(np.isfinite(q)):
+            continue
+        T_check = _fk(q)
+        residual = float(np.linalg.norm(T_check - T))
+        if residual <= fk_atol:
+            verified.append((q, residual))
+
+    # Wrap-to-pi dedup; keep lowest fk_residual on collision.
+    deduped = []
+    for cand_q, cand_res in verified:
+        dup_idx = None
+        for j, (existing_q, _) in enumerate(deduped):
+            diffs = np.array([_wrap_to_pi(a - b) for a, b in zip(cand_q, existing_q)])
+            if np.all(np.abs(diffs) < dedup_atol):
+                dup_idx = j
+                break
+        if dup_idx is None:
+            deduped.append((cand_q, cand_res))
+        elif cand_res < deduped[dup_idx][1]:
+            deduped[dup_idx] = (cand_q, cand_res)
+
+    solutions = [
+        Solution(
+            q=q,
+            fk_residual=residual,
+            refinement_used="none",
+            refinement_iters=0,
+            branch_id=i,
+            solver_name=SOLVER_NAME,
+        )
+        for i, (q, residual) in enumerate(deduped)
+    ]
+    return solutions, len(solutions) == 0
 
 
 __all__ = [

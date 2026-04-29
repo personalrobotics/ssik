@@ -127,7 +127,26 @@ _SOLVER_IMPORT_PATHS: dict[str, str] = {
 
 
 def _render(*, kb: KinBody, plan: DispatchPlan, module_name: str, arm_label: str) -> str:
-    """Render the artifact source as a single string."""
+    """Render the artifact source as a single string.
+
+    Picks between the **specialised** form (sympy-driven inlined trig with
+    arm constants substituted; #112) and the **thin wrapper** form (calls
+    into ssik solver at runtime; #110 Phase 1 default). The specialised
+    form is preferred when a per-solver composer is registered.
+    """
+    if plan.solver_name in _SPECIALISED_COMPOSERS:
+        return _render_specialised(kb=kb, plan=plan, module_name=module_name, arm_label=arm_label)
+    return _render_thin_wrapper(kb=kb, plan=plan, module_name=module_name, arm_label=arm_label)
+
+
+def _render_thin_wrapper(
+    *, kb: KinBody, plan: DispatchPlan, module_name: str, arm_label: str
+) -> str:
+    """Original Phase-1 emitter: `_solver_solve(_KB, T_target, ...)` wrapper.
+
+    Used for solvers without a registered specialised composer (today:
+    every solver except spherical_two_parallel; expand as composers land).
+    """
     solver_module = _SOLVER_IMPORT_PATHS[plan.solver_name]
     solver_short = plan.solver_name.split(".")[-1]
 
@@ -153,6 +172,172 @@ def _render(*, kb: KinBody, plan: DispatchPlan, module_name: str, arm_label: str
     buf.write("\n")
     buf.write(_render_all_export())
     return buf.getvalue()
+
+
+def _render_specialised(
+    *, kb: KinBody, plan: DispatchPlan, module_name: str, arm_label: str
+) -> str:
+    """Phase 1.5 emitter (#112): inlined per-arm trig + arithmetic.
+
+    Calls the registered composer to produce `_solve_algebraic(T_target)`
+    with all of the SP1/SP3/SP4 closed-form math expanded inline + arm
+    constants substituted. The artifact's `solve()` orchestrator wraps
+    the algebraic candidates with FK verification + dedup, mirroring
+    `verify_candidates`.
+    """
+    composer = _SPECIALISED_COMPOSERS[plan.solver_name]
+    composer_module = composer.__module__
+    composer_func_name = composer.__name__
+
+    # Local import to avoid a hard dep cycle.
+    from importlib import import_module
+
+    comp_mod = import_module(composer_module)
+    compose = getattr(comp_mod, composer_func_name)
+    render_constants_header = getattr(comp_mod, "render_constants_header")  # noqa: B009
+
+    algebraic_body = compose(kb)
+
+    buf = StringIO()
+    buf.write(_render_header(module_name, arm_label, plan))
+    buf.write("\n\nfrom __future__ import annotations\n\n")
+    buf.write(render_constants_header())
+    buf.write("\nimport numpy as np\n\n")
+    buf.write("from ssik._kinbody import Joint, KinBody, Link\n")
+    buf.write("from ssik.core.solution import Solution\n")
+    buf.write("from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy\n")
+    buf.write("from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix\n\n")
+    buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
+    buf.write(f"SOLVER_TIER = {plan.tier}\n")
+    buf.write(f"EXPECTED_MS_MEDIAN = {plan.expected_ms_median!r}\n")
+    buf.write(f"FLOP_BUDGET = {plan.flop_budget}\n")
+    buf.write(_render_dispatch_reason(plan.reason))
+    buf.write("\n")
+    buf.write(_render_kinbody_constants(kb))
+    buf.write("\n")
+    buf.write(_render_kinbody_builder())
+    buf.write("\n\n")
+    buf.write(algebraic_body)
+    buf.write("\n")
+    buf.write(_render_specialised_solve_orchestrator())
+    buf.write("\n")
+    buf.write(_render_all_export())
+    return buf.getvalue()
+
+
+def _render_specialised_solve_orchestrator() -> str:
+    """Render the public ``solve()`` for specialised artifacts.
+
+    Wraps ``_solve_algebraic`` with FK verification + wrap-to-pi dedup;
+    matches the runtime ``verify_candidates`` semantics. Exposes the
+    same kwargs as the thin-wrapper version.
+    """
+    return textwrap.dedent(
+        '''\
+
+        def _fk(q):
+            """POE forward kinematics using the baked KinBody."""
+            T = np.eye(4)
+            for j, qi in zip(_KB.joints, q, strict=True):
+                rot = np.eye(4)
+                rot[:3, :3] = _rotation_matrix(j.axis, float(qi))
+                T = T @ j.T_left @ rot @ j.T_right
+            return T
+
+
+        def _wrap_to_pi(a):
+            return ((a + math.pi) % (2 * math.pi)) - math.pi
+
+
+        def solve(
+            T_target,
+            *,
+            policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+            allow_refinement: bool = False,
+            refinement_max_iters: int = 15,
+        ):
+            """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
+
+            :param T_target: 4x4 SE(3) target end-effector pose.
+            :param policy: tolerance policy (FK closure + dedup tolerance).
+            :param allow_refinement: opt into Newton polish for near-miss
+                algebraic candidates. Currently a no-op in the specialised
+                emitter; a follow-up adds the inlined Newton loop.
+            :param refinement_max_iters: cap when refinement is added.
+            """
+            T = np.asarray(T_target, dtype=np.float64)
+            candidates = _solve_algebraic(T)
+
+            fk_atol = policy.subproblem_numerical
+            dedup_atol = policy.subproblem_dedup
+
+            # Verify each candidate via FK closure.
+            verified = []
+            for cand_q in candidates:
+                q = np.asarray(cand_q, dtype=np.float64)
+                if not np.all(np.isfinite(q)):
+                    continue
+                T_check = _fk(q)
+                residual = float(np.linalg.norm(T_check - T))
+                if residual <= fk_atol:
+                    verified.append((q, residual))
+
+            # Wrap-to-pi dedup; keep lowest fk_residual on collision.
+            deduped = []
+            for cand_q, cand_res in verified:
+                dup_idx = None
+                for j, (existing_q, _) in enumerate(deduped):
+                    diffs = np.array([_wrap_to_pi(a - b) for a, b in zip(cand_q, existing_q)])
+                    if np.all(np.abs(diffs) < dedup_atol):
+                        dup_idx = j
+                        break
+                if dup_idx is None:
+                    deduped.append((cand_q, cand_res))
+                elif cand_res < deduped[dup_idx][1]:
+                    deduped[dup_idx] = (cand_q, cand_res)
+
+            solutions = [
+                Solution(
+                    q=q,
+                    fk_residual=residual,
+                    refinement_used="none",
+                    refinement_iters=0,
+                    branch_id=i,
+                    solver_name=SOLVER_NAME,
+                )
+                for i, (q, residual) in enumerate(deduped)
+            ]
+            return solutions, len(solutions) == 0
+        '''
+    )
+
+
+# Per-solver registered composers. Solvers absent from this map fall back
+# to the thin-wrapper emitter. Add entries as composers land (#112 plan).
+from collections.abc import Callable  # noqa: E402
+
+# ``KinBody`` is in TYPE_CHECKING-only scope at module load; use a string
+# forward reference inside ``Callable``.
+ComposerFn = Callable[["KinBody"], str]
+
+
+def _import_composer(module_path: str, func_name: str) -> ComposerFn:
+    from importlib import import_module
+
+    fn = getattr(import_module(module_path), func_name)
+    return fn  # type: ignore[no-any-return]
+
+
+_SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
+    "ikgeo.spherical_two_parallel": _import_composer(
+        "ssik.codegen._compose.spherical_two_parallel", "compose"
+    ),
+    "ikgeo.three_parallel": _import_composer("ssik.codegen._compose.three_parallel", "compose"),
+    "ikgeo.spherical_two_intersecting": _import_composer(
+        "ssik.codegen._compose.spherical_two_intersecting", "compose"
+    ),
+    "ikgeo.spherical": _import_composer("ssik.codegen._compose.spherical", "compose"),
+}
 
 
 def _render_header(module_name: str, arm_label: str, plan: DispatchPlan) -> str:
