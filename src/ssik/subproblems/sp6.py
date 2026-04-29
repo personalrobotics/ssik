@@ -246,50 +246,46 @@ def _refine_sp6(
     (``det(J)`` too small, e.g. when ``axes[0] || axes[4]``) falls back
     to the input without raising.
     """
+    max_step = np.pi / 4.0
     for _ in range(max_iter):
         r0 = rotate(k[0], t1, p[0])
         r1 = rotate(k[1], t2, p[1])
         r2 = rotate(k[2], t1, p[2])
         r3 = rotate(k[3], t2, p[3])
 
-        f = np.array(
-            [
-                _dot3(h[0], r0) + _dot3(h[1], r1) - d1,
-                _dot3(h[2], r2) + _dot3(h[3], r3) - d2,
-            ],
-            dtype=np.float64,
-        )
+        f0 = _dot3(h[0], r0) + _dot3(h[1], r1) - d1
+        f1 = _dot3(h[2], r2) + _dot3(h[3], r3) - d2
 
         # Partials. dF_i/dt_j uses chain rule: Rot(k, t) rotates `p`, so
         # the angle derivative is k x (Rot(k, t) @ p).
-        d_dt1_r0 = _cross3(k[0], r0)
-        d_dt2_r1 = _cross3(k[1], r1)
-        d_dt1_r2 = _cross3(k[2], r2)
-        d_dt2_r3 = _cross3(k[3], r3)
+        j00 = _dot3(h[0], _cross3(k[0], r0))
+        j01 = _dot3(h[1], _cross3(k[1], r1))
+        j10 = _dot3(h[2], _cross3(k[2], r2))
+        j11 = _dot3(h[3], _cross3(k[3], r3))
 
-        j_mat_2x2 = np.array(
-            [
-                [_dot3(h[0], d_dt1_r0), _dot3(h[1], d_dt2_r1)],
-                [_dot3(h[2], d_dt1_r2), _dot3(h[3], d_dt2_r3)],
-            ],
-            dtype=np.float64,
-        )
-
-        try:
-            delta = np.linalg.solve(j_mat_2x2, -f)
-        except np.linalg.LinAlgError:
+        # Solve 2x2 system delta = -inv(J) @ f via closed-form inverse.
+        # Avoids np.linalg.solve dispatch (~5us) and the np.array(2,)
+        # construction overhead. det == 0 signals an ill-conditioned
+        # Jacobian (e.g. axes[0] || axes[4]); break and fall back to the
+        # current angles, mirroring the prior LinAlgError handling.
+        det = j00 * j11 - j01 * j10
+        if abs(det) < 1e-15:
             break
+        inv_det = 1.0 / det
+        delta0 = -(j11 * f0 - j01 * f1) * inv_det
+        delta1 = -(-j10 * f0 + j00 * f1) * inv_det
 
         # Clip per-iteration step to pi/4 so ill-conditioned Jacobians
         # don't launch us to a far-away minimum; quadratic convergence is
         # preserved near the true solution where |delta| is already small.
-        step_norm = float(np.linalg.norm(delta))
-        max_step = np.pi / 4.0
+        step_norm = float(np.sqrt(delta0 * delta0 + delta1 * delta1))
         if step_norm > max_step:
-            delta = delta * (max_step / step_norm)
+            scale = max_step / step_norm
+            delta0 *= scale
+            delta1 *= scale
 
-        t1 = _wrap(t1 + float(delta[0]))
-        t2 = _wrap(t2 + float(delta[1]))
+        t1 = _wrap(t1 + delta0)
+        t2 = _wrap(t2 + delta1)
 
         if step_norm < step_tol:
             break
