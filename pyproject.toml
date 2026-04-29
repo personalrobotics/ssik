@@ -36,6 +36,9 @@ urdf = [
 Repository = "https://github.com/siddhss5/ikfastpy"
 Issues = "https://github.com/siddhss5/ikfastpy/issues"
 
+[project.scripts]
+ssik = "ssik.cli:main"
+
 # PEP 735 dependency groups — for tooling that's not an "extra" of the package.
 [dependency-groups]
 dev = [
@@ -64,6 +67,12 @@ packages = ["src/ssik"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+extend-exclude = [
+    # Generated reference artifacts. Not subject to lint rules; their format
+    # is dictated by ssik.core.codegen and validated via byte-equal snapshot
+    # tests in test_artifact_snapshots.py.
+    "tests/artifacts",
+]
 
 [tool.ruff.lint]
 select = [
@@ -81,6 +90,7 @@ select = [
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
+exclude = ['^tests/artifacts/']
 
 # sympy ships no type stubs; used at module-import time for offline
 # per-arm symbolic preprocessing in ssik.solvers.ikgeo._raghavan_roth.
@@ -91,6 +101,12 @@ ignore_missing_imports = true
 # urchin (URDF parser) ships no type stubs.
 [[tool.mypy.overrides]]
 module = "urchin.*"
+ignore_missing_imports = true
+
+# tests/fixtures/jaco2.py is reachable via sys.path injection in tests; mypy
+# resolves it correctly when run inside pytest but not from a top-level pass.
+[[tool.mypy.overrides]]
+module = "jaco2"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

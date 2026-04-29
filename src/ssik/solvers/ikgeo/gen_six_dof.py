@@ -35,6 +35,8 @@ arms that match no specialisation.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -50,6 +52,7 @@ __all__ = ["solve"]
 
 _GRID_N = 100
 _SOLVER_NAME = "ikgeo.gen_six_dof"
+_LOG = logging.getLogger(__name__)
 
 
 def solve(
@@ -137,6 +140,14 @@ def solve(
         solver_name=_SOLVER_NAME,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
+    )
+    _LOG.info(
+        "%s: %d candidates from %d 2D-grid minima -> %d solutions (is_ls=%s)",
+        _SOLVER_NAME,
+        len(candidates),
+        len(minima),
+        len(solutions),
+        len(solutions) == 0,
     )
     return solutions, len(solutions) == 0
 

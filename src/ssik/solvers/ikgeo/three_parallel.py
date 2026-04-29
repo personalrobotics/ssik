@@ -37,6 +37,8 @@ Up to 8 IK solutions per target pose (2 shoulder-pan x 2 wrist-pitch x
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -51,6 +53,7 @@ from ssik.subproblems._rotation import rotate, rotation_matrix
 __all__ = ["solve"]
 
 _SOLVER_NAME = "ikgeo.three_parallel"
+_LOG = logging.getLogger(__name__)
 
 
 def _wrap_to_pi(angle: float) -> float:
@@ -173,6 +176,13 @@ def solve(
         solver_name=_SOLVER_NAME,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
+    )
+    _LOG.info(
+        "%s: %d candidates -> %d solutions (is_ls=%s)",
+        _SOLVER_NAME,
+        len(candidates),
+        len(solutions),
+        len(solutions) == 0,
     )
     return solutions, len(solutions) == 0
 

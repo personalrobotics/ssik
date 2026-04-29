@@ -1,0 +1,267 @@
+"""Solver dispatcher: classify a KinBody and pick the best ssik solver.
+
+Pure function:
+
+    KinBody -> DispatchPlan
+
+The :class:`DispatchPlan` is the structured handoff between the topology
+classifier and the rest of the build pipeline. It carries everything the CLI
+needs to print explanatory output and everything the codegen module needs to
+emit a per-arm artifact:
+
+* ``solver_name``: dotted module path of the chosen solver (e.g.
+  ``ikgeo.three_parallel``).
+* ``tier``: 0 closed-form, 1 univariate-search, 2 numeric Raghavan-Roth.
+* ``reason``: human-readable explanation of which structural conditions
+  matched and why this solver was preferred over its siblings.
+* ``expected_ms_median``, ``flop_budget``: rough order-of-magnitude
+  estimates from the speed-pass benches (#93). For showing users "expect
+  ~X ms / IK on commodity hardware" before they run the artifact.
+* ``needs_symbolic_precompute``: True iff the chosen solver runs a sympy
+  preprocessing step. Tier-2 RR triggers this; tier-0/1 do not.
+* ``estimated_precompute_seconds``: rough cold-cache time when applicable.
+
+Dispatch decision order (best to worst):
+
+1. Three consecutive parallel axes at (1, 2, 3) -> ``three_parallel``.
+2. Three consecutive intersecting axes at (3, 4, 5):
+   - + axes[1] || axes[2] -> ``spherical_two_parallel``.
+   - + p[1] near zero      -> ``spherical_two_intersecting``.
+   - else                  -> ``spherical``.
+3. otherwise               -> ``general_6r`` (tier-2 Raghavan-Roth).
+
+**Tier-1 univariate-search solvers (``two_parallel``, ``two_intersecting``)
+are not auto-dispatched.** They run a 200-sample 1D grid + inner SPx per
+sample and benchmark at 100s-of-ms to seconds per IK; the production tier-2
+path (Raghavan-Roth + AE-3) handles the same chains in ~5 ms. Tier-1
+solvers remain importable for users who want them explicitly, but they're
+strictly slower than tier-2 RR on every measured workload.
+
+Concretely: JACO 2 has ``axes[1] || axes[2]`` (parallel shoulder) but no
+spherical wrist (60-degree non-orthogonal twist at joints 4-5). The naive
+ordering would route it through ``two_parallel`` at ~261 ms median; instead
+we route it through ``general_6r`` at ~5 ms median (#85). The 50x-200x
+difference is consistent across non-Pieper geometries.
+
+This dispatcher will eventually be shared with
+:mod:`ssik.solvers.jointlock.seven_r` (which still routes its tier-2 fallback
+through the slower ``gen_six_dof`` oracle); that consolidation is tracked as
+a follow-up to #110.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+import numpy as np
+
+from ssik._kinbody import KinBody
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.kinematics.predicates import (
+    axis_parallel,
+    three_consecutive_intersecting,
+    three_consecutive_parallel,
+)
+
+__all__ = ["DispatchPlan", "dispatch"]
+
+_LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, kw_only=True)
+class DispatchPlan:
+    """Result of solver-classification on a POE-normalized KinBody.
+
+    Returned by :func:`dispatch`. The ``reason`` is the canonical user-facing
+    explanation; tests assert on the structured fields, the CLI renders the
+    ``reason`` text. Numeric fields are rough estimates from the #93 speed
+    pass on Apple M3 single-thread; treat as "expect this order of
+    magnitude," not a contract.
+    """
+
+    solver_name: str
+    """Dotted path under :mod:`ssik.solvers` (e.g. ``ikgeo.three_parallel``)."""
+
+    tier: int
+    """0 closed-form, 1 univariate-search, 2 numeric Raghavan-Roth."""
+
+    reason: str
+    """Multi-line human-readable explanation. Suitable for printing as-is."""
+
+    expected_ms_median: float
+    """Approximate median wall-clock per IK on commodity x86 / Apple M3."""
+
+    flop_budget: int
+    """Approximate machine-invariant FLOPs per IK (#93)."""
+
+    needs_symbolic_precompute: bool
+    """True iff the solver runs sympy preprocessing during build/first call."""
+
+    estimated_precompute_seconds: float | None
+    """Rough cold-cache time when ``needs_symbolic_precompute=True``."""
+
+
+# Per-solver order-of-magnitude estimates measured on Apple M3 single-thread,
+# Python+numpy, post-#93 speed pass. These are the user-facing "expect ~Xms"
+# numbers; codegen also bakes them into the emitted artifact's docstring.
+_SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
+    # solver_name -> (tier, expected_ms_median, flop_budget)
+    "ikgeo.three_parallel": (0, 1.6, 2_519),
+    "ikgeo.spherical_two_parallel": (0, 1.2, 1_316),
+    "ikgeo.spherical_two_intersecting": (0, 1.3, 1_476),
+    "ikgeo.spherical": (0, 7.5, 10_312),
+    "ikgeo.two_parallel": (1, 261.0, 141_569),
+    "ikgeo.two_intersecting": (1, 1184.0, 2_650_681),
+    "ikgeo.general_6r": (2, 5.0, 30_000_000),
+    "ikgeo.gen_six_dof": (2, 26_800.0, 31_478_656),
+}
+
+
+def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) -> DispatchPlan:
+    """Classify a 6R or 7R chain and pick the best ssik solver.
+
+    :param kb: a POE-normalized :class:`KinBody`. Pass the result of
+        :func:`ssik._urdf.load_urdf_kinbody_normalized` (or your MJCF/DH
+        equivalent). Non-normalized inputs produce undefined results.
+    :param policy: tolerance policy controlling the predicates' axis-parallel
+        / axis-intersect thresholds. Defaults to
+        :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
+    :returns: a :class:`DispatchPlan` describing the chosen solver, the
+        topology evidence, expected speed, and FLOP budget.
+    :raises ValueError: if the chain is not 6R (this iteration). 7R support
+        via :mod:`ssik.solvers.jointlock.seven_r` is a follow-up.
+    """
+    if len(kb.joints) != 6:
+        raise ValueError(
+            f"dispatch currently supports 6-DOF chains only; "
+            f"got {len(kb.joints)} joints. (7R support via jointlock.seven_r "
+            "lands in a follow-up to #110.)"
+        )
+
+    parallel_triple = three_consecutive_parallel(kb.joints, policy)
+    intersecting_triple = three_consecutive_intersecting(kb.joints, policy)
+    j12_parallel = axis_parallel(kb.joints[1].axis, kb.joints[2].axis, policy)
+    p1_norm = float(np.linalg.norm(kb.joints[1].T_left[:3, 3]))
+    p1_on_axis = p1_norm < policy.axis_intersect
+
+    # Tier 0 -- three consecutive parallel (UR class).
+    if parallel_triple == (1, 2, 3):
+        plan = _make_plan(
+            "ikgeo.three_parallel",
+            reason=(
+                "Three consecutive parallel axes at joints (1, 2, 3) -- the "
+                "UR-class structure (UR3 / UR5 / UR10).\n"
+                "Closed-form via SP6 (joints 0+4) + SP1 + SP3."
+            ),
+            needs_symbolic_precompute=False,
+        )
+        _LOG.info("dispatch: chose %s (tier 0)", plan.solver_name)
+        return plan
+
+    # Tier 0 -- spherical wrist (Pieper class).
+    if intersecting_triple == (3, 4, 5):
+        if j12_parallel and p1_on_axis:
+            # Both shoulder specializations match (Puma-560 case). Prefer the
+            # parallel-shoulder solver -- typically smaller IK set and slightly
+            # tighter conditioning on the SP3 elbow constraint.
+            plan = _make_plan(
+                "ikgeo.spherical_two_parallel",
+                reason=(
+                    "Spherical wrist at joints (3, 4, 5) AND axes[1] parallel "
+                    "to axes[2] AND ||p[1]|| ~= 0.\n"
+                    "Both Pieper specialisations apply (e.g. Puma 560); the "
+                    "parallel-shoulder solver is preferred for slightly tighter "
+                    "elbow conditioning."
+                ),
+                needs_symbolic_precompute=False,
+            )
+        elif j12_parallel:
+            plan = _make_plan(
+                "ikgeo.spherical_two_parallel",
+                reason=(
+                    "Spherical wrist at joints (3, 4, 5) AND axes[1] parallel "
+                    "to axes[2].\n"
+                    "Closed-form via SP4 (shoulder) + SP3 (elbow) + SP1 (wrist). "
+                    "Covers most industrial 6R arms (Puma, Fanuc LR/CR, KUKA KR)."
+                ),
+                needs_symbolic_precompute=False,
+            )
+        elif p1_on_axis:
+            plan = _make_plan(
+                "ikgeo.spherical_two_intersecting",
+                reason=(
+                    "Spherical wrist at joints (3, 4, 5) AND ||p[1]|| ~= 0 "
+                    "(joints 0 and 1 share an origin).\n"
+                    "Closed-form via SP3 + SP2 + SP4 + SP1. Compact-base arms "
+                    "(IRB120-class, lite6/xArm6 subfamilies)."
+                ),
+                needs_symbolic_precompute=False,
+            )
+        else:
+            plan = _make_plan(
+                "ikgeo.spherical",
+                reason=(
+                    "Spherical wrist at joints (3, 4, 5), no shoulder "
+                    "specialisation.\n"
+                    "Closed-form via SP5 (shoulder) + SP4 (wrist) + SP1. "
+                    "Generic spherical-wrist fallback; rarely matches "
+                    "commercial geometry."
+                ),
+                needs_symbolic_precompute=False,
+            )
+        _LOG.info("dispatch: chose %s (tier 0)", plan.solver_name)
+        return plan
+
+    # Tier 2 -- production Raghavan-Roth path. The EAIK gap.
+    #
+    # Skips tier-1 univariate-search solvers: those run a 200-sample 1D grid
+    # plus an inner SP5/SP6 call per sample and benchmark at 100s-of-ms to
+    # seconds, while RR handles the same chains at ~5ms. See module docstring
+    # for the JACO 2 example and the speed comparison.
+    weak_match_notes = []
+    if j12_parallel:
+        weak_match_notes.append(
+            "axes[1] parallel to axes[2] (would match tier-1 `two_parallel`, "
+            "but tier-2 RR is ~50x faster)"
+        )
+    if float(np.linalg.norm(kb.joints[5].T_left[:3, 3])) < policy.axis_intersect:
+        weak_match_notes.append(
+            "||p[5]|| ~= 0 (would match tier-1 `two_intersecting`, but tier-2 RR is ~200x faster)"
+        )
+    weak_block = (
+        "\nWeaker structural matches (not used):\n  - " + "\n  - ".join(weak_match_notes)
+        if weak_match_notes
+        else ""
+    )
+    plan = _make_plan(
+        "ikgeo.general_6r",
+        reason=(
+            "No tier-0 (Pieper-class) match.\n"
+            "Tier-2 numeric Raghavan-Roth + Manocha-Canny pipeline with AE-3 "
+            "leftvar selection. Closes the EAIK coverage gap (Kinova JACO 2 "
+            "classical, Agilex Piper, custom non-Pieper 6R)." + weak_block
+        ),
+        needs_symbolic_precompute=True,
+    )
+    _LOG.info("dispatch: chose %s (tier 2)", plan.solver_name)
+    return plan
+
+
+def _make_plan(solver_name: str, *, reason: str, needs_symbolic_precompute: bool) -> DispatchPlan:
+    """Assemble a :class:`DispatchPlan` from per-solver estimates + caller fields."""
+    tier, ms, flops = _SOLVER_ESTIMATES[solver_name]
+    # Symbolic precompute time estimate -- only applies to tier-2 RR currently.
+    # 150-300 s on JACO 2 today; report a single midpoint estimate for the
+    # build CLI's ETA. Real per-arm time depends on linearity-joint search
+    # hits and sympy version; the build pass measures it precisely.
+    precompute_s = 240.0 if needs_symbolic_precompute else None
+    return DispatchPlan(
+        solver_name=solver_name,
+        tier=tier,
+        reason=reason,
+        expected_ms_median=ms,
+        flop_budget=flops,
+        needs_symbolic_precompute=needs_symbolic_precompute,
+        estimated_precompute_seconds=precompute_s,
+    )

@@ -40,6 +40,8 @@ spherical-wrist siblings don't match.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -55,6 +57,7 @@ __all__ = ["solve"]
 
 _SEARCH_SAMPLES = 200
 _SOLVER_NAME = "ikgeo.two_intersecting"
+_LOG = logging.getLogger(__name__)
 
 
 def solve(
@@ -150,6 +153,14 @@ def solve(
         solver_name=_SOLVER_NAME,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
+    )
+    _LOG.info(
+        "%s: %d candidates from %d q4-search branches -> %d solutions (is_ls=%s)",
+        _SOLVER_NAME,
+        len(candidates),
+        len(q4_branches),
+        len(solutions),
+        len(solutions) == 0,
     )
     return solutions, len(solutions) == 0
 

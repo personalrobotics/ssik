@@ -30,6 +30,7 @@ is the "works now, works everywhere" fallback.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import replace
 
@@ -60,6 +61,7 @@ __all__ = ["choose_lock_joint", "solve"]
 
 _DEFAULT_SAMPLES = 16
 _SOLVER_NAME = "jointlock.seven_r"
+_LOG = logging.getLogger(__name__)
 
 
 def _lock_joint(kb: KinBody, lock_idx: int, q_lock: float) -> KinBody:
@@ -315,4 +317,13 @@ def solve(
             )
 
     solutions = dedup_by_wrap_close(candidates, dedup_tol)
+    _LOG.info(
+        "%s: lock_idx=%d, %d samples -> %d candidates -> %d unique solutions (is_ls=%s)",
+        _SOLVER_NAME,
+        lock_idx,
+        len(samples),
+        len(candidates),
+        len(solutions),
+        len(solutions) == 0,
+    )
     return solutions, len(solutions) == 0

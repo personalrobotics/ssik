@@ -34,6 +34,8 @@ back-substitute typically ~ms, vs. minutes for the 100x100 grid).
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -42,6 +44,8 @@ from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.poe_to_dh import poe_to_dh
 from ssik.solvers.ikgeo._raghavan_roth import solve_all_ik
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = ["solve"]
 
@@ -119,4 +123,11 @@ def solve(
             )
         )
 
+    _LOG.info(
+        "%s: %d inner candidates -> %d solutions (is_ls=%s)",
+        _SOLVER_NAME,
+        len(inner_solutions),
+        len(solutions),
+        len(solutions) == 0,
+    )
     return solutions, len(solutions) == 0

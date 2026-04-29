@@ -60,6 +60,65 @@ Status legend: ✅ in-repo URDF/MJCF fixture exercised by the test suite — �
 | 2 — fallback oracle | `gen_six_dof` | ~10-100 s | 100×100 grid + Nelder–Mead; correctness oracle only |
 | 7R wrapper | `jointlock.seven_r` | ~40-60 ms | lock one joint, dispatch inner 6R, sweep 16 lock samples |
 
+## Per-arm artifact builder (`ssik build`)
+
+The user-facing flow: hand us a URDF, get back a self-contained Python module.
+
+```bash
+$ ssik build path/to/ur5.urdf --base base_link --ee ee_link
+[ssik] Loading path/to/ur5.urdf
+[ssik]   6 joints, 7 links — POE-normalized OK
+[ssik] Classifying topology
+[ssik]   → Best solver: ikgeo.three_parallel (tier 0)
+[ssik]   → Expected median IK time: ~1.6 ms
+[ssik]   → FLOP budget: ~2,519 FLOPs / solve
+[ssik]   → Reasoning:
+[ssik]       Three consecutive parallel axes at joints (1, 2, 3) — the UR-class structure.
+[ssik]       Closed-form via SP6 (joints 0+4) + SP1 + SP3.
+[ssik] No build-time precompute needed (tier-0 closed-form)
+[ssik] Emitting ./ur5_ik.py
+[ssik]   Wrote 5,004 bytes
+[ssik] Validating (100 random poses)
+[ssik]   ✓ 100 poses, median 0.78 ms, max FK error 6e-09, 0 failures
+[ssik] ✓ Done. Try:
+[ssik]     >>> import ur5_ik
+[ssik]     >>> sols, is_ls = ur5_ik.solve(T_target)
+```
+
+The emitted artifact wraps the dispatched solver around baked KinBody constants and exposes a rich API:
+
+```python
+import ur5_ik
+from ssik import TolerancePolicy
+
+# Default: fastest path, no Newton polish.
+sols, is_ls = ur5_ik.solve(T_target)
+
+# Tighter FK-closure threshold for high-precision applications.
+strict = TolerancePolicy(subproblem_numerical=1e-9)
+sols, is_ls = ur5_ik.solve(T_target, policy=strict)
+
+# Newton polish for near-singular poses (off by default).
+sols, is_ls = ur5_ik.solve(T_target, allow_refinement=True, refinement_max_iters=8)
+
+# is_ls=True signals the algebraic path didn't close; sols is best-LS or empty.
+# Callers wanting only "exact" solutions check is_ls and discard.
+if is_ls:
+    raise NoExactIK
+for sol in sols:
+    print(sol.q, sol.fk_residual, sol.refinement_used)
+```
+
+The dispatcher picks the best solver from the catalog above based on topology predicates (`three_consecutive_parallel`, `three_consecutive_intersecting`, etc.). Tier-1 univariate-search solvers are not auto-selected: tier-2 Raghavan–Roth (`general_6r`) handles the same chains at ~5 ms vs tier-1's 100 ms–2 s. Tier-1 modules remain importable for users who want them explicitly.
+
+For inspection without emitting an artifact:
+
+```bash
+$ ssik classify path/to/your.urdf --base base_link --ee tcp_link
+```
+
+Tier-2 (non-Pieper) arms today still trigger the symbolic preprocessing on first `solve()` call (~150–300 s). Phase 2 of [#110](https://github.com/siddhss5/ikfastpy/issues/110) bakes the preprocessing output into the artifact at build time so first-call latency is gone.
+
 ## Repository layout
 
 This is the **internal development codebase**. Public users never see this; they receive a per-arm wheel built from this source.
@@ -105,7 +164,7 @@ uv run mkdocs serve
 
 ## Distribution model
 
-Customers submit a URDF / MJCF via [#95](https://github.com/siddhss5/ikfastpy/issues/95)'s intake mechanism. We run the cold-cache build pipeline (`poe_to_dh` → `pick_best_leftvar` AE-3 selection → symbolic preprocessing → compile to `.so`), produce a per-arm wheel, and deliver. The wheel exposes `solve(T_target) -> tuple[list[Solution], bool]` with the same `Solution` shape used internally. Customer source code never includes ssik internals — they call into the compiled binary.
+Customers submit a URDF / MJCF via [#95](https://github.com/siddhss5/ikfastpy/issues/95)'s intake mechanism. We run `ssik build` (above) which produces a per-arm `.py` artifact today; the [#110](https://github.com/siddhss5/ikfastpy/issues/110) phasing extends this to a Cython `.so` artifact with the same `solve(T, *, policy=..., allow_refinement=..., refinement_max_iters=...)` API. The wheel ships the artifact and nothing else — customer source code never imports ssik internals.
 
 The Cython port (gated on the Python pipeline being stable) closes the ~10000× gap the FLOP budget says is on the table: every solver is currently dispatch-bound at ~1 MFLOP/s achieved, and a native port should hit ~µs IK on Pieper-class arms — the original IKFast promise, this time without IKFast's fragility.
 
@@ -115,6 +174,7 @@ Proprietary. See [`LICENSE`](LICENSE) for full terms; in summary: all rights res
 
 ## Tracking
 
+- Per-arm artifact builder + Cython port: [#110](https://github.com/siddhss5/ikfastpy/issues/110).
 - Strategic distribution model: [#95](https://github.com/siddhss5/ikfastpy/issues/95).
 - Speed work across all solver pathways: [#93](https://github.com/siddhss5/ikfastpy/issues/93).
 - Tier-2 RR speed (already ~2× since baseline): [#86](https://github.com/siddhss5/ikfastpy/issues/86).
