@@ -257,34 +257,52 @@ def _render_sp4_block(
     sp4_out: tuple[sp.Expr, sp.Expr, sp.Expr, sp.Expr, sp.Expr],
     comment: str,
 ) -> list[str]:
-    """Render an SP4-style block with both branches + LS / degenerate guards."""
-    theta_plus, theta_minus, r_sq, rhs, phi = sp4_out
-    cse_subs, finals = sp.cse(
-        [theta_plus, theta_minus, r_sq, rhs, phi],
+    """Render an SP4-style block with both branches + LS / degenerate guards.
+
+    Mirrors the runtime ``ssik.subproblems.sp4`` control flow:
+
+      1. Compute (R_sq, rhs, phi). CSE-shared.
+      2. If R_sq < DEG_SQ: degenerate -- ``theta = 0`` (verify drops).
+      3. Else if |rhs| > sqrt(R_sq) + FEAS_TOL: LS branch -- ``theta = phi``
+         (or ``phi + pi`` if rhs < 0).
+      4. Else: feasible -- compute ``delta = acos(clip(rhs/sqrt(R_sq)))``,
+         ``theta_plus = phi + delta``, ``theta_minus = phi - delta``.
+
+    The clip on the acos input is required even in the "feasible" branch
+    because numerical noise on the boundary (|rhs| ~ sqrt(R_sq)) can push
+    rhs/R slightly outside [-1, 1], which raises ``ValueError`` in
+    ``math.acos``.
+    """
+    _theta_plus, _theta_minus, r_sq, rhs, phi = sp4_out
+    # We only need (R_sq, rhs, phi) at the top; theta_+- get computed
+    # inside the conditional after clipping.
+    cse_subs, [r_sq_final, rhs_final, phi_final] = sp.cse(
+        [r_sq, rhs, phi],
         symbols=sp.numbered_symbols(prefix=f"{prefix}_x"),
     )
     lines = [f"# {comment}"]
     for sym, sub in cse_subs:
         lines.append(f"{sym} = {sp.pycode(sub)}")
-    names = (
-        f"theta_{prefix}_plus",
-        f"theta_{prefix}_minus",
-        f"_{prefix}_R_sq",
-        f"_{prefix}_rhs",
-        f"_{prefix}_phi",
-    )
-    for name, expr in zip(names, finals, strict=True):
-        lines.append(f"{name} = {sp.pycode(expr)}")
-    # LS / degeneracy guards.
+    lines.append(f"_{prefix}_R_sq = {sp.pycode(r_sq_final)}")
+    lines.append(f"_{prefix}_rhs = {sp.pycode(rhs_final)}")
+    lines.append(f"_{prefix}_phi = {sp.pycode(phi_final)}")
+
     lines.append(f"if _{prefix}_R_sq < _DEG_SQ:")
     lines.append(f"    theta_{prefix}_plus = 0.0")
     lines.append(f"    theta_{prefix}_minus = 0.0  # degenerate; verify-step drops")
-    lines.append(f"elif abs(_{prefix}_rhs) > math.sqrt(_{prefix}_R_sq) + _FEAS_TOL:")
-    lines.append("    # LS fallback: theta = phi (or phi + pi if rhs < 0)")
-    lines.append(f"    theta_{prefix}_plus = (")
-    lines.append(f"        _{prefix}_phi if _{prefix}_rhs > 0 else _{prefix}_phi + math.pi")
-    lines.append("    )")
-    lines.append(f"    theta_{prefix}_minus = theta_{prefix}_plus")
+    lines.append("else:")
+    lines.append(f"    _{prefix}_R = math.sqrt(_{prefix}_R_sq)")
+    lines.append(f"    if abs(_{prefix}_rhs) > _{prefix}_R + _FEAS_TOL:")
+    lines.append("        # LS fallback: theta = phi (or phi + pi if rhs < 0)")
+    lines.append(f"        theta_{prefix}_plus = (")
+    lines.append(f"            _{prefix}_phi if _{prefix}_rhs > 0 else _{prefix}_phi + math.pi")
+    lines.append("        )")
+    lines.append(f"        theta_{prefix}_minus = theta_{prefix}_plus")
+    lines.append("    else:")
+    lines.append(f"        _{prefix}_clipped = min(1.0, max(-1.0, _{prefix}_rhs / _{prefix}_R))")
+    lines.append(f"        _{prefix}_delta = math.acos(_{prefix}_clipped)")
+    lines.append(f"        theta_{prefix}_plus = _{prefix}_phi + _{prefix}_delta")
+    lines.append(f"        theta_{prefix}_minus = _{prefix}_phi - _{prefix}_delta")
     return lines
 
 

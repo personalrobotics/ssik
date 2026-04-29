@@ -133,50 +133,51 @@ def _solve_algebraic(T_target):
     candidates = []
 
     # SP4 for q1 (shoulder pan).
-    q1_x0 = math.atan2(1.0*p_x, -1.0*p_y)
-    q1_x1 = 0.15005 - 6.12323399573677e-17*p_z
-    q1_x2 = 1.0*p_x**2 + 1.0*p_y**2
-    q1_x3 = math.acos(q1_x1/math.sqrt(q1_x2))
-    theta_q1_plus = q1_x0 + q1_x3
-    theta_q1_minus = q1_x0 - q1_x3
-    _q1_R_sq = q1_x2
-    _q1_rhs = q1_x1
-    _q1_phi = q1_x0
+    _q1_R_sq = 1.0*p_x**2 + 1.0*p_y**2
+    _q1_rhs = 0.15005 - 6.12323399573677e-17*p_z
+    _q1_phi = math.atan2(1.0*p_x, -1.0*p_y)
     if _q1_R_sq < _DEG_SQ:
         theta_q1_plus = 0.0
         theta_q1_minus = 0.0  # degenerate; verify-step drops
-    elif abs(_q1_rhs) > math.sqrt(_q1_R_sq) + _FEAS_TOL:
-        # LS fallback: theta = phi (or phi + pi if rhs < 0)
-        theta_q1_plus = (
-            _q1_phi if _q1_rhs > 0 else _q1_phi + math.pi
-        )
-        theta_q1_minus = theta_q1_plus
+    else:
+        _q1_R = math.sqrt(_q1_R_sq)
+        if abs(_q1_rhs) > _q1_R + _FEAS_TOL:
+            # LS fallback: theta = phi (or phi + pi if rhs < 0)
+            theta_q1_plus = (
+                _q1_phi if _q1_rhs > 0 else _q1_phi + math.pi
+            )
+            theta_q1_minus = theta_q1_plus
+        else:
+            _q1_clipped = min(1.0, max(-1.0, _q1_rhs / _q1_R))
+            _q1_delta = math.acos(_q1_clipped)
+            theta_q1_plus = _q1_phi + _q1_delta
+            theta_q1_minus = _q1_phi - _q1_delta
 
     for q1 in (theta_q1_plus, theta_q1_minus):
         s1 = math.sin(q1)
         c1 = math.cos(q1)
         # SP3 for q3 (elbow): reduces to SP4 with target shift.
-        q3_x0 = p_z**2
-        q3_x1 = 1.0*math.sin(q1)
-        q3_x2 = math.cos(q1)
-        q3_x3 = (p_x*q3_x1 - p_y*q3_x2)**2
-        q3_x4 = (-p_x*q3_x2 - p_y*q3_x1)**2
-        q3_x5 = math.acos(-2.67870768950383*q3_x0 - 2.67870768950383*q3_x3 - 2.67870768950383*q3_x4 + 1.06031171958876)
-        q3_x6 = 1.52381841044681 - math.pi
-        theta_q3_plus = q3_x5 - 1.52381841044681 + math.pi
-        theta_q3_minus = -q3_x5 - q3_x6
+        q3_x0 = 1.0*math.sin(q1)
+        q3_x1 = math.cos(q1)
         _q3_R_sq = 0.0348408995890292
-        _q3_rhs = -0.5*q3_x0 - 1/2*q3_x3 - 1/2*q3_x4 + 0.19791478625
-        _q3_phi = -q3_x6
+        _q3_rhs = -0.5*p_z**2 - 1/2*(p_x*q3_x0 - p_y*q3_x1)**2 - 1/2*(-p_x*q3_x1 - p_y*q3_x0)**2 + 0.19791478625
+        _q3_phi = -1.52381841044681 + math.pi
         if _q3_R_sq < _DEG_SQ:
             theta_q3_plus = 0.0
             theta_q3_minus = 0.0  # degenerate; verify-step drops
-        elif abs(_q3_rhs) > math.sqrt(_q3_R_sq) + _FEAS_TOL:
-            # LS fallback: theta = phi (or phi + pi if rhs < 0)
-            theta_q3_plus = (
-                _q3_phi if _q3_rhs > 0 else _q3_phi + math.pi
-            )
-            theta_q3_minus = theta_q3_plus
+        else:
+            _q3_R = math.sqrt(_q3_R_sq)
+            if abs(_q3_rhs) > _q3_R + _FEAS_TOL:
+                # LS fallback: theta = phi (or phi + pi if rhs < 0)
+                theta_q3_plus = (
+                    _q3_phi if _q3_rhs > 0 else _q3_phi + math.pi
+                )
+                theta_q3_minus = theta_q3_plus
+            else:
+                _q3_clipped = min(1.0, max(-1.0, _q3_rhs / _q3_R))
+                _q3_delta = math.acos(_q3_clipped)
+                theta_q3_plus = _q3_phi + _q3_delta
+                theta_q3_minus = _q3_phi - _q3_delta
 
         for q3 in (theta_q3_plus, theta_q3_minus):
             s3 = math.sin(q3)
@@ -210,22 +211,25 @@ def _solve_algebraic(T_target):
             q5_x11 = 1.0*math.sin(q1)
             q5_x12 = math.cos(q1)
             q5_x13 = -q5_x0*q5_x8 - q5_x1*q5_x6 - q5_x5*q5_x9
-            q5_x14 = 1.0*r_02*(-q5_x10*q5_x11 + q5_x12*q5_x13) + 1.0*r_12*(q5_x10*q5_x12 + q5_x11*q5_x13) + 1.0*r_22*(-1.0*q5_x0*q5_x1 + 1.0*q5_x3*q5_x5 + q5_x8*(q5_x6 + 3.74939945665464e-33)) - 3.74939945665464e-33
-            q5_x15 = math.acos(q5_x14)
-            theta_q5_plus = q5_x15
-            theta_q5_minus = -q5_x15
             _q5_R_sq = 1.00000000000000
-            _q5_rhs = q5_x14
+            _q5_rhs = 1.0*r_02*(-q5_x10*q5_x11 + q5_x12*q5_x13) + 1.0*r_12*(q5_x10*q5_x12 + q5_x11*q5_x13) + 1.0*r_22*(-1.0*q5_x0*q5_x1 + 1.0*q5_x3*q5_x5 + q5_x8*(q5_x6 + 3.74939945665464e-33)) - 3.74939945665464e-33
             _q5_phi = 0
             if _q5_R_sq < _DEG_SQ:
                 theta_q5_plus = 0.0
                 theta_q5_minus = 0.0  # degenerate; verify-step drops
-            elif abs(_q5_rhs) > math.sqrt(_q5_R_sq) + _FEAS_TOL:
-                # LS fallback: theta = phi (or phi + pi if rhs < 0)
-                theta_q5_plus = (
-                    _q5_phi if _q5_rhs > 0 else _q5_phi + math.pi
-                )
-                theta_q5_minus = theta_q5_plus
+            else:
+                _q5_R = math.sqrt(_q5_R_sq)
+                if abs(_q5_rhs) > _q5_R + _FEAS_TOL:
+                    # LS fallback: theta = phi (or phi + pi if rhs < 0)
+                    theta_q5_plus = (
+                        _q5_phi if _q5_rhs > 0 else _q5_phi + math.pi
+                    )
+                    theta_q5_minus = theta_q5_plus
+                else:
+                    _q5_clipped = min(1.0, max(-1.0, _q5_rhs / _q5_R))
+                    _q5_delta = math.acos(_q5_clipped)
+                    theta_q5_plus = _q5_phi + _q5_delta
+                    theta_q5_minus = _q5_phi - _q5_delta
 
             for q5 in (theta_q5_plus, theta_q5_minus):
                 s5 = math.sin(q5)
