@@ -67,9 +67,11 @@ _P_2 = np.array([0.4318, 0.0, 0.0])
 # Wrist consolidation: spherical-wrist family expects p[3] to be the
 # total joint-3 -> wrist-intersection translation. Puma's URDF splits
 # this across T_left[3..5]; sum them at build time.
-_P_3 = np.array([0.020299999999999985, -0.15005, 9.187912610603016e-18]) + np.array(
-    [0.0, 0.0, 0.4318]
-) + np.array([0.0, 0.0, 0.0])
+_P_3 = (
+    np.array([0.020299999999999985, -0.15005, 9.187912610603016e-18])
+    + np.array([0.0, 0.0, 0.4318])
+    + np.array([0.0, 0.0, 0.0])
+)
 _P_TOOL = np.array([0.0, 0.0, 0.0])
 
 # Pre-computed scalars. SP4 for q1 takes ``d = axes[1] @ (p[1] + p[2] + p[3])``.
@@ -172,7 +174,9 @@ def solve_specialised(T_target: NDArray[np.float64]) -> tuple[list[NDArray[np.fl
                 @ r_06
             )
 
-            t5_solutions, _ = sp4.solve(_AXIS_3, _AXIS_4, _AXIS_5, float(_AXIS_3 @ r_36 @ _AXIS_5), _POLICY)
+            t5_solutions, _ = sp4.solve(
+                _AXIS_3, _AXIS_4, _AXIS_5, float(_AXIS_3 @ r_36 @ _AXIS_5), _POLICY
+            )
 
             for q5 in t5_solutions:
                 q4, _ = sp1.solve(
@@ -280,7 +284,9 @@ def demo_sympy_sp4_substituted() -> None:
 
 def bench_and_validate() -> None:
     print("loading Puma 560 KinBody (for current-path baseline)...")
-    kb = load_urdf_kinbody_normalized(REPO / "tests/fixtures/puma560.urdf", "base_link", "wrist_3_link")
+    kb = load_urdf_kinbody_normalized(
+        REPO / "tests/fixtures/puma560.urdf", "base_link", "wrist_3_link"
+    )
 
     rng = np.random.default_rng(seed=0)
     n = 100
