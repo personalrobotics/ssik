@@ -37,6 +37,7 @@ import numpy as np
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.refinement import kinbody_jacobian as _kinbody_jacobian, lm_refine as _lm_refine
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.three_parallel"
@@ -275,10 +276,11 @@ def solve(
 
     :param T_target: 4x4 SE(3) target end-effector pose.
     :param policy: tolerance policy (FK closure + dedup tolerance).
-    :param allow_refinement: opt into Newton polish for near-miss
-        algebraic candidates. Currently a no-op in the specialised
-        emitter; a follow-up adds the inlined Newton loop.
-    :param refinement_max_iters: cap when refinement is added.
+    :param allow_refinement: opt into Newton-on-spatial-Jacobian
+        polish for near-miss candidates (those whose algebraic q
+        doesn't quite meet ``fk_atol``). Default off.
+    :param refinement_max_iters: cap on Newton iterations per
+        candidate when ``allow_refinement=True``.
     """
     T = np.asarray(T_target, dtype=np.float64)
     candidates = _solve_algebraic(T)
@@ -286,8 +288,9 @@ def solve(
     fk_atol = policy.subproblem_numerical
     dedup_atol = policy.subproblem_dedup
 
-    # Verify each candidate via FK closure.
-    verified = []
+    # Three-bucket sort: exact (closes within fk_atol), near-miss
+    # (refinable when allow_refinement=True), or drop.
+    verified: list[tuple[np.ndarray, float, str, int]] = []
     for cand_q in candidates:
         q = np.asarray(cand_q, dtype=np.float64)
         if not np.all(np.isfinite(q)):
@@ -295,32 +298,48 @@ def solve(
         T_check = _fk(q)
         residual = float(np.linalg.norm(T_check - T))
         if residual <= fk_atol:
-            verified.append((q, residual))
+            verified.append((q, residual, "none", 0))
+            continue
+        if not allow_refinement:
+            continue
+        # Newton polish using the baked KinBody's spatial Jacobian.
+        refined = _lm_refine(
+            q,
+            _fk,
+            T,
+            fk_atol=fk_atol,
+            max_iters=refinement_max_iters,
+            jacobian_fn=lambda qq: _kinbody_jacobian(_KB, qq),
+        )
+        if refined is None:
+            continue
+        q_ref, resid_ref, iters = refined
+        verified.append((q_ref, resid_ref, "lm", iters))
 
     # Wrap-to-pi dedup; keep lowest fk_residual on collision.
-    deduped = []
-    for cand_q, cand_res in verified:
+    deduped: list[tuple[np.ndarray, float, str, int]] = []
+    for cand_q, cand_res, ref_used, ref_iters in verified:
         dup_idx = None
-        for j, (existing_q, _) in enumerate(deduped):
+        for j, (existing_q, _, _, _) in enumerate(deduped):
             diffs = np.array([_wrap_to_pi(a - b) for a, b in zip(cand_q, existing_q)])
             if np.all(np.abs(diffs) < dedup_atol):
                 dup_idx = j
                 break
         if dup_idx is None:
-            deduped.append((cand_q, cand_res))
+            deduped.append((cand_q, cand_res, ref_used, ref_iters))
         elif cand_res < deduped[dup_idx][1]:
-            deduped[dup_idx] = (cand_q, cand_res)
+            deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)
 
     solutions = [
         Solution(
             q=q,
             fk_residual=residual,
-            refinement_used="none",
-            refinement_iters=0,
+            refinement_used=ref_used,
+            refinement_iters=ref_iters,
             branch_id=i,
             solver_name=SOLVER_NAME,
         )
-        for i, (q, residual) in enumerate(deduped)
+        for i, (q, residual, ref_used, ref_iters) in enumerate(deduped)
     ]
     return solutions, len(solutions) == 0
 
