@@ -298,6 +298,7 @@ def _refine_sp5(
     back to the input without raising, leaving the caller's post-verify
     as the authoritative filter.
     """
+    max_step = np.pi / 4.0
     for _ in range(max_iter):
         rotated_p1 = rotate(k1, t1, p1)
         rotated_p3_inner = rotate(k3, t3, p3)
@@ -310,24 +311,44 @@ def _refine_sp5(
         col1 = _cross3(k1, rotated_p1)
         col2 = -_cross3(k2, rotated_p2)
         col3 = -rotate(k2, t2, _cross3(k3, rotated_p3_inner))
-        j_mat_3x3 = np.column_stack([col1, col2, col3])
 
-        try:
-            delta = np.linalg.solve(j_mat_3x3, -f)
-        except np.linalg.LinAlgError:
+        # 3x3 closed-form solve via cofactor expansion -- avoids
+        # np.linalg.solve dispatch (~5us) and the column_stack + np.array
+        # construction. delta = inv(J) @ -f.
+        j00, j10, j20 = float(col1[0]), float(col1[1]), float(col1[2])
+        j01, j11, j21 = float(col2[0]), float(col2[1]), float(col2[2])
+        j02, j12, j22 = float(col3[0]), float(col3[1]), float(col3[2])
+        c00 = j11 * j22 - j12 * j21
+        c01 = j12 * j20 - j10 * j22
+        c02 = j10 * j21 - j11 * j20
+        det = j00 * c00 + j01 * c01 + j02 * c02
+        if abs(det) < 1e-15:
             break
+        c10 = j02 * j21 - j01 * j22
+        c11 = j00 * j22 - j02 * j20
+        c12 = j01 * j20 - j00 * j21
+        c20 = j01 * j12 - j02 * j11
+        c21 = j02 * j10 - j00 * j12
+        c22 = j00 * j11 - j01 * j10
+        b0, b1, b2 = -float(f[0]), -float(f[1]), -float(f[2])
+        inv_det = 1.0 / det
+        delta0 = (c00 * b0 + c10 * b1 + c20 * b2) * inv_det
+        delta1 = (c01 * b0 + c11 * b1 + c21 * b2) * inv_det
+        delta2 = (c02 * b0 + c12 * b1 + c22 * b2) * inv_det
 
         # Clip per-iteration step to pi/4 so an ill-conditioned Jacobian
         # doesn't launch us to a far-away minimum; quadratic convergence is
         # preserved near the true solution where |delta| is already small.
-        step_norm = _norm3(delta)
-        max_step = np.pi / 4.0
+        step_norm = float(np.sqrt(delta0 * delta0 + delta1 * delta1 + delta2 * delta2))
         if step_norm > max_step:
-            delta = delta * (max_step / step_norm)
+            scale = max_step / step_norm
+            delta0 *= scale
+            delta1 *= scale
+            delta2 *= scale
 
-        t1 = _wrap(t1 + float(delta[0]))
-        t2 = _wrap(t2 + float(delta[1]))
-        t3 = _wrap(t3 + float(delta[2]))
+        t1 = _wrap(t1 + delta0)
+        t2 = _wrap(t2 + delta1)
+        t3 = _wrap(t3 + delta2)
 
         if step_norm < step_tol:
             break
