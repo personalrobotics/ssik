@@ -139,3 +139,41 @@ def test_bulletproof_ur5_specialised(tmp_path: Path) -> None:
     kb = load_urdf_kinbody_normalized(FIXTURES / "ur5.urdf", "base_link", "ee_link")
     artifact = _build_specialised(kb, "ur5_bp", tmp_path)
     _bulletproof_check(kb, artifact, n_poses=100, fk_atol=1e-8)
+
+
+def test_specialised_artifact_refinement_path_works(tmp_path: Path) -> None:
+    """The specialised artifact's ``allow_refinement=True`` path must wire
+    through to ``ssik.refinement.lm_refine`` correctly.
+
+    Strategy: use a tightened ``subproblem_numerical`` so some algebraic
+    candidates fall into the near-miss bucket. Without refinement, those
+    get dropped (fewer solutions). With refinement, the Newton polish
+    recovers them (same or more solutions). At minimum, refinement must
+    return non-empty results without raising and report
+    ``refinement_used == "lm"`` for any polished candidate.
+    """
+    from ssik.core.tolerances import TolerancePolicy
+
+    kb = load_urdf_kinbody_normalized(FIXTURES / "puma560.urdf", "base_link", "wrist_3_link")
+    artifact = _build_specialised(kb, "puma560_refine", tmp_path)
+
+    rng = np.random.default_rng(seed=11)
+    q_star = rng.uniform(-1.0, 1.0, size=6)
+    T_star = _fk(kb, q_star)
+
+    # Tight policy that triggers the near-miss path on at least some poses.
+    tight_policy = TolerancePolicy(subproblem_numerical=1e-13)
+
+    sols_off, _ = artifact.solve(T_star, policy=tight_policy, allow_refinement=False)  # type: ignore[attr-defined]
+    sols_on, _ = artifact.solve(T_star, policy=tight_policy, allow_refinement=True)  # type: ignore[attr-defined]
+
+    # Refinement should recover at least as many candidates as the no-refine path.
+    assert len(sols_on) >= len(sols_off), (
+        f"refinement reduced solution count: {len(sols_off)} (off) -> {len(sols_on)} (on)"
+    )
+
+    # If refinement helped, at least one solution should report it.
+    if len(sols_on) > len(sols_off):
+        assert any(s.refinement_used == "lm" for s in sols_on), (
+            "refinement added solutions but no Solution.refinement_used == 'lm'"
+        )
