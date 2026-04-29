@@ -210,9 +210,7 @@ def _emit_vec_components(name: str, vec_expr: sp.Matrix, *, prefix: str) -> list
 
 def _emit_const_array(name: str, v: object) -> str:
     """Emit ``np.array(...)`` for a constant 3-vector."""
-    return (
-        f"{name} = np.array([{float(v[0])!r}, {float(v[1])!r}, {float(v[2])!r}])"  # type: ignore[index]
-    )
+    return f"{name} = np.array([{float(v[0])!r}, {float(v[1])!r}, {float(v[2])!r}])"  # type: ignore[index]
 
 
 def _indent(lines: list[str], spaces: int) -> str:

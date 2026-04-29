@@ -16,10 +16,11 @@ import pytest
 import sympy as sp
 
 from ssik.codegen._symbolic.sp1 import sp1_theta_sym
+from ssik.codegen._symbolic.sp2 import sp2_branches_sym
 from ssik.codegen._symbolic.sp3 import sp3_branches_sym
 from ssik.codegen._symbolic.sp4 import sp4_branches_sym
 from ssik.codegen._symbolic.sp6 import sp6_a_mat_b_sym
-from ssik.subproblems import sp1, sp3, sp4
+from ssik.subproblems import sp1, sp2, sp3, sp4
 from ssik.subproblems._rotation import _cross3, _dot3
 
 # ---------------------------------------------------------------------------
@@ -114,6 +115,57 @@ def test_sp4_symbolic_matches_numerical(seed: int) -> None:
 # ---------------------------------------------------------------------------
 # SP3.
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("seed", list(range(15)))
+def test_sp2_symbolic_matches_numerical(seed: int) -> None:
+    """SP2 produces 2 branches in the generic feasible case; symbolic must
+    reproduce both branches such that every numerical solution matches one
+    of them (modulo wrap-to-pi)."""
+    rng = np.random.default_rng(seed + 400)
+    k1 = rng.standard_normal(3)
+    k1 = k1 / np.linalg.norm(k1)
+    k2 = rng.standard_normal(3)
+    k2 = k2 / np.linalg.norm(k2)
+    # Construct feasible inputs: pick (theta1*, theta2*) and a "shell" point z.
+    # Set p = unrotate(k1, theta1*, z) so |Rot(k1, theta1*) p| = |z| = |q|.
+    z = rng.standard_normal(3)
+    theta1_seed = float(rng.uniform(-np.pi, np.pi))
+    theta2_seed = float(rng.uniform(-np.pi, np.pi))
+
+    def _rot(k: np.ndarray, t: float, v: np.ndarray) -> np.ndarray:
+        c, s = np.cos(t), np.sin(t)
+        out: np.ndarray = c * v + s * np.cross(k, v) + (1 - c) * np.dot(k, v) * k
+        return out
+
+    p = _rot(k1, -theta1_seed, z)
+    q = _rot(k2, -theta2_seed, z)
+
+    num_solutions, num_is_ls = sp2.solve(k1, k2, p, q)
+    if num_is_ls or len(num_solutions) == 0:
+        pytest.skip("test setup degenerate; rerun with different seed")
+
+    sym = sp2_branches_sym(_to_sym(k1), _to_sym(k2), _to_sym(p), _to_sym(q))
+    theta1_a = _eval(sym[0])
+    theta2_a = _eval(sym[1])
+    theta1_b = _eval(sym[2])
+    theta2_b = _eval(sym[3])
+    sym_pairs = ((theta1_a, theta2_a), (theta1_b, theta2_b))
+
+    def _wrap_close(a: float, b: float, tol: float = 1e-8) -> bool:
+        diff = ((a - b + np.pi) % (2 * np.pi)) - np.pi
+        return abs(diff) < tol
+
+    for sol_t1, sol_t2 in num_solutions:
+        match = any(
+            _wrap_close(sol_t1, sym_t1) and _wrap_close(sol_t2, sym_t2)
+            for sym_t1, sym_t2 in sym_pairs
+        )
+        if not match:
+            pytest.fail(
+                f"sp2: numeric ({sol_t1:.6f}, {sol_t2:.6f}) does not match "
+                f"either symbolic branch {sym_pairs}"
+            )
 
 
 @pytest.mark.parametrize("seed", list(range(10)))
