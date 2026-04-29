@@ -401,6 +401,15 @@ def _derive_pq_for_arm(
         "right_bilinear": right_bilinear,
         "drop_joint": drop_joint,
         "apply_so3": apply_so3,
+        # Symbolic matrices stashed for codegen consumers (#118): the
+        # composer for general_6r needs the pre-lambdify expressions to
+        # render explicit-trig source. Stored as ``sp.Matrix`` instances;
+        # T_target enters as the 12 ``T_:12`` symbols.
+        "_sym_p_sin": sp.Matrix(p_sin_sym),
+        "_sym_p_cos": sp.Matrix(p_cos_sym),
+        "_sym_p_one": sp.Matrix(p_one_sym),
+        "_sym_q": sp.Matrix(q_sym),
+        "_sym_t_target": T_syms,
     }
     return p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata
 
