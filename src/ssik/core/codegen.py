@@ -333,6 +333,10 @@ _SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
         "ssik.codegen._compose.spherical_two_parallel", "compose"
     ),
     "ikgeo.three_parallel": _import_composer("ssik.codegen._compose.three_parallel", "compose"),
+    "ikgeo.spherical_two_intersecting": _import_composer(
+        "ssik.codegen._compose.spherical_two_intersecting", "compose"
+    ),
+    "ikgeo.spherical": _import_composer("ssik.codegen._compose.spherical", "compose"),
 }
 
 

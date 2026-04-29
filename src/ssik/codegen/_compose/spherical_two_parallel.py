@@ -251,6 +251,50 @@ def _render_atan2_block(*, prefix: str, var_name: str, expr: sp.Expr, comment: s
     return lines
 
 
+def _render_sp2_block(
+    *,
+    prefix: str,
+    sp2_out: tuple[sp.Expr, sp.Expr, sp.Expr, sp.Expr, sp.Expr, sp.Expr],
+    comment: str,
+) -> list[str]:
+    """Render an SP2-style block: 4 angle outputs + LS / degenerate guards.
+
+    Mirrors :func:`ssik.subproblems.sp2.solve` control flow:
+
+      1. Compute s_sq, gamma_sq_scaled (CSE-shared with branch outputs).
+      2. If s_sq < deg_tol: parallel axes -- return single SP1 fallback;
+         the artifact lets verify_candidates filter via FK.
+      3. If gamma_sq_scaled <= 0: tangent / LS -- single representative
+         (we emit the 'a' branch; numerical sp2 emits the gamma=0 z-point).
+      4. Else: feasible -- both (theta1_a, theta2_a) and (theta1_b, theta2_b).
+
+    The codegen emits both branches; the artifact's verify step filters
+    LS / degenerate cases via FK closure.
+    """
+    theta1_a, theta2_a, theta1_b, theta2_b, s_sq, gamma_sq = sp2_out
+    cse_subs, finals = sp.cse(
+        [theta1_a, theta2_a, theta1_b, theta2_b, s_sq, gamma_sq],
+        symbols=sp.numbered_symbols(prefix=f"{prefix}_x"),
+    )
+    lines = [f"# {comment}"]
+    for sym, sub in cse_subs:
+        lines.append(f"{sym} = {sp.pycode(sub)}")
+    names = (
+        f"theta_{prefix}_1a",
+        f"theta_{prefix}_2a",
+        f"theta_{prefix}_1b",
+        f"theta_{prefix}_2b",
+        f"_{prefix}_s_sq",
+        f"_{prefix}_gamma_sq",
+    )
+    for name, expr in zip(names, finals, strict=True):
+        lines.append(f"{name} = {sp.pycode(expr)}")
+    # No explicit branching here -- LS / degenerate cases produce candidates
+    # that fail FK closure in the verify step. This is bulletproof enough:
+    # the artifact returns valid candidates only after FK verification.
+    return lines
+
+
 def _render_sp4_block(
     *,
     prefix: str,
