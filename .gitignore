@@ -48,3 +48,8 @@ htmlcov/
 
 # mkdocs build output
 site/
+*.cpython-*-darwin.so
+*.cpython-*-linux-gnu.so
+src/ssik/**/*.c
+src/ssik/**/*.html
+build/

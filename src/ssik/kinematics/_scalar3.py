@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import math
 
+import cython
 import numpy as np
 from numpy.typing import NDArray
 
@@ -45,22 +46,52 @@ __all__ = [
 ]
 
 
+@cython.ccall
+@cython.locals(
+    a0=cython.double,
+    a1=cython.double,
+    a2=cython.double,
+    b0=cython.double,
+    b1=cython.double,
+    b2=cython.double,
+)
 def _cross3(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
     """3-vector cross product. Deterministic, no BLAS dispatch."""
-    return np.array(
-        [
-            a[1] * b[2] - a[2] * b[1],
-            a[2] * b[0] - a[0] * b[2],
-            a[0] * b[1] - a[1] * b[0],
-        ]
-    )
+    a0 = float(a[0])
+    a1 = float(a[1])
+    a2 = float(a[2])
+    b0 = float(b[0])
+    b1 = float(b[1])
+    b2 = float(b[2])
+    return np.array([a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0])
 
 
+@cython.ccall
+@cython.locals(
+    a0=cython.double,
+    a1=cython.double,
+    a2=cython.double,
+    b0=cython.double,
+    b1=cython.double,
+    b2=cython.double,
+)
 def _dot3(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
     """3-vector dot product as ``float``. Deterministic, no BLAS dispatch."""
-    return float(a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+    a0 = float(a[0])
+    a1 = float(a[1])
+    a2 = float(a[2])
+    b0 = float(b[0])
+    b1 = float(b[1])
+    b2 = float(b[2])
+    return a0 * b0 + a1 * b1 + a2 * b2
 
 
+@cython.ccall
+@cython.locals(
+    a0=cython.double,
+    a1=cython.double,
+    a2=cython.double,
+)
 def _norm3(a: NDArray[np.floating]) -> float:
     """3-vector L2 norm. Deterministic, no BLAS dispatch.
 
@@ -69,7 +100,10 @@ def _norm3(a: NDArray[np.floating]) -> float:
     platforms, unlike vectorised ``np.sqrt`` which can dispatch to
     platform-specific SIMD implementations with different rounding.
     """
-    return math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+    a0 = float(a[0])
+    a1 = float(a[1])
+    a2 = float(a[2])
+    return math.sqrt(a0 * a0 + a1 * a1 + a2 * a2)
 
 
 def _mat3_vec3(M: NDArray[np.float64], v: NDArray[np.float64]) -> NDArray[np.float64]:

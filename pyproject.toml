@@ -47,6 +47,8 @@ dev = [
     "mypy>=1.13",
     "urchin>=0.0.27",  # exercised by the URDF-adapter tests
     "hypothesis>=6.112",  # property-based fuzzing of the URDF loader
+    "cython>=3.1",  # in-place builds via scripts/build_cython.py (#137 Slice 1)
+    "setuptools>=70",  # cythonize+setuptools build backend
 ]
 docs = [
     "mkdocs-material>=9.5",

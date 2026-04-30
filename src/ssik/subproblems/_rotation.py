@@ -4,10 +4,22 @@ Kept private (underscore-prefixed) and internal to the subproblems package.
 3-vector primitives ``_cross3`` / ``_dot3`` / ``_norm3`` are re-exported
 from :mod:`ssik.kinematics._scalar3` so the subproblems hot path uses the
 same deterministic, no-BLAS scalar versions as the codegen pipeline.
+
+This module is Cython-compilable in pure-Python mode (#137 Slice 1):
+the ``import cython`` block + ``@cython.locals`` / ``@cython.ccall``
+decorators are no-ops when interpreted by CPython, but generate
+typed C code when compiled by Cython. ``rotation_matrix`` and ``rotate``
+are the two hottest functions in any IK solve (per profile of Franka
+7R: ``rotate`` accounts for ~21% of total IK time); typing them lets
+Cython inline the scalar trig + arithmetic without Python-object
+boxing.
 """
 
 from __future__ import annotations
 
+import math
+
+import cython
 import numpy as np
 from numpy.typing import NDArray
 
@@ -18,17 +30,35 @@ from ssik.kinematics._scalar3 import _cross3, _dot3, _norm3
 __all__ = ["_cross3", "_dot3", "_norm3", "rotate", "rotation_matrix"]
 
 
+@cython.ccall
+@cython.locals(
+    c=cython.double,
+    s=cython.double,
+    kv=cython.double,
+    one_minus_c=cython.double,
+)
 def rotate(k: NDArray[np.float64], theta: float, v: NDArray[np.float64]) -> NDArray[np.float64]:
     """Rotate vector ``v`` by angle ``theta`` about unit axis ``k`` (Rodrigues).
 
     ``rotate(k, theta, v) = v cos(theta) + (k x v) sin(theta) + k (k . v) (1 - cos(theta))``
     """
-    c = float(np.cos(theta))
-    s = float(np.sin(theta))
+    c = math.cos(theta)
+    s = math.sin(theta)
     kv = _dot3(k, v)
-    return v * c + _cross3(k, v) * s + k * (kv * (1.0 - c))
+    one_minus_c = 1.0 - c
+    out: NDArray[np.float64] = v * c + _cross3(k, v) * s + k * (kv * one_minus_c)
+    return out
 
 
+@cython.ccall
+@cython.locals(
+    c=cython.double,
+    s=cython.double,
+    x=cython.double,
+    y=cython.double,
+    z=cython.double,
+    oc=cython.double,
+)
 def rotation_matrix(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
     """3x3 rotation matrix around unit ``axis`` by ``angle`` (Rodrigues form).
 
@@ -37,9 +67,11 @@ def rotation_matrix(axis: NDArray[np.float64], angle: float) -> NDArray[np.float
     multiplies and adds; faster than constructing a skew-symmetric matrix
     and matrix-multiplying.
     """
-    c = float(np.cos(angle))
-    s = float(np.sin(angle))
-    x, y, z = float(axis[0]), float(axis[1]), float(axis[2])
+    c = math.cos(angle)
+    s = math.sin(angle)
+    x = float(axis[0])
+    y = float(axis[1])
+    z = float(axis[2])
     oc = 1.0 - c
     return np.array(
         [
