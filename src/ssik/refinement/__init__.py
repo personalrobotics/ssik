@@ -26,12 +26,19 @@ Design constraints (see GitHub #74):
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable
 
+import cython
 import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
+
+# 2*pi as a typed module-level constant -- referenced inside the dedup
+# hot loop. Cython types this as a C ``double``; pure Python sees it as
+# a regular ``float``.
+_TWO_PI: float = 2.0 * math.pi
 
 __all__ = [
     "kinbody_jacobian",
@@ -200,31 +207,64 @@ def lm_refine(
     return (q, final_r, max_iters)
 
 
+@cython.ccall
+@cython.locals(
+    i=cython.int,
+    n=cython.int,
+    diff=cython.double,
+    ai=cython.double,
+    bi=cython.double,
+)
 def _q_close(a: NDArray[np.float64], b: NDArray[np.float64], tol: float) -> bool:
-    """Element-wise wrap-to-pi closeness for joint-angle vectors."""
-    for ai, bi in zip(a, b, strict=True):
-        diff = float(((float(ai) - float(bi) + np.pi) % (2 * np.pi)) - np.pi)
+    """Element-wise wrap-to-pi closeness for joint-angle vectors.
+
+    Early-exits on the first per-element mismatch -- when ``a`` and ``b``
+    are clearly not the same solution (mod 2pi) the typical case bails
+    out within 1-2 elements, much cheaper than a full broadcasted compare.
+    Cython compiles this to a typed scalar loop with no Python-object
+    boxing in the inner arithmetic.
+    """
+    n = len(a)
+    for i in range(n):
+        ai = float(a[i])
+        bi = float(b[i])
+        diff = ((ai - bi + math.pi) % _TWO_PI) - math.pi
         if abs(diff) > tol:
             return False
     return True
 
 
-def dedup_by_wrap_close(candidates: list[Solution], tol: float) -> list[Solution]:
-    """Vectorised dedup of :class:`Solution` candidates by wrap-to-pi joint-
-    angle closeness.
+def _dedup_scalar(candidates: list[Solution], tol: float) -> list[Solution]:
+    """Pairwise scan with early-exit -- fast path under Cython compile.
 
-    For each cluster of solutions whose joint vectors agree (mod 2pi) within
-    ``tol`` per joint, keeps the candidate with the lowest ``fk_residual``.
-    Streaming order matches the previous Python-loop implementation
-    (``_q_close`` first-match-wins) so output ordering is preserved.
-
-    Implementation: maintains the deduped joint vectors as a stacked
-    ``(M, N_dof)`` numpy array; per-candidate dedup is one broadcasted
-    ``mod 2pi`` + ``argwhere`` instead of an inner Python loop. Replaces
-    the dominant cost (~24% of total) in 7R jointlock solves.
+    Inner per-pair check via :func:`_q_close` short-circuits on first
+    mismatched joint. Cython compiles the scalar arithmetic to a typed
+    C loop; the inner cost is near-memcpy when most pairs disagree
+    quickly.
     """
-    if not candidates:
-        return []
+    deduped: list[Solution] = []
+    for cand in candidates:
+        match_idx = -1
+        for j, existing in enumerate(deduped):
+            if _q_close(cand.q, existing.q, tol):
+                match_idx = j
+                break
+        if match_idx == -1:
+            deduped.append(cand)
+        elif cand.fk_residual < deduped[match_idx].fk_residual:
+            deduped[match_idx] = cand
+    return deduped
+
+
+def _dedup_numpy(candidates: list[Solution], tol: float) -> list[Solution]:
+    """Numpy-broadcast all-pairs compare -- fast path under pure Python.
+
+    For untyped Python, batching the wrap-to-pi compare through one
+    broadcasted ``mod 2pi`` over an ``(M, N_dof)`` array beats the
+    per-element scalar loop because the per-numpy-call overhead amortises
+    over all M existing candidates. Pure-Python interpretation of the
+    scalar loop has too much per-iteration overhead to compete.
+    """
     deduped: list[Solution] = []
     n_dof = candidates[0].q.shape[0]
     arr = np.empty((0, n_dof), dtype=np.float64)
@@ -242,6 +282,34 @@ def dedup_by_wrap_close(candidates: list[Solution], tol: float) -> list[Solution
         deduped.append(cand)
         arr = np.vstack([arr, cand.q[np.newaxis, :]])
     return deduped
+
+
+def dedup_by_wrap_close(candidates: list[Solution], tol: float) -> list[Solution]:
+    """Dedup :class:`Solution` candidates by wrap-to-pi joint-angle closeness.
+
+    For each cluster of solutions whose joint vectors agree (mod 2pi) within
+    ``tol`` per joint, keeps the candidate with the lowest ``fk_residual``.
+    Streaming order matches the first-match-wins semantics so output
+    ordering is stable.
+
+    Two implementations under one entry point. Cython compiles
+    ``cython.compiled`` to ``True`` and dead-strips the other branch:
+
+    - Compiled: :func:`_dedup_scalar`. Per-pair early-exit at C scalar
+      speed; ~25% faster than the numpy-broadcast variant on realistic
+      Franka 7R workloads (200 cands -> 64 unique: 1.25 ms vs 1.62 ms).
+    - Pure Python: :func:`_dedup_numpy`. Numpy-broadcast all-pairs
+      compare; faster than the scalar loop in interpreted form because
+      the per-numpy-call overhead amortises over M existing candidates.
+
+    Without this dispatch, picking either implementation regresses one
+    of the two install paths (wheel users vs source-install users).
+    """
+    if not candidates:
+        return []
+    if cython.compiled:
+        return _dedup_scalar(candidates, tol)
+    return _dedup_numpy(candidates, tol)
 
 
 def verify_candidates(

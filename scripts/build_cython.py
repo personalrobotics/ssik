@@ -39,11 +39,22 @@ TARGETS = [
     REPO / "src" / "ssik" / "subproblems" / "sp5.py",
 ]
 
+# Targets compiled with safer directives -- ``wraparound=True`` and
+# ``boundscheck=True``. Files here use Python-idiomatic indexing (``cum[-1]``
+# negative wrap-around, untyped numpy slicing) that aggressive directives
+# would mis-compile or segfault.
+SAFE_TARGETS = [
+    # Slice 3.1: refinement.dedup_by_wrap_close + _q_close. Inner per-pair
+    # check is the dominant cost in 7R jointlock dedup; kinbody_jacobian
+    # in the same module uses ``cum[-1]`` so we keep wraparound on.
+    REPO / "src" / "ssik" / "refinement" / "__init__.py",
+]
+
 # Per-arm artifact targets (#137 Slice 3). The orchestrator code emitted
 # by ``ssik.core.codegen`` carries pure-Python-mode Cython annotations
 # (``@cython.ccall`` on ``_fk`` / ``_spatial_jacobian`` / ``_wrap_to_pi``)
 # but the body still uses Python-style numpy indexing. Compiled with the
-# safer directives below to avoid bus errors from skipped bounds checks.
+# same safer directives as ``SAFE_TARGETS``.
 ARTIFACT_TARGETS = [
     REPO / "tests" / "artifacts" / "franka_panda_ik.py",
 ]
@@ -60,10 +71,12 @@ def main() -> int:
 
     import numpy as np
 
-    total = len(TARGETS) + len(ARTIFACT_TARGETS)
+    total = len(TARGETS) + len(SAFE_TARGETS) + len(ARTIFACT_TARGETS)
     print(f"compiling {total} ssik modules in-place via Cython:")
     for t in TARGETS:
         print(f"  {t.relative_to(REPO)}")
+    for t in SAFE_TARGETS:
+        print(f"  {t.relative_to(REPO)}  (safe directives)")
     for t in ARTIFACT_TARGETS:
         print(f"  {t.relative_to(REPO)}  (artifact, safe directives)")
 
@@ -80,19 +93,24 @@ def main() -> int:
         },
         annotate=True,  # writes per-file .html annotation reports
     )
-    # Safe directives for per-arm artifacts (untyped numpy indexing).
-    safe = cythonize(
-        [str(t) for t in ARTIFACT_TARGETS],
-        compiler_directives={
-            "language_level": "3",
-            "boundscheck": True,
-            "wraparound": True,
-            "cdivision": True,
-            "initializedcheck": True,
-        },
+    safe_directives = {
+        "language_level": "3",
+        "boundscheck": True,
+        "wraparound": True,
+        "cdivision": True,
+        "initializedcheck": True,
+    }
+    safe_src = cythonize(
+        [str(t) for t in SAFE_TARGETS],
+        compiler_directives=safe_directives,
         annotate=True,
     )
-    extensions = list(aggressive) + list(safe)
+    safe_artifacts = cythonize(
+        [str(t) for t in ARTIFACT_TARGETS],
+        compiler_directives=safe_directives,
+        annotate=True,
+    )
+    extensions = list(aggressive) + list(safe_src) + list(safe_artifacts)
     # Disable FP contraction (FMA) -- ssik.kinematics._scalar3 uses strict
     # left-to-right IEEE 754 evaluation as the determinism guarantee that
     # makes codegen (poe_to_dh -> sympy.cse) bit-exact across platforms. A
