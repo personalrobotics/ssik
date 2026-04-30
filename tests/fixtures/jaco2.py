@@ -78,12 +78,27 @@ _JACO2_EE_FRAME: tuple[tuple[float, float, float], tuple[float, float, float, fl
     (0.0, 0.707107, 0.707107, 0.0),
 )
 
+# Per-joint reachable range from the MJCF ``range="lo hi"`` attributes.
+# Joints with no explicit ``range`` attribute (joints 1, 4, 5, 6) are
+# treated as continuous (free rotation, ``limits=None``) -- the URDF
+# ``continuous`` convention. Joints 2 and 3 have explicit ranges.
+_JACO2_JOINT_LIMITS: tuple[tuple[float, float] | None, ...] = (
+    None,  # joint_1: no range -> continuous
+    (0.820305, 5.46288),  # joint_2
+    (0.331613, 5.95157),  # joint_3
+    None,  # joint_4: no range -> continuous
+    None,  # joint_5: no range -> continuous
+    None,  # joint_6: no range -> continuous
+)
+
 
 def jaco2_specs() -> list[JointSpec]:
     """6 revolute :class:`JointSpec`s for the JACO 2 arm chain.
 
     Joint 6's ``child_link_T`` carries the EE-site offset so the chain's
-    forward kinematics produces the EE pose used by IK targets.
+    forward kinematics produces the EE pose used by IK targets. Each
+    joint carries its MJCF reachable range in ``limits`` (``None`` for
+    continuous joints).
     """
     z_axis = np.array([0.0, 0.0, 1.0], dtype=np.float64)
     specs: list[JointSpec] = []
@@ -98,6 +113,7 @@ def jaco2_specs() -> list[JointSpec]:
                 joint_type="revolute",
                 child_link_T=child,
                 name=f"j2n6s200_joint_{i + 1}",
+                limits=_JACO2_JOINT_LIMITS[i],
             )
         )
     return specs

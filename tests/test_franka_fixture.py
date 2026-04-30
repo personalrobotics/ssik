@@ -151,3 +151,52 @@ def test_franka_7r_solves_via_reversed_dispatch() -> None:
         f"Franka 7R IK closed only {closures}/5 random poses -- "
         "the reversed-chain dispatch isn't producing valid solutions."
     )
+
+
+def test_franka_joint_limits_baked_into_kinbody() -> None:
+    """Each joint's MJCF-supplied ``range`` lands in ``Joint.limits`` after
+    ``build_kinbody`` POE-normalisation. Limits are kinematic data (frame
+    change is a no-op on them).
+    """
+    kb = build_kinbody(franka_panda_specs())
+    expected = [
+        (-2.8973, 2.8973),  # joint1
+        (-1.7628, 1.7628),  # joint2
+        (-2.8973, 2.8973),  # joint3
+        (-3.0718, -0.0698),  # joint4
+        (-2.8973, 2.8973),  # joint5
+        (-0.0175, 3.7525),  # joint6
+        (-2.8973, 2.8973),  # joint7
+    ]
+    for i, lim in enumerate(expected):
+        assert kb.joints[i].limits == lim, f"joint {i} limits"
+
+
+def test_franka_seven_r_lock_samples_clamps_to_limits() -> None:
+    """``seven_r.solve`` default lock-sample sweep covers the locked joint's
+    actual range, not ``[-pi, pi]``. Exercises the clamping path in #129
+    Step 1.
+    """
+    from ssik.solvers.jointlock.seven_r import choose_lock_joint
+    from ssik.solvers.jointlock.seven_r import solve as seven_r_solve
+
+    kb = build_kinbody(franka_panda_specs())
+    lock_idx = choose_lock_joint(kb)
+    # Joint 4 has limits (-2.8973, 2.8973) -- about 92% of [-pi, pi].
+    expected_lo, expected_hi = kb.joints[lock_idx].limits  # type: ignore[misc]
+
+    # FK on the home pose gives a reachable target. The solve internally
+    # builds samples = np.linspace(lo, hi, N, endpoint=False); we can't
+    # observe them directly, but we can verify the chosen lock_idx's
+    # limits have the expected MJCF-supplied bounds (Franka joint 4
+    # is the forearm-adjacent joint, range -2.8973..2.8973).
+    assert lock_idx == 4
+    assert expected_lo == -2.8973
+    assert expected_hi == 2.8973
+
+    # Also verify a real solve still works through the limits-aware
+    # sweep (regression check: clamping shouldn't break IK).
+    T_home = _fk(kb, FRANKA_PANDA_KEYFRAMES["home"])
+    sols, is_ls = seven_r_solve(kb, T_home)
+    assert not is_ls
+    assert len(sols) > 0

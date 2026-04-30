@@ -73,6 +73,21 @@ def _emit_jaco2() -> str:
     return result.source
 
 
+def _emit_franka_panda() -> str:
+    from franka_panda import franka_panda_specs
+
+    kb = build_kinbody(franka_panda_specs())
+    plan = dispatch(kb)
+    result = emit_artifact(
+        kb=kb,
+        plan=plan,
+        module_name="franka_panda_ik",
+        output_path=None,
+        arm_label="Franka Emika Panda (no hand)",
+    )
+    return result.source
+
+
 @pytest.mark.parametrize(
     ("module_name", "emit_fn"),
     [
@@ -91,6 +106,7 @@ def _emit_jaco2() -> str:
             ),
         ),
         ("jaco2_ik", _emit_jaco2),
+        ("franka_panda_ik", _emit_franka_panda),
     ],
 )
 def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: object) -> None:

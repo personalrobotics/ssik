@@ -375,8 +375,9 @@ def _kb_digest(kb: KinBody) -> str:
     """
     import hashlib
 
+    # Bumped to v2 when joint limits joined the kinematic spec (#129).
     h = hashlib.sha256()
-    h.update(b"ssik-kinbody-v1\n")
+    h.update(b"ssik-kinbody-v2\n")
     for link in kb.links:
         h.update(b"L:")
         h.update(link.name.encode("utf-8"))
@@ -400,6 +401,11 @@ def _kb_digest(kb: KinBody) -> str:
             for v in row:
                 h.update(f"{v!r}".encode())
                 h.update(b",")
+        h.update(b":lim=")
+        if joint.limits is None:
+            h.update(b"None")
+        else:
+            h.update(f"{joint.limits[0]!r},{joint.limits[1]!r}".encode())
         h.update(b"\n")
     return h.hexdigest()[:12]
 
@@ -482,6 +488,10 @@ def _render_kinbody_constants(kb: KinBody) -> str:
     for j in kb.joints:
         lines.append(f"    {j.joint_type!r},")
     lines.append("]\n")
+    lines.append("_JOINT_LIMITS = [")
+    for j in kb.joints:
+        lines.append(f"    {j.limits!r},")
+    lines.append("]\n")
     return "\n".join(lines)
 
 
@@ -502,6 +512,7 @@ def _render_kinbody_builder() -> str:
                     T_right=_JOINT_T_RIGHTS[i],
                     axis=_JOINT_AXES[i],
                     joint_type=_JOINT_TYPES[i],
+                    limits=_JOINT_LIMITS[i],
                 )
                 for i in range(len(_JOINT_NAMES))
             ]

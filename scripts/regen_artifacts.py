@@ -51,6 +51,7 @@ def main() -> int:
         arm_label="Puma 560",
     )
     _emit_jaco2_artifact()
+    _emit_franka_panda_artifact()
     print("done.")
     return 0
 
@@ -86,6 +87,27 @@ def _emit_jaco2_artifact() -> None:
         module_name="jaco2_ik",
         output_path=str(out),
         arm_label="Kinova JACO 2 (j2n6s200)",
+    )
+    print(f"  {out.relative_to(REPO_ROOT)}: {plan.solver_name} (tier {plan.tier})")
+
+
+def _emit_franka_panda_artifact() -> None:
+    """Franka Panda fixture: real MJCF transcription, 7-DOF. The artifact
+    routes through ``jointlock.seven_r`` which auto-picks lock_idx=4
+    (matching EAIK) and dispatches to ``reversed:spherical_two_parallel``
+    via the chain-reversal pre-pass."""
+    sys.path.insert(0, str(FIXTURES))
+    from franka_panda import franka_panda_specs
+
+    kb = build_kinbody(franka_panda_specs())
+    plan = dispatch(kb)
+    out = ARTIFACTS / "franka_panda_ik.py"
+    emit_artifact(
+        kb=kb,
+        plan=plan,
+        module_name="franka_panda_ik",
+        output_path=str(out),
+        arm_label="Franka Emika Panda (no hand)",
     )
     print(f"  {out.relative_to(REPO_ROOT)}: {plan.solver_name} (tier {plan.tier})")
 
