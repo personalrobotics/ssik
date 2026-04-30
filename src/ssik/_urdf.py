@@ -126,6 +126,10 @@ def load_urdf_kinbody(
         joint_type = _map_joint_type(uj.joint_type, uj.name)
         T_left = pending_fixed @ np.asarray(uj.origin, dtype=np.float64)
         pending_fixed = _IDENTITY.copy()
+        if uj.joint_type == "continuous" or uj.limit is None:
+            limits: tuple[float, float] | None = None
+        else:
+            limits = (float(uj.limit.lower), float(uj.limit.upper))
 
         child_link = Link(name=uj.child)
         joints.append(
@@ -137,6 +141,7 @@ def load_urdf_kinbody(
                 T_right=_IDENTITY.copy(),
                 axis=np.asarray(uj.axis, dtype=np.float64),
                 joint_type=joint_type,
+                limits=limits,
             )
         )
         links.append(child_link)
@@ -158,6 +163,7 @@ def load_urdf_kinbody(
             T_right=last.T_right @ pending_fixed,
             axis=last.axis,
             joint_type=last.joint_type,
+            limits=last.limits,
         )
 
     # The last link we appended carries the active-chain's child name; rename
@@ -217,8 +223,19 @@ def load_urdf_kinbody_normalized(
     pos_cum = np.zeros(3, dtype=np.float64)
     prev_active_pos = np.zeros(3, dtype=np.float64)
 
-    # Per-active-joint records: (name, joint_type, axis_base, P_offset).
-    records: list[tuple[str, JointType, NDArray[np.float64], NDArray[np.float64]]] = []
+    # Per-active-joint records: (name, joint_type, axis_base, P_offset, limits).
+    # ``limits`` is ``None`` for URDF ``continuous`` joints (free rotation, no
+    # range) and for any joint without a ``<limit>`` element. Otherwise it's
+    # ``(lower, upper)`` from urchin.
+    records: list[
+        tuple[
+            str,
+            JointType,
+            NDArray[np.float64],
+            NDArray[np.float64],
+            tuple[float, float] | None,
+        ]
+    ] = []
 
     for uj in chain:
         if uj.mimic is not None:
@@ -242,7 +259,14 @@ def load_urdf_kinbody_normalized(
         joint_type = _map_joint_type(uj.joint_type, uj.name)
         axis_base = r_cum @ np.asarray(uj.axis, dtype=np.float64)
         p_offset = pos_cum - prev_active_pos
-        records.append((uj.name, joint_type, axis_base, p_offset))
+        # Continuous URDF joints (free rotation) have no <limit>; urchin
+        # returns ``j.limit = None``. Same handling for any joint with no
+        # explicit limit element. Limited joints get ``(lower, upper)``.
+        if uj.joint_type == "continuous" or uj.limit is None:
+            limits = None
+        else:
+            limits = (float(uj.limit.lower), float(uj.limit.upper))
+        records.append((uj.name, joint_type, axis_base, p_offset, limits))
         prev_active_pos = pos_cum.copy()
 
     if not records:
@@ -266,7 +290,7 @@ def load_urdf_kinbody_normalized(
     link_names = [base_link, *[f"_poe_link_{i}" for i in range(1, n)], ee_link]
     links = [Link(name=name) for name in link_names]
     joints: list[Joint] = []
-    for i, (name, joint_type, axis_base, p_offset) in enumerate(records):
+    for i, (name, joint_type, axis_base, p_offset, limits) in enumerate(records):
         t_left = np.eye(4, dtype=np.float64)
         t_left[:3, 3] = p_offset
         t_right = final_t_right if i == n - 1 else _IDENTITY.copy()
@@ -279,6 +303,7 @@ def load_urdf_kinbody_normalized(
                 T_right=t_right,
                 axis=axis_base,
                 joint_type=joint_type,
+                limits=limits,
             )
         )
 

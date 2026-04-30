@@ -80,6 +80,19 @@ _FRANKA_JOINT_FRAMES: tuple[
     ((0.088, 0.0, 0.0), (1.0, 1.0, 0.0, 0.0)),
 )
 
+# Per-joint reachable range from the MJCF ``range="lo hi"`` attributes
+# (joints with no explicit range inherit the panda-class default of
+# ``-2.8973 .. 2.8973``).
+_FRANKA_JOINT_LIMITS: tuple[tuple[float, float], ...] = (
+    (-2.8973, 2.8973),  # joint1 (default class)
+    (-1.7628, 1.7628),  # joint2 (override)
+    (-2.8973, 2.8973),  # joint3 (default class)
+    (-3.0718, -0.0698),  # joint4 (override)
+    (-2.8973, 2.8973),  # joint5 (default class)
+    (-0.0175, 3.7525),  # joint6 (override)
+    (-2.8973, 2.8973),  # joint7 (default class)
+)
+
 # End-effector attachment-site offset inside link_7 (post-joint-7).
 _FRANKA_EE_FRAME: tuple[tuple[float, float, float], tuple[float, float, float, float]] = (
     (0.0, 0.0, 0.107),
@@ -91,7 +104,11 @@ def franka_panda_specs() -> list[JointSpec]:
     """7 revolute :class:`JointSpec`s for the Franka Panda arm chain.
 
     Joint 7's ``child_link_T`` carries the EE attachment-site offset so
-    forward kinematics produces the EE pose used by IK targets.
+    forward kinematics produces the EE pose used by IK targets. Each
+    joint carries its MJCF-supplied reachable range in ``limits``;
+    ``ssik.solvers.jointlock.seven_r.solve`` clamps the default
+    ``lock_samples`` sweep to the locked joint's range so we don't waste
+    samples outside reachable territory.
     """
     z_axis = np.array([0.0, 0.0, 1.0], dtype=np.float64)
     specs: list[JointSpec] = []
@@ -106,6 +123,7 @@ def franka_panda_specs() -> list[JointSpec]:
                 joint_type="revolute",
                 child_link_T=child,
                 name=f"panda_joint{i + 1}",
+                limits=_FRANKA_JOINT_LIMITS[i],
             )
         )
     return specs

@@ -49,6 +49,15 @@ class JointSpec:
     purely in terms of "where the next joint sits" (e.g., simple axis lists).
     It is optional but necessary to express classical DH (where the ``d``/``a``
     translations happen *after* the joint rotation).
+
+    ``limits`` is an optional ``(lo, hi)`` pair giving the joint's reachable
+    range (radians for revolute, metres for prismatic). ``None`` means
+    unconstrained / unspecified -- ssik solvers don't filter by limits
+    inside the kernel (that lives in :mod:`ssik.postprocess`); the limits
+    are kinematic data downstream code can consume. The single in-kernel
+    consumer is :func:`ssik.solvers.jointlock.seven_r.solve`, which
+    clamps the default ``lock_samples`` sweep to ``[lo, hi]`` when
+    available so we don't waste samples outside the joint's range.
     """
 
     parent_link_T: NDArray[np.float64]
@@ -56,6 +65,7 @@ class JointSpec:
     joint_type: JointType
     child_link_T: NDArray[np.float64] | None = None
     name: str | None = None
+    limits: tuple[float, float] | None = None
 
 
 @dataclass(eq=False)
@@ -88,6 +98,10 @@ class Joint:
     Multi-axis joints (spherical, universal) are not supported — ``iaxis`` must
     be ``0``. Mimic/passive joints are not supported either; the relevant stubs
     raise if the solver tries to treat this joint as mimic.
+
+    ``limits`` mirrors :attr:`JointSpec.limits` -- an ``(lo, hi)`` pair or
+    ``None`` for unconstrained / unspecified. Solvers don't filter by limits
+    inside the kernel; downstream code in :mod:`ssik.postprocess` does.
     """
 
     name: str
@@ -97,6 +111,7 @@ class Joint:
     T_right: NDArray[np.float64]
     axis: NDArray[np.float64]
     joint_type: JointType
+    limits: tuple[float, float] | None = None
 
     def _check_iaxis(self, iaxis: int) -> None:
         if iaxis != 0:
@@ -246,7 +261,15 @@ def build_kinbody(
     # frame and the world-frame position of the rotation axis.
     R_cum = np.eye(3, dtype=np.float64)
     pos_cum = np.zeros(3, dtype=np.float64)
-    records: list[tuple[str, JointType, NDArray[np.float64], NDArray[np.float64]]] = []
+    records: list[
+        tuple[
+            str,
+            JointType,
+            NDArray[np.float64],
+            NDArray[np.float64],
+            tuple[float, float] | None,
+        ]
+    ] = []
     for i, spec in enumerate(specs):
         T_left = np.ascontiguousarray(spec.parent_link_T, dtype=np.float64)
         if T_left.shape != (4, 4):
@@ -276,7 +299,7 @@ def build_kinbody(
         R_cum = R_cum @ T_right[:3, :3]
 
         joint_name = spec.name if spec.name is not None else f"j{i}"
-        records.append((joint_name, spec.joint_type, axis_world, joint_origin))
+        records.append((joint_name, spec.joint_type, axis_world, joint_origin, spec.limits))
 
     # Second pass: emit POE-normalised joints. T_left is pure translation
     # (offset between consecutive joint origins in world); T_right is
@@ -284,7 +307,7 @@ def build_kinbody(
     # home_rotation). pos_cum and R_cum at this point are the FK at q=0.
     joints: list[Joint] = []
     prev_origin = np.zeros(3, dtype=np.float64)
-    for i, (joint_name, joint_type, axis_world, joint_origin) in enumerate(records):
+    for i, (joint_name, joint_type, axis_world, joint_origin, limits) in enumerate(records):
         new_T_left = np.eye(4, dtype=np.float64)
         new_T_left[:3, 3] = joint_origin - prev_origin
 
@@ -308,6 +331,7 @@ def build_kinbody(
                 T_right=new_T_right,
                 axis=axis_world,
                 joint_type=joint_type,
+                limits=limits,
             )
         )
         prev_origin = joint_origin

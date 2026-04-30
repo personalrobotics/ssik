@@ -13,11 +13,15 @@ import pytest
 from ssik._kinbody import JointSpec, KinBody, Link, build_kinbody
 
 
-def _spec(joint_type: str = "revolute") -> JointSpec:
+def _spec(
+    joint_type: str = "revolute",
+    limits: tuple[float, float] | None = None,
+) -> JointSpec:
     return JointSpec(
         parent_link_T=np.eye(4),
         axis=np.array([0.0, 0.0, 1.0]),
         joint_type=joint_type,  # type: ignore[arg-type]
+        limits=limits,
     )
 
 
@@ -195,3 +199,28 @@ def test_custom_joint_names_preserved() -> None:
     )
     kb = build_kinbody([spec])
     assert kb.joints[0].GetName() == "shoulder_pan"
+
+
+def test_joint_limits_default_none() -> None:
+    """Joints without explicit limits default to ``limits=None`` (continuous /
+    unspecified). This is the silent backwards-compat path for fixtures that
+    don't supply limits."""
+    kb = build_kinbody([_spec(), _spec()])
+    for j in kb.joints:
+        assert j.limits is None
+
+
+def test_joint_limits_propagate_through_build_kinbody() -> None:
+    """``JointSpec.limits`` propagate to ``Joint.limits`` after POE
+    normalisation. Limits are kinematic data; the normalisation is a frame
+    change, not a re-parametrisation, so limits stay attached to the same
+    physical joint."""
+    specs = [
+        _spec(limits=(-1.0, 1.0)),
+        _spec(limits=None),  # continuous middle joint
+        _spec(limits=(-2.5, 0.5)),
+    ]
+    kb = build_kinbody(specs)
+    assert kb.joints[0].limits == (-1.0, 1.0)
+    assert kb.joints[1].limits is None
+    assert kb.joints[2].limits == (-2.5, 0.5)

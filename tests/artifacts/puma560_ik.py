@@ -5,7 +5,7 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
-Provenance: KinBody hash d08202c0ca6c (sha256/12 of the input chain).
+Provenance: KinBody hash d7fe5076cb07 (sha256/12 of the input chain).
 
 Solver: ``ikgeo.spherical_two_parallel`` (tier 0)
 Expected median IK time: ~1.2 ms on commodity
@@ -96,6 +96,15 @@ _JOINT_TYPES = [
     'revolute',
 ]
 
+_JOINT_LIMITS = [
+    (-3.14159265358979, 3.14159265358979),
+    (-3.14159265358979, 3.14159265358979),
+    (-3.14159265358979, 3.14159265358979),
+    (-3.14159265358979, 3.14159265358979),
+    (-3.14159265358979, 3.14159265358979),
+    (-3.14159265358979, 3.14159265358979),
+]
+
 
 def _build_kb() -> KinBody:
     """Reconstruct the baked KinBody. Run once at module import."""
@@ -109,6 +118,7 @@ def _build_kb() -> KinBody:
             T_right=_JOINT_T_RIGHTS[i],
             axis=_JOINT_AXES[i],
             joint_type=_JOINT_TYPES[i],
+            limits=_JOINT_LIMITS[i],
         )
         for i in range(len(_JOINT_NAMES))
     ]

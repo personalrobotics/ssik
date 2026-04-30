@@ -311,9 +311,13 @@ def solve(
 
     :param kb: POE-normalized :class:`KinBody` with 7 revolute joints.
     :param T_target: 4x4 target end-effector pose in the base frame.
-    :param lock_samples: either an ``int N`` (uniform sweep over
-        ``[-pi, pi]`` with N samples), or an explicit sequence of
-        lock-joint values. Default 16.
+    :param lock_samples: either an ``int N`` (uniform sweep over the
+        locked joint's reachable range with ``N`` samples), or an explicit
+        sequence of lock-joint values. Default 16. The sweep range is
+        ``kb.joints[lock_idx].limits`` if set, otherwise ``[-pi, pi]``
+        (which is the full revolution and the right default for
+        continuous / unspecified-limit joints). Explicit sequences
+        bypass the range clamp -- the caller's values win.
     :param policy: tolerances (forwarded to inner 6R solver).
     :param allow_refinement: opt into Newton polish on each inner-solver
         candidate (#74). Default off.
@@ -335,7 +339,17 @@ def solve(
         lock_idx = choose_lock_joint(kb, policy)
 
     if isinstance(lock_samples, int):
-        samples = np.linspace(-np.pi, np.pi, lock_samples, endpoint=False)
+        # Clamp the uniform sweep to the locked joint's reachable range
+        # when known (limits=None for continuous joints means free
+        # rotation -> sweep [-pi, pi] = one full revolution, the unique
+        # sample space). For limited joints this avoids wasting samples
+        # in unreachable territory.
+        joint_limits = kb.joints[lock_idx].limits
+        if joint_limits is None:
+            lo, hi = -np.pi, np.pi
+        else:
+            lo, hi = joint_limits
+        samples = np.linspace(lo, hi, lock_samples, endpoint=False)
     else:
         samples = np.array(list(lock_samples), dtype=np.float64)
 
