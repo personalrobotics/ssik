@@ -66,6 +66,10 @@ ARMS = {
         "label": "Kinova JACO 2 (j2n6s200)",
         "loader": lambda: _load_jaco2(),
     },
+    "franka": {
+        "label": "Franka Emika Panda (no hand)",
+        "loader": lambda: _load_franka(),
+    },
 }
 
 
@@ -76,6 +80,15 @@ def _load_jaco2():
     from ssik._kinbody import build_kinbody
 
     return build_kinbody(jaco2_specs())
+
+
+def _load_franka():
+    """Franka 7R fixture, MJCF-transcribed."""
+    from franka_panda import franka_panda_specs
+
+    from ssik._kinbody import build_kinbody
+
+    return build_kinbody(franka_panda_specs())
 
 
 def _emit_module(kb, plan, module_name: str, label: str, output_path: Path):
