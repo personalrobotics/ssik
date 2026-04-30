@@ -37,6 +37,9 @@ of a 2x2 quadratic-circle system, and ``theta2`` via :func:`sp1.solve`.
 
 from __future__ import annotations
 
+import math
+
+import cython
 import numpy as np
 from numpy.typing import NDArray
 
@@ -54,17 +57,26 @@ from ssik.subproblems._validate import validate_vec3
 
 __all__ = ["solve"]
 
+# 2*pi as a typed constant -- referenced inside the hot _refine_sp5 loop.
+# `float` is enough for mypy; Cython treats module-level float as `double`.
+_TWO_PI: float = 2.0 * math.pi
 
+
+@cython.ccall
 def _wrap(a: float) -> float:
-    """Wrap an angle to ``(-pi, pi]``."""
-    return float(((a + np.pi) % (2 * np.pi)) - np.pi)
+    """Wrap an angle to ``(-pi, pi]``. Inlined inside _refine_sp5's hot loop;
+    every iteration does three of these."""
+    return ((a + math.pi) % _TWO_PI) - math.pi
 
 
 def _close_triple(a: tuple[float, float, float], b: tuple[float, float, float], tol: float) -> bool:
+    # ``float(...)`` reasserts the boundary type: Cython.Shadow's ``@cython.ccall``
+    # decorator widens ``_wrap``'s return to ``Any`` for mypy, so without this
+    # cast the bool-and chain is inferred as ``Any``.
     return (
-        abs(_wrap(a[0] - b[0])) < tol
-        and abs(_wrap(a[1] - b[1])) < tol
-        and abs(_wrap(a[2] - b[2])) < tol
+        abs(float(_wrap(a[0] - b[0]))) < tol
+        and abs(float(_wrap(a[1] - b[1]))) < tol
+        and abs(float(_wrap(a[2] - b[2]))) < tol
     )
 
 
@@ -89,14 +101,16 @@ def _degenerate(
     """Return True if input falls in a configuration where the cone-polynomial
     reduction is ill-defined (``k_i`` parallel to ``k_2``, or ``p_i`` collinear
     with its rotation axis)."""
+    # ``float(...)`` reasserts the boundary type: ``_dot3`` is ``@cython.ccall``,
+    # which widens to ``Any`` for mypy.
     k1xk2 = _cross3(k1, k2)
     k3xk2 = _cross3(k3, k2)
-    k1xk2_sq = _dot3(k1xk2, k1xk2)
-    k3xk2_sq = _dot3(k3xk2, k3xk2)
+    k1xk2_sq = float(_dot3(k1xk2, k1xk2))
+    k3xk2_sq = float(_dot3(k3xk2, k3xk2))
     if k1xk2_sq < deg_tol or k3xk2_sq < deg_tol:
         return True
-    p1_perp_sq = _dot3(p1, p1) - _dot3(k1, p1) ** 2
-    p3_perp_sq = _dot3(p3, p3) - _dot3(k3, p3) ** 2
+    p1_perp_sq = float(_dot3(p1, p1)) - float(_dot3(k1, p1)) ** 2
+    p3_perp_sq = float(_dot3(p3, p3)) - float(_dot3(k3, p3)) ** 2
     return p1_perp_sq < deg_tol or p3_perp_sq < deg_tol
 
 
@@ -114,7 +128,8 @@ def _residual(
 ) -> float:
     lhs = p0 + rotate(k1, theta1, p1)
     rhs = rotate(k2, theta2, p2 + rotate(k3, theta3, p3))
-    return _norm3(lhs - rhs)
+    # ``float(...)`` reasserts the boundary: ``_norm3`` is ``@cython.ccall``.
+    return float(_norm3(lhs - rhs))
 
 
 def solve(
@@ -272,10 +287,43 @@ def solve(
     return [best], True
 
 
+@cython.ccall
+@cython.locals(
+    max_step=cython.double,
+    j00=cython.double,
+    j01=cython.double,
+    j02=cython.double,
+    j10=cython.double,
+    j11=cython.double,
+    j12=cython.double,
+    j20=cython.double,
+    j21=cython.double,
+    j22=cython.double,
+    c00=cython.double,
+    c01=cython.double,
+    c02=cython.double,
+    c10=cython.double,
+    c11=cython.double,
+    c12=cython.double,
+    c20=cython.double,
+    c21=cython.double,
+    c22=cython.double,
+    det=cython.double,
+    inv_det=cython.double,
+    b0=cython.double,
+    b1=cython.double,
+    b2=cython.double,
+    delta0=cython.double,
+    delta1=cython.double,
+    delta2=cython.double,
+    step_norm=cython.double,
+    scale=cython.double,
+    _iter_idx=cython.int,
+)
 def _refine_sp5(
-    t1: float,
-    t2: float,
-    t3: float,
+    t1: cython.double,
+    t2: cython.double,
+    t3: cython.double,
     p0: NDArray[np.float64],
     p1: NDArray[np.float64],
     p2: NDArray[np.float64],
@@ -283,8 +331,8 @@ def _refine_sp5(
     k1: NDArray[np.float64],
     k2: NDArray[np.float64],
     k3: NDArray[np.float64],
-    max_iter: int = 20,
-    step_tol: float = 1e-15,
+    max_iter: cython.int = 20,
+    step_tol: cython.double = 1e-15,
 ) -> tuple[float, float, float]:
     """Gauss-Newton refinement of an SP5 angle triple.
 
@@ -298,8 +346,8 @@ def _refine_sp5(
     back to the input without raising, leaving the caller's post-verify
     as the authoritative filter.
     """
-    max_step = np.pi / 4.0
-    for _ in range(max_iter):
+    max_step = math.pi / 4.0
+    for _iter_idx in range(max_iter):
         rotated_p1 = rotate(k1, t1, p1)
         rotated_p3_inner = rotate(k3, t3, p3)
         p2_plus_rotp3 = p2 + rotated_p3_inner
@@ -315,9 +363,15 @@ def _refine_sp5(
         # 3x3 closed-form solve via cofactor expansion -- avoids
         # np.linalg.solve dispatch (~5us) and the column_stack + np.array
         # construction. delta = inv(J) @ -f.
-        j00, j10, j20 = float(col1[0]), float(col1[1]), float(col1[2])
-        j01, j11, j21 = float(col2[0]), float(col2[1]), float(col2[2])
-        j02, j12, j22 = float(col3[0]), float(col3[1]), float(col3[2])
+        j00 = float(col1[0])
+        j10 = float(col1[1])
+        j20 = float(col1[2])
+        j01 = float(col2[0])
+        j11 = float(col2[1])
+        j21 = float(col2[2])
+        j02 = float(col3[0])
+        j12 = float(col3[1])
+        j22 = float(col3[2])
         c00 = j11 * j22 - j12 * j21
         c01 = j12 * j20 - j10 * j22
         c02 = j10 * j21 - j11 * j20
@@ -330,7 +384,9 @@ def _refine_sp5(
         c20 = j01 * j12 - j02 * j11
         c21 = j02 * j10 - j00 * j12
         c22 = j00 * j11 - j01 * j10
-        b0, b1, b2 = -float(f[0]), -float(f[1]), -float(f[2])
+        b0 = -float(f[0])
+        b1 = -float(f[1])
+        b2 = -float(f[2])
         inv_det = 1.0 / det
         delta0 = (c00 * b0 + c10 * b1 + c20 * b2) * inv_det
         delta1 = (c01 * b0 + c11 * b1 + c21 * b2) * inv_det
@@ -339,7 +395,7 @@ def _refine_sp5(
         # Clip per-iteration step to pi/4 so an ill-conditioned Jacobian
         # doesn't launch us to a far-away minimum; quadratic convergence is
         # preserved near the true solution where |delta| is already small.
-        step_norm = float(np.sqrt(delta0 * delta0 + delta1 * delta1 + delta2 * delta2))
+        step_norm = math.sqrt(delta0 * delta0 + delta1 * delta1 + delta2 * delta2)
         if step_norm > max_step:
             scale = max_step / step_norm
             delta0 *= scale

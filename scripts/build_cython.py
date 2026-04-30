@@ -31,6 +31,8 @@ REPO = Path(__file__).resolve().parent.parent
 TARGETS = [
     REPO / "src" / "ssik" / "kinematics" / "_scalar3.py",
     REPO / "src" / "ssik" / "subproblems" / "_rotation.py",
+    # Slice 2: sp5._refine_sp5 is 30% of Franka 7R IK time per profile.
+    REPO / "src" / "ssik" / "subproblems" / "sp5.py",
 ]
 
 
@@ -50,19 +52,34 @@ def main() -> int:
         print(f"  {t.relative_to(REPO)}")
 
     sys.argv = [sys.argv[0], "build_ext", "--inplace"]
+    extensions = cythonize(
+        [str(t) for t in TARGETS],
+        compiler_directives={
+            "language_level": "3",
+            "boundscheck": False,
+            "wraparound": False,
+            "cdivision": True,
+            "initializedcheck": False,
+        },
+        annotate=True,  # writes per-file .html annotation reports
+    )
+    # Disable FP contraction (FMA) -- ssik.kinematics._scalar3 uses strict
+    # left-to-right IEEE 754 evaluation as the determinism guarantee that
+    # makes codegen (poe_to_dh -> sympy.cse) bit-exact across platforms. A
+    # compiler that contracts a*b + c*d into fma(a,b,c*d) saves 1 ulp of
+    # rounding error but produces a bit-different result, which propagates
+    # through cse and breaks artifact byte-equality (test_artifact_snapshots).
+    # `-fno-fast-math` is the macOS/clang default but kept explicit as
+    # belt-and-braces against future toolchain changes.
+    for ext in extensions:
+        ext.extra_compile_args = [
+            *(ext.extra_compile_args or []),
+            "-ffp-contract=off",
+            "-fno-fast-math",
+        ]
     setup(
         name="ssik_cython_inplace",
-        ext_modules=cythonize(
-            [str(t) for t in TARGETS],
-            compiler_directives={
-                "language_level": "3",
-                "boundscheck": False,
-                "wraparound": False,
-                "cdivision": True,
-                "initializedcheck": False,
-            },
-            annotate=True,  # writes per-file .html annotation reports
-        ),
+        ext_modules=extensions,
         include_dirs=[np.get_include()],
         script_args=sys.argv[1:],
     )

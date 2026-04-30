@@ -93,8 +93,14 @@ def _residual(
     d1: float,
     d2: float,
 ) -> float:
-    lhs1 = _dot3(h[0], rotate(k[0], theta1, p[0])) + _dot3(h[1], rotate(k[1], theta2, p[1]))
-    lhs2 = _dot3(h[2], rotate(k[2], theta1, p[2])) + _dot3(h[3], rotate(k[3], theta2, p[3]))
+    # ``float(...)`` reasserts the boundary type: ``_dot3`` is ``@cython.ccall``,
+    # which widens to ``Any`` for mypy.
+    lhs1 = float(_dot3(h[0], rotate(k[0], theta1, p[0]))) + float(
+        _dot3(h[1], rotate(k[1], theta2, p[1]))
+    )
+    lhs2 = float(_dot3(h[2], rotate(k[2], theta1, p[2]))) + float(
+        _dot3(h[3], rotate(k[3], theta2, p[3]))
+    )
     return max(abs(lhs1 - d1), abs(lhs2 - d2))
 
 
