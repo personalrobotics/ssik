@@ -39,7 +39,7 @@ import numpy as np
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.refinement import kinbody_jacobian as _kinbody_jacobian, lm_refine as _lm_refine
+from ssik.refinement import lm_refine as _lm_refine
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.three_parallel"
@@ -264,13 +264,43 @@ def _solve_algebraic(T_target):
 
 
 def _fk(q):
-    """POE forward kinematics using the baked KinBody."""
+    """POE forward kinematics using the baked chain constants."""
     T = np.eye(4)
-    for j, qi in zip(_KB.joints, q, strict=True):
+    for i in range(len(_JOINT_AXES)):
         rot = np.eye(4)
-        rot[:3, :3] = _rotation_matrix(j.axis, float(qi))
-        T = T @ j.T_left @ rot @ j.T_right
+        rot[:3, :3] = _rotation_matrix(_JOINT_AXES[i], float(q[i]))
+        T = T @ _JOINT_T_LEFTS[i] @ rot @ _JOINT_T_RIGHTS[i]
     return T
+
+
+def _spatial_jacobian(q):
+    """6 x n_dof spatial Jacobian using the baked chain constants.
+
+    Math identical to ssik.refinement.kinbody_jacobian: column i
+    is (z_i x (p_e - p_i), z_i) where z_i is the i-th joint axis
+    in the world frame at q and p_i / p_e are the i-th joint
+    origin and EE position respectively. Per-arm version with
+    baked _JOINT_AXES / _JOINT_T_LEFTS / _JOINT_T_RIGHTS so
+    there's no KinBody walk at runtime.
+    """
+    n = len(_JOINT_AXES)
+    cum = np.eye(4, dtype=np.float64)
+    cums = [cum.copy()]
+    for i in range(n):
+        rot = np.eye(4, dtype=np.float64)
+        rot[:3, :3] = _rotation_matrix(_JOINT_AXES[i], float(q[i]))
+        cum = cum @ _JOINT_T_LEFTS[i] @ rot @ _JOINT_T_RIGHTS[i]
+        cums.append(cum.copy())
+    p_e = cums[-1][:3, 3]
+    J = np.zeros((6, n), dtype=np.float64)
+    for i in range(n):
+        t_pre = cums[i] @ _JOINT_T_LEFTS[i]
+        axis_unit = _JOINT_AXES[i] / np.linalg.norm(_JOINT_AXES[i])
+        z_i = t_pre[:3, :3] @ axis_unit
+        p_i = t_pre[:3, 3]
+        J[:3, i] = np.cross(z_i, p_e - p_i)
+        J[3:, i] = z_i
+    return J
 
 
 def _wrap_to_pi(a):
@@ -314,14 +344,14 @@ def solve(
             continue
         if not allow_refinement:
             continue
-        # Newton polish using the baked KinBody's spatial Jacobian.
+        # Newton polish using the per-arm spatial Jacobian.
         refined = _lm_refine(
             q,
             _fk,
             T,
             fk_atol=fk_atol,
             max_iters=refinement_max_iters,
-            jacobian_fn=lambda qq: _kinbody_jacobian(_KB, qq),
+            jacobian_fn=_spatial_jacobian,
         )
         if refined is None:
             continue
