@@ -31,6 +31,7 @@ from __future__ import annotations
 import math
 from ssik.solvers.jointlock import seven_r as _ssik_seven_r
 
+import cython
 import numpy as np
 
 from ssik._kinbody import Joint, KinBody, Link
@@ -154,16 +155,26 @@ def _solve_algebraic(T_target):
     return [list(s.q) for s in sub_solutions]
 
 
+# Module-scope ``2*pi`` constant referenced inside the dedup hot
+# loop (Cython compiles ``_TWO_PI`` to a typed C ``double``).
+_TWO_PI: float = 2.0 * math.pi
+
+
+@cython.ccall
+@cython.locals(i=cython.int, n=cython.int)
 def _fk(q):
     """POE forward kinematics using the baked chain constants."""
+    n = len(_JOINT_AXES)
     T = np.eye(4)
-    for i in range(len(_JOINT_AXES)):
+    for i in range(n):
         rot = np.eye(4)
         rot[:3, :3] = _rotation_matrix(_JOINT_AXES[i], float(q[i]))
         T = T @ _JOINT_T_LEFTS[i] @ rot @ _JOINT_T_RIGHTS[i]
     return T
 
 
+@cython.ccall
+@cython.locals(i=cython.int, n=cython.int)
 def _spatial_jacobian(q):
     """6 x n_dof spatial Jacobian using the baked chain constants.
 
@@ -194,8 +205,37 @@ def _spatial_jacobian(q):
     return J
 
 
-def _wrap_to_pi(a):
-    return ((a + math.pi) % (2 * math.pi)) - math.pi
+@cython.ccall
+def _wrap_to_pi(a: float) -> float:
+    """Wrap an angle to ``(-pi, pi]``. Called inside the per-IK
+    dedup hot loop (235k+ times on Franka 7R)."""
+    return ((a + math.pi) % _TWO_PI) - math.pi
+
+
+@cython.ccall
+@cython.locals(
+    i=cython.int,
+    n=cython.int,
+    diff=cython.double,
+    ai=cython.double,
+    bi=cython.double,
+)
+def _q_close_wrap(a, b, tol: float) -> bool:
+    """Return ``True`` if joint vectors ``a`` and ``b`` agree (mod 2pi)
+    within ``tol`` per element. Replaces the
+    ``np.array([_wrap_to_pi(...)]) -> np.all(np.abs(...) < tol)``
+    pipeline that allocated a numpy array per dedup-loop iteration --
+    a per-element scalar loop avoids the array creation and the
+    ``np.all`` reduction overhead, which together dominated the
+    artifact's ``solve()`` body at the per-IK level."""
+    n = len(a)
+    for i in range(n):
+        ai = float(a[i])
+        bi = float(b[i])
+        diff = ((ai - bi + math.pi) % _TWO_PI) - math.pi
+        if abs(diff) > tol:
+            return False
+    return True
 
 
 def solve(
@@ -250,12 +290,13 @@ def solve(
         verified.append((q_ref, resid_ref, "lm", iters))
 
     # Wrap-to-pi dedup; keep lowest fk_residual on collision.
+    # Inner check via ``_q_close_wrap`` -- typed scalar loop, no per-
+    # iteration numpy allocation (#137 Slice 3).
     deduped: list[tuple[np.ndarray, float, str, int]] = []
     for cand_q, cand_res, ref_used, ref_iters in verified:
         dup_idx = None
         for j, (existing_q, _, _, _) in enumerate(deduped):
-            diffs = np.array([_wrap_to_pi(a - b) for a, b in zip(cand_q, existing_q)])
-            if np.all(np.abs(diffs) < dedup_atol):
+            if _q_close_wrap(cand_q, existing_q, dedup_atol):
                 dup_idx = j
                 break
         if dup_idx is None:
