@@ -71,7 +71,9 @@ def axis_parallel(
     Implementation: ``||a x b||`` is ``sin(theta)`` for unit vectors, which
     small-angle approximates to the angular misalignment in radians.
     """
-    return _norm3(_cross3(a, b)) < policy.axis_parallel
+    # ``float(...)`` reasserts the boundary type: ``_norm3`` is decorated
+    # ``@cython.ccall``, which widens to ``Any`` for mypy.
+    return float(_norm3(_cross3(a, b))) < policy.axis_parallel
 
 
 def axis_intersect(
@@ -91,14 +93,14 @@ def axis_intersect(
     of ``(ob - oa)`` after projecting out ``a``.
     """
     cross = _cross3(a, b)
-    cross_norm = _norm3(cross)
+    cross_norm = float(_norm3(cross))
     delta = ob - oa
     if cross_norm < policy.axis_parallel:
         # Parallel case: shortest distance is the perpendicular component
         # of delta relative to a (equivalently b -- they're parallel).
         perp = delta - _dot3(delta, a) * a
-        return _norm3(perp) < policy.axis_intersect
-    distance = abs(_dot3(cross, delta)) / cross_norm
+        return float(_norm3(perp)) < policy.axis_intersect
+    distance = abs(float(_dot3(cross, delta))) / cross_norm
     return distance < policy.axis_intersect
 
 
