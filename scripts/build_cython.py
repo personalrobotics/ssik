@@ -22,17 +22,30 @@ of #137 (cibuildwheel + multi-platform wheels).
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
 # Files to compile. Order matters: deeper deps first.
+# These targets have explicit Cython type annotations on hot-path locals;
+# the aggressive directives (``boundscheck=False, wraparound=False``) are
+# safe because indices are typed and bounded.
 TARGETS = [
     REPO / "src" / "ssik" / "kinematics" / "_scalar3.py",
     REPO / "src" / "ssik" / "subproblems" / "_rotation.py",
     # Slice 2: sp5._refine_sp5 is 30% of Franka 7R IK time per profile.
     REPO / "src" / "ssik" / "subproblems" / "sp5.py",
+]
+
+# Per-arm artifact targets (#137 Slice 3). The orchestrator code emitted
+# by ``ssik.core.codegen`` carries pure-Python-mode Cython annotations
+# (``@cython.ccall`` on ``_fk`` / ``_spatial_jacobian`` / ``_wrap_to_pi``)
+# but the body still uses Python-style numpy indexing. Compiled with the
+# safer directives below to avoid bus errors from skipped bounds checks.
+ARTIFACT_TARGETS = [
+    REPO / "tests" / "artifacts" / "franka_panda_ik.py",
 ]
 
 
@@ -47,12 +60,16 @@ def main() -> int:
 
     import numpy as np
 
-    print(f"compiling {len(TARGETS)} ssik modules in-place via Cython:")
+    total = len(TARGETS) + len(ARTIFACT_TARGETS)
+    print(f"compiling {total} ssik modules in-place via Cython:")
     for t in TARGETS:
         print(f"  {t.relative_to(REPO)}")
+    for t in ARTIFACT_TARGETS:
+        print(f"  {t.relative_to(REPO)}  (artifact, safe directives)")
 
     sys.argv = [sys.argv[0], "build_ext", "--inplace"]
-    extensions = cythonize(
+    # Aggressive directives for src/ssik targets (manually typed).
+    aggressive = cythonize(
         [str(t) for t in TARGETS],
         compiler_directives={
             "language_level": "3",
@@ -63,6 +80,19 @@ def main() -> int:
         },
         annotate=True,  # writes per-file .html annotation reports
     )
+    # Safe directives for per-arm artifacts (untyped numpy indexing).
+    safe = cythonize(
+        [str(t) for t in ARTIFACT_TARGETS],
+        compiler_directives={
+            "language_level": "3",
+            "boundscheck": True,
+            "wraparound": True,
+            "cdivision": True,
+            "initializedcheck": True,
+        },
+        annotate=True,
+    )
+    extensions = list(aggressive) + list(safe)
     # Disable FP contraction (FMA) -- ssik.kinematics._scalar3 uses strict
     # left-to-right IEEE 754 evaluation as the determinism guarantee that
     # makes codegen (poe_to_dh -> sympy.cse) bit-exact across platforms. A
@@ -83,6 +113,17 @@ def main() -> int:
         include_dirs=[np.get_include()],
         script_args=sys.argv[1:],
     )
+    # ``cythonize`` puts artifact .so files at ``src/<module>.cpython-...so``
+    # (because the artifact source lives outside any registered package). Move
+    # each one next to its .py source so ``import tests.artifacts.<arm>_ik``
+    # picks up the compiled extension.
+    for source in ARTIFACT_TARGETS:
+        stem = source.stem  # e.g. "franka_panda_ik"
+        misplaced = list((REPO / "src").glob(f"{stem}.cpython-*.so"))
+        for so in misplaced:
+            dest = source.parent / so.name
+            shutil.move(str(so), str(dest))
+            print(f"  moved {so.relative_to(REPO)} -> {dest.relative_to(REPO)}")
     print("done.")
     return 0
 

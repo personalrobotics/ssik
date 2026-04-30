@@ -52,4 +52,7 @@ site/
 *.cpython-*-linux-gnu.so
 src/ssik/**/*.c
 src/ssik/**/*.html
+# Cython artefacts from per-arm artifact compile (#137 Slice 3).
+tests/artifacts/*.c
+tests/artifacts/*.html
 build/
