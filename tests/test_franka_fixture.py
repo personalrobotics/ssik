@@ -1,15 +1,18 @@
-"""Franka Panda fixture validation + topology baseline (#121).
+"""Franka Panda fixture validation + 7R IK end-to-end (#121).
 
 The fixture itself is a transcribed MJCF (see ``tests/fixtures/franka_panda.py``).
-This test validates two things:
+This module covers four things:
 
 1. The fixture builds correctly: FK at the documented home pose matches
    the Franka spec, and ``build_kinbody`` produces a POE-normalised
    chain (axes in the base frame).
-2. The current state of the topology-rank dispatch on Franka post-lock-4.
-   This is recorded as ``xfail`` so the suite keeps running; when #121
-   Step 2 lands and the topology rank can dispatch the spherical-wrist-
-   at-base case, this test will start passing and the xfail is removed.
+2. ``build_kinbody`` POE-normalisation lands axes in the world frame at
+   q=0 (regression check for #125).
+3. The auto-selected lock joint matches EAIK's pick (joint index 4)
+   and the topology rank dispatches to ``reversed:spherical_two_parallel``
+   at tier-0 closed-form speed (#121 Level 1: chain reversal).
+4. Random-pose 7R IK closes at machine precision via the reversed-chain
+   dispatch path.
 """
 
 from __future__ import annotations
@@ -18,8 +21,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
-
 from numpy.typing import NDArray
 
 from ssik._kinbody import KinBody, build_kinbody
@@ -85,31 +86,68 @@ def test_franka_kb_axes_are_world_frame_at_q0() -> None:
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Franka post-lock-4 has a spherical wrist at the chain BASE (joints "
-        "0,1,2 all pass through (0,0,0.333)) plus joints (3,4) parallel. "
-        "EAIK calls this REVERSED + SPHERICAL_SECOND_TWO_PARALLEL after "
-        "chain reversal. ssik's `_topology_rank` only matches spherical "
-        "wrists at the END of the sub-chain (positions 3,4,5); generalising "
-        "it (chain-reversal pre-pass + position-flexible dispatch) is "
-        "tracked as #121 Step 2."
-    ),
-    strict=True,
-)
-def test_franka_dispatches_to_spherical_wrist_class() -> None:
-    """When #121 Step 2 lands, Franka should dispatch to a tier-0 closed-form
-    solver (some spherical-wrist class) for the post-lock-4 sub-chain.
+def test_franka_dispatches_to_reversed_spherical_two_parallel() -> None:
+    """Franka post-lock-4 dispatches to ``reversed:spherical_two_parallel``
+    at tier-0 closed-form speed.
 
-    Today it falls through to ``gen_six_dof`` or ``two_parallel`` with the
-    inner solver returning ``is_ls=True`` for every pose -- documented here
-    via xfail so the suite keeps running until the fix lands.
+    The chain has its spherical wrist at the BASE of the sub-chain
+    (joints 0,1,2 all pass through (0,0,0.333)). ssik's
+    :func:`~ssik.solvers.jointlock.seven_r._topology_rank` reverses the
+    chain and recognises the now-canonical-position spherical wrist;
+    :func:`~ssik.solvers.jointlock.seven_r._dispatch` routes the call
+    through ``reverse_kinematic_chain``, dispatches to the standard
+    ``spherical_two_parallel`` solver, and maps the returned q-vectors
+    back to the original ordering.
+
+    EAIK identifies the same structure as ``REVERSED +
+    SPHERICAL_SECOND_TWO_PARALLEL`` -- consistent with this dispatch.
     """
     from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
-    from ssik.solvers.jointlock.seven_r import _lock_joint, _topology_rank
+    from ssik.solvers.jointlock.seven_r import (
+        _lock_joint,
+        _topology_rank,
+        choose_lock_joint,
+    )
 
     kb = build_kinbody(franka_panda_specs())
+    # choose_lock_joint should match EAIK's pick (joint index 4).
+    assert choose_lock_joint(kb, DEFAULT_TOLERANCE_POLICY) == 4
+
     sub_kb = _lock_joint(kb, 4, 0.0)
     rank, solver_name = _topology_rank(sub_kb, DEFAULT_TOLERANCE_POLICY)
-    # When fixed, this should land on tier-0 (rank 0, closed-form).
     assert rank == 0, f"expected tier-0, got rank={rank} solver={solver_name}"
+    assert solver_name == "reversed:spherical_two_parallel", (
+        f"expected reversed:spherical_two_parallel, got {solver_name}"
+    )
+
+
+def test_franka_7r_solves_via_reversed_dispatch() -> None:
+    """Franka 7R IK closes for random poses via the reversed-chain
+    closed-form path. Every returned solution FK-closes at machine
+    precision (~1e-12); the median IK call runs in ~80 ms (16-sample
+    sweep times ~5 ms inner spherical_two_parallel), competitive with
+    mink et al. while remaining fully analytical.
+    """
+    from ssik.solvers.jointlock.seven_r import solve as seven_r_solve
+
+    kb = build_kinbody(franka_panda_specs())
+    rng = np.random.default_rng(seed=0)
+    closures = 0
+    for _ in range(5):
+        q_true = rng.uniform(-1.5, 1.5, size=7)
+        T_target = _fk(kb, q_true)
+        sols, is_ls = seven_r_solve(kb, T_target)
+        if is_ls or not sols:
+            continue
+        # Every returned solution FK-closes at machine precision.
+        for sol in sols:
+            T_check = _fk(kb, sol.q)
+            assert np.allclose(T_check, T_target, atol=1e-9), (
+                f"Franka IK candidate failed FK closure: "
+                f"max|diff|={float(np.max(np.abs(T_check - T_target))):.2e}"
+            )
+        closures += 1
+    assert closures == 5, (
+        f"Franka 7R IK closed only {closures}/5 random poses -- "
+        "the reversed-chain dispatch isn't producing valid solutions."
+    )

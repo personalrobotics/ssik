@@ -40,11 +40,13 @@ from numpy.typing import NDArray
 from ssik._kinbody import Joint, KinBody
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.kinematics._scalar3 import _se3_inv
 from ssik.kinematics.predicates import (
     axis_parallel,
     three_consecutive_intersecting,
     three_consecutive_parallel,
 )
+from ssik.kinematics.reverse import map_reversed_q, reverse_kinematic_chain
 from ssik.refinement import dedup_by_wrap_close
 from ssik.solvers.ikgeo import (
     gen_six_dof,
@@ -147,12 +149,11 @@ def _lock_joint(kb: KinBody, lock_idx: int, q_lock: float) -> KinBody:
 # ---------------------------------------------------------------------------
 
 
-def _topology_rank(sub_kb: KinBody, policy: TolerancePolicy) -> tuple[int, str]:
-    """Score a 6R KinBody by its best matching solver family.
-
-    Lower rank = better (faster, more specialized). Returns (rank,
-    solver_name). Unmatched sub-chains fall through to the tier-2
-    rank.
+def _topology_rank_direct(sub_kb: KinBody, policy: TolerancePolicy) -> tuple[int, str]:
+    """Score a 6R KinBody by its best matching solver family at canonical
+    sub-chain positions: parallel triple at ``(1, 2, 3)`` and spherical
+    wrist at ``(3, 4, 5)``. Sub-chains whose structure sits elsewhere are
+    handled by :func:`_topology_rank` via chain reversal.
     """
     # Tier-0 closed-form: rank 0 = best.
     if three_consecutive_parallel(sub_kb.joints, policy) == (1, 2, 3):
@@ -177,6 +178,39 @@ def _topology_rank(sub_kb: KinBody, policy: TolerancePolicy) -> tuple[int, str]:
         return (2, "two_parallel")
     # Tier-2 fallback (slow but correct).
     return (3, "gen_six_dof")
+
+
+def _topology_rank(sub_kb: KinBody, policy: TolerancePolicy) -> tuple[int, str]:
+    """Score a 6R KinBody by its best matching solver family, considering
+    both the original chain ordering and the chain reversal.
+
+    Lower rank = better. Returns ``(rank, solver_name)`` where
+    ``solver_name`` is either a plain name (e.g. ``"three_parallel"``)
+    for the original chain or a ``"reversed:..."`` prefixed name when
+    reversal lands the kinematic structure at a canonical position.
+
+    The reversal pre-pass closes the EAIK ``REVERSED`` decomposition
+    family: arms whose post-lock 6R sub-chain has its spherical wrist or
+    parallel triple at the BASE (not the END) of the chain. Franka Panda
+    after locking joint 4 is the canonical example -- joints 0,1,2 of
+    the sub-chain all pass through the shoulder origin, so reversing
+    the chain places the spherical wrist at sub-chain positions
+    ``(3, 4, 5)`` where :mod:`ssik.solvers.ikgeo.spherical_two_parallel`
+    matches it directly.
+    """
+    orig_rank, orig_name = _topology_rank_direct(sub_kb, policy)
+    if orig_rank == 0:
+        # Already a tier-0 closed-form match on the original chain --
+        # reversal can't beat that.
+        return (orig_rank, orig_name)
+
+    # Try the reversed chain. If it ranks better, use the reversed
+    # dispatch path.
+    sub_kb_rev = reverse_kinematic_chain(sub_kb)
+    rev_rank, rev_name = _topology_rank_direct(sub_kb_rev, policy)
+    if rev_rank < orig_rank:
+        return (rev_rank, "reversed:" + rev_name)
+    return (orig_rank, orig_name)
 
 
 def choose_lock_joint(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) -> int:
@@ -216,7 +250,30 @@ def _dispatch(
     allow_refinement: bool,
     refinement_max_iters: int,
 ) -> tuple[list[Solution], bool]:
-    """Call the named ikgeo solver on ``sub_kb``. Returns ``(solutions, is_ls)``."""
+    """Call the named ikgeo solver on ``sub_kb``. Returns ``(solutions, is_ls)``.
+
+    ``solver_name`` may be prefixed with ``"reversed:"`` to indicate that
+    the inner solver should be called on the chain-reversed sub-chain
+    with target ``T_target^{-1}``; the returned q-vectors are then mapped
+    back to the original-chain ordering. This handles the EAIK
+    ``REVERSED`` decomposition family (e.g. Franka post-lock-4).
+    """
+    if solver_name.startswith("reversed:"):
+        inner_name = solver_name[len("reversed:") :]
+        sub_kb_rev = reverse_kinematic_chain(sub_kb)
+        T_target_rev = _se3_inv(np.asarray(T_target, dtype=np.float64))
+        sub_sols_rev, is_ls = _dispatch(
+            inner_name,
+            sub_kb_rev,
+            T_target_rev,
+            policy,
+            allow_refinement=allow_refinement,
+            refinement_max_iters=refinement_max_iters,
+        )
+        # Map reversed-chain q's back to original-chain ordering.
+        sub_sols_orig = [replace(sol, q=map_reversed_q(sol.q)) for sol in sub_sols_rev]
+        return sub_sols_orig, is_ls
+
     table = {
         "three_parallel": three_parallel.solve,
         "spherical_two_parallel": spherical_two_parallel.solve,

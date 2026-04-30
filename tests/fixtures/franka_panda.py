@@ -3,9 +3,14 @@
 7-DOF arm. Per EAIK (``find_locked_joint_index`` in
 ``mj_manipulator/src/mj_manipulator/arms/franka.py:60-64``), locking joint
 index 4 (the forearm-adjacent joint) yields a ``SPHERICAL_SECOND_TWO_PARALLEL``
-6R sub-chain in EAIK's taxonomy. ssik's current ``_topology_rank``
-doesn't recognise that pattern (#121); this fixture is the canonical
-test target for fixing that gap.
+6R sub-chain in EAIK's taxonomy.
+
+ssik dispatches the same structure via chain reversal (#121 Level 1):
+the post-lock-4 sub-chain has a spherical wrist at the BASE; reversing
+the chain lands the wrist at sub-chain ``(3, 4, 5)`` where the standard
+:mod:`ssik.solvers.ikgeo.spherical_two_parallel` solver matches it
+directly. Solver name reported by ``_topology_rank`` is
+``"reversed:spherical_two_parallel"``.
 
 Source of truth: ``mujoco_menagerie/franka_emika_panda/panda_nohand.xml``
 (MuJoCo MJCF, official upstream from Franka Emika). We transcribe the
