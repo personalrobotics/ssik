@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import logging
 
+import cython
 import numpy as np
 from numpy.typing import NDArray
 
@@ -70,6 +71,14 @@ _SOLVER_NAME = "ikgeo.spherical"
 _LOG = logging.getLogger(__name__)
 
 
+@cython.locals(
+    q1=cython.double,
+    q2=cython.double,
+    q3=cython.double,
+    q4=cython.double,
+    q5=cython.double,
+    q6=cython.double,
+)
 def solve(
     kb: KinBody,
     T_target: NDArray[np.float64],

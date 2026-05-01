@@ -48,6 +48,12 @@ SAFE_TARGETS = [
     # check is the dominant cost in 7R jointlock dedup; kinbody_jacobian
     # in the same module uses ``cum[-1]`` so we keep wraparound on.
     REPO / "src" / "ssik" / "refinement" / "__init__.py",
+    # Slice 4 step 2 (#147): Franka 7R's actual inner-dispatch hot path
+    # is ``ikgeo.spherical`` (most lock samples produce its topology, not
+    # the spherical_two_parallel baked into the artifact at codegen time).
+    # Per-call profile shows ~1.7 ms in the body; Cython types the loop
+    # locals as ``cython.double`` and reduces Python-interpreter overhead.
+    REPO / "src" / "ssik" / "solvers" / "ikgeo" / "spherical.py",
 ]
 
 # Per-arm artifact targets (#137 Slice 3). The orchestrator code emitted
