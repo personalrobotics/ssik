@@ -385,3 +385,96 @@ def test_max_solutions_fk_bulletproof(srs_kb: KinBody) -> None:
             failures += 1
     assert failures == 0, f"{failures}/100 random poses failed FK closure (max err {fk_max:.2e})"
     assert fk_max < 1e-9, f"max FK closure error {fk_max:.2e} above 1e-9"
+
+
+# ---------------------------------------------------------------------------
+# Codegen-time topology cache (#142 item 4).
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_cache_matches_uncached(srs_kb: KinBody) -> None:
+    """When the dispatch cache is correctly pre-computed, the cached
+    path must produce the same solution set as the uncached path. This
+    is the safety net under the codegen-time topology cache: if the
+    cached dispatch names ever drift from what ``_topology_rank`` would
+    pick at runtime, this test catches it.
+    """
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+    from ssik.solvers.jointlock.seven_r import (
+        _DEFAULT_SAMPLES,
+        _lock_joint,
+        _topology_rank,
+    )
+
+    lock_idx = seven_r.choose_lock_joint(srs_kb)
+    joint_lim = srs_kb.joints[lock_idx].limits
+    if joint_lim is None:
+        lo, hi = -np.pi, np.pi
+    else:
+        lo, hi = joint_lim
+    samples = np.linspace(lo, hi, _DEFAULT_SAMPLES, endpoint=False)
+    cache = []
+    for q_lock in samples:
+        sub_kb = _lock_joint(srs_kb, lock_idx, float(q_lock))
+        _, name = _topology_rank(sub_kb, DEFAULT_TOLERANCE_POLICY)
+        cache.append(name)
+
+    q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
+    T_star = _fk(srs_kb, q_star)
+    sols_uncached, _ = seven_r.solve(srs_kb, T_star, lock_samples=samples)
+    sols_cached, _ = seven_r.solve(srs_kb, T_star, lock_samples=samples, dispatch_cache=cache)
+
+    # Same solution count.
+    assert len(sols_uncached) == len(sols_cached), (
+        f"cache changed solution count: uncached={len(sols_uncached)}, cached={len(sols_cached)}"
+    )
+    # Each cached solution matches some uncached solution at machine
+    # precision (mod 2pi).
+    for sc in sols_cached:
+        match = False
+        for su in sols_uncached:
+            diff = ((sc.q - su.q + np.pi) % (2 * np.pi)) - np.pi
+            if np.max(np.abs(diff)) < 1e-9:
+                match = True
+                break
+        assert match, f"cached solution {sc.q.tolist()} not in uncached set"
+
+
+def test_dispatch_cache_length_mismatch_raises(srs_kb: KinBody) -> None:
+    """``dispatch_cache`` length must match ``lock_samples`` length."""
+    T_star = _fk(srs_kb, np.zeros(7))
+    samples = [0.0, 0.5, 1.0]  # 3 samples
+    cache = ["spherical_two_parallel", "spherical_two_parallel"]  # 2 entries
+    with pytest.raises(ValueError, match="dispatch_cache length"):
+        seven_r.solve(srs_kb, T_star, lock_samples=samples, dispatch_cache=cache)
+
+
+def test_dispatch_cache_with_q_seed_reordering(srs_kb: KinBody) -> None:
+    """When ``q_seed`` reorders samples, the cache must be permuted
+    alongside so each cached entry still corresponds to its sample."""
+    q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
+    T_star = _fk(srs_kb, q_star)
+    samples = np.linspace(-np.pi, np.pi, 16, endpoint=False)
+    # All-correct cache (matches what _topology_rank would pick).
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+    from ssik.solvers.jointlock.seven_r import _lock_joint, _topology_rank
+
+    lock_idx = seven_r.choose_lock_joint(srs_kb)
+    cache = []
+    for q_lock in samples:
+        sub_kb = _lock_joint(srs_kb, lock_idx, float(q_lock))
+        _, name = _topology_rank(sub_kb, DEFAULT_TOLERANCE_POLICY)
+        cache.append(name)
+
+    sols_seeded, _ = seven_r.solve(
+        srs_kb,
+        T_star,
+        lock_samples=samples,
+        dispatch_cache=cache,
+        q_seed=q_star,
+        max_solutions=1,
+    )
+    assert len(sols_seeded) == 1
+    # FK-closes at machine precision.
+    T_check = _fk(srs_kb, sols_seeded[0].q)
+    assert np.allclose(T_check, T_star, atol=1e-10)

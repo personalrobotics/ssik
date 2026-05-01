@@ -306,13 +306,14 @@ def solve(
     kb: KinBody,
     T_target: NDArray[np.float64],
     *,
-    lock_samples: int | Sequence[float] = _DEFAULT_SAMPLES,
+    lock_samples: int | Sequence[float] | NDArray[np.float64] = _DEFAULT_SAMPLES,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
     lock_idx: int | None = None,
     max_solutions: int | None = None,
     q_seed: NDArray[np.float64] | None = None,
+    dispatch_cache: Sequence[str] | None = None,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for any 7R arm via joint-locking + inner 6R solver.
 
@@ -347,6 +348,15 @@ def solve(
         ``max_solutions=1`` this turns the trajectory-tracking case
         ("track this current config") into a 1-2 sample lookup instead
         of a full 16/24 sweep.
+    :param dispatch_cache: optional pre-computed inner-solver dispatch
+        names, one per element of ``lock_samples`` and aligned by
+        sample index. When provided, the per-sample
+        :func:`_topology_rank` call (~70 us with chain reversal) is
+        skipped -- saving ~1 ms per IK on a 16-sample sweep. Must
+        match ``len(lock_samples)``; mismatch is a ``ValueError``.
+        Codegen artifacts emitted for non-SRS 7R arms bake this from
+        the codegen-time topology probe (#142 item 4); manual callers
+        leave ``None``.
     :returns: ``(solutions, is_ls)``. Each :class:`Solution.q` is a
         7-vector including the locked joint's value. ``branch_id``
         encodes the lock-sample index in the order they were *evaluated*
@@ -397,6 +407,17 @@ def solve(
     else:
         samples = np.array(list(lock_samples), dtype=np.float64)
 
+    cache_arr: list[str] | None
+    if dispatch_cache is not None:
+        cache_arr = list(dispatch_cache)
+        if len(cache_arr) != len(samples):
+            raise ValueError(
+                f"dispatch_cache length {len(cache_arr)} must match "
+                f"lock_samples length {len(samples)}"
+            )
+    else:
+        cache_arr = None
+
     if q_seed_arr is not None:
         # Reorder samples by wrap-to-pi distance to seed[lock_idx], nearest
         # first. Combined with max_solutions=1, this is the trajectory-
@@ -408,6 +429,10 @@ def solve(
         diffs = np.abs((samples - seed_lock + np.pi) % (2 * np.pi) - np.pi)
         order = np.lexsort((samples, diffs))
         samples = samples[order]
+        # Apply the same permutation to the dispatch cache so the
+        # cache[i] still corresponds to samples[i].
+        if cache_arr is not None:
+            cache_arr = [cache_arr[i] for i in order]
 
     dedup_tol = policy.subproblem_dedup
     candidates: list[Solution] = []
@@ -416,9 +441,14 @@ def solve(
     for sample_idx, q_lock in enumerate(samples):
         samples_evaluated = sample_idx + 1
         sub_kb = _lock_joint(kb, lock_idx, float(q_lock))
-        # Re-check topology per sample: rotating downstream axes by
-        # R_lock can switch which tier-0/1 specialization matches.
-        _, solver_name = _topology_rank(sub_kb, policy)
+        if cache_arr is not None:
+            # Codegen-time topology probe (#142 item 4); skip the per-IK
+            # ``_topology_rank`` call (~70 us with chain-reversal).
+            solver_name = cache_arr[sample_idx]
+        else:
+            # Re-check topology per sample: rotating downstream axes by
+            # R_lock can switch which tier-0/1 specialization matches.
+            _, solver_name = _topology_rank(sub_kb, policy)
         try:
             sub_sols, is_ls = _dispatch(
                 solver_name,

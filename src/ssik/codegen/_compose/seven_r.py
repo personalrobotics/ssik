@@ -44,16 +44,27 @@ from __future__ import annotations
 
 import textwrap
 
+import numpy as np
+
 from ssik._kinbody import KinBody
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
-from ssik.solvers.jointlock.seven_r import choose_lock_joint
+from ssik.solvers.jointlock.seven_r import (
+    _DEFAULT_SAMPLES,
+    _lock_joint,
+    _topology_rank,
+    choose_lock_joint,
+)
 
 __all__ = ["compose", "render_constants_header"]
 
 
 def render_constants_header() -> str:
     """Imports needed by the rendered seven_r artifact."""
-    return "import math\nfrom ssik.solvers.jointlock import seven_r as _ssik_seven_r\n"
+    return (
+        "import math\n"
+        "import numpy as np\n"
+        "from ssik.solvers.jointlock import seven_r as _ssik_seven_r\n"
+    )
 
 
 def compose(kb: KinBody) -> str:
@@ -64,11 +75,35 @@ def compose(kb: KinBody) -> str:
         runtime ``ssik.solvers.jointlock.seven_r.solve`` with the baked
         7R KinBody and pre-selected ``lock_idx`` to produce the candidates;
         the orchestrator's verify + dedup applies.
+
+    Codegen-time topology cache (#142 item 4): runs the lock sweep at
+    ``_DEFAULT_SAMPLES`` once at codegen time and bakes the resulting
+    inner-solver dispatch table. Runtime ``seven_r.solve`` skips its
+    per-sample ``_topology_rank`` (~70 us with chain reversal) and
+    uses the cached name directly. Saves ~1 ms per IK on a 16-sample
+    sweep -- ~3-5% on Franka 7R default.
     """
     if len(kb.joints) != 7:
         raise ValueError(f"jointlock.seven_r composer requires 7-DOF chain; got {len(kb.joints)}")
 
-    lock_idx = choose_lock_joint(kb, DEFAULT_TOLERANCE_POLICY)
+    policy = DEFAULT_TOLERANCE_POLICY
+    lock_idx = choose_lock_joint(kb, policy)
+
+    # Compute the canonical lock-sample schedule + dispatch cache.
+    joint_limits = kb.joints[lock_idx].limits
+    if joint_limits is None:
+        lo, hi = -float(np.pi), float(np.pi)
+    else:
+        lo, hi = joint_limits
+    samples = np.linspace(lo, hi, _DEFAULT_SAMPLES, endpoint=False)
+    dispatch: list[str] = []
+    for q_lock in samples:
+        sub_kb = _lock_joint(kb, lock_idx, float(q_lock))
+        _, name = _topology_rank(sub_kb, policy)
+        dispatch.append(name)
+
+    samples_repr = ", ".join(repr(float(s)) for s in samples)
+    dispatch_repr = ",\n            ".join(repr(name) for name in dispatch)
 
     return textwrap.dedent(
         f"""\
@@ -80,18 +115,38 @@ def compose(kb: KinBody) -> str:
         # which tier-0/1 specialization applies).
         _LOCK_IDX = {lock_idx}
 
+        # Canonical lock-sample schedule (np.linspace over the locked
+        # joint's range, ``_DEFAULT_SAMPLES`` samples, endpoint excluded).
+        _LOCK_SAMPLES = np.array(
+            [{samples_repr}],
+            dtype=np.float64,
+        )
+
+        # Codegen-time topology cache (#142 item 4). Pre-computed via
+        # ``_lock_joint`` + ``_topology_rank`` at each lock sample; runtime
+        # ``seven_r.solve`` uses these directly instead of re-running the
+        # topology rank per IK. The cache aligns by sample index with
+        # ``_LOCK_SAMPLES``; under ``q_seed`` reordering the runtime
+        # permutes the cache alongside the samples.
+        _DISPATCH_CACHE = (
+            {dispatch_repr},
+        )
+
 
         def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
             \"\"\"7R IK candidates via joint-locking + inner 6R sweep.
 
             Routes to ssik.solvers.jointlock.seven_r.solve with the baked
-            KinBody and pre-selected lock_idx. ``max_solutions`` and
-            ``q_seed`` are forwarded so the underlying lock-sweep can
-            short-circuit (#142). Returns ``list[list[float]]`` of length-7
-            q-vectors.
+            KinBody, lock_idx, lock-sample schedule, and dispatch cache.
+            ``max_solutions`` and ``q_seed`` are forwarded so the underlying
+            lock-sweep can short-circuit (#142). Returns ``list[list[float]]``
+            of length-7 q-vectors.
             \"\"\"
             sub_solutions, _is_ls = _ssik_seven_r.solve(
-                _KB, T_target, lock_idx=_LOCK_IDX,
+                _KB, T_target,
+                lock_idx=_LOCK_IDX,
+                lock_samples=_LOCK_SAMPLES,
+                dispatch_cache=_DISPATCH_CACHE,
                 max_solutions=max_solutions, q_seed=q_seed,
             )
             return [list(s.q) for s in sub_solutions]

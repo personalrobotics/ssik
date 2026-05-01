@@ -29,6 +29,7 @@ and the returned list is the best-LS approximation (or empty).
 from __future__ import annotations
 
 import math
+import numpy as np
 from ssik.solvers.jointlock import seven_r as _ssik_seven_r
 
 import cython
@@ -141,18 +142,53 @@ _KB = _build_kb()
 # which tier-0/1 specialization applies).
 _LOCK_IDX = 4
 
+# Canonical lock-sample schedule (np.linspace over the locked
+# joint's range, ``_DEFAULT_SAMPLES`` samples, endpoint excluded).
+_LOCK_SAMPLES = np.array(
+    [-2.8973, -2.5351375, -2.172975, -1.8108125, -1.44865, -1.0864875, -0.7243249999999999, -0.36216250000000016, 0.0, 0.36216250000000016, 0.7243249999999999, 1.0864875, 1.4486500000000002, 1.8108125000000004, 2.1729749999999997, 2.5351375],
+    dtype=np.float64,
+)
+
+# Codegen-time topology cache (#142 item 4). Pre-computed via
+# ``_lock_joint`` + ``_topology_rank`` at each lock sample; runtime
+# ``seven_r.solve`` uses these directly instead of re-running the
+# topology rank per IK. The cache aligns by sample index with
+# ``_LOCK_SAMPLES``; under ``q_seed`` reordering the runtime
+# permutes the cache alongside the samples.
+_DISPATCH_CACHE = (
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical_two_parallel',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+    'reversed:spherical',
+)
+
 
 def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
     """7R IK candidates via joint-locking + inner 6R sweep.
 
     Routes to ssik.solvers.jointlock.seven_r.solve with the baked
-    KinBody and pre-selected lock_idx. ``max_solutions`` and
-    ``q_seed`` are forwarded so the underlying lock-sweep can
-    short-circuit (#142). Returns ``list[list[float]]`` of length-7
-    q-vectors.
+    KinBody, lock_idx, lock-sample schedule, and dispatch cache.
+    ``max_solutions`` and ``q_seed`` are forwarded so the underlying
+    lock-sweep can short-circuit (#142). Returns ``list[list[float]]``
+    of length-7 q-vectors.
     """
     sub_solutions, _is_ls = _ssik_seven_r.solve(
-        _KB, T_target, lock_idx=_LOCK_IDX,
+        _KB, T_target,
+        lock_idx=_LOCK_IDX,
+        lock_samples=_LOCK_SAMPLES,
+        dispatch_cache=_DISPATCH_CACHE,
         max_solutions=max_solutions, q_seed=q_seed,
     )
     return [list(s.q) for s in sub_solutions]
