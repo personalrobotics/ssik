@@ -283,13 +283,18 @@ def _dispatch(
         "two_parallel": two_parallel.solve,
         "gen_six_dof": gen_six_dof.solve,
     }
-    return table[solver_name](
+    # ``Cython.Shadow``'s ``@cython.locals`` decorator widens the wrapped
+    # function's signature for mypy, so the dispatch-table lookup returns
+    # ``Any``. Reasserting the annotated return type here keeps the strict
+    # ``no-any-return`` check happy without affecting runtime behaviour.
+    result: tuple[list[Solution], bool] = table[solver_name](
         sub_kb,
         T_target,
         policy,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
     )
+    return result
 
 
 # ---------------------------------------------------------------------------
