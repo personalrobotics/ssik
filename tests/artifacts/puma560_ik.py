@@ -308,15 +308,24 @@ def _solve_algebraic(T_target):
 # loop (Cython compiles ``_TWO_PI`` to a typed C ``double``).
 _TWO_PI: float = 2.0 * math.pi
 
+# Cached 4x4 identity reused inside ``_fk`` / ``_spatial_jacobian``
+# so each call avoids ``len(_JOINT_AXES)+1`` per-iteration ``np.eye(4)``
+# allocations -- the orchestrator's #1 hotspot per Slice 4 profile
+# (~22% of ``_fk`` cost on Puma 560).
+_FK_EYE4 = np.eye(4, dtype=np.float64)
+_FK_EYE4.flags.writeable = False
+
 
 @cython.ccall
 @cython.locals(i=cython.int, n=cython.int)
 def _fk(q):
     """POE forward kinematics using the baked chain constants."""
     n = len(_JOINT_AXES)
-    T = np.eye(4)
+    T = _FK_EYE4.copy()
+    # Single ``rot`` buffer reused across joints; only the 3x3 rotation
+    # block is overwritten each iteration (bottom row stays [0,0,0,1]).
+    rot = _FK_EYE4.copy()
     for i in range(n):
-        rot = np.eye(4)
         rot[:3, :3] = _rotation_matrix(_JOINT_AXES[i], float(q[i]))
         T = T @ _JOINT_T_LEFTS[i] @ rot @ _JOINT_T_RIGHTS[i]
     return T
@@ -335,10 +344,10 @@ def _spatial_jacobian(q):
     there's no KinBody walk at runtime.
     """
     n = len(_JOINT_AXES)
-    cum = np.eye(4, dtype=np.float64)
+    cum = _FK_EYE4.copy()
     cums = [cum.copy()]
+    rot = _FK_EYE4.copy()
     for i in range(n):
-        rot = np.eye(4, dtype=np.float64)
         rot[:3, :3] = _rotation_matrix(_JOINT_AXES[i], float(q[i]))
         cum = cum @ _JOINT_T_LEFTS[i] @ rot @ _JOINT_T_RIGHTS[i]
         cums.append(cum.copy())

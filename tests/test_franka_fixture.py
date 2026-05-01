@@ -218,7 +218,7 @@ def test_franka_artifact_max_solutions_short_circuit() -> None:
     rng = np.random.default_rng(seed=0)
     for _ in range(5):
         q_true = rng.uniform(-1.5, 1.5, size=7)
-        T_target = franka_panda_ik._fk(q_true)  # type: ignore[no-untyped-call]
+        T_target = franka_panda_ik._fk(q_true)
 
         sols_all, is_ls_all = franka_panda_ik.solve(T_target)
         sols_one, is_ls_one = franka_panda_ik.solve(T_target, max_solutions=1)
@@ -229,7 +229,7 @@ def test_franka_artifact_max_solutions_short_circuit() -> None:
         assert len(sols_all) >= 8, "exhaustive search should produce many solutions"
 
         # FK closure on the short-circuit result.
-        T_check = franka_panda_ik._fk(sols_one[0].q)  # type: ignore[no-untyped-call]
+        T_check = franka_panda_ik._fk(sols_one[0].q)
         err = float(np.max(np.abs(T_check - T_target)))
         assert err < 1e-9, f"max_solutions=1 candidate FK closure {err:.2e} > 1e-9"
 
@@ -241,7 +241,7 @@ def test_franka_artifact_q_seed_returns_nearest() -> None:
     from tests.artifacts import franka_panda_ik
 
     q_true = np.array([0.0, 0.5, 0.0, -1.5, 0.0, 1.5, 0.0])
-    T_target = franka_panda_ik._fk(q_true)  # type: ignore[no-untyped-call]
+    T_target = franka_panda_ik._fk(q_true)
 
     # Seed exactly at q_true; the corresponding lock-joint sample is
     # nearest by definition, so the returned IK should match q_true at
