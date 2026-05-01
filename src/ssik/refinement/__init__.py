@@ -40,6 +40,12 @@ from ssik.core.solution import Solution
 # a regular ``float``.
 _TWO_PI: float = 2.0 * math.pi
 
+# Cached read-only 4x4 identity reused inside ``kinbody_jacobian``: each
+# call avoids ``len(joints)+1`` per-iteration ``np.eye(4)`` allocations.
+# Same pattern as the artifact orchestrator's ``_FK_EYE4`` (#146).
+_FK_EYE4 = np.eye(4, dtype=np.float64)
+_FK_EYE4.flags.writeable = False
+
 __all__ = [
     "kinbody_jacobian",
     "lm_refine",
@@ -121,9 +127,9 @@ def kinbody_jacobian(
     """
     joints = kb.joints  # type: ignore[attr-defined]
     n = len(joints)
-    cum: list[NDArray[np.float64]] = [np.eye(4, dtype=np.float64)]
+    cum: list[NDArray[np.float64]] = [_FK_EYE4.copy()]
+    rot = _FK_EYE4.copy()
     for joint, qi in zip(joints, q, strict=True):
-        rot = np.eye(4, dtype=np.float64)
         c = float(np.cos(float(qi)))
         s = float(np.sin(float(qi)))
         ax = joint.axis / np.linalg.norm(joint.axis)

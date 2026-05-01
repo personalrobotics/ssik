@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import axis_parallel
 from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.solvers.ikgeo._univariate import search_1d_matched
@@ -134,7 +135,7 @@ def solve(
 
     solutions = verify_candidates(
         candidates,
-        fk_fn=lambda q: _forward_kinematics(kb, q),
+        fk_fn=lambda q: poe_forward_kinematics(kb, q),
         jacobian_fn=lambda q: kinbody_jacobian(kb, q),
         t_target=t_target,
         fk_atol=policy.subproblem_numerical,
@@ -152,12 +153,3 @@ def solve(
         len(solutions) == 0,
     )
     return solutions, len(solutions) == 0
-
-
-def _forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float64]:
-    T = np.eye(4)
-    for j, qi in zip(kb.joints, q, strict=True):
-        rot = np.eye(4)
-        rot[:3, :3] = rotation_matrix(j.axis, float(qi))
-        T = T @ j.T_left @ rot @ j.T_right
-    return T
