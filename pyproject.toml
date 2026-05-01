@@ -23,6 +23,17 @@ classifiers = [
 dependencies = [
     "numpy>=2.0",
     "sympy>=1.10",
+    # Required for ``import cython`` at module top in compiled-source modules
+    # (``ssik.kinematics._scalar3``, ``ssik.subproblems._rotation``,
+    # ``ssik.subproblems.sp5``, ``ssik.kinematics.poe_fk``,
+    # ``ssik.solvers.ikgeo.spherical``, ``ssik.refinement``). When ssik is
+    # installed from a wheel with pre-compiled .so files, the Python-source
+    # ``import cython`` lines never execute -- but a fresh ``pip install ssik``
+    # without the .so (sdist build, or platform without prebuilt wheel) does
+    # execute them. The Cython runtime is small and well-maintained, so making
+    # it a hard dep is the simplest fix vs. a try/except fallback shim.
+    # See #144 for the regression history.
+    "cython>=3.1",
 ]
 dynamic = ["version"]
 
@@ -47,7 +58,8 @@ dev = [
     "mypy>=1.13",
     "urchin>=0.0.27",  # exercised by the URDF-adapter tests
     "hypothesis>=6.112",  # property-based fuzzing of the URDF loader
-    "cython>=3.1",  # in-place builds via scripts/build_cython.py (#137 Slice 1)
+    # cython itself is in runtime ``[project.dependencies]`` (#144); only the
+    # build-side ``setuptools`` extension stays here.
     "setuptools>=70",  # cythonize+setuptools build backend
 ]
 docs = [
