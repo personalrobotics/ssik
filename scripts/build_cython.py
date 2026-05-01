@@ -54,6 +54,11 @@ SAFE_TARGETS = [
     # Per-call profile shows ~1.7 ms in the body; Cython types the loop
     # locals as ``cython.double`` and reduces Python-interpreter overhead.
     REPO / "src" / "ssik" / "solvers" / "ikgeo" / "spherical.py",
+    # Slice 4 step 3b: hand-rolled scalar 4x4 matmul + inline Rodrigues in
+    # the shared ``poe_forward_kinematics`` (the inner-solver verify FK
+    # called ~94 times per Franka 7R IK via the lock-sweep dispatch).
+    # Mirrors the orchestrator-template change in #152.
+    REPO / "src" / "ssik" / "kinematics" / "poe_fk.py",
 ]
 
 # Per-arm artifact targets (#137 Slice 3). The orchestrator code emitted
