@@ -230,3 +230,158 @@ def test_wrong_dof_raises() -> None:
     six_kb = KinBody(links=links, joints=joints)
     with pytest.raises(ValueError, match="7"):
         seven_r.solve(six_kb, np.eye(4))
+
+
+# ---------------------------------------------------------------------------
+# Early-exit + seed-bias (#142 items 1+2).
+#
+# Universal speedup for non-SRS 7R arms: ``max_solutions`` short-circuits
+# the lock-sweep once enough deduplicated solutions are collected;
+# ``q_seed`` reorders samples by wrap-to-pi distance to the seed so
+# trajectory-tracking callers find their match in the first sample(s).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("k", [1, 2, 4, 8])
+def test_max_solutions_returns_at_most_n(srs_kb: KinBody, k: int) -> None:
+    """``max_solutions=k`` returns at most ``k`` deduplicated solutions, and
+    every returned solution FK-closes against the target."""
+    q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
+    T_star = _fk(srs_kb, q_star)
+    solutions, is_ls = seven_r.solve(srs_kb, T_star, max_solutions=k)
+    assert not is_ls
+    assert 1 <= len(solutions) <= k
+    for sol in solutions:
+        T_check = _fk(srs_kb, sol.q)
+        assert np.allclose(T_check, T_star, atol=1e-10), (
+            f"early-exit solution fails FK: max|diff|={np.max(np.abs(T_check - T_star))}"
+        )
+
+
+def test_max_solutions_subset_of_full_sweep(srs_kb: KinBody) -> None:
+    """Solutions returned with ``max_solutions=k`` must be a wrap-to-pi
+    subset of the full-sweep result -- early exit reduces *count* but
+    never returns *different* solutions."""
+    q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
+    T_star = _fk(srs_kb, q_star)
+    full, _ = seven_r.solve(srs_kb, T_star)
+    short, _ = seven_r.solve(srs_kb, T_star, max_solutions=3)
+    full_qs = [s.q for s in full]
+    for sol in short:
+        # Each early-exit solution must match (mod 2pi) some full-sweep
+        # solution.
+        match = False
+        for q_full in full_qs:
+            diff = ((sol.q - q_full + np.pi) % (2 * np.pi)) - np.pi
+            if np.max(np.abs(diff)) < 1e-6:
+                match = True
+                break
+        assert match, f"early-exit solution {sol.q.tolist()} not in full sweep"
+
+
+def test_q_seed_returns_nearest_first(srs_kb: KinBody) -> None:
+    """With ``q_seed=q*`` and ``max_solutions=1``, the returned solution
+    should be the one closest to ``q*`` (in wrap-to-pi joint distance) --
+    that's the trajectory-tracking promise."""
+    q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
+    T_star = _fk(srs_kb, q_star)
+    sols_seeded, _ = seven_r.solve(srs_kb, T_star, q_seed=q_star, max_solutions=1)
+    assert len(sols_seeded) == 1
+    sol_seeded = sols_seeded[0]
+    # Compare against the full sweep to confirm we picked the nearest one
+    # to the seed (or one of them, modulo 2pi wrap on non-locked joints).
+    full, _ = seven_r.solve(srs_kb, T_star)
+    lock_idx = seven_r.choose_lock_joint(srs_kb)
+
+    def _lock_dist(q: NDArray[np.float64]) -> float:
+        d = float(((q[lock_idx] - q_star[lock_idx] + np.pi) % (2 * np.pi)) - np.pi)
+        return abs(d)
+
+    seeded_lock_dist = _lock_dist(sol_seeded.q)
+    full_lock_dists = [_lock_dist(s.q) for s in full]
+    # Seeded result's lock-joint distance must be the minimum (the seed
+    # bias only ranks lock-joint values; tie-breaks on inner-solver
+    # outputs are not specified, so we don't assert on the *full* q
+    # vector).
+    assert seeded_lock_dist <= min(full_lock_dists) + 1e-9
+
+
+def test_q_seed_speedup_visits_fewer_samples(srs_kb: KinBody) -> None:
+    """``q_seed`` + ``max_solutions=1`` should evaluate fewer lock samples
+    than the unseeded variant, on average. Empirical bound: with the
+    seed at the true q*, we should never need more than 4 samples (the
+    nearest-first ordering puts the matching sample at index 0)."""
+    import logging
+
+    q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
+    T_star = _fk(srs_kb, q_star)
+    seven_r._LOG.setLevel(logging.INFO)
+
+    # Capture the log message that reports samples-evaluated count.
+    handler_records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            handler_records.append(record)
+
+    h = _Capture()
+    seven_r._LOG.addHandler(h)
+    try:
+        seven_r.solve(srs_kb, T_star, q_seed=q_star, max_solutions=1)
+        msg = handler_records[-1].getMessage()
+        # The log line is "...lock_idx=K, M/N samples -> ..."; pull M.
+        # Just sanity-check that M <= 4.
+        seg = msg.split(",")[1].strip()  # "M/N samples -> ..."
+        m_evaluated = int(seg.split("/")[0])
+        assert m_evaluated <= 4, (
+            f"q_seed + max_solutions=1 evaluated {m_evaluated} samples; expected <= 4"
+        )
+    finally:
+        seven_r._LOG.removeHandler(h)
+
+
+def test_default_unchanged(srs_kb: KinBody) -> None:
+    """Calling without ``max_solutions`` and ``q_seed`` should produce the
+    same solution count as before -- backwards-compat guard."""
+    q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
+    T_star = _fk(srs_kb, q_star)
+    sols_before, _ = seven_r.solve(srs_kb, T_star)
+    sols_after, _ = seven_r.solve(srs_kb, T_star, max_solutions=None, q_seed=None)
+    assert len(sols_before) == len(sols_after)
+
+
+def test_invalid_max_solutions_raises(srs_kb: KinBody) -> None:
+    T_star = _fk(srs_kb, np.zeros(7))
+    for bad in (0, -1, -10):
+        with pytest.raises(ValueError, match="max_solutions"):
+            seven_r.solve(srs_kb, T_star, max_solutions=bad)
+
+
+def test_invalid_q_seed_shape_raises(srs_kb: KinBody) -> None:
+    T_star = _fk(srs_kb, np.zeros(7))
+    for bad in (np.zeros(6), np.zeros(8), np.zeros((7, 1))):
+        with pytest.raises(ValueError, match="q_seed"):
+            seven_r.solve(srs_kb, T_star, q_seed=bad)
+
+
+def test_max_solutions_fk_bulletproof(srs_kb: KinBody) -> None:
+    """100 random poses, ``max_solutions=1``: every returned solution
+    must FK-close at machine precision. The early-exit path must never
+    return a non-converged candidate."""
+    rng = np.random.default_rng(20260430)
+    failures = 0
+    fk_max = 0.0
+    for _ in range(100):
+        q_star = rng.uniform(-1.5, 1.5, size=7)
+        T_star = _fk(srs_kb, q_star)
+        sols, is_ls = seven_r.solve(srs_kb, T_star, max_solutions=1)
+        if is_ls or not sols:
+            failures += 1
+            continue
+        T_check = _fk(srs_kb, sols[0].q)
+        err = float(np.max(np.abs(T_check - T_star)))
+        fk_max = max(fk_max, err)
+        if err > 1e-9:
+            failures += 1
+    assert failures == 0, f"{failures}/100 random poses failed FK closure (max err {fk_max:.2e})"
+    assert fk_max < 1e-9, f"max FK closure error {fk_max:.2e} above 1e-9"
