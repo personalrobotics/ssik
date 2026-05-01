@@ -116,6 +116,17 @@ ignore_missing_imports = true
 module = "franka_panda"
 ignore_missing_imports = true
 
+# Generated per-arm artifacts under tests/artifacts/ are byte-stable
+# emitted code; their format is dictated by ``ssik.core.codegen`` and
+# validated via byte-equal snapshot tests. mypy excludes the directory
+# from checking, but tests that import from it (e.g. franka artifact
+# integration tests under #142) need this override so the imports
+# don't drag the strict-mode rules into the generated source.
+[[tool.mypy.overrides]]
+module = "tests.artifacts.*"
+ignore_errors = true
+follow_imports = "silent"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "-m", "not slow"]

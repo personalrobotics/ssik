@@ -81,15 +81,18 @@ def compose(kb: KinBody) -> str:
         _LOCK_IDX = {lock_idx}
 
 
-        def _solve_algebraic(T_target):
+        def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
             \"\"\"7R IK candidates via joint-locking + inner 6R sweep.
 
             Routes to ssik.solvers.jointlock.seven_r.solve with the baked
-            KinBody and pre-selected lock_idx. Returns ``list[list[float]]``
-            of length-7 q-vectors.
+            KinBody and pre-selected lock_idx. ``max_solutions`` and
+            ``q_seed`` are forwarded so the underlying lock-sweep can
+            short-circuit (#142). Returns ``list[list[float]]`` of length-7
+            q-vectors.
             \"\"\"
             sub_solutions, _is_ls = _ssik_seven_r.solve(
-                _KB, T_target, lock_idx=_LOCK_IDX
+                _KB, T_target, lock_idx=_LOCK_IDX,
+                max_solutions=max_solutions, q_seed=q_seed,
             )
             return [list(s.q) for s in sub_solutions]
         """

@@ -142,39 +142,32 @@ _KB = _build_kb()
 _LOCK_IDX = 4
 
 
-def _solve_algebraic(T_target):
+def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
     """7R IK candidates via joint-locking + inner 6R sweep.
 
     Routes to ssik.solvers.jointlock.seven_r.solve with the baked
-    KinBody and pre-selected lock_idx. Returns ``list[list[float]]``
-    of length-7 q-vectors.
+    KinBody and pre-selected lock_idx. ``max_solutions`` and
+    ``q_seed`` are forwarded so the underlying lock-sweep can
+    short-circuit (#142). Returns ``list[list[float]]`` of length-7
+    q-vectors.
     """
     sub_solutions, _is_ls = _ssik_seven_r.solve(
-        _KB, T_target, lock_idx=_LOCK_IDX
+        _KB, T_target, lock_idx=_LOCK_IDX,
+        max_solutions=max_solutions, q_seed=q_seed,
     )
     return [list(s.q) for s in sub_solutions]
 
 
-# Module-scope ``2*pi`` constant referenced inside the dedup hot
-# loop (Cython compiles ``_TWO_PI`` to a typed C ``double``).
-_TWO_PI: float = 2.0 * math.pi
-
-
-@cython.ccall
-@cython.locals(i=cython.int, n=cython.int)
 def _fk(q):
     """POE forward kinematics using the baked chain constants."""
-    n = len(_JOINT_AXES)
     T = np.eye(4)
-    for i in range(n):
+    for i in range(len(_JOINT_AXES)):
         rot = np.eye(4)
         rot[:3, :3] = _rotation_matrix(_JOINT_AXES[i], float(q[i]))
         T = T @ _JOINT_T_LEFTS[i] @ rot @ _JOINT_T_RIGHTS[i]
     return T
 
 
-@cython.ccall
-@cython.locals(i=cython.int, n=cython.int)
 def _spatial_jacobian(q):
     """6 x n_dof spatial Jacobian using the baked chain constants.
 
@@ -203,6 +196,11 @@ def _spatial_jacobian(q):
         J[:3, i] = np.cross(z_i, p_e - p_i)
         J[3:, i] = z_i
     return J
+
+
+# Module-scope ``2*pi`` constant referenced inside the dedup hot
+# loop (Cython compiles ``_TWO_PI`` to a typed C ``double``).
+_TWO_PI: float = 2.0 * math.pi
 
 
 @cython.ccall
@@ -244,6 +242,8 @@ def solve(
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
+    max_solutions: int | None = None,
+    q_seed=None,
 ):
     """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
 
@@ -254,9 +254,33 @@ def solve(
         doesn't quite meet ``fk_atol``). Default off.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
+    :param max_solutions: optional early-exit cap on the
+        jointlock lock-sweep. ``None`` (default) = exhaustive
+        search. ``max_solutions=1`` short-circuits as soon as
+        one valid IK is found (~17x faster on Franka 7R).
+    :param q_seed: optional length-7 seed configuration. When
+        provided, the lock-joint samples are visited in order
+        of wrap-to-pi distance to ``q_seed[lock_idx]`` --
+        combined with ``max_solutions=1`` this is the
+        trajectory-tracking fast path (~37x faster on Franka).
+
+    Common idioms::
+
+        # Exhaustive search (default).
+        solutions, _ = solve(T_target)
+
+        # "Just give me one IK" -- ~17x faster.
+        solutions, _ = solve(T_target, max_solutions=1)
+
+        # Track current config -- ~37x faster.
+        solutions, _ = solve(
+            T_target, q_seed=q_current, max_solutions=1,
+        )
     """
     T = np.asarray(T_target, dtype=np.float64)
-    candidates = _solve_algebraic(T)
+    candidates = _solve_algebraic(
+        T, max_solutions=max_solutions, q_seed=q_seed
+    )
 
     fk_atol = policy.subproblem_numerical
     dedup_atol = policy.subproblem_dedup
@@ -303,6 +327,13 @@ def solve(
             deduped.append((cand_q, cand_res, ref_used, ref_iters))
         elif cand_res < deduped[dup_idx][1]:
             deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)
+
+    # Final trim: the underlying lock-sweep already capped at
+    # ``max_solutions`` (under #142), but verify+dedup may have
+    # collapsed near-duplicates so ``len(deduped)`` can also be
+    # smaller. Trimming here is the defensive belt-and-braces.
+    if max_solutions is not None and len(deduped) > max_solutions:
+        deduped = deduped[:max_solutions]
 
     solutions = [
         Solution(

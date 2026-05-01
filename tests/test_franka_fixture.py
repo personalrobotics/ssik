@@ -200,3 +200,58 @@ def test_franka_seven_r_lock_samples_clamps_to_limits() -> None:
     sols, is_ls = seven_r_solve(kb, T_home)
     assert not is_ls
     assert len(sols) > 0
+
+
+def test_franka_artifact_max_solutions_short_circuit() -> None:
+    """Public Franka artifact ``solve()`` exposes ``max_solutions`` and
+    short-circuits the lock sweep -- the universal-7R speedup from #142.
+    Validates the codegen plumbed the param through (composer
+    ``_solve_algebraic`` accepts it, orchestrator forwards it).
+
+    The artifact module is excluded from mypy strict typing (it's
+    generated code; its types come from the codegen template and are
+    validated via the byte-equal snapshot test). Calls into it use
+    ``# type: ignore`` to silence the cross-boundary call warnings.
+    """
+    from tests.artifacts import franka_panda_ik
+
+    rng = np.random.default_rng(seed=0)
+    for _ in range(5):
+        q_true = rng.uniform(-1.5, 1.5, size=7)
+        T_target = franka_panda_ik._fk(q_true)  # type: ignore[no-untyped-call]
+
+        sols_all, is_ls_all = franka_panda_ik.solve(T_target)
+        sols_one, is_ls_one = franka_panda_ik.solve(T_target, max_solutions=1)
+
+        assert not is_ls_all
+        assert not is_ls_one
+        assert len(sols_one) == 1, f"max_solutions=1 returned {len(sols_one)}"
+        assert len(sols_all) >= 8, "exhaustive search should produce many solutions"
+
+        # FK closure on the short-circuit result.
+        T_check = franka_panda_ik._fk(sols_one[0].q)  # type: ignore[no-untyped-call]
+        err = float(np.max(np.abs(T_check - T_target)))
+        assert err < 1e-9, f"max_solutions=1 candidate FK closure {err:.2e} > 1e-9"
+
+
+def test_franka_artifact_q_seed_returns_nearest() -> None:
+    """``q_seed`` + ``max_solutions=1`` returns the IK whose lock-joint
+    value is closest to the seed (the trajectory-tracking promise).
+    """
+    from tests.artifacts import franka_panda_ik
+
+    q_true = np.array([0.0, 0.5, 0.0, -1.5, 0.0, 1.5, 0.0])
+    T_target = franka_panda_ik._fk(q_true)  # type: ignore[no-untyped-call]
+
+    # Seed exactly at q_true; the corresponding lock-joint sample is
+    # nearest by definition, so the returned IK should match q_true at
+    # the locked joint within a sweep-step.
+    sols, _ = franka_panda_ik.solve(T_target, q_seed=q_true, max_solutions=1)
+    assert len(sols) == 1
+    lock_idx = 4  # baked _LOCK_IDX for Franka
+    sweep_step = (2.8973 - (-2.8973)) / 16  # default 16 samples over the joint range
+    diff = float(((sols[0].q[lock_idx] - q_true[lock_idx] + np.pi) % (2 * np.pi)) - np.pi)
+    assert abs(diff) <= sweep_step + 1e-9, (
+        f"q_seed bias didn't pick the nearest lock sample: "
+        f"diff={diff:.4f}, sweep_step={sweep_step:.4f}"
+    )
