@@ -155,6 +155,11 @@ ignore_missing_imports = true
 module = "kuka_iiwa14"
 ignore_missing_imports = true
 
+# Same for tests/fixtures/xarm7.py.
+[[tool.mypy.overrides]]
+module = "xarm7"
+ignore_missing_imports = true
+
 # Generated per-arm artifacts under tests/artifacts/ are byte-stable
 # emitted code; their format is dictated by ``ssik.core.codegen`` and
 # validated via byte-equal snapshot tests. mypy excludes the directory
