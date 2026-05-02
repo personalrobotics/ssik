@@ -230,7 +230,7 @@ def test_ur5_urdf_matches_hand_fixture() -> None:
     This is the strongest proof that the adapter preserves kinematics
     across the URDF→JointSpec conversion.
     """
-    from fixtures.ur5 import ur5_fk
+    from tests.fixtures.ur5 import ur5_fk
 
     kb = load_urdf_kinbody(FIXTURES / "ur5.urdf", "base_link", "ee_link")
     assert len(kb.joints) == 6
