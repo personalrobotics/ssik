@@ -137,18 +137,25 @@ def three_consecutive_intersecting(
     joints: list[Joint],
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
 ) -> tuple[int, int, int] | None:
-    """Find the first triple of consecutive joints whose axes share a common
-    point (Pieper's spherical-wrist condition).
+    """Find the first triple of consecutive joints whose **origins** all lie
+    at a common axes-intersection point (the IK-Geo spherical-wrist condition).
 
     Three lines in 3D that are pairwise intersecting do **not** necessarily
-    share a common point -- they can form a triangle in space. This function
-    requires strict coincidence: computes the intersection point of axes 0
-    and 1, then verifies axis 2 passes through that same point within
-    ``policy.axis_intersect``.
+    share a common point -- they can form a triangle in space. And even
+    when they do share a common point, the IK-Geo ``spherical`` family
+    requires more: the joint origins must *coincide at* that intersection
+    point (within ``policy.axis_intersect``), because the inner solvers
+    consolidate the wrist offset as ``p[3] = T_left[3] + T_left[4] +
+    T_left[5]`` and assume the wrist rotations leave that consolidation
+    invariant -- which holds iff ``T_left[i+1]`` and ``T_left[i+2]``
+    contribute zero translation to the wrist intersection.
 
     Parallel-axis triples are rejected (axis_intersect short-circuits on
     parallel, which is the degenerate case where "intersection" is
     ill-defined).
+
+    See #155 for the prior loose-predicate behaviour and the iiwa silent-
+    failure repro.
     """
     if len(joints) < 3:
         return None
@@ -181,6 +188,30 @@ def three_consecutive_intersecting(
 
         delta = p - oc
         perp = delta - _dot3(delta, c) * c
-        if _norm3(perp) < policy.axis_intersect:
-            return (i, i + 1, i + 2)
+        if _norm3(perp) >= policy.axis_intersect:
+            continue
+
+        # Strict consolidation check (#155): for the IK-Geo ``spherical``
+        # family setup ``p[3] = T_left[i] + T_left[i+1] + T_left[i+2]`` to
+        # correctly represent the offset from joint ``i-1`` to the wrist
+        # intersection, the **last two** wrist joint origins (``i+1`` and
+        # ``i+2``) must lie at the intersection point. Equivalently:
+        # ``T_left[i+1]`` and ``T_left[i+2]`` must contribute zero net
+        # displacement *off the axis intersection*, which is satisfied when
+        # joint ``i+1`` and ``i+2`` origins coincide with ``p``. Joint
+        # ``i``'s origin can be anywhere on its axis (the rotation
+        # ``R(axes[i], q_i)`` applies *before* consolidating).
+        #
+        # iiwa14 fails this check: wrist axes meet at z=1.18, but the
+        # MJCF places joint 5/6/7 origins at z=1.18, 1.261, 1.342 -- the
+        # 2nd and 3rd wrist origins drift off the intersection. Predicate
+        # used to silently mis-classify iiwa as spherical, sending it
+        # to a solver that hard-fails on its geometry.
+        if (
+            float(_norm3(ob - p)) >= policy.axis_intersect
+            or float(_norm3(oc - p)) >= policy.axis_intersect
+        ):
+            continue
+
+        return (i, i + 1, i + 2)
     return None
