@@ -117,6 +117,28 @@ ignore_missing_imports = true
 module = "urchin.*"
 ignore_missing_imports = true
 
+# cython runtime ships ``py.typed`` from 3.1+ but the marker is missing
+# from some 3.2.x Linux wheels (verified on cython 3.2.4 manylinux2014).
+# Locally on macOS arm64 the marker is present and mypy is happy without
+# this override; on Linux CI we need it. Same pattern as sympy / urchin.
+# Without the marker, ``@cython.ccall`` and ``@cython.locals`` decorators
+# become untyped, so we also suppress ``untyped-decorator`` on the six
+# files that use them (the only untyped decorators in the codebase).
+[[tool.mypy.overrides]]
+module = "cython"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "ssik.kinematics._scalar3",
+    "ssik.kinematics.poe_fk",
+    "ssik.subproblems._rotation",
+    "ssik.subproblems.sp5",
+    "ssik.solvers.ikgeo.spherical",
+    "ssik.refinement",
+]
+disable_error_code = ["untyped-decorator"]
+
 # tests/fixtures/jaco2.py is reachable via sys.path injection in tests; mypy
 # resolves it correctly when run inside pytest but not from a top-level pass.
 [[tool.mypy.overrides]]

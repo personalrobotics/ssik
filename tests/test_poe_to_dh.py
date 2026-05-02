@@ -14,9 +14,9 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from fixtures.ur5 import ur5_specs
 from ssik._kinbody import KinBody, build_kinbody
 from ssik.kinematics.poe_to_dh import poe_to_dh
+from tests.fixtures.ur5 import ur5_specs
 
 
 def _rot_axis(axis: NDArray[np.float64], angle: float) -> NDArray[np.float64]:
