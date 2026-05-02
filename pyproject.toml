@@ -160,6 +160,11 @@ ignore_missing_imports = true
 module = "xarm7"
 ignore_missing_imports = true
 
+# Same for tests/fixtures/ur5.py.
+[[tool.mypy.overrides]]
+module = "ur5"
+ignore_missing_imports = true
+
 # Generated per-arm artifacts under tests/artifacts/ are byte-stable
 # emitted code; their format is dictated by ``ssik.core.codegen`` and
 # validated via byte-equal snapshot tests. mypy excludes the directory

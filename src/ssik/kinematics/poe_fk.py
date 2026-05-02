@@ -123,8 +123,9 @@ __all__ = ["poe_forward_kinematics"]
 def poe_forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float64]:
     """POE forward kinematics for a normalized :class:`KinBody` at config ``q``.
 
-    Walks the chain joint-by-joint, applying ``T_left @ Rot(axis, q) @ T_right``
-    in order. Returns the 4x4 base-to-end pose.
+    Walks the chain joint-by-joint, applying ``T_left @ Joint(axis, q) @ T_right``
+    in order, where ``Joint`` is a rotation for revolute joints and a translation
+    along ``axis`` for prismatic joints. Returns the 4x4 base-to-end pose.
 
     Hand-rolled scalar 4x4 matmul + inline Rodrigues. The accumulator is
     carried as 12 scalars (the bottom row ``[0, 0, 0, 1]`` is implicit);
@@ -152,19 +153,6 @@ def poe_forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.fl
         ay = float(axis[1])
         az = float(axis[2])
         qi = float(q[i])
-        c = math.cos(qi)
-        s = math.sin(qi)
-        oc = 1.0 - c
-        # Rodrigues 3x3 rotation.
-        r00 = c + ax * ax * oc
-        r01 = ax * ay * oc - az * s
-        r02 = ax * az * oc + ay * s
-        r10 = ay * ax * oc + az * s
-        r11 = c + ay * ay * oc
-        r12 = ay * az * oc - ax * s
-        r20 = az * ax * oc - ay * s
-        r21 = az * ay * oc + ax * s
-        r22 = c + az * az * oc
         # T_left entries.
         Tl = joint.T_left
         l00 = float(Tl[0, 0])
@@ -179,20 +167,48 @@ def poe_forward_kinematics(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.fl
         l21 = float(Tl[2, 1])
         l22 = float(Tl[2, 2])
         l23 = float(Tl[2, 3])
-        # M = T_left @ R (R is the homogeneous version of the 3x3 rotation
-        # above with column 3 = [0, 0, 0, 1]^T).
-        m00 = l00 * r00 + l01 * r10 + l02 * r20
-        m01 = l00 * r01 + l01 * r11 + l02 * r21
-        m02 = l00 * r02 + l01 * r12 + l02 * r22
-        m03 = l03
-        m10 = l10 * r00 + l11 * r10 + l12 * r20
-        m11 = l10 * r01 + l11 * r11 + l12 * r21
-        m12 = l10 * r02 + l11 * r12 + l12 * r22
-        m13 = l13
-        m20 = l20 * r00 + l21 * r10 + l22 * r20
-        m21 = l20 * r01 + l21 * r11 + l22 * r21
-        m22 = l20 * r02 + l21 * r12 + l22 * r22
-        m23 = l23
+        if joint.joint_type == "prismatic":
+            # Joint transform is translation by qi along axis. Composed with
+            # T_left: rotation block unchanged from L33, translation column
+            # gets ``L33 @ (qi * axis)`` added on top of Lt.
+            m00 = l00
+            m01 = l01
+            m02 = l02
+            m03 = l03 + qi * (l00 * ax + l01 * ay + l02 * az)
+            m10 = l10
+            m11 = l11
+            m12 = l12
+            m13 = l13 + qi * (l10 * ax + l11 * ay + l12 * az)
+            m20 = l20
+            m21 = l21
+            m22 = l22
+            m23 = l23 + qi * (l20 * ax + l21 * ay + l22 * az)
+        else:
+            # Revolute path: Rodrigues 3x3 rotation, then ``M = T_left @ R``.
+            c = math.cos(qi)
+            s = math.sin(qi)
+            oc = 1.0 - c
+            r00 = c + ax * ax * oc
+            r01 = ax * ay * oc - az * s
+            r02 = ax * az * oc + ay * s
+            r10 = ay * ax * oc + az * s
+            r11 = c + ay * ay * oc
+            r12 = ay * az * oc - ax * s
+            r20 = az * ax * oc - ay * s
+            r21 = az * ay * oc + ax * s
+            r22 = c + az * az * oc
+            m00 = l00 * r00 + l01 * r10 + l02 * r20
+            m01 = l00 * r01 + l01 * r11 + l02 * r21
+            m02 = l00 * r02 + l01 * r12 + l02 * r22
+            m03 = l03
+            m10 = l10 * r00 + l11 * r10 + l12 * r20
+            m11 = l10 * r01 + l11 * r11 + l12 * r21
+            m12 = l10 * r02 + l11 * r12 + l12 * r22
+            m13 = l13
+            m20 = l20 * r00 + l21 * r10 + l22 * r20
+            m21 = l20 * r01 + l21 * r11 + l22 * r21
+            m22 = l20 * r02 + l21 * r12 + l22 * r22
+            m23 = l23
         # T_right entries.
         Tr = joint.T_right
         t00 = float(Tr[0, 0])
