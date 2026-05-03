@@ -47,7 +47,12 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:  # pragma: no cover
     pass
 
-__all__ = ["hyperplane_residuals", "tv1_hyperplanes_rrr", "v1_hyperplanes_rrr"]
+__all__ = [
+    "hyperplane_residuals",
+    "tv1_hyperplanes_rrr",
+    "tv3_hyperplanes_rrr",
+    "v1_hyperplanes_rrr",
+]
 
 
 def v1_hyperplanes_rrr(a_2: float, l_2: float) -> NDArray[np.float64]:
@@ -253,5 +258,149 @@ def tv1_hyperplanes_rrr(
     if result.shape != (4, 8):
         raise RuntimeError(  # pragma: no cover
             f"tv1_hyperplanes_rrr produced shape {result.shape}, expected (4, 8)"
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 5c step 3: T(v_3) -- alternative parametrisation by the third joint.
+#
+# T(v_1) requires ``a_2 != 0 ∧ l_2 != 0`` (V_1's eq. (5) precondition). Real
+# arms with ``l_2 = ±1`` (alpha_2 = ±90deg, the most common DH twist on
+# industrial 6R like UR5, Puma) do NOT satisfy this. ``T(v_3)`` is the
+# alternative: parametrise V_L by ``v_3`` instead of ``v_1``, using V_3's
+# hyperplanes (which depend on ``a_1, l_1``).
+#
+# Structure mirrors T(v_1) but with the change of variables on the RIGHT
+# only:
+#
+#   V_L = V_3 · POST(v_3)
+#       = {R_z(v_1) T_x(a_1) R_x(l_1) R_z(v_2)} ·
+#         T_z(d_2) T_x(a_2) R_x(l_2) R_z(v_3) T_z(d_3) T_x(a_3) R_x(l_3)
+#
+# So ``tau = sigma · POST^*`` and the V_3 hyperplanes (eq. 5 with ``a_1, l_1``
+# directly, no index swap) vanish on tau.
+# ---------------------------------------------------------------------------
+
+
+@lru_cache(maxsize=1)
+def _build_tv3_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
+    """Build the lambdified runtime function for ``T(v_3)`` in the RRR case.
+
+    Symbolic pipeline parallels :func:`_build_tv1_rrr_lambdified` with two
+    key differences:
+
+    1. The inner V_3 hyperplanes use ``(a_1, l_1)`` directly (eq. 5 of
+       Capco et al., no index substitution).
+    2. The change of variables is **one-sided** on the right only:
+       ``tau = sigma · POST^*`` where
+       ``POST = T_z(d_2) T_x(a_2) R_x(l_2) R_z(v_3) T_z(d_3) T_x(a_3) R_x(l_3)``.
+
+    The lambdified callable takes ``(v_3, a_1, l_1, d_2, a_2, l_2, d_3,
+    a_3, l_3)`` and returns a 4x8 numpy array.
+    """
+    v_3 = sp.symbols("v_3", real=True)
+    a_1, l_1 = sp.symbols("a_1 l_1", real=True)
+    d_2, a_2, l_2 = sp.symbols("d_2 a_2 l_2", real=True)
+    d_3, a_3, l_3 = sp.symbols("d_3 a_3 l_3", real=True)
+    x_syms = sp.symbols("x_0 x_1 x_2 x_3 y_0 y_1 y_2 y_3", real=True)
+    sigma_sym = sp.Matrix(x_syms)
+
+    half = sp.Rational(1, 2)
+    one = sp.Integer(1)
+    zero = sp.Integer(0)
+
+    def rz(v: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, v, zero, zero, zero, zero])
+
+    def tx(a: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, zero, zero, half * a, zero, zero])
+
+    def tz(d: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, zero, zero, zero, zero, half * d])
+
+    def rx(t: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, t, zero, zero, zero, zero, zero, zero])
+
+    # POST = T_z(d_2) T_x(a_2) R_x(l_2) R_z(v_3) T_z(d_3) T_x(a_3) R_x(l_3)
+    post = _dq_mul_sym(
+        tz(d_2),
+        _dq_mul_sym(
+            tx(a_2),
+            _dq_mul_sym(
+                rx(l_2),
+                _dq_mul_sym(rz(v_3), _dq_mul_sym(tz(d_3), _dq_mul_sym(tx(a_3), rx(l_3)))),
+            ),
+        ),
+    )
+    post_conj = _dq_conj_sym(post)
+
+    # tau = sigma · POST^* (one-sided)
+    tau = _dq_mul_sym(sigma_sym, post_conj)
+
+    # V_3 hyperplanes use (a_1, l_1) directly per Capco eq. (5).
+    v3_coeffs = sp.Matrix(
+        [
+            [a_1 * l_1, zero, zero, zero, sp.Integer(2), zero, zero, zero],
+            [zero, -a_1, zero, zero, zero, sp.Integer(2) * l_1, zero, zero],
+            [zero, zero, -a_1, zero, zero, zero, sp.Integer(2) * l_1, zero],
+            [zero, zero, zero, a_1 * l_1, zero, zero, zero, sp.Integer(2)],
+        ]
+    )
+
+    hyperplanes_vl = v3_coeffs * tau
+    c_new_sym = sp.zeros(4, 8)
+    for i in range(4):
+        expr_i = sp.expand(hyperplanes_vl[i])
+        for j in range(8):
+            c_new_sym[i, j] = expr_i.coeff(x_syms[j])
+
+    return sp.lambdify(  # type: ignore[no-any-return]
+        (v_3, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3),
+        c_new_sym,
+        modules="numpy",
+    )
+
+
+def tv3_hyperplanes_rrr(
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
+    d_3: float,
+    a_3: float,
+    l_3: float,
+    v_3: float,
+) -> NDArray[np.float64]:
+    """4x8 coefficient matrix of ``T(v_3)`` for the RRR case at parameter ``v_3``.
+
+    The alternative parametrisation of V_L when ``T(v_1)`` lies in the
+    Study quadric (which happens iff ``l_2 = ±1`` in Capco's convention
+    -- alpha_2 = ±pi/2, very common on industrial arms like UR5 / Puma).
+
+    DH parameter convention (Capco): rotations parametrised by
+    tan-half-angle, so ``v_3 = tan(theta_3 / 2)`` and ``l_i = tan(alpha_i
+    / 2)``. Distances ``a_i`` and offsets ``d_i`` are linear DH parameters.
+
+    Argument order matches T(v_1) (DH params for joints 1-3 then the
+    parametrising joint ``v_3`` last).
+
+    For any ``v_1, v_2, v_3 in R``, the 4 hyperplanes vanish on the
+    projective Study DQ of the full RRR chain
+    ``sigma_1(v_1) sigma_2(v_2) sigma_3(v_3)`` within floating-point noise.
+
+    Precondition: ``a_1 != 0 ∧ l_1 != 0`` (V_3's eq. (5) precondition).
+    For arms with both ``l_1 = 0`` and ``l_2 = ±1``, neither T(v_1) nor
+    T(v_3) applies; the T(v_2) fallback (next phase) is required.
+    """
+    fn = _build_tv3_rrr_lambdified()
+    result = np.asarray(
+        fn(v_3, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3),
+        dtype=np.float64,
+    )
+    if result.shape != (4, 8):
+        raise RuntimeError(  # pragma: no cover
+            f"tv3_hyperplanes_rrr produced shape {result.shape}, expected (4, 8)"
         )
     return result
