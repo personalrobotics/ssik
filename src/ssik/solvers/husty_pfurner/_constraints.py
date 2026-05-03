@@ -51,6 +51,7 @@ __all__ = [
     "hyperplane_residuals",
     "tv1_hyperplanes_rrr",
     "tv3_hyperplanes_rrr",
+    "tv6_hyperplanes_rrr",
     "v1_hyperplanes_rrr",
 ]
 
@@ -404,3 +405,123 @@ def tv3_hyperplanes_rrr(
             f"tv3_hyperplanes_rrr produced shape {result.shape}, expected (4, 8)"
         )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 5d step 1: T(v_6) -- right-chain hyperplanes parametrised by joint 6.
+#
+# Per Capco eq. (6), the right chain
+#     V_R = {sigma_E sigma_6^{-1}(v_6) sigma_5^{-1}(v_5) sigma_4^{-1}(v_4)}
+# can be obtained from the LEFT-chain T(v_1) construction by:
+#
+#   1. Parameter substitutions (sign flips + index re-mapping):
+#        v_1 -> -v_6, a_1 -> -a_5, l_1 -> -l_5, d_2 -> -d_5
+#        v_2 -> -v_5, a_2 -> -a_4, l_2 -> -l_4
+#        v_3 -> -v_4, a_3 -> 0,   l_3 -> 0,    d_3 -> -d_4
+#   2. A final change of variables ``sigma -> sigma_E^* . sigma`` (left
+#      multiplication by the conjugate of the target end-effector pose).
+#
+# Convention: a_6 = d_6 = l_6 = 0 -- the EE site / last-link offset must be
+# absorbed into ``sigma_E`` by the caller (left-multiplying the end-pose
+# by the joint-6 EE offset DQ before passing it here).
+# ---------------------------------------------------------------------------
+
+
+def _quat_left_mult_matrix(p: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return the 4x4 matrix ``L(p)`` such that ``L(p) @ q == p * q`` for
+    any quaternion ``q``.
+
+    Hamilton product written as a linear map in ``q``.
+    """
+    p0, p1, p2, p3 = float(p[0]), float(p[1]), float(p[2]), float(p[3])
+    return np.array(
+        [
+            [p0, -p1, -p2, -p3],
+            [p1, p0, -p3, p2],
+            [p2, p3, p0, -p1],
+            [p3, -p2, p1, p0],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _dq_left_mult_matrix(eta: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return the 8x8 matrix ``M_eta`` such that ``M_eta @ sigma == eta * sigma``
+    for any 8-vec dual quaternion ``sigma`` (using ``ssik.solvers.husty_pfurner._study.dq_mul``).
+
+    Block structure: top-left and bottom-right are ``L(eta_p)`` (the rotation
+    part of ``eta`` acts on both halves of ``sigma``); bottom-left is
+    ``L(eta_q)`` (the translation part of ``eta`` mixes ``sigma_p`` into
+    the result's translation half); top-right is zero (``sigma_q`` does
+    not contribute to the rotation half of the product).
+    """
+    eta_p = eta[:4]
+    eta_q = eta[4:]
+    Lp = _quat_left_mult_matrix(eta_p)
+    Lq = _quat_left_mult_matrix(eta_q)
+    M = np.zeros((8, 8), dtype=np.float64)
+    M[:4, :4] = Lp
+    M[4:, :4] = Lq
+    M[4:, 4:] = Lp
+    return M
+
+
+def tv6_hyperplanes_rrr(
+    a_4: float,
+    l_4: float,
+    d_4: float,
+    a_5: float,
+    l_5: float,
+    d_5: float,
+    sigma_E: NDArray[np.float64],
+    v_6: float,
+) -> NDArray[np.float64]:
+    """4x8 coefficient matrix of ``T(v_6)`` for the right chain in 6R/RRR.
+
+    Reuses the lambdified ``T(v_1)`` machinery via Capco eq. (6) parameter
+    substitutions, then applies the ``sigma_E^*``-left-multiplication
+    change of variables.
+
+    :param a_4, l_4, d_4: DH parameters for joint 4 (``l_4 = tan(alpha_4/2)``).
+    :param a_5, l_5, d_5: DH parameters for joint 5.
+    :param sigma_E: 8-vec Study DQ of the target end-effector pose. Caller
+        must absorb the joint-6 EE offset into ``sigma_E`` (since this
+        function assumes ``a_6 = d_6 = l_6 = 0`` per Capco's convention).
+    :param v_6: tan-half-angle of joint-6 rotation.
+
+    Precondition: ``a_5 != 0 ∧ l_5 != 0`` (mirrors V_1's eq. 5
+    precondition, transposed for the right chain).
+
+    Returns a 4x8 array; each row is the coefficients of ``(x_0, ..., y_3)``
+    in one of four hyperplanes that vanish on
+    ``V_R = sigma_E . sigma_6^{-1} . sigma_5^{-1} . sigma_4^{-1}``.
+    """
+    coeffs_pre_sigma_e = tv1_hyperplanes_rrr(
+        a_1=-a_5,
+        l_1=-l_5,
+        d_2=-d_5,
+        a_2=-a_4,
+        l_2=-l_4,
+        d_3=-d_4,
+        a_3=0.0,
+        l_3=0.0,
+        v_1=-v_6,
+    )
+    sigma_e_arr = np.asarray(sigma_E, dtype=np.float64)
+    if sigma_e_arr.shape != (8,):
+        raise ValueError(f"sigma_E must be 8-vec, got shape {sigma_e_arr.shape}")
+    sigma_e_conj = np.array(
+        [
+            sigma_e_arr[0],
+            -sigma_e_arr[1],
+            -sigma_e_arr[2],
+            -sigma_e_arr[3],
+            sigma_e_arr[4],
+            -sigma_e_arr[5],
+            -sigma_e_arr[6],
+            -sigma_e_arr[7],
+        ],
+        dtype=np.float64,
+    )
+    M_e = _dq_left_mult_matrix(sigma_e_conj)
+    return coeffs_pre_sigma_e @ M_e

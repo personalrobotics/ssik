@@ -31,6 +31,7 @@ from ssik.solvers.husty_pfurner._constraints import (
     hyperplane_residuals,
     tv1_hyperplanes_rrr,
     tv3_hyperplanes_rrr,
+    tv6_hyperplanes_rrr,
     v1_hyperplanes_rrr,
 )
 from ssik.solvers.husty_pfurner._study import dq_mul
@@ -811,3 +812,439 @@ def test_tv3_shape() -> None:
     )
     assert coeffs.shape == (4, 8)
     assert coeffs.dtype == np.float64
+
+
+# ============================================================================
+# Phase 5d step 1: T(v_6) -- right-chain hyperplanes parametrised by joint 6.
+# ============================================================================
+#
+# Capco eq. (6) constructs T(v_6) from T(v_1) via parameter substitutions
+# + a final sigma_E^* change of variables. Conventions assumed by
+# tv6_hyperplanes_rrr: a_6 = d_6 = l_6 = 0 (caller absorbs joint-6 EE
+# offset into sigma_E by left-multiplying).
+#
+# Bulletproof property: for ANY q_star = (v_1, v_2, v_3, v_4, v_5, v_6) and
+# DH parameters with a_5, l_5 != 0, the T(v_6) hyperplanes vanish on the
+# left-chain DQ tau = sigma_1(v_1) sigma_2(v_2) sigma_3(v_3) when sigma_E
+# is the full 6R chain DQ at q_star.
+
+
+def _full_6r_chain_dq(
+    v_1: float,
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    v_2: float,
+    a_2: float,
+    l_2: float,
+    v_3: float,
+    d_3: float,
+    a_3: float,
+    l_3: float,
+    v_4: float,
+    d_4: float,
+    a_4: float,
+    l_4: float,
+    v_5: float,
+    d_5: float,
+    a_5: float,
+    l_5: float,
+    v_6: float,
+) -> np.ndarray:
+    """Full 6R chain DQ: ``sigma_1 sigma_2 sigma_3 sigma_4 sigma_5 sigma_6``
+    with ``a_6 = d_6 = l_6 = 0`` (sigma_6 = R_z(v_6) only).
+    """
+    sigma_1 = dq_mul(_rz_dq(v_1), dq_mul(_tx_dq(a_1), _rx_dq(l_1)))
+    sigma_2 = dq_mul(
+        _rz_dq(v_2),
+        dq_mul(_tz_dq(d_2), dq_mul(_tx_dq(a_2), _rx_dq(l_2))),
+    )
+    sigma_3 = dq_mul(
+        _rz_dq(v_3),
+        dq_mul(_tz_dq(d_3), dq_mul(_tx_dq(a_3), _rx_dq(l_3))),
+    )
+    sigma_4 = dq_mul(
+        _rz_dq(v_4),
+        dq_mul(_tz_dq(d_4), dq_mul(_tx_dq(a_4), _rx_dq(l_4))),
+    )
+    sigma_5 = dq_mul(
+        _rz_dq(v_5),
+        dq_mul(_tz_dq(d_5), dq_mul(_tx_dq(a_5), _rx_dq(l_5))),
+    )
+    sigma_6 = _rz_dq(v_6)  # a_6 = d_6 = l_6 = 0
+    return dq_mul(
+        sigma_1,
+        dq_mul(sigma_2, dq_mul(sigma_3, dq_mul(sigma_4, dq_mul(sigma_5, sigma_6)))),
+    )
+
+
+@pytest.mark.parametrize("seed", list(range(10)))
+def test_tv6_hyperplanes_vanish_on_left_chain_dq(seed: int) -> None:
+    """T(v_6) hyperplanes vanish on the LEFT chain DQ when sigma_E is the
+    full 6R FK pose.
+
+    Setup: pick random (DH, q_star). Compute sigma_E = full 6R FK DQ.
+    The LEFT-chain DQ tau = sigma_1 sigma_2 sigma_3 belongs to V_L AND
+    to V_R = sigma_E sigma_6^{-1} sigma_5^{-1} sigma_4^{-1} (they coincide
+    at the IK solution by construction). T(v_6) is the V_R 3-space, so
+    its hyperplanes must vanish on tau.
+    """
+    rng = np.random.default_rng(seed + 400)
+    a_1 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_1 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+    d_2 = float(rng.uniform(-1.0, 1.0))
+    a_2 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_2 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+    d_3 = float(rng.uniform(-1.0, 1.0))
+    a_3 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_3 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+    d_4 = float(rng.uniform(-1.0, 1.0))
+    a_4 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_4 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+    d_5 = float(rng.uniform(-1.0, 1.0))
+    a_5 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_5 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+
+    v_1 = float(rng.uniform(-2.0, 2.0))
+    v_2 = float(rng.uniform(-2.0, 2.0))
+    v_3 = float(rng.uniform(-2.0, 2.0))
+    v_4 = float(rng.uniform(-2.0, 2.0))
+    v_5 = float(rng.uniform(-2.0, 2.0))
+    v_6 = float(rng.uniform(-2.0, 2.0))
+
+    sigma_E = _full_6r_chain_dq(
+        v_1,
+        a_1,
+        l_1,
+        d_2,
+        v_2,
+        a_2,
+        l_2,
+        v_3,
+        d_3,
+        a_3,
+        l_3,
+        v_4,
+        d_4,
+        a_4,
+        l_4,
+        v_5,
+        d_5,
+        a_5,
+        l_5,
+        v_6,
+    )
+
+    # tau = sigma_1 sigma_2 sigma_3 (left chain only)
+    tau = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
+
+    coeffs = tv6_hyperplanes_rrr(a_4, l_4, d_4, a_5, l_5, d_5, sigma_E, v_6)
+    residuals = hyperplane_residuals(coeffs, tau)
+    sigma_norm = float(np.linalg.norm(tau))
+    row_norms = np.linalg.norm(coeffs, axis=1)
+    expected_scales = np.maximum(row_norms * sigma_norm, 1e-12)
+    relative = np.abs(residuals) / expected_scales
+    assert np.all(relative < 1e-10), (
+        f"seed={seed}: max relative residual={float(np.max(relative)):.2e}, "
+        f"absolute={residuals}, scales={expected_scales}"
+    )
+
+
+@pytest.mark.parametrize("v_4", [-1.0, 0.0, 0.7, 1.5])
+@pytest.mark.parametrize("v_5", [-1.0, 0.0, 0.7, 1.5])
+def test_tv6_invariant_under_v4_v5_changes(v_4: float, v_5: float) -> None:
+    """Fix DH and v_6; vary v_4, v_5 across V_R's other free parameters.
+    T(v_6) coefficients are independent of (v_4, v_5) by construction;
+    every V_L pose at the corresponding sigma_E must satisfy them.
+    """
+    a_1, l_1, d_2 = 0.5, 0.4, 0.1
+    a_2, l_2 = 0.6, 0.3
+    d_3, a_3, l_3 = 0.2, 0.4, 0.5
+    d_4, a_4, l_4 = 0.15, 0.45, 0.55
+    d_5, a_5, l_5 = 0.18, 0.5, 0.45
+    v_1, v_2, v_3, v_6 = 0.3, -0.4, 0.5, 0.7
+
+    sigma_E = _full_6r_chain_dq(
+        v_1,
+        a_1,
+        l_1,
+        d_2,
+        v_2,
+        a_2,
+        l_2,
+        v_3,
+        d_3,
+        a_3,
+        l_3,
+        v_4,
+        d_4,
+        a_4,
+        l_4,
+        v_5,
+        d_5,
+        a_5,
+        l_5,
+        v_6,
+    )
+    tau = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
+    coeffs = tv6_hyperplanes_rrr(a_4, l_4, d_4, a_5, l_5, d_5, sigma_E, v_6)
+    residuals = hyperplane_residuals(coeffs, tau)
+    sigma_norm = float(np.linalg.norm(tau))
+    row_norms = np.linalg.norm(coeffs, axis=1)
+    expected_scales = np.maximum(row_norms * sigma_norm, 1e-12)
+    relative = np.abs(residuals) / expected_scales
+    assert np.all(relative < 1e-10), (
+        f"v_4={v_4}, v_5={v_5}: max relative={float(np.max(relative)):.2e}"
+    )
+
+
+@given(
+    a_1=_safe_dh,
+    s_a1=_sign,
+    alpha_1=_safe_alpha,
+    d_2=_safe_dist,
+    a_2=_safe_dh,
+    s_a2=_sign,
+    alpha_2=_safe_alpha,
+    d_3=_safe_dist,
+    a_3=_safe_dh,
+    s_a3=_sign,
+    alpha_3=_safe_alpha,
+    d_4=_safe_dist,
+    a_4=_safe_dh,
+    s_a4=_sign,
+    alpha_4=_safe_alpha,
+    d_5=_safe_dist,
+    a_5=_safe_dh,
+    s_a5=_sign,
+    alpha_5=_safe_alpha,
+    v_1=_safe_q,
+    v_2=_safe_q,
+    v_3=_safe_q,
+    v_4=_safe_q,
+    v_5=_safe_q,
+    v_6=_safe_q,
+)
+@settings(
+    max_examples=500,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
+)
+def test_tv6_hypothesis_fuzz_500_examples(
+    a_1: float,
+    s_a1: float,
+    alpha_1: float,
+    d_2: float,
+    a_2: float,
+    s_a2: float,
+    alpha_2: float,
+    d_3: float,
+    a_3: float,
+    s_a3: float,
+    alpha_3: float,
+    d_4: float,
+    a_4: float,
+    s_a4: float,
+    alpha_4: float,
+    d_5: float,
+    a_5: float,
+    s_a5: float,
+    alpha_5: float,
+    v_1: float,
+    v_2: float,
+    v_3: float,
+    v_4: float,
+    v_5: float,
+    v_6: float,
+) -> None:
+    """Bulletproof gate for T(v_6): 500 (DH, q) combos across full alpha
+    range; relative tolerance 1e-12. Sigma_E built from full 6R FK; T(v_6)
+    hyperplanes vanish on the left-chain DQ.
+    """
+    a_1_signed = s_a1 * a_1
+    a_2_signed = s_a2 * a_2
+    a_3_signed = s_a3 * a_3
+    a_4_signed = s_a4 * a_4
+    a_5_signed = s_a5 * a_5
+    l_1 = math.tan(0.5 * alpha_1)
+    l_2 = math.tan(0.5 * alpha_2)
+    l_3 = math.tan(0.5 * alpha_3)
+    l_4 = math.tan(0.5 * alpha_4)
+    l_5 = math.tan(0.5 * alpha_5)
+
+    sigma_E = _full_6r_chain_dq(
+        v_1,
+        a_1_signed,
+        l_1,
+        d_2,
+        v_2,
+        a_2_signed,
+        l_2,
+        v_3,
+        d_3,
+        a_3_signed,
+        l_3,
+        v_4,
+        d_4,
+        a_4_signed,
+        l_4,
+        v_5,
+        d_5,
+        a_5_signed,
+        l_5,
+        v_6,
+    )
+    tau = _vl_chain_rrr(v_1, a_1_signed, l_1, d_2, v_2, a_2_signed, l_2, v_3, d_3, a_3_signed, l_3)
+    coeffs = tv6_hyperplanes_rrr(a_4_signed, l_4, d_4, a_5_signed, l_5, d_5, sigma_E, v_6)
+    residuals = hyperplane_residuals(coeffs, tau)
+    sigma_norm = float(np.linalg.norm(tau))
+    row_norms = np.linalg.norm(coeffs, axis=1)
+    expected_scales = np.maximum(row_norms * sigma_norm, 1e-12)
+    relative = np.abs(residuals) / expected_scales
+    assert np.all(relative < 1e-12), (
+        f"max relative residual={float(np.max(relative)):.2e}; "
+        f"absolute={residuals}, scales={expected_scales}"
+    )
+
+
+def test_tv6_independent_path_agrees() -> None:
+    """T(v_6) lambdified path agrees with direct V_R computation.
+
+    Path A: tv6_hyperplanes_rrr(DH, sigma_E, v_6) @ tau (where tau is the
+    LEFT-chain DQ, which equals V_R-points by the IK relation).
+
+    Path B: build V_R explicitly via numerical conjugation:
+    tau_R = sigma_E . sigma_6^{-1} . sigma_5^{-1} . sigma_4^{-1}.
+    Apply T(v_1)-with-substitutions hyperplanes to tau_R (path BEFORE the
+    sigma_E^* change of variables). Should also vanish.
+
+    Both paths vanish on V_R points; agreement at 1e-9.
+    """
+    rng = np.random.default_rng(500)
+    for _ in range(20):
+        a_1 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_1 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        d_2 = float(rng.uniform(-1.0, 1.0))
+        a_2 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_2 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        d_3 = float(rng.uniform(-1.0, 1.0))
+        a_3 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_3 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        d_4 = float(rng.uniform(-1.0, 1.0))
+        a_4 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_4 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        d_5 = float(rng.uniform(-1.0, 1.0))
+        a_5 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_5 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        v_1 = float(rng.uniform(-2.0, 2.0))
+        v_2 = float(rng.uniform(-2.0, 2.0))
+        v_3 = float(rng.uniform(-2.0, 2.0))
+        v_4 = float(rng.uniform(-2.0, 2.0))
+        v_5 = float(rng.uniform(-2.0, 2.0))
+        v_6 = float(rng.uniform(-2.0, 2.0))
+
+        sigma_E = _full_6r_chain_dq(
+            v_1,
+            a_1,
+            l_1,
+            d_2,
+            v_2,
+            a_2,
+            l_2,
+            v_3,
+            d_3,
+            a_3,
+            l_3,
+            v_4,
+            d_4,
+            a_4,
+            l_4,
+            v_5,
+            d_5,
+            a_5,
+            l_5,
+            v_6,
+        )
+        tau = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
+
+        # Path A: lambdified tv6_hyperplanes_rrr.
+        coeffs_a = tv6_hyperplanes_rrr(a_4, l_4, d_4, a_5, l_5, d_5, sigma_E, v_6)
+        residuals_a = coeffs_a @ tau
+
+        # Path B: apply sigma_E^* to tau (tau is the V_L pose, which equals
+        # sigma_E (full chain) at IK; sigma_E^* @ tau lands in V_R-pre-
+        # change-of-variables coordinates), then apply substituted T(v_1).
+        sigma_E_conj = _dq_conj_numpy(sigma_E)
+        # tau_R = sigma_E^* @ tau (== V_R-pre-sigma_E version of the IK pose)
+        tau_R = dq_mul(sigma_E_conj, tau)
+        coeffs_b = tv1_hyperplanes_rrr(
+            a_1=-a_5,
+            l_1=-l_5,
+            d_2=-d_5,
+            a_2=-a_4,
+            l_2=-l_4,
+            d_3=-d_4,
+            a_3=0.0,
+            l_3=0.0,
+            v_1=-v_6,
+        )
+        residuals_b = coeffs_b @ tau_R
+
+        assert np.allclose(residuals_a, 0.0, atol=1e-9), f"path A residuals: {residuals_a}"
+        assert np.allclose(residuals_b, 0.0, atol=1e-9), f"path B residuals: {residuals_b}"
+
+
+def test_tv6_at_identity_sigma_e_collapses_to_substituted_v1() -> None:
+    """When ``sigma_E = (1, 0, 0, 0, 0, 0, 0, 0)`` (identity DQ), the
+    sigma_E^* change of variables is identity, so T(v_6) reduces to
+    the substituted T(v_1). Sanity check on the wiring.
+    """
+    a_4, l_4, d_4 = 0.45, 0.55, 0.15
+    a_5, l_5, d_5 = 0.5, 0.45, 0.18
+    v_6 = 0.7
+    sigma_E_identity = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+
+    coeffs_tv6 = tv6_hyperplanes_rrr(a_4, l_4, d_4, a_5, l_5, d_5, sigma_E_identity, v_6)
+    coeffs_tv1_sub = tv1_hyperplanes_rrr(
+        a_1=-a_5,
+        l_1=-l_5,
+        d_2=-d_5,
+        a_2=-a_4,
+        l_2=-l_4,
+        d_3=-d_4,
+        a_3=0.0,
+        l_3=0.0,
+        v_1=-v_6,
+    )
+    assert np.allclose(coeffs_tv6, coeffs_tv1_sub, atol=1e-15)
+
+
+def test_tv6_shape() -> None:
+    sigma_E = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5], dtype=np.float64)
+    coeffs = tv6_hyperplanes_rrr(
+        a_4=0.5,
+        l_4=0.4,
+        d_4=0.1,
+        a_5=0.6,
+        l_5=0.3,
+        d_5=0.2,
+        sigma_E=sigma_E,
+        v_6=0.0,
+    )
+    assert coeffs.shape == (4, 8)
+    assert coeffs.dtype == np.float64
+
+
+def test_tv6_rejects_wrong_shape_sigma_e() -> None:
+    """sigma_E must be 8-vec; otherwise raise ValueError."""
+    with pytest.raises(ValueError, match="sigma_E must be 8-vec"):
+        tv6_hyperplanes_rrr(
+            a_4=0.5,
+            l_4=0.4,
+            d_4=0.1,
+            a_5=0.6,
+            l_5=0.3,
+            d_5=0.2,
+            sigma_E=np.zeros(7),  # wrong shape
+            v_6=0.0,
+        )
