@@ -30,6 +30,7 @@ from hypothesis import strategies as st
 from ssik.solvers.husty_pfurner._constraints import (
     hyperplane_residuals,
     tv1_hyperplanes_rrr,
+    tv3_hyperplanes_rrr,
     v1_hyperplanes_rrr,
 )
 from ssik.solvers.husty_pfurner._study import dq_mul
@@ -596,3 +597,217 @@ def test_tv1_a1_l1_zero_left_chain_simplification() -> None:
     coeffs = tv1_hyperplanes_rrr(a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3, v_1)
     residuals = hyperplane_residuals(coeffs, sigma_vl)
     assert np.allclose(residuals, 0.0, atol=1e-10), f"residuals: {residuals}"
+
+
+# ============================================================================
+# Phase 5c step 3: T(v_3) -- alternative parametrisation by joint 3.
+# ============================================================================
+#
+# T(v_1) requires a_2 != 0 ∧ l_2 != 0. For arms with l_2 = ±1 (common DH
+# twist of ±90deg), T(v_1) lies in the Study quadric and we need T(v_3).
+# T(v_3) requires a_1 != 0 ∧ l_1 != 0 (eq. 5 precondition for V_3).
+#
+# The change of variables for T(v_3) is one-sided (only on the right):
+#     V_L = V_3 · POST(v_3)
+# where POST(v_3) = T_z(d_2) T_x(a_2) R_x(l_2) R_z(v_3) T_z(d_3) T_x(a_3)
+# R_x(l_3) and V_3 = {R_z(v_1) T_x(a_1) R_x(l_1) R_z(v_2)}.
+
+
+def test_tv3_at_zero_dh_collapses_to_v3_hyperplanes() -> None:
+    """When POST = identity (zero DH) and v_3 = 0, T(v_3) collapses to
+    V_3 hyperplanes. V_3 hyperplanes use (a_1, l_1) per Capco eq. (5).
+    """
+    a_1, l_1 = 0.7, 0.3
+    # v1_hyperplanes_rrr(a_2, l_2) is also eq (5); we reuse it with
+    # (a_1, l_1) here as it's the SAME equation, just labelled by joint
+    # indexing.
+    c_v3 = v1_hyperplanes_rrr(a_1, l_1)
+    c_tv3 = tv3_hyperplanes_rrr(
+        a_1=a_1, l_1=l_1, d_2=0.0, a_2=0.0, l_2=0.0, d_3=0.0, a_3=0.0, l_3=0.0, v_3=0.0
+    )
+    assert np.allclose(c_tv3, c_v3, atol=1e-15), f"diff: {c_tv3 - c_v3}"
+
+
+@pytest.mark.parametrize("seed", list(range(10)))
+def test_tv3_hyperplanes_vanish_on_full_vl_chain(seed: int) -> None:
+    """T(v_3) hyperplanes vanish on the full RRR chain DQ for random
+    (v_1, v_2, v_3) and random non-degenerate DH at 1e-10 absolute.
+    """
+    rng = np.random.default_rng(seed + 200)
+    a_1 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_1 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+    d_2 = float(rng.uniform(-1.0, 1.0))
+    a_2 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_2 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+    d_3 = float(rng.uniform(-1.0, 1.0))
+    a_3 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+    l_3 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+
+    v_1 = float(rng.uniform(-2.0, 2.0))
+    v_2 = float(rng.uniform(-2.0, 2.0))
+    v_3 = float(rng.uniform(-2.0, 2.0))
+
+    sigma_vl = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
+    coeffs = tv3_hyperplanes_rrr(a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3, v_3)
+    residuals = hyperplane_residuals(coeffs, sigma_vl)
+    assert np.allclose(residuals, 0.0, atol=1e-10), (
+        f"seed={seed}: max|residual|={float(np.max(np.abs(residuals))):.2e}"
+    )
+
+
+@pytest.mark.parametrize("v_1", [-1.5, -0.3, 0.0, 0.7, 1.8])
+@pytest.mark.parametrize("v_2", [-1.5, -0.3, 0.0, 0.7, 1.8])
+def test_tv3_invariant_under_v1_v2_changes(v_1: float, v_2: float) -> None:
+    """Fix DH and v_3; vary v_1, v_2 across V_L's other free parameters.
+    The T(v_3) coefficients are independent of (v_1, v_2) by construction;
+    every V_L pose must satisfy them.
+    """
+    a_1, l_1, d_2 = 0.5, 0.4, 0.1
+    a_2, l_2 = 0.6, 0.3
+    d_3, a_3, l_3 = 0.2, 0.4, 0.5
+    v_3 = 0.7
+
+    sigma_vl = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
+    coeffs = tv3_hyperplanes_rrr(a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3, v_3)
+    residuals = hyperplane_residuals(coeffs, sigma_vl)
+    assert np.allclose(residuals, 0.0, atol=1e-10), f"v_1={v_1}, v_2={v_2}: residuals={residuals}"
+
+
+@given(
+    a_1=_safe_dh,
+    s_a1=_sign,
+    alpha_1=_safe_alpha,
+    d_2=_safe_dist,
+    a_2=_safe_dh,
+    s_a2=_sign,
+    alpha_2=_safe_alpha,
+    d_3=_safe_dist,
+    a_3=_safe_dh,
+    s_a3=_sign,
+    alpha_3=_safe_alpha,
+    v_1=_safe_q,
+    v_2=_safe_q,
+    v_3=_safe_q,
+)
+@settings(
+    max_examples=500,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
+)
+def test_tv3_hypothesis_fuzz_500_examples(
+    a_1: float,
+    s_a1: float,
+    alpha_1: float,
+    d_2: float,
+    a_2: float,
+    s_a2: float,
+    alpha_2: float,
+    d_3: float,
+    a_3: float,
+    s_a3: float,
+    alpha_3: float,
+    v_1: float,
+    v_2: float,
+    v_3: float,
+) -> None:
+    """Bulletproof gate for T(v_3): 500 (DH, q) combinations across the
+    full alpha range; relative tolerance 1e-12. Mirrors T(v_1)'s
+    bulletproof test.
+    """
+    a_1_signed = s_a1 * a_1
+    a_2_signed = s_a2 * a_2
+    a_3_signed = s_a3 * a_3
+    l_1 = math.tan(0.5 * alpha_1)
+    l_2 = math.tan(0.5 * alpha_2)
+    l_3 = math.tan(0.5 * alpha_3)
+
+    sigma_vl = _vl_chain_rrr(
+        v_1, a_1_signed, l_1, d_2, v_2, a_2_signed, l_2, v_3, d_3, a_3_signed, l_3
+    )
+    coeffs = tv3_hyperplanes_rrr(a_1_signed, l_1, d_2, a_2_signed, l_2, d_3, a_3_signed, l_3, v_3)
+    residuals = hyperplane_residuals(coeffs, sigma_vl)
+    sigma_norm = float(np.linalg.norm(sigma_vl))
+    row_norms = np.linalg.norm(coeffs, axis=1)
+    expected_scales = np.maximum(row_norms * sigma_norm, 1e-12)
+    relative = np.abs(residuals) / expected_scales
+    assert np.all(relative < 1e-12), (
+        f"max relative residual={float(np.max(relative)):.2e}; "
+        f"absolute={residuals}, scales={expected_scales}"
+    )
+
+
+def test_tv3_independent_path_agrees() -> None:
+    """T(v_3) lambdified path agrees with numerical composition path.
+
+    Path A: ``tv3_hyperplanes_rrr(DH, v_3) @ sigma_VL`` (lambdified sympy).
+    Path B: ``v1_hyperplanes_rrr(a_1, l_1) @ (sigma_VL · POST^*)`` (numpy).
+
+    Both vanish on V_L points; agreement at 1e-9.
+    """
+    rng = np.random.default_rng(300)
+    for _ in range(20):
+        a_1 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_1 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        d_2 = float(rng.uniform(-1.0, 1.0))
+        a_2 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_2 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        d_3 = float(rng.uniform(-1.0, 1.0))
+        a_3 = float(rng.uniform(0.1, 1.5)) * float(rng.choice([-1.0, 1.0]))
+        l_3 = math.tan(0.5 * float(rng.uniform(0.1, math.pi - 0.1)))
+        v_1 = float(rng.uniform(-2.0, 2.0))
+        v_2 = float(rng.uniform(-2.0, 2.0))
+        v_3 = float(rng.uniform(-2.0, 2.0))
+
+        sigma_vl = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
+
+        # Path A: lambdified.
+        coeffs_a = tv3_hyperplanes_rrr(a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3, v_3)
+        residuals_a = coeffs_a @ sigma_vl
+
+        # Path B: numerical composition. POST = T_z(d_2) T_x(a_2) R_x(l_2)
+        # R_z(v_3) T_z(d_3) T_x(a_3) R_x(l_3).
+        post = dq_mul(
+            _tz_dq(d_2),
+            dq_mul(
+                _tx_dq(a_2),
+                dq_mul(
+                    _rx_dq(l_2),
+                    dq_mul(_rz_dq(v_3), dq_mul(_tz_dq(d_3), dq_mul(_tx_dq(a_3), _rx_dq(l_3)))),
+                ),
+            ),
+        )
+        post_conj = _dq_conj_numpy(post)
+        tau = dq_mul(sigma_vl, post_conj)
+        coeffs_b = v1_hyperplanes_rrr(a_1, l_1)  # eq. 5 with (a_1, l_1) is the V_3 set
+        residuals_b = coeffs_b @ tau
+
+        assert np.allclose(residuals_a, 0.0, atol=1e-9), f"path A residuals: {residuals_a}"
+        assert np.allclose(residuals_b, 0.0, atol=1e-9), f"path B residuals: {residuals_b}"
+
+
+def test_tv3_a1_zero_produces_finite_coefficients() -> None:
+    """``a_1 = 0`` violates V_3's eq. (5) precondition; coefficients
+    should still be finite (no NaN). Vanishing set may differ; future
+    phase 5c.4 will dispatch the degenerate branch explicitly.
+    """
+    coeffs = tv3_hyperplanes_rrr(
+        a_1=0.0, l_1=0.4, d_2=0.1, a_2=0.6, l_2=0.3, d_3=0.2, a_3=0.4, l_3=0.5, v_3=0.7
+    )
+    assert np.all(np.isfinite(coeffs))
+
+
+def test_tv3_l1_zero_produces_finite_coefficients() -> None:
+    """``l_1 = 0`` (alpha_1 = 0 or pi) violates V_3's eq. (5) precondition."""
+    coeffs = tv3_hyperplanes_rrr(
+        a_1=0.6, l_1=0.0, d_2=0.1, a_2=0.4, l_2=0.5, d_3=0.2, a_3=0.4, l_3=0.5, v_3=0.7
+    )
+    assert np.all(np.isfinite(coeffs))
+
+
+def test_tv3_shape() -> None:
+    """tv3_hyperplanes_rrr returns 4x8 float64."""
+    coeffs = tv3_hyperplanes_rrr(
+        a_1=0.3, l_1=0.5, d_2=0.1, a_2=0.4, l_2=0.6, d_3=0.2, a_3=0.5, l_3=0.7, v_3=0.0
+    )
+    assert coeffs.shape == (4, 8)
+    assert coeffs.dtype == np.float64
