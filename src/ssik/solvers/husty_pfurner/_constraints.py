@@ -36,10 +36,18 @@ arXiv 1906.07813.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
 import numpy as np
+import sympy as sp
 from numpy.typing import NDArray
 
-__all__ = ["hyperplane_residuals", "v1_hyperplanes_rrr"]
+if TYPE_CHECKING:  # pragma: no cover
+    pass
+
+__all__ = ["hyperplane_residuals", "tv1_hyperplanes_rrr", "v1_hyperplanes_rrr"]
 
 
 def v1_hyperplanes_rrr(a_2: float, l_2: float) -> NDArray[np.float64]:
@@ -92,3 +100,158 @@ def hyperplane_residuals(
     zero up to floating-point noise.
     """
     return coeffs @ sigma
+
+
+# ---------------------------------------------------------------------------
+# Phase 5c step 2: T(v_1) -- V_1 hyperplanes after change of variables (Capco
+# eq. 4) to inject the parametrising joint v_1.
+#
+# Strategy: symbolic preprocessing via sympy, then ``sp.lambdify`` to a
+# numpy-vectorised callable. The lambdify is one-time at module-import; the
+# runtime ``tv1_hyperplanes_rrr`` is pure numpy substitution.
+# ---------------------------------------------------------------------------
+
+
+def _quat_mul_sym(p: sp.Matrix, q: sp.Matrix) -> sp.Matrix:
+    """Hamilton product of two sympy 4-vec quaternions."""
+    return sp.Matrix(
+        [
+            p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3],
+            p[0] * q[1] + p[1] * q[0] + p[2] * q[3] - p[3] * q[2],
+            p[0] * q[2] - p[1] * q[3] + p[2] * q[0] + p[3] * q[1],
+            p[0] * q[3] + p[1] * q[2] - p[2] * q[1] + p[3] * q[0],
+        ]
+    )
+
+
+def _dq_mul_sym(a: sp.Matrix, b: sp.Matrix) -> sp.Matrix:
+    """Symbolic dual-quaternion product of two 8-vec sympy matrices."""
+    pa = sp.Matrix([a[0], a[1], a[2], a[3]])
+    qa = sp.Matrix([a[4], a[5], a[6], a[7]])
+    pb = sp.Matrix([b[0], b[1], b[2], b[3]])
+    qb = sp.Matrix([b[4], b[5], b[6], b[7]])
+    p = _quat_mul_sym(pa, pb)
+    q = _quat_mul_sym(pa, qb) + _quat_mul_sym(qa, pb)
+    return sp.Matrix([p[0], p[1], p[2], p[3], q[0], q[1], q[2], q[3]])
+
+
+def _dq_conj_sym(s: sp.Matrix) -> sp.Matrix:
+    """Symbolic dual-quaternion conjugate (negate imaginary parts of both halves)."""
+    return sp.Matrix([s[0], -s[1], -s[2], -s[3], s[4], -s[5], -s[6], -s[7]])
+
+
+@lru_cache(maxsize=1)
+def _build_tv1_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
+    """Build the lambdified runtime function for ``T(v_1)`` in the RRR case.
+
+    Symbolic pipeline:
+
+    1. Build ``LEFT = R_z(v_1) T_x(a_1) R_x(l_1) T_z(d_2)`` and
+       ``RIGHT = T_z(d_3) T_x(a_3) R_x(l_3)`` as projective sympy 8-vecs.
+    2. Compute ``tau = LEFT^* * sigma * RIGHT^*`` symbolically; this maps a
+       point ``sigma`` in ``V_L`` to a (scalar-multiple of a) point in
+       ``V_1`` per Capco eq. (4).
+    3. Apply the four ``V_1`` hyperplanes from eq. (5) to ``tau``; collect
+       the result as a 4-vec of polynomials in the ``sigma`` components,
+       with coefficients in ``(v_1, DH)``.
+    4. Extract the coefficient of each ``sigma`` component to get the
+       ``T(v_1)`` 4x8 coefficient matrix.
+
+    The lambdified callable takes ``(v_1, a_1, l_1, d_2, a_2, l_2, d_3,
+    a_3, l_3)`` (in that order) and returns a 4x8 numpy array.
+    """
+    v_1 = sp.symbols("v_1", real=True)
+    a_1, l_1, d_2 = sp.symbols("a_1 l_1 d_2", real=True)
+    a_2, l_2 = sp.symbols("a_2 l_2", real=True)
+    d_3, a_3, l_3 = sp.symbols("d_3 a_3 l_3", real=True)
+    x_syms = sp.symbols("x_0 x_1 x_2 x_3 y_0 y_1 y_2 y_3", real=True)
+    sigma_sym = sp.Matrix(x_syms)
+
+    half = sp.Rational(1, 2)
+    one = sp.Integer(1)
+    zero = sp.Integer(0)
+
+    def rz(v: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, v, zero, zero, zero, zero])
+
+    def tx(a: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, zero, zero, half * a, zero, zero])
+
+    def tz(d: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, zero, zero, zero, zero, half * d])
+
+    def rx(t: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, t, zero, zero, zero, zero, zero, zero])
+
+    left = _dq_mul_sym(rz(v_1), _dq_mul_sym(tx(a_1), _dq_mul_sym(rx(l_1), tz(d_2))))
+    right = _dq_mul_sym(tz(d_3), _dq_mul_sym(tx(a_3), rx(l_3)))
+
+    left_conj = _dq_conj_sym(left)
+    right_conj = _dq_conj_sym(right)
+
+    tau = _dq_mul_sym(left_conj, _dq_mul_sym(sigma_sym, right_conj))
+
+    v1_coeffs = sp.Matrix(
+        [
+            [a_2 * l_2, zero, zero, zero, sp.Integer(2), zero, zero, zero],
+            [zero, -a_2, zero, zero, zero, sp.Integer(2) * l_2, zero, zero],
+            [zero, zero, -a_2, zero, zero, zero, sp.Integer(2) * l_2, zero],
+            [zero, zero, zero, a_2 * l_2, zero, zero, zero, sp.Integer(2)],
+        ]
+    )
+
+    # 4-vec of polynomials in (x, v_1, DH).
+    hyperplanes_vl = v1_coeffs * tau
+    c_new_sym = sp.zeros(4, 8)
+    for i in range(4):
+        expr_i = sp.expand(hyperplanes_vl[i])
+        for j in range(8):
+            c_new_sym[i, j] = expr_i.coeff(x_syms[j])
+
+    return sp.lambdify(  # type: ignore[no-any-return]
+        (v_1, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3),
+        c_new_sym,
+        modules="numpy",
+    )
+
+
+def tv1_hyperplanes_rrr(
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
+    d_3: float,
+    a_3: float,
+    l_3: float,
+    v_1: float,
+) -> NDArray[np.float64]:
+    """4x8 coefficient matrix of ``T(v_1)`` for the RRR case at parameter ``v_1``.
+
+    Applies Capco eq. (4) change of variables to the V_1 hyperplanes
+    (see :func:`v1_hyperplanes_rrr`) so the resulting 4 hyperplanes
+    contain the full left-chain workspace ``V_L = {sigma_1(v_1)
+    sigma_2(v_2) sigma_3(v_3) | v_2, v_3 in R}`` with ``v_1`` injected
+    as a numeric parameter.
+
+    DH parameter convention (Capco): rotations parametrised by tan-half-angle,
+    so ``v_1 = tan(theta_1 / 2)`` and ``l_1 = tan(alpha_1 / 2)``. Distances
+    ``a_i`` and offsets ``d_i`` are linear DH parameters.
+
+    The argument order matches the natural DH walk: parameters of joints
+    1, 2, 3 in sequence, ``v_1`` last (it's the parametrising free variable).
+
+    For any ``v_1, v_2, v_3 in R``, the 4 hyperplanes returned here vanish
+    on the projective Study DQ of the full RRR chain
+    ``sigma_1(v_1) sigma_2(v_2) sigma_3(v_3)`` within floating-point noise.
+    """
+    fn = _build_tv1_rrr_lambdified()
+    result = np.asarray(
+        fn(v_1, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3),
+        dtype=np.float64,
+    )
+    if result.shape != (4, 8):
+        raise RuntimeError(  # pragma: no cover
+            f"tv1_hyperplanes_rrr produced shape {result.shape}, expected (4, 8)"
+        )
+    return result
