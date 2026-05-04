@@ -756,35 +756,21 @@ def _equilibrate_pencil(
     """Row + column equilibrate ``(A, B, C)`` jointly for better-conditioned
     eigendecomposition. Issue #68 (AE-1).
 
-    Joint scaling: each row's max-magnitude entry across (A, B, C) scaled to 1,
-    then each column's max-magnitude entry scaled to 1. The quadratic eigenvalue
-    problem ``(A x^2 + B x + C) v = 0`` and the equilibrated ``(D_l A D_r) x^2 +
-    (D_l B D_r) x + (D_l C D_r)`` have the **same eigenvalues**; eigenvectors
-    transform as ``v = D_r * v_eq``.
+    Thin adapter over the shared
+    :func:`ssik._pencil.equilibrate_three_matrix_pencil`; the actual logic
+    lives in :mod:`ssik._pencil` so the Husty-Pfurner pipeline (#162) can
+    reuse it for arbitrary-degree polynomial matrices.
 
-    ikfast does NOT do this (per #81 ikfast survey). Free win on chains where
-    coefficients span many orders of magnitude (e.g. JACO 2's 60-deg twists).
+    The quadratic eigenvalue problem ``(A x^2 + B x + C) v = 0`` and the
+    equilibrated ``(D_l A D_r) x^2 + (D_l B D_r) x + (D_l C D_r)`` have
+    the **same eigenvalues**; eigenvectors transform as ``v = D_r * v_eq``.
+    ikfast does NOT do this (per #81 ikfast survey).
 
-    :returns: ``(A_eq, B_eq, C_eq, d_l, d_r)`` where ``d_l, d_r`` are 1D scaling
-        vectors (diagonal entries of D_l, D_r).
+    :returns: ``(A_eq, B_eq, C_eq, d_l, d_r)``.
     """
-    row_max = np.maximum.reduce(
-        [np.abs(a).max(axis=1), np.abs(b).max(axis=1), np.abs(c).max(axis=1)]
-    )
-    row_max = np.where(row_max > 0, row_max, 1.0)
-    d_l = 1.0 / row_max
-    a1 = a * d_l[:, None]
-    b1 = b * d_l[:, None]
-    c1 = c * d_l[:, None]
-    col_max = np.maximum.reduce(
-        [np.abs(a1).max(axis=0), np.abs(b1).max(axis=0), np.abs(c1).max(axis=0)]
-    )
-    col_max = np.where(col_max > 0, col_max, 1.0)
-    d_r = 1.0 / col_max
-    a2 = a1 * d_r[None, :]
-    b2 = b1 * d_r[None, :]
-    c2 = c1 * d_r[None, :]
-    return a2, b2, c2, d_l, d_r
+    from ssik._pencil import equilibrate_three_matrix_pencil
+
+    return equilibrate_three_matrix_pencil(a, b, c)
 
 
 def solve_x2_roots(

@@ -50,10 +50,21 @@ if TYPE_CHECKING:  # pragma: no cover
 __all__ = [
     "hyperplane_residuals",
     "tv1_hyperplanes_rrr",
+    "tv1_symbolic_in_v1",
     "tv3_hyperplanes_rrr",
+    "tv3_symbolic_in_v3",
     "tv6_hyperplanes_rrr",
+    "tv6_symbolic_in_v6",
     "v1_hyperplanes_rrr",
 ]
+
+
+# Canonical sympy symbols used by all symbolic helpers in this module.
+# Cached once at import time to avoid repeated allocation; tests and
+# downstream code (``_eliminate.py``) reuse these for substitution.
+_V1_SYM = sp.symbols("v_1", real=True)
+_V3_SYM = sp.symbols("v_3", real=True)
+_V6_SYM = sp.symbols("v_6", real=True)
 
 
 def v1_hyperplanes_rrr(a_2: float, l_2: float) -> NDArray[np.float64]:
@@ -147,8 +158,9 @@ def _dq_conj_sym(s: sp.Matrix) -> sp.Matrix:
 
 
 @lru_cache(maxsize=1)
-def _build_tv1_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
-    """Build the lambdified runtime function for ``T(v_1)`` in the RRR case.
+def _build_tv1_rrr_symbolic() -> tuple[sp.Matrix, tuple[sp.Symbol, ...]]:
+    """Build the symbolic 4x8 ``T(v_1)`` coefficient matrix and the ordered
+    tuple of free symbols ``(v_1, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3)``.
 
     Symbolic pipeline:
 
@@ -157,16 +169,14 @@ def _build_tv1_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
     2. Compute ``tau = LEFT^* * sigma * RIGHT^*`` symbolically; this maps a
        point ``sigma`` in ``V_L`` to a (scalar-multiple of a) point in
        ``V_1`` per Capco eq. (4).
-    3. Apply the four ``V_1`` hyperplanes from eq. (5) to ``tau``; collect
-       the result as a 4-vec of polynomials in the ``sigma`` components,
-       with coefficients in ``(v_1, DH)``.
+    3. Apply the four ``V_1`` hyperplanes from eq. (5) to ``tau``.
     4. Extract the coefficient of each ``sigma`` component to get the
        ``T(v_1)`` 4x8 coefficient matrix.
 
-    The lambdified callable takes ``(v_1, a_1, l_1, d_2, a_2, l_2, d_3,
-    a_3, l_3)`` (in that order) and returns a 4x8 numpy array.
+    Cached so all callers (lambdified runtime + symbolic-substitution helpers
+    used by elimination) share one symbolic preprocessing pass.
     """
-    v_1 = sp.symbols("v_1", real=True)
+    v_1 = _V1_SYM
     a_1, l_1, d_2 = sp.symbols("a_1 l_1 d_2", real=True)
     a_2, l_2 = sp.symbols("a_2 l_2", real=True)
     d_3, a_3, l_3 = sp.symbols("d_3 a_3 l_3", real=True)
@@ -206,7 +216,6 @@ def _build_tv1_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
         ]
     )
 
-    # 4-vec of polynomials in (x, v_1, DH).
     hyperplanes_vl = v1_coeffs * tau
     c_new_sym = sp.zeros(4, 8)
     for i in range(4):
@@ -214,11 +223,48 @@ def _build_tv1_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
         for j in range(8):
             c_new_sym[i, j] = expr_i.coeff(x_syms[j])
 
-    return sp.lambdify(  # type: ignore[no-any-return]
-        (v_1, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3),
-        c_new_sym,
-        modules="numpy",
-    )
+    return c_new_sym, (v_1, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3)
+
+
+@lru_cache(maxsize=1)
+def _build_tv1_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
+    """Lambdified runtime version of ``T(v_1)``: numpy callable taking
+    ``(v_1, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3)`` and returning a 4x8
+    numpy array.
+    """
+    c_new_sym, args = _build_tv1_rrr_symbolic()
+    return sp.lambdify(args, c_new_sym, modules="numpy")  # type: ignore[no-any-return]
+
+
+def tv1_symbolic_in_v1(
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
+    d_3: float,
+    a_3: float,
+    l_3: float,
+) -> sp.Matrix:
+    """Return the 4x8 ``T(v_1)`` coefficient matrix as a sympy ``Matrix``
+    with ``v_1`` symbolic and DH parameters substituted numerically.
+
+    Used by the elimination pipeline (Phase 5d) to build the linear system
+    over ``C(v_1, v_6)``. ``ssik.solvers.husty_pfurner._constraints._V1_SYM``
+    is the sympy symbol used for ``v_1`` (cached at module import).
+    """
+    c_sym, (_v_1, p_a1, p_l1, p_d2, p_a2, p_l2, p_d3, p_a3, p_l3) = _build_tv1_rrr_symbolic()
+    subs = {
+        p_a1: sp.Float(a_1),
+        p_l1: sp.Float(l_1),
+        p_d2: sp.Float(d_2),
+        p_a2: sp.Float(a_2),
+        p_l2: sp.Float(l_2),
+        p_d3: sp.Float(d_3),
+        p_a3: sp.Float(a_3),
+        p_l3: sp.Float(l_3),
+    }
+    return c_sym.subs(subs)
 
 
 def tv1_hyperplanes_rrr(
@@ -285,22 +331,15 @@ def tv1_hyperplanes_rrr(
 
 
 @lru_cache(maxsize=1)
-def _build_tv3_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
-    """Build the lambdified runtime function for ``T(v_3)`` in the RRR case.
+def _build_tv3_rrr_symbolic() -> tuple[sp.Matrix, tuple[sp.Symbol, ...]]:
+    """Symbolic 4x8 ``T(v_3)`` Matrix and ordered ``(v_3, a_1, l_1, d_2,
+    a_2, l_2, d_3, a_3, l_3)`` symbol tuple.
 
-    Symbolic pipeline parallels :func:`_build_tv1_rrr_lambdified` with two
-    key differences:
-
-    1. The inner V_3 hyperplanes use ``(a_1, l_1)`` directly (eq. 5 of
-       Capco et al., no index substitution).
-    2. The change of variables is **one-sided** on the right only:
-       ``tau = sigma · POST^*`` where
-       ``POST = T_z(d_2) T_x(a_2) R_x(l_2) R_z(v_3) T_z(d_3) T_x(a_3) R_x(l_3)``.
-
-    The lambdified callable takes ``(v_3, a_1, l_1, d_2, a_2, l_2, d_3,
-    a_3, l_3)`` and returns a 4x8 numpy array.
+    Differs from ``T(v_1)`` in two ways: V_3 hyperplanes use ``(a_1, l_1)``
+    directly (Capco eq. 5, no index swap), and the change of variables
+    is one-sided on the right (``tau = sigma · POST^*``).
     """
-    v_3 = sp.symbols("v_3", real=True)
+    v_3 = _V3_SYM
     a_1, l_1 = sp.symbols("a_1 l_1", real=True)
     d_2, a_2, l_2 = sp.symbols("d_2 a_2 l_2", real=True)
     d_3, a_3, l_3 = sp.symbols("d_3 a_3 l_3", real=True)
@@ -323,7 +362,6 @@ def _build_tv3_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
     def rx(t: sp.Symbol) -> sp.Matrix:
         return sp.Matrix([one, t, zero, zero, zero, zero, zero, zero])
 
-    # POST = T_z(d_2) T_x(a_2) R_x(l_2) R_z(v_3) T_z(d_3) T_x(a_3) R_x(l_3)
     post = _dq_mul_sym(
         tz(d_2),
         _dq_mul_sym(
@@ -335,11 +373,8 @@ def _build_tv3_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
         ),
     )
     post_conj = _dq_conj_sym(post)
-
-    # tau = sigma · POST^* (one-sided)
     tau = _dq_mul_sym(sigma_sym, post_conj)
 
-    # V_3 hyperplanes use (a_1, l_1) directly per Capco eq. (5).
     v3_coeffs = sp.Matrix(
         [
             [a_1 * l_1, zero, zero, zero, sp.Integer(2), zero, zero, zero],
@@ -356,11 +391,47 @@ def _build_tv3_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
         for j in range(8):
             c_new_sym[i, j] = expr_i.coeff(x_syms[j])
 
-    return sp.lambdify(  # type: ignore[no-any-return]
-        (v_3, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3),
-        c_new_sym,
-        modules="numpy",
-    )
+    return c_new_sym, (v_3, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3)
+
+
+@lru_cache(maxsize=1)
+def _build_tv3_rrr_lambdified() -> Callable[..., NDArray[np.float64]]:
+    """Lambdified runtime function for ``T(v_3)`` in RRR. Numpy callable
+    taking ``(v_3, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3)``.
+    """
+    c_new_sym, args = _build_tv3_rrr_symbolic()
+    return sp.lambdify(args, c_new_sym, modules="numpy")  # type: ignore[no-any-return]
+
+
+def tv3_symbolic_in_v3(
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
+    d_3: float,
+    a_3: float,
+    l_3: float,
+) -> sp.Matrix:
+    """Return the 4x8 ``T(v_3)`` coefficient matrix as a sympy ``Matrix``
+    with ``v_3`` symbolic and DH parameters substituted numerically.
+
+    Parallel to :func:`tv1_symbolic_in_v1` for the alternative left-chain
+    parametrisation. The free symbol is
+    ``ssik.solvers.husty_pfurner._constraints._V3_SYM``.
+    """
+    c_sym, (_v_3, p_a1, p_l1, p_d2, p_a2, p_l2, p_d3, p_a3, p_l3) = _build_tv3_rrr_symbolic()
+    subs = {
+        p_a1: sp.Float(a_1),
+        p_l1: sp.Float(l_1),
+        p_d2: sp.Float(d_2),
+        p_a2: sp.Float(a_2),
+        p_l2: sp.Float(l_2),
+        p_d3: sp.Float(d_3),
+        p_a3: sp.Float(a_3),
+        p_l3: sp.Float(l_3),
+    }
+    return c_sym.subs(subs)
 
 
 def tv3_hyperplanes_rrr(
@@ -525,3 +596,63 @@ def tv6_hyperplanes_rrr(
     )
     M_e = _dq_left_mult_matrix(sigma_e_conj)
     return coeffs_pre_sigma_e @ M_e
+
+
+def tv6_symbolic_in_v6(
+    a_4: float,
+    l_4: float,
+    d_4: float,
+    a_5: float,
+    l_5: float,
+    d_5: float,
+    sigma_E: NDArray[np.float64],
+) -> sp.Matrix:
+    """Return the 4x8 ``T(v_6)`` coefficient matrix as a sympy ``Matrix``
+    with ``v_6`` symbolic and DH + ``sigma_E`` substituted numerically.
+
+    Mirrors :func:`tv6_hyperplanes_rrr` but keeps ``v_6`` symbolic for use
+    in the elimination pipeline. The free symbol is
+    ``ssik.solvers.husty_pfurner._constraints._V6_SYM``.
+
+    Implementation: build ``T(v_1)`` symbolic with the Capco eq. (6)
+    parameter substitutions (``v_1 -> -v_6``, ``a_1 -> -a_5``, etc.) so
+    the result is a sympy matrix in ``v_6``. Then apply the
+    ``sigma_E^*`` left-multiplication numerically (since ``sigma_E`` is
+    given as a fully-numeric 8-vec).
+    """
+    sigma_e_arr = np.asarray(sigma_E, dtype=np.float64)
+    if sigma_e_arr.shape != (8,):
+        raise ValueError(f"sigma_E must be 8-vec, got shape {sigma_e_arr.shape}")
+    # Step 1-3: substituted T(v_1) symbolic. We DO NOT call
+    # tv1_symbolic_in_v1 directly because that returns a Matrix in v_1 --
+    # we want it in v_6. Substitute v_1 -> -v_6 after.
+    tv1_sub = tv1_symbolic_in_v1(
+        a_1=-a_5,
+        l_1=-l_5,
+        d_2=-d_5,
+        a_2=-a_4,
+        l_2=-l_4,
+        d_3=-d_4,
+        a_3=0.0,
+        l_3=0.0,
+    )
+    # Substitute v_1 -> -v_6.
+    coeffs_pre_sigma_e = tv1_sub.subs(_V1_SYM, -_V6_SYM)
+
+    # Step 4: numerical sigma_E^* left-mult.
+    sigma_e_conj = np.array(
+        [
+            sigma_e_arr[0],
+            -sigma_e_arr[1],
+            -sigma_e_arr[2],
+            -sigma_e_arr[3],
+            sigma_e_arr[4],
+            -sigma_e_arr[5],
+            -sigma_e_arr[6],
+            -sigma_e_arr[7],
+        ],
+        dtype=np.float64,
+    )
+    M_e = _dq_left_mult_matrix(sigma_e_conj)
+    M_e_sym = sp.Matrix(M_e.tolist())
+    return coeffs_pre_sigma_e * M_e_sym
