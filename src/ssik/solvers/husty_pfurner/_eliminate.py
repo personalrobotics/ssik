@@ -73,6 +73,7 @@ __all__ = [
     "compute_fg_numeric",
     "eliminate_uw",
     "eliminate_uw_numeric",
+    "eliminate_uw_pairs",
     "evaluate_poly",
     "extract_uv_linear_tensor",
     "polynomial_residual",
@@ -627,51 +628,32 @@ def _build_fg_closures(
 _HP_CLUSTER_TOL = 1e-7
 
 
-def eliminate_uw_numeric(
+def eliminate_uw_pairs(
     pre: EliminatePrecompute,
     sigma_E: NDArray[np.float64],
     *,
     drop_indices: tuple[int, ...] = (7, 4, 0),
     residue_tol: float = _NEWTON_RESIDUE_TOL,
 ) -> NDArray[np.float64]:
-    """Run the full HP elimination pipeline on numeric inputs.
+    """Run the HP elimination pipeline; return refined ``(u, w)`` pairs.
 
-    Three-stage architecture, no tunable heuristics in the hot path:
+    Identical pipeline to :func:`eliminate_uw_numeric` but returns the
+    full bivariate candidates, not just the ``u`` projection. Phase 5f
+    back-substitution consumes ``(u, w)`` pairs; the public
+    :func:`eliminate_uw_numeric` wraps this and projects to ``u`` only
+    for callers that need just the ``v_1`` candidates.
 
-    1. **Algebraic coverage** (matrix pencil, 2 drops). Run the
-       Sylvester pencil eigsolve for each ``drop_idx`` in
-       ``drop_indices``. Each drop produces ``O(eps * cond)``
-       approximate ``(u_i, w_i)`` pairs; different drops cover
-       different parts of the V_L cap V_R variety (left-chain
-       rows ``{0..3}`` vs right-chain rows ``{4..7}``). Two
-       drops from complementary blocks guarantee coverage of every
-       IK candidate. Default ``(7, 4)``.
-    2. **Newton refinement** of every candidate against the
-       bivariate residual ``[f(u, w); g(u, w)] = 0`` via the
-       shared :func:`ssik._pencil.newton_refine_system`. Quadratic
-       convergence at simple roots; converges to machine precision
-       in 3 iterations from any pencil starting point at 1e-3.
-    3. **Residue filter + cluster merge**. Drop candidates whose
-       post-Newton residue stays above ``residue_tol`` (spurious
-       eigenvalues from the pencil's null space). Cluster-merge
-       near-duplicates within ``sqrt(float64 eps)`` -- handles
-       multiplicity-k root splits per Wilkinson 1965 and
-       collapses duplicates from the multiple drops.
-
-    :param pre: per-arm precomputed tensors (DH baked).
-    :param sigma_E: 8-vec Study DQ of the target end-effector pose.
-    :param drop_indices: tuple of drop-row indices. Default ``(7, 4)``.
-    :param residue_tol: maximum post-Newton relative residue
-        ``|f(u, w)|/Sigma|f[p,q]||u|^p|w|^q`` for accepted candidates.
-        Default 1e-12 (10 digits under float64 machine epsilon).
-
-    :returns: sorted 1-D array of real candidate ``u = v_1`` values.
+    :returns: 2-D array of shape ``(n, 2)`` with rows
+        ``[u_i, w_i]`` sorted lexicographically by ``u`` then ``w``.
+        Cluster-merging operates in 2-D Euclidean distance, so two
+        candidates at the same ``u`` but different ``w`` are kept
+        separate -- they are physically distinct IK solutions.
     """
     if not drop_indices:
         raise ValueError("drop_indices must be non-empty")
-    from ssik._pencil import cluster_merge_1d, newton_refine_system
+    from ssik._pencil import newton_refine_system
 
-    refined: list[float] = []
+    refined: list[tuple[float, float]] = []
     last_error: Exception | None = None
     for di in drop_indices:
         try:
@@ -700,10 +682,78 @@ def eliminate_uw_numeric(
                 tol=residue_tol,
             )
             if residue < residue_tol:
-                refined.append(float(x_ref[0]))
+                refined.append((float(x_ref[0]), float(x_ref[1])))
     if not refined and last_error is not None:
         raise last_error
-    return np.asarray(cluster_merge_1d(refined, tol=_HP_CLUSTER_TOL), dtype=np.float64)
+    if not refined:
+        return np.empty((0, 2), dtype=np.float64)
+    # Cluster-merge in (u, w) Euclidean space. Multiplicity-k splits and
+    # duplicates from different drops cluster within sqrt(eps); two
+    # genuinely distinct IK solutions stay separate.
+    refined.sort()
+    deduped: list[list[float]] = [list(refined[0])]
+    for uw in refined[1:]:
+        ref = deduped[-1]
+        d2 = (uw[0] - ref[0]) ** 2 + (uw[1] - ref[1]) ** 2
+        scale = 1.0 + abs(ref[0]) + abs(ref[1])
+        if d2 <= (_HP_CLUSTER_TOL * scale) ** 2:
+            # Merge: average into the cluster centroid.
+            ref[0] = 0.5 * (ref[0] + uw[0])
+            ref[1] = 0.5 * (ref[1] + uw[1])
+        else:
+            deduped.append(list(uw))
+    return np.asarray(deduped, dtype=np.float64)
+
+
+def eliminate_uw_numeric(
+    pre: EliminatePrecompute,
+    sigma_E: NDArray[np.float64],
+    *,
+    drop_indices: tuple[int, ...] = (7, 4, 0),
+    residue_tol: float = _NEWTON_RESIDUE_TOL,
+) -> NDArray[np.float64]:
+    """Run the full HP elimination pipeline; return refined ``v_1`` candidates.
+
+    Three-stage architecture, no tunable heuristics in the hot path:
+
+    1. **Algebraic coverage** (matrix pencil, multi-drop). Run the
+       Sylvester pencil eigsolve for each ``drop_idx`` in
+       ``drop_indices``. Each drop produces ``O(eps * cond)``
+       approximate ``(u_i, w_i)`` pairs; different drops cover
+       different parts of the V_L cap V_R variety (left-chain
+       rows ``{0..3}`` vs right-chain rows ``{4..7}``). The default
+       ``(7, 4, 0)`` -- two right-chain + one left-chain -- guarantees
+       coverage of every IK candidate.
+    2. **Newton refinement** of every candidate against the
+       bivariate residual ``[f(u, w); g(u, w)] = 0`` via the
+       shared :func:`ssik._pencil.newton_refine_system`. Quadratic
+       convergence at simple roots.
+    3. **Residue filter + cluster merge**. Drop candidates whose
+       post-Newton residue stays above ``residue_tol`` (spurious
+       eigenvalues). Cluster-merge near-duplicates within
+       ``sqrt(float64 eps)``.
+
+    :param pre: per-arm precomputed tensors (DH baked).
+    :param sigma_E: 8-vec Study DQ of the target end-effector pose.
+    :param drop_indices: tuple of drop-row indices. Default ``(7, 4, 0)``.
+    :param residue_tol: maximum post-Newton relative residue.
+
+    :returns: sorted 1-D array of real candidate ``u = v_1`` values.
+    """
+    pairs = eliminate_uw_pairs(
+        pre, sigma_E, drop_indices=drop_indices, residue_tol=residue_tol
+    )
+    if pairs.size == 0:
+        return np.asarray([], dtype=np.float64)
+    # Project to u only; re-cluster in 1-D since two pairs at the same u
+    # but different w (genuinely distinct IK solutions) collapse to a
+    # single u value.
+    from ssik._pencil import cluster_merge_1d
+
+    return np.asarray(
+        cluster_merge_1d(pairs[:, 0].tolist(), tol=_HP_CLUSTER_TOL),
+        dtype=np.float64,
+    )
 
 
 # =============================================================================
