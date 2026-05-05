@@ -171,17 +171,46 @@ class EliminatePrecompute:
         This is ``T(v_6)`` BEFORE the ``sigma_E^*`` left-multiplication.
         At IK call time, the runtime multiplies by an 8x8 matrix derived
         from ``sigma_E`` to get the final ``T_w``.
+    :ivar parametric_var: which joint variable the ``u`` axis represents.
+        ``"v_1"`` for the default ``T(v_1)`` left-chain parametrization;
+        ``"v_2"`` for ``T(v_2)`` (RRR double-degenerate fallback per
+        Capco; #176). The back-substitution path branches on this --
+        recovering different joint-tuples from the ``(u, w)`` pair.
+    :ivar tv2_case_key: the Capco RRR Tv2 sub-case key when
+        ``parametric_var == "v_2"`` (one of
+        :data:`ssik.solvers.husty_pfurner._constraints.TV2_RRR_CASE_KEYS`).
+        ``None`` for the ``T(v_1)`` path.
     """
 
-    __slots__ = ("T_u", "T_w_pre")
+    __slots__ = ("T_u", "T_w_pre", "parametric_var", "tv2_case_key")
 
-    def __init__(self, T_u: NDArray[np.float64], T_w_pre: NDArray[np.float64]) -> None:
+    def __init__(
+        self,
+        T_u: NDArray[np.float64],
+        T_w_pre: NDArray[np.float64],
+        parametric_var: str = "v_1",
+        tv2_case_key: str | None = None,
+    ) -> None:
         if T_u.shape != (4, 8, 2):
             raise ValueError(f"T_u must be (4, 8, 2), got {T_u.shape}")
         if T_w_pre.shape != (4, 8, 2):
             raise ValueError(f"T_w_pre must be (4, 8, 2), got {T_w_pre.shape}")
+        if parametric_var not in ("v_1", "v_2"):
+            raise ValueError(
+                f"parametric_var must be 'v_1' or 'v_2', got {parametric_var!r}"
+            )
+        if parametric_var == "v_2" and tv2_case_key is None:
+            raise ValueError(
+                "parametric_var='v_2' requires tv2_case_key to be set"
+            )
+        if parametric_var == "v_1" and tv2_case_key is not None:
+            raise ValueError(
+                "parametric_var='v_1' should not carry a tv2_case_key"
+            )
         self.T_u = T_u.astype(np.float64, copy=True)
         self.T_w_pre = T_w_pre.astype(np.float64, copy=True)
+        self.parametric_var = parametric_var
+        self.tv2_case_key = tv2_case_key
 
 
 def extract_uv_linear_tensor(M_sym: sp.Matrix, var: sp.Symbol) -> NDArray[np.float64]:
@@ -222,6 +251,8 @@ def precompute_from_sympy(
     u_sym: sp.Symbol,
     T_w_pre_sym: sp.Matrix,
     w_sym: sp.Symbol,
+    parametric_var: str = "v_1",
+    tv2_case_key: str | None = None,
 ) -> EliminatePrecompute:
     """Build per-arm :class:`EliminatePrecompute` from sympy matrices.
 
@@ -229,10 +260,15 @@ def precompute_from_sympy(
     :param T_w_pre_sym: 4x8 sympy matrix; entries linear in ``w_sym``, DH
         numeric, but BEFORE ``sigma_E^*`` left-multiplication. (``T_w`` then
         equals ``T_w_pre @ M(sigma_E)`` at IK time -- linear in ``sigma_E``.)
+    :param parametric_var: which joint variable ``u_sym`` represents
+        (``"v_1"`` or ``"v_2"``). Forwarded to
+        :class:`EliminatePrecompute`.
+    :param tv2_case_key: when ``parametric_var=="v_2"``, the Capco RRR
+        Tv2 sub-case key. Forwarded to :class:`EliminatePrecompute`.
     """
     T_u = extract_uv_linear_tensor(T_u_sym, u_sym)
     T_w_pre = extract_uv_linear_tensor(T_w_pre_sym, w_sym)
-    return EliminatePrecompute(T_u, T_w_pre)
+    return EliminatePrecompute(T_u, T_w_pre, parametric_var, tv2_case_key)
 
 
 _TV1_DEGEN_WARNED: set[tuple[float, ...]] = set()
@@ -376,7 +412,9 @@ def precompute_rrr_chain(
         tv1_symbolic_in_v1,
     )
 
-    T_u_sym = tv1_symbolic_in_v1(a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3).subs(_V1_SYM, _V1_SYM)
+    # T_w_pre uses T(v_6) for the right chain regardless of left-chain
+    # parametrization choice -- right-mirror dispatch (T(v_4)/T(v_5))
+    # is tracked in #177.
     T_w_pre_sym = tv1_symbolic_in_v1(
         a_1=-a_5,
         l_1=-l_5,
@@ -387,7 +425,32 @@ def precompute_rrr_chain(
         a_3=0.0,
         l_3=0.0,
     ).subs(_V1_SYM, -_V6_SYM)
-    return precompute_from_sympy(T_u_sym, _V1_SYM, T_w_pre_sym, _V6_SYM)
+
+    # Left-chain dispatch SCAFFOLDING (currently always uses Tv1, even
+    # when degenerate): the symbolic Tv2 hyperplanes are ready
+    # (``ssik.solvers.husty_pfurner._constraints.tv2_symbolic_in_v2``,
+    # ``tv2_hyperplanes_rrr``) and the back-sub variant
+    # (``_back_substitute._back_sub_tv2_left``) is implemented, but the
+    # 8x8 Cramer + Sylvester pencil **elimination architecture** in
+    # ``compute_fg_numeric`` / ``_cramer_8vec_via_interp`` currently
+    # only handles the rank-7 system T_v1 produces. The Tv2 case
+    # substitution adds extra V_L hyperplanes (kernel dim of the
+    # 12x16 matrix can be > 4 at the case-substituted DH), so the
+    # downstream stacked 8x8 system has rank 6 (kernel dim 2) at the
+    # IK -- Cramer fails to extract a 1-D kernel.
+    #
+    # Fixing this requires re-architecting the elimination to handle
+    # m-of-n linear systems with m > n + 1 (i.e. accept all kernel
+    # basis vectors from Tv2's case-substituted 12x16, stack them
+    # with T_w, take the rank-7 stacked system's kernel via SVD with
+    # Study-quadric disambiguation). Substantial work; the partial
+    # Tv2 infrastructure landing here is the foundation.
+    T_u_sym = tv1_symbolic_in_v1(
+        a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3
+    ).subs(_V1_SYM, _V1_SYM)
+    return precompute_from_sympy(
+        T_u_sym, _V1_SYM, T_w_pre_sym, _V6_SYM, parametric_var="v_1"
+    )
 
 
 def _apply_sigma_e_to_tw_pre(

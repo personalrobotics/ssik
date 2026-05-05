@@ -220,6 +220,78 @@ def _cramer_P_at(
     return P
 
 
+def _back_sub_tv2_left(
+    P: NDArray[np.float64],
+    v_2: float,
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
+    d_3: float,
+    a_3: float,
+    l_3: float,
+) -> tuple[float, float]:
+    """Recover ``(v_1, v_3)`` from the Cramer cofactor when the
+    parametric variable is ``v_2`` (Tv2 path).
+
+    For the Tv2 left chain, ``P`` is projectively
+    ``sigma_1(v_1) sigma_2(v_2) sigma_3(v_3)``. Splitting:
+
+        Q' = P . sigma_3_DH^-1
+           = sigma_1(v_1) sigma_2(v_2) R_z(v_3)
+        M  = Sigma_1 . sigma_2(v_2)
+           where Sigma_1 = T_x(a_1) R_x(l_1)  (joint-1 DH, no v_1)
+
+    Then ``R_z(v_1) M R_z(v_3) = Q'``. Solve in two stages:
+
+    1. Translation alignment in the xy-plane gives ``v_1`` via atan2.
+    2. The residual rotation ``M_R^{-1} R_z(-v_1) Q'_R`` must be
+       ``R_z(v_3)``; extract ``v_3`` via atan2.
+
+    Closed-form, exact at machine precision when M and Q' have
+    non-degenerate translation magnitudes in xy.
+    """
+    P_se3 = se3_from_dq(P)
+
+    # Joint-3 DH offset: T_z(d_3) T_x(a_3) R_x(l_3) (no v_3 rotation).
+    j3_dh_dq = dq_mul(
+        _sigma_tz(d_3), dq_mul(_sigma_tx(a_3), _sigma_rx(l_3))
+    )
+    j3_se3 = se3_from_dq(j3_dh_dq)
+    Q_prime = P_se3 @ np.linalg.inv(j3_se3)
+
+    # Sigma_1 = T_x(a_1) R_x(l_1) (joint-1 DH; d_1 = 0 by HP convention,
+    # no v_1 rotation here).
+    sigma_1_dh_dq = dq_mul(_sigma_tx(a_1), _sigma_rx(l_1))
+    sigma_2_v2_dq = _sigma_joint_full(v_2, a_2, l_2, d_2)
+    M_dq = dq_mul(sigma_1_dh_dq, sigma_2_v2_dq)
+    M_se3 = se3_from_dq(M_dq)
+
+    # Stage 1: translation alignment for v_1.
+    M_t = M_se3[:3, 3]
+    Q_t = Q_prime[:3, 3]
+    theta_M = float(np.arctan2(M_t[1], M_t[0]))
+    theta_Q = float(np.arctan2(Q_t[1], Q_t[0]))
+    theta_1 = theta_Q - theta_M
+    v_1 = float(np.tan(0.5 * theta_1))
+
+    # Stage 2: rotation residual for v_3.
+    c1 = float(np.cos(theta_1))
+    s1 = float(np.sin(theta_1))
+    Rz_neg_v1 = np.array(
+        [[c1, s1, 0.0], [-s1, c1, 0.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    M_R = M_se3[:3, :3]
+    Q_R = Q_prime[:3, :3]
+    R_residual = M_R.T @ Rz_neg_v1 @ Q_R
+    theta_3 = float(np.arctan2(R_residual[1, 0], R_residual[0, 0]))
+    v_3 = float(np.tan(0.5 * theta_3))
+
+    return v_1, v_3
+
+
 def back_substitute_one(
     pre: EliminatePrecompute,
     sigma_E: NDArray[np.float64],
@@ -240,39 +312,59 @@ def back_substitute_one(
     d_5: float,
     a_5: float,
     l_5: float,
-) -> list[tuple[float, float, float, float]]:
-    """Recover ``(v_2, v_3, v_4, v_5)`` for one ``(u, w)`` candidate.
+) -> list[tuple[float, float, float, float, float, float]]:
+    """Recover the full 6-tuple ``(v_1, v_2, v_3, v_4, v_5, v_6)``
+    for one ``(u, w)`` candidate.
 
-    See module docstring for the algorithm. Returns a list because
-    each 2R sub-decomposition can in principle yield multiple
-    branches (though in this DH convention the closed-form atan2
-    yields a single solution per sub-chain; near gimbal lock there
-    is a 1-parameter family that we represent by a single sample).
+    Branches on ``pre.parametric_var``:
+
+    * ``"v_1"``: ``(u, w) == (v_1, v_6)``. Cramer cofactor
+      ``P = sigma_1(v_1) sigma_2 sigma_3`` projectively. Two 2R
+      sub-chain decompositions recover ``(v_2, v_3)`` from
+      ``sigma_1^-1 P`` and ``(v_4, v_5)`` from
+      ``P^-1 sigma_E sigma_6^-1``.
+    * ``"v_2"``: ``(u, w) == (v_2, v_6)``. Same Cramer cofactor; left
+      chain becomes ``R_z(v_1) M(v_2) R_z(v_3) = P sigma_3_DH^-1``,
+      solved by translation/rotation atan2 (see
+      :func:`_back_sub_tv2_left`). Right chain unchanged.
+
+    Returns a list because each 2R sub-decomposition can in principle
+    yield multiple branches (though in this DH convention the closed-
+    form atan2 yields a single solution per sub-chain).
 
     Caller must pass DH parameters explicitly because the
     ``EliminatePrecompute`` tensors don't preserve them in a
     recoverable form.
     """
-    # Build sigma_1(u) and sigma_6(w).
-    sigma_1 = _sigma_joint_full(u, a_1, l_1, 0.0)  # joint 1: a_6 = d_6 = l_6 = 0 convention
-    sigma_6 = _sigma_z(w)
-
     # Recover the Cramer cofactor P(u, w) at this refined point.
     P = _cramer_P_at(pre, sigma_E, u, w)
+    sigma_6 = _sigma_z(w)
 
-    # Compute the two 2R chain targets:
-    #   sigma_left  = sigma_2(v_2) sigma_3(v_3) = sigma_1(u)^-1 . P
-    #   sigma_right = sigma_4(v_4) sigma_5(v_5) = P^-1 . sigma_E . sigma_6(w)^-1
-    sigma_left = dq_mul(_dq_inv(sigma_1), P)
+    # Right chain is identical for v_1 and v_2 parametrisations:
+    # sigma_4(v_4) sigma_5(v_5) = P^-1 . sigma_E . sigma_6(w)^-1
     sigma_right = dq_mul(_dq_inv(P), dq_mul(sigma_E, _dq_inv(sigma_6)))
-
-    # Decompose directly on the projective Study DQ targets (no SE(3)
-    # conversion needed; the full-8-vec back-sub uses both rotation
-    # and translation components).
-    sol_23 = _solve_2r_chain(sigma_left, a_2, l_2, d_2, a_3, l_3, d_3)
     sol_45 = _solve_2r_chain(sigma_right, a_4, l_4, d_4, a_5, l_5, d_5)
 
-    return [(v_2, v_3, v_4, v_5) for (v_2, v_3) in sol_23 for (v_4, v_5) in sol_45]
+    if pre.parametric_var == "v_2":
+        # Tv2 path: u is v_2, recover (v_1, v_3) via _back_sub_tv2_left.
+        v_2 = u
+        v_6 = w
+        v_1, v_3 = _back_sub_tv2_left(
+            P, v_2, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3
+        )
+        return [(v_1, v_2, v_3, v_4, v_5, v_6) for (v_4, v_5) in sol_45]
+
+    # Default Tv1 path: u is v_1.
+    v_1 = u
+    v_6 = w
+    sigma_1 = _sigma_joint_full(v_1, a_1, l_1, 0.0)  # d_1 = 0 per HP
+    sigma_left = dq_mul(_dq_inv(sigma_1), P)
+    sol_23 = _solve_2r_chain(sigma_left, a_2, l_2, d_2, a_3, l_3, d_3)
+    return [
+        (v_1, v_2, v_3, v_4, v_5, v_6)
+        for (v_2, v_3) in sol_23
+        for (v_4, v_5) in sol_45
+    ]
 
 
 def solve_ik(
@@ -361,13 +453,13 @@ def solve_ik(
             a_5=a_5,
             l_5=l_5,
         )
-        for v_2, v_3, v_4, v_5 in candidates:
+        for v_1, v_2, v_3, v_4, v_5, v_6 in candidates:
             if skip_chain_check:
-                out.append([float(u), v_2, v_3, v_4, v_5, float(w)])
+                out.append([v_1, v_2, v_3, v_4, v_5, v_6])
                 continue
             # FK closure: build the full 6R chain DQ and compare.
             sigma_chain = dq_mul(
-                _sigma_joint_full(float(u), a_1, l_1, 0.0),
+                _sigma_joint_full(v_1, a_1, l_1, 0.0),
                 dq_mul(
                     _sigma_joint_full(v_2, a_2, l_2, d_2),
                     dq_mul(
@@ -376,7 +468,7 @@ def solve_ik(
                             _sigma_joint_full(v_4, a_4, l_4, d_4),
                             dq_mul(
                                 _sigma_joint_full(v_5, a_5, l_5, d_5),
-                                _sigma_z(float(w)),
+                                _sigma_z(v_6),
                             ),
                         ),
                     ),
@@ -389,7 +481,7 @@ def solve_ik(
             residue_abs = float(np.linalg.norm(sigma_chain * scale - sigma_E_arr))
             residue_rel = residue_abs / max(sigma_E_norm, 1e-300)
             if residue_rel < fk_tol:
-                out.append([float(u), v_2, v_3, v_4, v_5, float(w)])
+                out.append([v_1, v_2, v_3, v_4, v_5, v_6])
 
     if not out:
         return np.empty((0, 6), dtype=np.float64)
