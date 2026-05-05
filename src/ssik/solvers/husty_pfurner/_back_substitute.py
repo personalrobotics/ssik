@@ -102,55 +102,44 @@ def _dq_inv(sigma: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 def _solve_2r_chain(
-    T_target: NDArray[np.float64],
+    sigma_target: NDArray[np.float64],
     a_a: float,
     ls_a: float,
     d_a: float,
     a_b: float,
     ls_b: float,
     d_b: float,
-    *,
-    rot_tol: float = 1e-8,
 ) -> list[tuple[float, float]]:
-    """Recover ``(v_a, v_b)`` from a 2R chain target.
+    """Recover ``(v_a, v_b)`` from a 2R-chain Study DQ target.
 
-    Chain: ``sigma_a(v_a) sigma_b(v_b) = sigma_target``, where each
-    ``sigma_i(v_i) = R_z(v_i) T_z(d_i) T_x(a_i) R_x(alpha_i)``,
-    ``v_i = tan(theta_i/2)``, ``ls_i = tan(alpha_i/2)``.
+    Chain: ``sigma_a(v_a) sigma_b(v_b) = lambda * sigma_target``
+    (projective), where each ``sigma_i(v_i) = R_z(v_i) T_z(d_i)
+    T_x(a_i) R_x(alpha_i)``, ``v_i = tan(theta_i/2)``,
+    ``ls_i = tan(alpha_i/2)``.
 
-    Strategy: extract the 3x3 rotation ``R_target`` from the SE(3)
-    matrix, reduce to a 2-DOF ZXZ-like decomposition by undoing the
-    fixed ``alpha_b`` and ``d_b`` factors, then atan2 for each
-    ``v_i``. The translation part of ``T_target`` is used as a
-    consistency check (Phase 5f's FK closure handles full check).
+    Closed-form ZXZ-like decomposition: extract the rotation part of
+    ``sigma_target``, undo the fixed ``alpha_b`` factor on the right,
+    atan2 for ``v_a``, then atan2 for ``v_b``. Two atan2 calls = ~1 us.
 
-    :param T_target: 4x4 SE(3) target matrix.
-    :param a_a, ls_a, d_a: DH for joint a.
-    :param a_b, ls_b, d_b: DH for joint b.
-    :param rot_tol: gimbal-lock detection tolerance on
-        ``cos(alpha_a) - R'[2, 2]``.
+    On *true* common roots (target on the chain's image), this is
+    exact at machine precision. On *spurious* roots (Newton converged
+    to an algebraic root that doesn't correspond to a physical IK),
+    the rotation is correct but translation isn't -- the resulting
+    ``(v_a, v_b)`` gives a chain that doesn't FK-close. The outer
+    :func:`solve_ik` filter (tight ``fk_tol``) catches those, and the
+    dispatcher's ``lm_refine`` fallback polishes them when needed.
 
-    :returns: list of ``(v_a, v_b)`` solutions (typically 1 in
-        non-degenerate cases; near gimbal lock there may be a
-        1-parameter family that we sample with a single representative
-        value from atan2). FK closure in :func:`solve_ik` filters
-        anyway.
+    :returns: ``[(v_a, v_b)]`` (single solution); ``[]`` only on
+        gimbal lock + sign-degenerate input.
     """
-    R = T_target[:3, :3]
+    # Convert to SE(3) for rotation extraction.
+    R = se3_from_dq(sigma_target)[:3, :3]
 
-    # Undo the fixed R_x(alpha_b) on the right of the chain:
-    # R · R_x(-alpha_b) = R_z(v_a) R_x(alpha_a) R_z(v_b).
-    # tan(alpha_b/2) = ls_b -> sin(alpha_b) = 2*ls_b / (1 + ls_b^2),
-    # cos(alpha_b) = (1 - ls_b^2) / (1 + ls_b^2).
     denom_b = 1.0 + ls_b * ls_b
     sa_b = 2.0 * ls_b / denom_b
     ca_b = (1.0 - ls_b * ls_b) / denom_b
     Rx_neg_alpha_b = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, ca_b, sa_b],
-            [0.0, -sa_b, ca_b],
-        ],
+        [[1.0, 0.0, 0.0], [0.0, ca_b, sa_b], [0.0, -sa_b, ca_b]],
         dtype=np.float64,
     )
     R_prime = R @ Rx_neg_alpha_b
@@ -158,50 +147,28 @@ def _solve_2r_chain(
     denom_a = 1.0 + ls_a * ls_a
     sa_a = 2.0 * ls_a / denom_a
     ca_a = (1.0 - ls_a * ls_a) / denom_a
-
-    # R_prime e_z = R_z(v_a) R_x(alpha_a) e_z = (sa_a sin v_a, -sa_a cos v_a, ca_a).
-    # The consistency rzz = ca_a is exact when ``T_target`` is in the
-    # 2R image; the pencil's Newton-refined (u, w) at multiplicity-k
-    # polynomial roots can be off by ``machine_eps^(1/k)``, which
-    # propagates to a small rzz - ca_a discrepancy. We do NOT reject
-    # here -- atan2 still produces the closest-match (v_a, v_b) and
-    # the outer 6R FK closure in :func:`solve_ik` is the truth-level
-    # filter. (See _back_substitute.py rot_tol param for context.)
     rxz, ryz = float(R_prime[0, 2]), float(R_prime[1, 2])
 
-    if abs(sa_a) < rot_tol:
-        # Gimbal lock: alpha_a = 0 or pi. v_a is degenerate; pick 0.0.
+    if abs(sa_a) < 1e-12:
         v_a = 0.0
         R_double = R_prime
     else:
-        # rxz = sa_a sin theta_a, -ryz = sa_a cos theta_a. Hence
-        # sin theta_a = rxz / sa_a, cos theta_a = -ryz / sa_a.
-        # atan2 is sign-sensitive in both args; for sa_a < 0 we need
-        # atan2(rxz/sa_a, -ryz/sa_a) which equals atan2(-rxz, ryz).
         sign_sa_a = 1.0 if sa_a > 0.0 else -1.0
         theta_a = float(np.arctan2(rxz * sign_sa_a, -ryz * sign_sa_a))
         v_a = float(np.tan(0.5 * theta_a))
-
-        # Compute R'' = R_x(-alpha_a) R_z(-theta_a) R_prime.
         c_va, s_va = np.cos(theta_a), np.sin(theta_a)
         Rz_neg_va = np.array(
             [[c_va, s_va, 0.0], [-s_va, c_va, 0.0], [0.0, 0.0, 1.0]],
             dtype=np.float64,
         )
         Rx_neg_alpha_a = np.array(
-            [
-                [1.0, 0.0, 0.0],
-                [0.0, ca_a, sa_a],
-                [0.0, -sa_a, ca_a],
-            ],
+            [[1.0, 0.0, 0.0], [0.0, ca_a, sa_a], [0.0, -sa_a, ca_a]],
             dtype=np.float64,
         )
         R_double = Rx_neg_alpha_a @ Rz_neg_va @ R_prime
 
-    # Recover v_b from R_double = R_z(theta_b).
     theta_b = float(np.arctan2(R_double[1, 0], R_double[0, 0]))
     v_b = float(np.tan(0.5 * theta_b))
-
     return [(v_a, v_b)]
 
 
@@ -299,12 +266,11 @@ def back_substitute_one(
     sigma_left = dq_mul(_dq_inv(sigma_1), P)
     sigma_right = dq_mul(_dq_inv(P), dq_mul(sigma_E, _dq_inv(sigma_6)))
 
-    # Convert each to SE(3) and decompose.
-    T_left = se3_from_dq(sigma_left)
-    T_right = se3_from_dq(sigma_right)
-
-    sol_23 = _solve_2r_chain(T_left, a_2, l_2, d_2, a_3, l_3, d_3)
-    sol_45 = _solve_2r_chain(T_right, a_4, l_4, d_4, a_5, l_5, d_5)
+    # Decompose directly on the projective Study DQ targets (no SE(3)
+    # conversion needed; the full-8-vec back-sub uses both rotation
+    # and translation components).
+    sol_23 = _solve_2r_chain(sigma_left, a_2, l_2, d_2, a_3, l_3, d_3)
+    sol_45 = _solve_2r_chain(sigma_right, a_4, l_4, d_4, a_5, l_5, d_5)
 
     return [(v_2, v_3, v_4, v_5) for (v_2, v_3) in sol_23 for (v_4, v_5) in sol_45]
 

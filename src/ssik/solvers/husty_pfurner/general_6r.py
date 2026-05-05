@@ -44,8 +44,9 @@ from numpy.typing import NDArray
 from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.poe_to_dh import poe_to_dh
-from ssik.refinement import lm_refine
+from ssik.refinement import kinbody_jacobian, verify_candidates
 from ssik.solvers.husty_pfurner._back_substitute import solve_ik
 from ssik.solvers.husty_pfurner._eliminate import precompute_rrr_chain
 from ssik.solvers.husty_pfurner._study import dq_from_se3
@@ -89,21 +90,20 @@ def solve(
     :param policy: tolerance policy. ``subproblem_numerical`` is the
         FK-closure threshold passed through to
         :func:`~ssik.solvers.husty_pfurner._back_substitute.solve_ik`.
-    :param allow_refinement: opt into Newton polish for candidates that
-        don't meet ``policy.subproblem_numerical`` on their own. Newton
-        is already part of the inner pipeline; this flag is currently
-        a no-op (kept for API parity with other solvers; #74 follow-up
-        will surface a tighter ``residue_tol`` override).
-    :param refinement_max_iters: parity with other solvers' API.
-        Currently unused.
+    :param allow_refinement: opt into Newton polish for seeds that
+        don't already meet ``policy.subproblem_numerical`` after
+        algebraic elimination + back-sub. Defaults to ``False`` to match
+        the other solvers' contract; Phase 5g multi-root configs (locked
+        Franka, etc.) require ``True`` to recover machine-precision IK
+        because pencil eigenvalues at multiplicity-k roots sit at
+        ``O(eps^{1/k})`` from truth.
+    :param refinement_max_iters: cap on Newton iterations per seed
+        when ``allow_refinement=True``.
 
     :returns: ``(solutions, is_ls)``. ``is_ls=True`` iff no candidate
         passed FK closure -- typically means the ``T_target`` is
         outside the workspace.
     """
-    del allow_refinement  # always-on; the multi-root configs Phase 5g sees
-    # routinely benefit (locked-Franka multiplicity-4 is unsolvable without
-    # post-back-sub Newton on the POE FK residual).
     if len(kb.joints) != 6:
         raise ValueError(f"husty_pfurner.general_6r requires a 6-joint chain, got {len(kb.joints)}")
 
@@ -195,62 +195,42 @@ def solve(
         _LOG.info("husty_pfurner.general_6r: no IK seeds from elimination")
         return [], True
 
-    # Newton polish: each algebraic seed -> machine-precision physical IK
-    # via :func:`ssik.refinement.lm_refine` on the SE(3) log residual.
-    # At multi-root configs (locked Franka, etc.) the algebraic seeds can
-    # be 1e-1 away from the true IK; lm_refine's quadratic convergence
-    # closes that gap in 3-5 iterations. Spurious seeds either fail to
-    # converge or land on the same physical solution as a good seed
-    # (collapsed by the dedup pass below).
-    fk_fn = lambda q: _fk_poe_chain(kb, q)  # noqa: E731
-    refined_solutions: list[tuple[NDArray[np.float64], float, int]] = []
-    for v in sols_v:
-        theta_dh = 2.0 * np.arctan(v)
-        q_seed = theta_dh - dh.theta_offset
-        result = lm_refine(
-            q_seed,
-            fk_fn,
-            t_target,
-            fk_atol=max(fk_atol, 1e-9),
-            max_iters=refinement_max_iters,
-        )
-        if result is None:
-            continue
-        refined_solutions.append(result)
+    # Tier-dispatch: convert each algebraic seed to q-space then hand the
+    # whole batch to :func:`ssik.refinement.verify_candidates`.
+    #
+    # Tier 0 -- the simple-root fast path: ``verify_candidates`` first
+    # FK-checks each seed against ``t_target``; clean seeds (residue
+    # already <= ``policy.subproblem_numerical``) are accepted without
+    # ever invoking Newton. Empirically this covers the bulk of poses
+    # on most arms (the algebraic seeds *are* the IK solutions modulo
+    # bridge round-off).
+    #
+    # Tier 1 -- multi-root fallback: seeds that fail the FK check (e.g.
+    # locked-Franka multiplicity-4 cluster, where pencil eigenvalues sit
+    # at O(eps^{1/4}) ~ 1e-4 from truth) get one ``lm_refine`` pass with
+    # the analytical :func:`kinbody_jacobian` and Cython
+    # :func:`poe_forward_kinematics`. Quadratic convergence closes the
+    # gap in 3-5 iterations.
+    fk_fn = lambda q: poe_forward_kinematics(kb, q)  # noqa: E731
+    jac_fn = lambda q: kinbody_jacobian(kb, q)  # noqa: E731
 
-    if not refined_solutions:
-        _LOG.info("husty_pfurner.general_6r: no IK seeds converged via lm_refine")
+    q_seeds = [2.0 * np.arctan(v) - dh.theta_offset for v in sols_v]
+
+    solutions = verify_candidates(
+        q_seeds,
+        fk_fn=fk_fn,
+        t_target=t_target,
+        fk_atol=fk_atol,
+        solver_name=_SOLVER_NAME,
+        dedup_atol=policy.subproblem_dedup,
+        allow_refinement=allow_refinement,
+        refinement_max_iters=refinement_max_iters,
+        jacobian_fn=jac_fn,
+    )
+
+    if not solutions:
+        _LOG.info("husty_pfurner.general_6r: no IK seeds passed FK closure or Newton polish")
         return [], True
-
-    # Dedup post-refinement: multiple seeds can converge to the same
-    # physical IK. Cluster by joint-wrap-angle distance using the policy
-    # tolerance.
-    dedup_tol = policy.subproblem_dedup
-    deduped: list[tuple[NDArray[np.float64], float, int]] = []
-    for q_ref, fk_residual, iters in refined_solutions:
-        is_dup = False
-        for q_existing, _, _ in deduped:
-            diffs = np.array(
-                [(((q_ref[i] - q_existing[i] + np.pi) % (2 * np.pi)) - np.pi) for i in range(6)]
-            )
-            if np.max(np.abs(diffs)) < dedup_tol:
-                is_dup = True
-                break
-        if not is_dup:
-            deduped.append((q_ref, fk_residual, iters))
-
-    solutions: list[Solution] = []
-    for branch_id, (q_ref, fk_residual, iters) in enumerate(deduped):
-        solutions.append(
-            Solution(
-                q=q_ref,
-                fk_residual=fk_residual,
-                refinement_used="lm",
-                refinement_iters=iters,
-                branch_id=branch_id,
-                solver_name=_SOLVER_NAME,
-            )
-        )
 
     _LOG.info(
         "husty_pfurner.general_6r: returned %d IK solutions (max fk_residual=%.3e)",
@@ -258,25 +238,3 @@ def solve(
         max(s.fk_residual for s in solutions),
     )
     return solutions, False
-
-
-def _fk_poe_chain(kb: KinBody, q: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Forward kinematics of the POE chain: same convention as the FK
-    used by :func:`ssik._kinbody.KinBody.fk_chain` (chain product of
-    joint twist exponentials in the POE base frame).
-    """
-    # KinBody POE FK: T = prod_i T_left @ exp(qi * axis_i_hat) @ T_right
-    # where axis_i is the screw axis. Use the helper if available; here
-    # we inline the standard FK in a way that mirrors test fixtures.
-    t_acc = np.eye(4, dtype=np.float64)
-    for joint, qi in zip(kb.joints, q, strict=True):
-        # Joint contribution: T_left @ axis-angle(qi) @ T_right
-        axis = np.asarray(joint.axis, dtype=np.float64)
-        c, s = float(np.cos(qi)), float(np.sin(qi))
-        kx, ky, kz = float(axis[0]), float(axis[1]), float(axis[2])
-        K = np.array([[0, -kz, ky], [kz, 0, -kx], [-ky, kx, 0]], dtype=np.float64)
-        R = np.eye(3) + s * K + (1.0 - c) * (K @ K)
-        joint_T = np.eye(4)
-        joint_T[:3, :3] = R
-        t_acc = t_acc @ joint.T_left @ joint_T @ joint.T_right
-    return t_acc
