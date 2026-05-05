@@ -413,6 +413,24 @@ def _dropped_row_g(
     return out
 
 
+def _compute_fg_with_tw(
+    T_u: NDArray[np.float64],
+    T_w: NDArray[np.float64],
+    drop_idx: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Cramer + Study-quadric + dropped-row substitution given the
+    pre-computed ``T_u`` and ``T_w`` tensors. Internal hot-path helper:
+    ``T_w = _apply_sigma_e_to_tw_pre(pre.T_w_pre, sigma_E)`` is
+    drop-independent, so multi-drop callers compute it once and reuse.
+    """
+    if not 0 <= drop_idx < 8:
+        raise ValueError(f"drop_idx must be in [0, 8), got {drop_idx}")
+    P_coef = _cramer_8vec_via_interp(T_u, T_w, drop_idx)
+    f = _study_quadric_f(P_coef)
+    g = _dropped_row_g(T_u, T_w, P_coef, drop_idx)
+    return f, g
+
+
 def compute_fg_numeric(
     pre: EliminatePrecompute,
     sigma_E: NDArray[np.float64],
@@ -426,14 +444,9 @@ def compute_fg_numeric(
     :returns: ``(f, g)`` where ``f`` is ``(9, 7)`` and ``g`` is ``(6, 5)``.
         Indexing is ``f[i, j] = coeff of u^i w^j``.
     """
-    if not 0 <= drop_idx < 8:
-        raise ValueError(f"drop_idx must be in [0, 8), got {drop_idx}")
     sigma_E_arr = np.asarray(sigma_E, dtype=np.float64)
     T_w = _apply_sigma_e_to_tw_pre(pre.T_w_pre, sigma_E_arr)
-    P_coef = _cramer_8vec_via_interp(pre.T_u, T_w, drop_idx)
-    f = _study_quadric_f(P_coef)
-    g = _dropped_row_g(pre.T_u, T_w, P_coef, drop_idx)
-    return f, g
+    return _compute_fg_with_tw(pre.T_u, T_w, drop_idx)
 
 
 # =============================================================================
@@ -770,11 +783,18 @@ def eliminate_uw_pairs(
         raise ValueError("drop_indices must be non-empty")
     accept_tol = accept_residue_tol if accept_residue_tol is not None else residue_tol
 
+    # Hoist the drop-independent ``T_w`` precompute out of the per-drop
+    # loop. ``_apply_sigma_e_to_tw_pre`` only depends on ``sigma_E`` and
+    # the per-arm ``T_w_pre``, not on ``drop_idx``; calling
+    # ``compute_fg_numeric`` per drop was redoing it 3x.
+    sigma_E_arr = np.asarray(sigma_E, dtype=np.float64)
+    T_w = _apply_sigma_e_to_tw_pre(pre.T_w_pre, sigma_E_arr)
+
     refined: list[tuple[float, float]] = []
     last_error: Exception | None = None
     for di in drop_indices:
         try:
-            f, g = compute_fg_numeric(pre, sigma_E, drop_idx=di)
+            f, g = _compute_fg_with_tw(pre.T_u, T_w, di)
         except np.linalg.LinAlgError as e:
             last_error = e
             continue

@@ -170,8 +170,9 @@ def solve(
     # Pass loose tolerances so solve_ik returns ALL back-sub seeds, not
     # only those that algebraically close to full HP precision:
     #
-    # - ``fk_tol=0.5``: accept every back-sub q as a seed (the projective
-    #   Study DQ residue check is essentially disabled).
+    # - ``fk_tol=0.5``: skips the projective Study-DQ closure check
+    #   inside solve_ik (downstream verify_candidates does the FK
+    #   closure in POE space; the in-flight check is wasted overhead).
     # - ``accept_residue_tol=1e-3``: don't reject pass-1 (u, w)
     #   candidates whose 2-D Newton bottomed out above 1e-12. At
     #   multi-root degenerate poses (locked-Franka multiplicity-4
@@ -204,22 +205,13 @@ def solve(
         _LOG.info("husty_pfurner.general_6r: no IK seeds from elimination")
         return [], True
 
-    # Tier-dispatch: convert each algebraic seed to q-space then hand the
-    # whole batch to :func:`ssik.refinement.verify_candidates`.
-    #
-    # Tier 0 -- the simple-root fast path: ``verify_candidates`` first
-    # FK-checks each seed against ``t_target``; clean seeds (residue
-    # already <= ``policy.subproblem_numerical``) are accepted without
-    # ever invoking Newton. Empirically this covers the bulk of poses
-    # on most arms (the algebraic seeds *are* the IK solutions modulo
-    # bridge round-off).
-    #
-    # Tier 1 -- multi-root fallback: seeds that fail the FK check (e.g.
-    # locked-Franka multiplicity-4 cluster, where pencil eigenvalues sit
-    # at O(eps^{1/4}) ~ 1e-4 from truth) get one ``lm_refine`` pass with
-    # the analytical :func:`kinbody_jacobian` and Cython
-    # :func:`poe_forward_kinematics`. Quadratic convergence closes the
-    # gap in 3-5 iterations.
+    # Tier-dispatch: convert each algebraic seed to q-space then hand
+    # the whole batch to verify_candidates. Tier 0 = FK-check accepts
+    # clean seeds without Newton; tier 1 = lm_refine polishes seeds
+    # that fail the FK check (e.g. locked-Franka multiplicity-4
+    # cluster). The analytical kinbody_jacobian + Cython
+    # poe_forward_kinematics + lm_refine divergence-abort make the
+    # per-spurious-seed cost ~150 us instead of 1 ms.
     fk_fn = lambda q: poe_forward_kinematics(kb, q)  # noqa: E731
     jac_fn = lambda q: kinbody_jacobian(kb, q)  # noqa: E731
 
