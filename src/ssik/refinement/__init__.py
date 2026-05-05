@@ -169,6 +169,8 @@ def lm_refine(
     max_iters: int = 15,
     jacobian_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]] | None = None,
     step_clip: float = 0.5,
+    divergence_factor: float = 5.0,
+    divergence_min_iters: int = 4,
 ) -> tuple[NDArray[np.float64], float, int] | None:
     """Newton-Raphson polish on the SE(3) log residual.
 
@@ -184,14 +186,29 @@ def lm_refine(
         When ``None``, central-difference numeric Jacobian is used (slow).
     :param step_clip: per-component absolute clip on the Newton step;
         keeps trajectories from overshooting in the linearisation regime.
+    :param divergence_factor: early-abort multiplier applied to the
+        best-so-far residual. After ``divergence_min_iters`` iterations,
+        if ``||r|| > divergence_factor * r_best`` the trajectory is
+        clearly outside the basin of attraction and Newton is aborted
+        with a ``None`` return. Set to ``inf`` to disable. Default
+        ``5.0`` -- empirically convergent trajectories from algebraic
+        seeds stay within ~1.5x of best-so-far on locked-Franka
+        multiplicity-4 clusters; divergers exceed 5x within 5 iters.
+    :param divergence_min_iters: number of iterations before the
+        divergence check arms (default 4). Allows the first uphill
+        step a converger sometimes takes (~30% bump on a hard seed)
+        without triggering abort.
     :returns: ``(q_refined, fk_residual, iters)`` on convergence,
-        ``None`` if ``max_iters`` was reached without ``||r|| < fk_atol``.
+        ``None`` if ``max_iters`` was reached without ``||r|| < fk_atol``
+        or the divergence guard fired.
 
-    No divergence-abort: Newton can be non-monotonic near a saddle or
-    under step-clipping; aggressive early termination misses recoveries.
-    Trust ``max_iters`` + final residual check instead.
+    On divergent seeds (algebraic spurious roots, multi-root cluster
+    members from a different IK branch, etc.) the early-abort saves
+    ~10 wasted Newton iterations per seed -- on locked-Franka HP that
+    is the difference between 39 ms and 13 ms in ``verify_candidates``.
     """
     q = q_seed.astype(np.float64).copy()
+    r_best: float = float("inf")
     for it in range(max_iters):
         t_q = fk_fn(q)
         t_diff = t_target @ np.linalg.inv(t_q)
@@ -199,6 +216,12 @@ def lm_refine(
         norm = float(np.linalg.norm(r))
         if norm < fk_atol:
             return (q, norm, it)
+        if norm < r_best:
+            r_best = norm
+        elif it >= divergence_min_iters and norm > divergence_factor * r_best:
+            # Trajectory is clearly outside the basin of attraction.
+            # See divergence_factor docstring for the rationale.
+            return None
         j_s = jacobian_fn(q) if jacobian_fn is not None else numerical_jacobian(q, fk_fn)
         try:
             dq = np.linalg.solve(j_s, r)
