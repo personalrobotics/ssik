@@ -235,6 +235,56 @@ def precompute_from_sympy(
     return EliminatePrecompute(T_u, T_w_pre)
 
 
+_TV1_DEGEN_WARNED: set[tuple[float, ...]] = set()
+_HP_DEGEN_TOL = 1e-9
+_LOG = __import__("logging").getLogger(__name__)
+
+
+def _check_hp_preconditions(a_1: float, l_1: float, l_2: float) -> None:
+    """Detect Capco eq. (5) degenerate cases for ``T(v_1)`` and warn.
+
+    Currently the only implemented parametrization is ``T(v_1)``. When
+    its precondition is violated (``|l_2| = 1``), the alternative
+    parametrizations ``T(v_2)`` (#176) or ``T(v_3)`` (already coded but
+    not yet wired into back-substitution) are required for correctness.
+
+    This function logs a one-time WARNING per degenerate DH-tuple so
+    callers can audit which arms/configurations are affected without
+    spamming on every IK call. It deliberately does NOT raise -- the
+    partial IK set ``T(v_1)`` returns on these arms is still useful;
+    full IK coverage requires the missing parametrizations.
+    """
+    l2_is_unit = abs(abs(l_2) - 1.0) < _HP_DEGEN_TOL
+    a1_zero = abs(a_1) < _HP_DEGEN_TOL
+    l1_zero = abs(l_1) < _HP_DEGEN_TOL
+    if not l2_is_unit:
+        return  # T(v_1) precondition holds; no warning needed.
+    key = (round(a_1, 9), round(l_1, 9), round(l_2, 9))
+    if key in _TV1_DEGEN_WARNED:
+        return
+    _TV1_DEGEN_WARNED.add(key)
+    if a1_zero or l1_zero:
+        _LOG.warning(
+            "husty_pfurner: HP T(v_1) parametrization degenerate for this DH "
+            "(a_1=%.3e, l_1=%.3e, l_2=%.3e): (a_1=0 OR l_1=0) AND |l_2|=1 -- "
+            "this is the double-degenerate case where neither T(v_1) nor T(v_3) "
+            "applies; T(v_2) (Capco's documented fallback, see #176) is required "
+            "for full IK coverage. Proceeding with T(v_1) anyway -- the partial "
+            "IK set it returns is still useful, but some IK branches will be "
+            "silently missed.",
+            a_1, l_1, l_2,
+        )
+    else:
+        _LOG.warning(
+            "husty_pfurner: HP T(v_1) parametrization degenerate for this DH "
+            "(a_1=%.3e, l_1=%.3e, l_2=%.3e): |l_2|=1 with a_1, l_1 != 0 -- "
+            "T(v_3) (already coded in _constraints.py but not yet wired into "
+            "back-substitution, see #180) is the well-conditioned alternative. "
+            "Proceeding with T(v_1) -- some IK branches may be silently missed.",
+            a_1, l_1, l_2,
+        )
+
+
 @functools.lru_cache(maxsize=128)
 def precompute_rrr_chain(
     a_1: float,
@@ -271,10 +321,40 @@ def precompute_rrr_chain(
     floats; downstream code never mutates the returned tensors so sharing
     the same instance across calls is safe.
 
+    HP coverage matrix
+    ------------------
+
+    Capco eq. (5) gives the precondition under which ``T(v_1)`` is
+    well-defined (does NOT lie in the Study quadric ``S``). The
+    parametrization variants and their preconditions are:
+
+    +----------+----------------------------------------+--------+
+    | Variant  | Applies when                           | Status |
+    +==========+========================================+========+
+    | T(v_1)   | ``|l_2| != 1``                         | OK     |
+    | T(v_3)   | ``|l_2| = 1 ∧ a_1 != 0 ∧ l_1 != 0``    | #176   |
+    | T(v_2)   | ``(a_1 = 0 ∨ l_1 = 0) ∧ |l_2| = 1``    | #176   |
+    +----------+----------------------------------------+--------+
+
+    Currently this function calls ``T(v_1)`` unconditionally. When the
+    DH-precondition for T(v_1) is violated (i.e. T(v_1) lies in S), the
+    Sylvester pencil constructed downstream is rank-deficient and **some
+    IK branches are silently missed**. The current implementation logs
+    a warning at WARNING level the first time each degenerate DH-tuple
+    is seen so callers can audit their fixtures, but proceeds with T(v_1)
+    anyway -- the partial IK set it returns is still useful.
+
+    Issues #176 (T(v_2)) and #177 (T(v_4)/T(v_5)) close this gap. The
+    DH audit (`scripts/hp_coverage_audit.py`) shows every locked-7R
+    configuration on Franka / KUKA iiwa LBR / xArm7 hits the
+    double-degenerate case requiring T(v_2).
+
     :raises ValueError: if any DH-derived T(v_i) entry has degree > 1 in
         the parametrising symbol (indicates a degenerate DH where the
         pure-tan-half-angle parametrisation breaks down).
     """
+    _check_hp_preconditions(a_1, l_1, l_2)
+
     from ssik.solvers.husty_pfurner._constraints import (
         _V1_SYM,
         _V6_SYM,
