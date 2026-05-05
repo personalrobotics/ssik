@@ -51,19 +51,19 @@ def _kwargs_for_solve(dh: dict[str, float]) -> dict[str, float]:
     """Map _DH_* dict keys (l_*) to solve_ik's expected kwargs (ls_*)."""
     return dict(
         a_1=dh["a_1"],
-        ls_1=dh["l_1"],
+        l_1=dh["l_1"],
         d_2=dh["d_2"],
         a_2=dh["a_2"],
-        ls_2=dh["l_2"],
+        l_2=dh["l_2"],
         d_3=dh["d_3"],
         a_3=dh["a_3"],
-        ls_3=dh["l_3"],
+        l_3=dh["l_3"],
         d_4=dh["d_4"],
         a_4=dh["a_4"],
-        ls_4=dh["l_4"],
+        l_4=dh["l_4"],
         d_5=dh["d_5"],
         a_5=dh["a_5"],
-        ls_5=dh["l_5"],
+        l_5=dh["l_5"],
     )
 
 
