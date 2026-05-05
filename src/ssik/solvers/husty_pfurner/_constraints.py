@@ -57,6 +57,8 @@ __all__ = [
     "tv2_symbolic_in_v2",
     "tv3_hyperplanes_rrr",
     "tv3_symbolic_in_v3",
+    "tv4_hyperplanes_rrr",
+    "tv4_symbolic_in_v4",
     "tv6_hyperplanes_rrr",
     "tv6_symbolic_in_v6",
     "v1_hyperplanes_rrr",
@@ -69,6 +71,7 @@ __all__ = [
 _V1_SYM = sp.symbols("v_1", real=True)
 _V2_SYM = sp.symbols("v_2", real=True)
 _V3_SYM = sp.symbols("v_3", real=True)
+_V4_SYM = sp.symbols("v_4", real=True)
 _V6_SYM = sp.symbols("v_6", real=True)
 
 
@@ -696,6 +699,139 @@ def tv6_symbolic_in_v6(
     coeffs_pre_sigma_e = tv1_sub.subs(_V1_SYM, -_V6_SYM)
 
     # Step 4: numerical sigma_E^* left-mult.
+    sigma_e_conj = np.array(
+        [
+            sigma_e_arr[0],
+            -sigma_e_arr[1],
+            -sigma_e_arr[2],
+            -sigma_e_arr[3],
+            sigma_e_arr[4],
+            -sigma_e_arr[5],
+            -sigma_e_arr[6],
+            -sigma_e_arr[7],
+        ],
+        dtype=np.float64,
+    )
+    M_e = _dq_left_mult_matrix(sigma_e_conj)
+    M_e_sym = sp.Matrix(M_e.tolist())
+    return coeffs_pre_sigma_e * M_e_sym
+
+
+# ---------------------------------------------------------------------------
+# Phase 5c.4b / GitHub #177: T(v_4) -- right-chain mirror of T(v_3).
+#
+# Used when T(v_6) is structurally degenerate (typically because joint 4's
+# DH (a_4, l_4) lands on a Capco-Tv1 nullspace, e.g., locked-Franka after
+# joint-4 lock with a_4 = 0). Built by parameter-mirroring T(v_3): right
+# chain joints (4, 5, 6) map to left-analog joints (3, 2, 1) with sign
+# flips, and the parametric symbol substitutes v_3 -> -v_4.
+#
+# Precondition: a_5 != 0 AND l_5 != 0 (Tv3's (a_1, l_1) precondition under
+# the mirror substitution a_1 -> -a_5, l_1 -> -l_5). Same precondition as
+# T(v_6); the difference is structural -- T(v_4) survives some DH
+# pathologies that null T(v_6) coefficients.
+# ---------------------------------------------------------------------------
+
+
+def tv4_hyperplanes_rrr(
+    a_4: float,
+    l_4: float,
+    d_4: float,
+    a_5: float,
+    l_5: float,
+    d_5: float,
+    sigma_E: NDArray[np.float64],
+    v_4: float,
+) -> NDArray[np.float64]:
+    """4x8 coefficient matrix of ``T(v_4)`` for the right chain in 6R/RRR.
+
+    Mirror of :func:`tv6_hyperplanes_rrr` but built from ``T(v_3)`` rather
+    than ``T(v_1)``. Parametrises the innermost joint of the right chain
+    (joint 4) instead of the outermost (joint 6). Used when ``T(v_6)``
+    coefficients structurally vanish for the given DH (e.g. locked-Franka
+    with ``a_4 = 0``).
+
+    :param a_4, l_4, d_4: DH parameters for joint 4 (``l_4 = tan(alpha_4/2)``).
+    :param a_5, l_5, d_5: DH parameters for joint 5.
+    :param sigma_E: 8-vec Study DQ of the target end-effector pose. Caller
+        must absorb the joint-6 EE offset into ``sigma_E`` (since this
+        function assumes ``a_6 = d_6 = l_6 = 0`` per Capco's convention).
+    :param v_4: tan-half-angle of joint-4 rotation.
+
+    Precondition: ``a_5 != 0 ∧ l_5 != 0`` (Tv3's (a_1, l_1) precondition
+    under the right-chain mirror substitution).
+
+    Returns a 4x8 array; each row is the coefficients of ``(x_0, ..., y_3)``
+    in one of four hyperplanes that vanish on
+    ``V_R = sigma_E . sigma_6^{-1} . sigma_5^{-1} . sigma_4^{-1}``.
+    """
+    coeffs_pre_sigma_e = tv3_hyperplanes_rrr(
+        a_1=-a_5,
+        l_1=-l_5,
+        d_2=-d_5,
+        a_2=-a_4,
+        l_2=-l_4,
+        d_3=-d_4,
+        a_3=0.0,
+        l_3=0.0,
+        v_3=-v_4,
+    )
+    sigma_e_arr = np.asarray(sigma_E, dtype=np.float64)
+    if sigma_e_arr.shape != (8,):
+        raise ValueError(f"sigma_E must be 8-vec, got shape {sigma_e_arr.shape}")
+    sigma_e_conj = np.array(
+        [
+            sigma_e_arr[0],
+            -sigma_e_arr[1],
+            -sigma_e_arr[2],
+            -sigma_e_arr[3],
+            sigma_e_arr[4],
+            -sigma_e_arr[5],
+            -sigma_e_arr[6],
+            -sigma_e_arr[7],
+        ],
+        dtype=np.float64,
+    )
+    M_e = _dq_left_mult_matrix(sigma_e_conj)
+    return coeffs_pre_sigma_e @ M_e
+
+
+def tv4_symbolic_in_v4(
+    a_4: float,
+    l_4: float,
+    d_4: float,
+    a_5: float,
+    l_5: float,
+    d_5: float,
+    sigma_E: NDArray[np.float64],
+) -> sp.Matrix:
+    """Return the 4x8 ``T(v_4)`` coefficient matrix as a sympy ``Matrix``
+    with ``v_4`` symbolic and DH + ``sigma_E`` substituted numerically.
+
+    Mirrors :func:`tv4_hyperplanes_rrr` but keeps ``v_4`` symbolic for use
+    in the elimination pipeline. The free symbol is
+    ``ssik.solvers.husty_pfurner._constraints._V4_SYM``.
+
+    Implementation: build ``T(v_3)`` symbolic with the right-chain mirror
+    substitutions (``a_1 -> -a_5``, ``l_1 -> -l_5``, ...) so the result is
+    a sympy matrix in ``v_3``. Then substitute ``v_3 -> -v_4``. Then apply
+    the ``sigma_E^*`` left-multiplication numerically.
+    """
+    sigma_e_arr = np.asarray(sigma_E, dtype=np.float64)
+    if sigma_e_arr.shape != (8,):
+        raise ValueError(f"sigma_E must be 8-vec, got shape {sigma_e_arr.shape}")
+    tv3_sub = tv3_symbolic_in_v3(
+        a_1=-a_5,
+        l_1=-l_5,
+        d_2=-d_5,
+        a_2=-a_4,
+        l_2=-l_4,
+        d_3=-d_4,
+        a_3=0.0,
+        l_3=0.0,
+    )
+    coeffs_pre_sigma_e = tv3_sub.subs(_V3_SYM, -_V4_SYM)
+
     sigma_e_conj = np.array(
         [
             sigma_e_arr[0],

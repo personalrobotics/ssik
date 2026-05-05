@@ -338,32 +338,45 @@ def back_substitute_one(
     """
     # Recover the Cramer cofactor P(u, w) at this refined point.
     P = _cramer_P_at(pre, sigma_E, u, w)
-    sigma_6 = _sigma_z(w)
 
-    # Right chain is identical for v_1 and v_2 parametrisations:
-    # sigma_4(v_4) sigma_5(v_5) = P^-1 . sigma_E . sigma_6(w)^-1
-    sigma_right = dq_mul(_dq_inv(P), dq_mul(sigma_E, _dq_inv(sigma_6)))
-    sol_45 = _solve_2r_chain(sigma_right, a_4, l_4, d_4, a_5, l_5, d_5)
+    # Right chain decomposition depends on which joint w parametrises.
+    # Tv6 path (default): w = v_6, recover (v_4, v_5) from
+    #   sigma_4(v_4) sigma_5(v_5) = P^-1 . sigma_E . sigma_6(v_6)^-1
+    # Tv4 path (#177): w = v_4, recover (v_5, v_6) from
+    #   sigma_5(v_5) sigma_6(v_6) = sigma_4(v_4)^-1 . P^-1 . sigma_E
+    # where sigma_6 = R_z(v_6) since a_6 = d_6 = l_6 = 0.
+    if pre.right_parametric_var == "v_4":
+        v_4 = w
+        sigma_4 = _sigma_joint_full(v_4, a_4, l_4, d_4)
+        sigma_right = dq_mul(_dq_inv(sigma_4), dq_mul(_dq_inv(P), sigma_E))
+        # 2R chain: sigma_a = sigma_5(v_5), sigma_b = sigma_6(v_6) = R_z(v_6)
+        # so a_b = l_b = d_b = 0.
+        sol_56 = _solve_2r_chain(sigma_right, a_5, l_5, d_5, 0.0, 0.0, 0.0)
+        sol_right = [(v_4, v_5, v_6) for (v_5, v_6) in sol_56]
+    else:
+        v_6 = w
+        sigma_6 = _sigma_z(v_6)
+        sigma_right = dq_mul(_dq_inv(P), dq_mul(sigma_E, _dq_inv(sigma_6)))
+        sol_45 = _solve_2r_chain(sigma_right, a_4, l_4, d_4, a_5, l_5, d_5)
+        sol_right = [(v_4, v_5, v_6) for (v_4, v_5) in sol_45]
 
     if pre.parametric_var == "v_2":
         # Tv2 path: u is v_2, recover (v_1, v_3) via _back_sub_tv2_left.
         v_2 = u
-        v_6 = w
         v_1, v_3 = _back_sub_tv2_left(
             P, v_2, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3
         )
-        return [(v_1, v_2, v_3, v_4, v_5, v_6) for (v_4, v_5) in sol_45]
+        return [(v_1, v_2, v_3, v_4, v_5, v_6) for (v_4, v_5, v_6) in sol_right]
 
     # Default Tv1 path: u is v_1.
     v_1 = u
-    v_6 = w
     sigma_1 = _sigma_joint_full(v_1, a_1, l_1, 0.0)  # d_1 = 0 per HP
     sigma_left = dq_mul(_dq_inv(sigma_1), P)
     sol_23 = _solve_2r_chain(sigma_left, a_2, l_2, d_2, a_3, l_3, d_3)
     return [
         (v_1, v_2, v_3, v_4, v_5, v_6)
         for (v_2, v_3) in sol_23
-        for (v_4, v_5) in sol_45
+        for (v_4, v_5, v_6) in sol_right
     ]
 
 
@@ -407,6 +420,9 @@ def solve_ik(
         precision. Default ``None`` (use the strict
         ``residue_tol=1e-12`` filter -- correct for callers that don't
         run a downstream Newton).
+    :param drop_indices: Cramer-cofactor drop rows for the elimination
+        (default ``(7, 4, 0)`` -- two right-chain + one left-chain
+        covers every IK candidate for both Tv6 and Tv4 right paths).
 
     :returns: 2-D array of shape ``(n, 6)`` with rows
         ``(v_1, v_2, v_3, v_4, v_5, v_6)``, each tan-half-angle.

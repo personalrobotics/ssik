@@ -180,9 +180,15 @@ class EliminatePrecompute:
         ``parametric_var == "v_2"`` (one of
         :data:`ssik.solvers.husty_pfurner._constraints.TV2_RRR_CASE_KEYS`).
         ``None`` for the ``T(v_1)`` path.
+    :ivar right_parametric_var: which joint variable the ``w`` axis
+        represents on the right chain. ``"v_6"`` (default) for the
+        outer-mirror ``T(v_6)`` path; ``"v_4"`` for the inner-mirror
+        ``T(v_4)`` path (#177). T(v_4) is dispatched when ``T(v_6)``
+        coefficients structurally vanish on the Capco-Tv1 nullspace
+        for the given DH (e.g. locked-Franka with ``a_4 = 0``).
     """
 
-    __slots__ = ("T_u", "T_w_pre", "parametric_var", "tv2_case_key")
+    __slots__ = ("T_u", "T_w_pre", "parametric_var", "tv2_case_key", "right_parametric_var")
 
     def __init__(
         self,
@@ -190,6 +196,7 @@ class EliminatePrecompute:
         T_w_pre: NDArray[np.float64],
         parametric_var: str = "v_1",
         tv2_case_key: str | None = None,
+        right_parametric_var: str = "v_6",
     ) -> None:
         if T_u.shape != (4, 8, 2):
             raise ValueError(f"T_u must be (4, 8, 2), got {T_u.shape}")
@@ -198,6 +205,10 @@ class EliminatePrecompute:
         if parametric_var not in ("v_1", "v_2"):
             raise ValueError(
                 f"parametric_var must be 'v_1' or 'v_2', got {parametric_var!r}"
+            )
+        if right_parametric_var not in ("v_6", "v_4"):
+            raise ValueError(
+                f"right_parametric_var must be 'v_6' or 'v_4', got {right_parametric_var!r}"
             )
         if parametric_var == "v_2" and tv2_case_key is None:
             raise ValueError(
@@ -211,6 +222,7 @@ class EliminatePrecompute:
         self.T_w_pre = T_w_pre.astype(np.float64, copy=True)
         self.parametric_var = parametric_var
         self.tv2_case_key = tv2_case_key
+        self.right_parametric_var = right_parametric_var
 
 
 def extract_uv_linear_tensor(M_sym: sp.Matrix, var: sp.Symbol) -> NDArray[np.float64]:
@@ -253,6 +265,7 @@ def precompute_from_sympy(
     w_sym: sp.Symbol,
     parametric_var: str = "v_1",
     tv2_case_key: str | None = None,
+    right_parametric_var: str = "v_6",
 ) -> EliminatePrecompute:
     """Build per-arm :class:`EliminatePrecompute` from sympy matrices.
 
@@ -265,10 +278,15 @@ def precompute_from_sympy(
         :class:`EliminatePrecompute`.
     :param tv2_case_key: when ``parametric_var=="v_2"``, the Capco RRR
         Tv2 sub-case key. Forwarded to :class:`EliminatePrecompute`.
+    :param right_parametric_var: which joint variable ``w_sym`` represents
+        (``"v_6"`` or ``"v_4"``). Forwarded to
+        :class:`EliminatePrecompute`.
     """
     T_u = extract_uv_linear_tensor(T_u_sym, u_sym)
     T_w_pre = extract_uv_linear_tensor(T_w_pre_sym, w_sym)
-    return EliminatePrecompute(T_u, T_w_pre, parametric_var, tv2_case_key)
+    return EliminatePrecompute(
+        T_u, T_w_pre, parametric_var, tv2_case_key, right_parametric_var
+    )
 
 
 _TV1_DEGEN_WARNED: set[tuple[float, ...]] = set()
@@ -370,35 +388,35 @@ def precompute_rrr_chain(
     HP coverage matrix (RRR pattern; Capco eq. 5 simplified-form
     degeneracy criterion verified against ``which_case.py:74-80``):
 
-    +----------+----------------------------------------------------+--------+
-    | Variant  | Applies when                                       | Status |
-    +==========+====================================================+========+
-    | T(v_1)   | ``a_2 != 0 ∧ l_2 != 0``                            | OK     |
-    | T(v_3)   | ``(a_2 = 0 ∨ l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180   |
-    | T(v_2)   | ``(a_2 = 0 ∨ l_2 = 0) ∧ (a_1 = 0 ∨ l_1 = 0)``,     | #176   |
-    |          | sub-case keyed by which DH param(s) are zero       |        |
-    |          | -- 4 RRR sub-cases: ``[a_1=0,a_2=0]``,             |        |
-    |          | ``[a_1=0,l_2=0]``, ``[l_1=0,a_2=0]``,              |        |
-    |          | ``[l_1=0,l_2=0]``                                  |        |
-    +----------+----------------------------------------------------+--------+
+    +-----------+----------------------------------------------------+--------+
+    | Variant   | Applies when                                       | Status |
+    +===========+====================================================+========+
+    | Left:     |                                                    |        |
+    | T(v_1)    | ``a_2 != 0 ∧ l_2 != 0``                            | OK     |
+    | T(v_3)    | ``(a_2 = 0 ∨ l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180   |
+    | T(v_2)    | ``(a_2 = 0 ∨ l_2 = 0) ∧ (a_1 = 0 ∨ l_1 = 0)``,     | #176   |
+    |           | sub-case keyed by which DH param(s) are zero       |        |
+    |           | -- 4 RRR sub-cases: ``[a_1=0,a_2=0]``,             |        |
+    |           | ``[a_1=0,l_2=0]``, ``[l_1=0,a_2=0]``,              |        |
+    |           | ``[l_1=0,l_2=0]``                                  |        |
+    +-----------+----------------------------------------------------+--------+
+    | Right:    |                                                    |        |
+    | T(v_6)    | ``a_4 != 0 ∧ l_4 != 0``  (mirror of Tv1)           | OK     |
+    | T(v_4)    | ``(a_4 = 0 ∨ l_4 = 0) ∧ a_5 != 0 ∧ l_5 != 0``      | OK     |
+    |           |   (mirror of Tv3, #177)                            |        |
+    | T(v_5)    | ``(a_4 = 0 ∨ l_4 = 0) ∧ (a_5 = 0 ∨ l_5 = 0)``      | TODO   |
+    +-----------+----------------------------------------------------+--------+
 
-    The RRR dispatch is on ``a_2 = 0 ∨ l_2 = 0`` (eq. 5 simplified-form
-    degeneracy). The ``|l_2| = ±1`` rule applies to RRP, not RRR --
-    earlier ssik docstrings had this wrong.
+    Dispatch logic: left chain uses T(v_1) (Tv2/Tv3 unwired); right chain
+    auto-dispatches T(v_6) -> T(v_4) when (a_4 = 0 OR l_4 = 0) AND
+    (a_5 != 0 AND l_5 != 0). When BOTH right chain DH groups degenerate,
+    falls back to T(v_6) (still degenerate -- some IK branches missed,
+    needs T(v_5) per #177 stretch goal).
 
-    Currently this function calls ``T(v_1)`` unconditionally. When the
-    DH-precondition for T(v_1) is violated (i.e. T(v_1) lies in S), the
-    Sylvester pencil constructed downstream is rank-deficient and **some
-    IK branches are silently missed**. The current implementation logs
-    a warning at WARNING level the first time each degenerate DH-tuple
-    is seen so callers can audit their fixtures, but proceeds with T(v_1)
-    anyway -- the partial IK set it returns is still useful.
-
-    Issues #176 (T(v_2) for RRR, all 4 sub-cases) and #177
-    (T(v_4)/T(v_5) right-mirrors) close this gap. Every locked-7R
-    configuration on Franka / KUKA iiwa LBR / xArm7 hits **RRR Tv2
-    sub-case [a_1=0, a_2=0]** -- implementing just that one sub-case
-    unblocks 12/14 lock configs per arm.
+    Important: Tv4 alone does NOT close the locked-7R gap. Locked Franka /
+    KUKA iiwa LBR / xArm7 hit **left** Tv2 sub-case ``[a_1=0, a_2=0]``
+    AND **right** Tv4 case simultaneously. Both fixes are needed for
+    full locked-7R coverage; #176 (Tv2) is the remaining blocker.
 
     :raises ValueError: if any DH-derived T(v_i) entry has degree > 1 in
         the parametrising symbol (indicates a degenerate DH where the
@@ -408,23 +426,54 @@ def precompute_rrr_chain(
 
     from ssik.solvers.husty_pfurner._constraints import (
         _V1_SYM,
+        _V3_SYM,
+        _V4_SYM,
         _V6_SYM,
         tv1_symbolic_in_v1,
+        tv3_symbolic_in_v3,
     )
 
-    # T_w_pre uses T(v_6) for the right chain regardless of left-chain
-    # parametrization choice -- right-mirror dispatch (T(v_4)/T(v_5))
-    # is tracked in #177.
-    T_w_pre_sym = tv1_symbolic_in_v1(
-        a_1=-a_5,
-        l_1=-l_5,
-        d_2=-d_5,
-        a_2=-a_4,
-        l_2=-l_4,
-        d_3=-d_4,
-        a_3=0.0,
-        l_3=0.0,
-    ).subs(_V1_SYM, -_V6_SYM)
+    # Right-chain dispatch (#177): T(v_6) is the default outer-mirror
+    # parametrisation but its coefficients structurally vanish on the
+    # Capco-Tv1 nullspace when (a_4 = 0 OR l_4 = 0). In that regime the
+    # 8x8 Cramer system goes rank-deficient and IK candidates are silently
+    # missed (locked-Franka with a_4 = 0 is the canonical case). Dispatch
+    # the inner-mirror T(v_4) instead -- it has the same precondition as
+    # T(v_6) (a_5 != 0 AND l_5 != 0) but survives the (a_4, l_4) -> 0
+    # pathology because the joint-4 DH lands in a different coefficient
+    # slot of the underlying T(v_3) construction.
+    a4_zero = abs(a_4) < _HP_DEGEN_TOL
+    l4_zero = abs(l_4) < _HP_DEGEN_TOL
+    a5_zero = abs(a_5) < _HP_DEGEN_TOL
+    l5_zero = abs(l_5) < _HP_DEGEN_TOL
+    use_tv4 = (a4_zero or l4_zero) and not (a5_zero or l5_zero)
+
+    if use_tv4:
+        T_w_pre_sym = tv3_symbolic_in_v3(
+            a_1=-a_5,
+            l_1=-l_5,
+            d_2=-d_5,
+            a_2=-a_4,
+            l_2=-l_4,
+            d_3=-d_4,
+            a_3=0.0,
+            l_3=0.0,
+        ).subs(_V3_SYM, -_V4_SYM)
+        right_w_sym = _V4_SYM
+        right_param = "v_4"
+    else:
+        T_w_pre_sym = tv1_symbolic_in_v1(
+            a_1=-a_5,
+            l_1=-l_5,
+            d_2=-d_5,
+            a_2=-a_4,
+            l_2=-l_4,
+            d_3=-d_4,
+            a_3=0.0,
+            l_3=0.0,
+        ).subs(_V1_SYM, -_V6_SYM)
+        right_w_sym = _V6_SYM
+        right_param = "v_6"
 
     # Left-chain dispatch SCAFFOLDING (currently always uses Tv1, even
     # when degenerate): the symbolic Tv2 hyperplanes are ready
@@ -449,7 +498,12 @@ def precompute_rrr_chain(
         a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3
     ).subs(_V1_SYM, _V1_SYM)
     return precompute_from_sympy(
-        T_u_sym, _V1_SYM, T_w_pre_sym, _V6_SYM, parametric_var="v_1"
+        T_u_sym,
+        _V1_SYM,
+        T_w_pre_sym,
+        right_w_sym,
+        parametric_var="v_1",
+        right_parametric_var=right_param,
     )
 
 

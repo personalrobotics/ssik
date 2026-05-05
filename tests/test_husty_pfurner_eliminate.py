@@ -695,3 +695,64 @@ def test_pencil_returns_bounded_real_eigenvalue_count() -> None:
     )
     cands = eliminate_uw_numeric(pre, sigma_E, drop_indices=(7,))
     assert 1 <= len(cands) <= 30, f"unexpected candidate count {len(cands)}: {cands}"
+
+
+# ============================================================================
+# T(v_4) right-chain dispatch (#177)
+# ============================================================================
+#
+# When (a_4 = 0 OR l_4 = 0) AND a_5 != 0 AND l_5 != 0, precompute_rrr_chain
+# auto-dispatches T(v_4) instead of T(v_6). The 8x8 elimination is unchanged
+# in shape and structure; only the right-chain parametric variable swaps.
+
+_DH_TV4_DISPATCH = dict(
+    a_1=0.30, l_1=math.tan(0.5 * 0.4), d_2=0.20,
+    a_2=0.40, l_2=math.tan(0.5 * 0.6), d_3=0.10,
+    a_3=0.50, l_3=math.tan(0.5 * 0.5), d_4=0.30,
+    a_4=0.0,                                # forces Tv4 dispatch
+    l_4=math.tan(0.5 * 0.3), d_5=0.40,
+    a_5=0.30, l_5=math.tan(0.5 * 0.7),
+)
+
+
+def test_precompute_rrr_chain_dispatches_tv4_when_a4_zero() -> None:
+    """When a_4 = 0, precompute_rrr_chain selects the T(v_4) right path."""
+    pre = precompute_rrr_chain(**_DH_TV4_DISPATCH)
+    assert pre.right_parametric_var == "v_4"
+    # Shapes unchanged.
+    assert pre.T_u.shape == (4, 8, 2)
+    assert pre.T_w_pre.shape == (4, 8, 2)
+    assert np.all(np.isfinite(pre.T_u))
+    assert np.all(np.isfinite(pre.T_w_pre))
+
+
+def test_precompute_rrr_chain_dispatches_tv4_when_l4_zero() -> None:
+    """When l_4 = 0 (alpha_4 = 0), precompute_rrr_chain selects T(v_4)."""
+    dh = dict(_DH_TV4_DISPATCH)
+    dh["a_4"] = 0.20
+    dh["l_4"] = 0.0
+    pre = precompute_rrr_chain(**dh)
+    assert pre.right_parametric_var == "v_4"
+
+
+def test_precompute_rrr_chain_keeps_tv6_when_a4_l4_nonzero() -> None:
+    """Default DH (Tv6 precondition met) keeps T(v_6) path."""
+    pre = precompute_rrr_chain(**_DH_BASELINE)
+    assert pre.right_parametric_var == "v_6"
+
+
+def test_precompute_rrr_chain_falls_back_to_tv6_when_a5_zero() -> None:
+    """When BOTH right groups are degenerate (a_4=0 AND a_5=0), Tv4
+    precondition fails too -- fall back to Tv6 (still degenerate, but
+    matches the prior behavior; #177 stretch goal is T(v_5))."""
+    dh = dict(_DH_TV4_DISPATCH)
+    dh["a_5"] = 0.0  # both a_4 and a_5 zero
+    pre = precompute_rrr_chain(**dh)
+    assert pre.right_parametric_var == "v_6"
+
+
+def test_eliminate_precompute_rejects_invalid_right_parametric_var() -> None:
+    from ssik.solvers.husty_pfurner._eliminate import EliminatePrecompute
+    T = np.zeros((4, 8, 2))
+    with pytest.raises(ValueError, match="right_parametric_var"):
+        EliminatePrecompute(T, T, parametric_var="v_1", right_parametric_var="v_5")
