@@ -240,13 +240,20 @@ _HP_DEGEN_TOL = 1e-9
 _LOG = __import__("logging").getLogger(__name__)
 
 
-def _check_hp_preconditions(a_1: float, l_1: float, l_2: float) -> None:
-    """Detect Capco eq. (5) degenerate cases for ``T(v_1)`` and warn.
+def _check_hp_preconditions(a_1: float, l_1: float, a_2: float, l_2: float) -> None:
+    """Detect Capco eq. (5) degenerate cases for the RRR pattern and warn.
 
-    Currently the only implemented parametrization is ``T(v_1)``. When
-    its precondition is violated (``|l_2| = 1``), the alternative
-    parametrizations ``T(v_2)`` (#176) or ``T(v_3)`` (already coded but
-    not yet wired into back-substitution) are required for correctness.
+    Verified by reading Capco's ``which_case.py:74-80`` directly (see
+    ``reference_capco_hp_dispatch`` memory entry). The RRR dispatch is:
+
+    * ``T(v_1)`` applies when ``a_2 != 0 AND l_2 != 0``
+      (eq. 5 simplified-form non-degenerate).
+    * ``T(v_3)`` applies when ``(a_2 = 0 OR l_2 = 0) AND a_1 != 0 AND l_1 != 0``.
+    * ``T(v_2)`` (sub-case-keyed) applies when both are degenerate:
+      ``(a_2 = 0 OR l_2 = 0) AND (a_1 = 0 OR l_1 = 0)``.
+
+    The previously-shipped check used the RRP-specific ``|l_2| = ±1``
+    condition by mistake. Corrected here.
 
     This function logs a one-time WARNING per degenerate DH-tuple so
     callers can audit which arms/configurations are affected without
@@ -254,34 +261,37 @@ def _check_hp_preconditions(a_1: float, l_1: float, l_2: float) -> None:
     partial IK set ``T(v_1)`` returns on these arms is still useful;
     full IK coverage requires the missing parametrizations.
     """
-    l2_is_unit = abs(abs(l_2) - 1.0) < _HP_DEGEN_TOL
+    a2_zero = abs(a_2) < _HP_DEGEN_TOL
+    l2_zero = abs(l_2) < _HP_DEGEN_TOL
     a1_zero = abs(a_1) < _HP_DEGEN_TOL
     l1_zero = abs(l_1) < _HP_DEGEN_TOL
-    if not l2_is_unit:
+    if not (a2_zero or l2_zero):
         return  # T(v_1) precondition holds; no warning needed.
-    key = (round(a_1, 9), round(l_1, 9), round(l_2, 9))
+    key = (round(a_1, 9), round(l_1, 9), round(a_2, 9), round(l_2, 9))
     if key in _TV1_DEGEN_WARNED:
         return
     _TV1_DEGEN_WARNED.add(key)
     if a1_zero or l1_zero:
         _LOG.warning(
             "husty_pfurner: HP T(v_1) parametrization degenerate for this DH "
-            "(a_1=%.3e, l_1=%.3e, l_2=%.3e): (a_1=0 OR l_1=0) AND |l_2|=1 -- "
-            "this is the double-degenerate case where neither T(v_1) nor T(v_3) "
-            "applies; T(v_2) (Capco's documented fallback, see #176) is required "
-            "for full IK coverage. Proceeding with T(v_1) anyway -- the partial "
-            "IK set it returns is still useful, but some IK branches will be "
-            "silently missed.",
-            a_1, l_1, l_2,
+            "(a_1=%.3e, l_1=%.3e, a_2=%.3e, l_2=%.3e): both eq.5 simplified "
+            "preconditions violated -- (a_1=0 OR l_1=0) AND (a_2=0 OR l_2=0). "
+            "Capco's RRR Tv2 sub-case keyed by which DH params are zero is "
+            "required (see #176). Locked-7R configurations on Franka / KUKA "
+            "iiwa LBR / xArm7 hit the case [a_1=0, a_2=0]. Proceeding with "
+            "T(v_1) anyway -- partial IK set is still useful but some "
+            "branches are silently missed.",
+            a_1, l_1, a_2, l_2,
         )
     else:
         _LOG.warning(
             "husty_pfurner: HP T(v_1) parametrization degenerate for this DH "
-            "(a_1=%.3e, l_1=%.3e, l_2=%.3e): |l_2|=1 with a_1, l_1 != 0 -- "
-            "T(v_3) (already coded in _constraints.py but not yet wired into "
-            "back-substitution, see #180) is the well-conditioned alternative. "
-            "Proceeding with T(v_1) -- some IK branches may be silently missed.",
-            a_1, l_1, l_2,
+            "(a_1=%.3e, l_1=%.3e, a_2=%.3e, l_2=%.3e): a_2=0 OR l_2=0 with "
+            "a_1, l_1 != 0 -- T(v_3) (already coded in _constraints.py but not "
+            "yet wired into back-substitution, see #180) is the well-conditioned "
+            "alternative. Proceeding with T(v_1) -- some IK branches may be "
+            "silently missed.",
+            a_1, l_1, a_2, l_2,
         )
 
 
@@ -321,20 +331,24 @@ def precompute_rrr_chain(
     floats; downstream code never mutates the returned tensors so sharing
     the same instance across calls is safe.
 
-    HP coverage matrix
-    ------------------
+    HP coverage matrix (RRR pattern; Capco eq. 5 simplified-form
+    degeneracy criterion verified against ``which_case.py:74-80``):
 
-    Capco eq. (5) gives the precondition under which ``T(v_1)`` is
-    well-defined (does NOT lie in the Study quadric ``S``). The
-    parametrization variants and their preconditions are:
+    +----------+----------------------------------------------------+--------+
+    | Variant  | Applies when                                       | Status |
+    +==========+====================================================+========+
+    | T(v_1)   | ``a_2 != 0 ∧ l_2 != 0``                            | OK     |
+    | T(v_3)   | ``(a_2 = 0 ∨ l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180   |
+    | T(v_2)   | ``(a_2 = 0 ∨ l_2 = 0) ∧ (a_1 = 0 ∨ l_1 = 0)``,     | #176   |
+    |          | sub-case keyed by which DH param(s) are zero       |        |
+    |          | -- 4 RRR sub-cases: ``[a_1=0,a_2=0]``,             |        |
+    |          | ``[a_1=0,l_2=0]``, ``[l_1=0,a_2=0]``,              |        |
+    |          | ``[l_1=0,l_2=0]``                                  |        |
+    +----------+----------------------------------------------------+--------+
 
-    +----------+----------------------------------------+--------+
-    | Variant  | Applies when                           | Status |
-    +==========+========================================+========+
-    | T(v_1)   | ``|l_2| != 1``                         | OK     |
-    | T(v_3)   | ``|l_2| = 1 ∧ a_1 != 0 ∧ l_1 != 0``    | #176   |
-    | T(v_2)   | ``(a_1 = 0 ∨ l_1 = 0) ∧ |l_2| = 1``    | #176   |
-    +----------+----------------------------------------+--------+
+    The RRR dispatch is on ``a_2 = 0 ∨ l_2 = 0`` (eq. 5 simplified-form
+    degeneracy). The ``|l_2| = ±1`` rule applies to RRP, not RRR --
+    earlier ssik docstrings had this wrong.
 
     Currently this function calls ``T(v_1)`` unconditionally. When the
     DH-precondition for T(v_1) is violated (i.e. T(v_1) lies in S), the
@@ -344,16 +358,17 @@ def precompute_rrr_chain(
     is seen so callers can audit their fixtures, but proceeds with T(v_1)
     anyway -- the partial IK set it returns is still useful.
 
-    Issues #176 (T(v_2)) and #177 (T(v_4)/T(v_5)) close this gap. The
-    DH audit (`scripts/hp_coverage_audit.py`) shows every locked-7R
-    configuration on Franka / KUKA iiwa LBR / xArm7 hits the
-    double-degenerate case requiring T(v_2).
+    Issues #176 (T(v_2) for RRR, all 4 sub-cases) and #177
+    (T(v_4)/T(v_5) right-mirrors) close this gap. Every locked-7R
+    configuration on Franka / KUKA iiwa LBR / xArm7 hits **RRR Tv2
+    sub-case [a_1=0, a_2=0]** -- implementing just that one sub-case
+    unblocks 12/14 lock configs per arm.
 
     :raises ValueError: if any DH-derived T(v_i) entry has degree > 1 in
         the parametrising symbol (indicates a degenerate DH where the
         pure-tan-half-angle parametrisation breaks down).
     """
-    _check_hp_preconditions(a_1, l_1, l_2)
+    _check_hp_preconditions(a_1, l_1, a_2, l_2)
 
     from ssik.solvers.husty_pfurner._constraints import (
         _V1_SYM,

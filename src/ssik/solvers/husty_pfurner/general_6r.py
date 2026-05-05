@@ -33,36 +33,46 @@ universal degree-16 polynomial works on every 6R chain (Capco's RRR
 case) and -- with future Phase 5c.4 dispatch -- on RRP/RPR/RPP/PRR/PPR
 6R/P variants too.
 
-Coverage matrix
----------------
+Coverage matrix (RRR pattern)
+-----------------------------
 
 Capco eq. (5)/(6) give DH-precondition rules for which left-/right-chain
-parametrization is well-defined. The current implementation uses
-``T(v_1)`` (left) and ``T(v_6)`` (right) unconditionally and falls
-short of full coverage on arms where these are degenerate:
+parametrization is well-defined. Verified against Capco's reference
+giac code at Zenodo 3157441 (``which_case.py:74-80``):
 
-+------------+------------------------------------+----------+
-| Variant    | Required when                      | Status   |
-+============+====================================+==========+
-| T(v_1)     | ``|l_2| != 1`` (default)           | done     |
-| T(v_3)     | ``|l_2| = 1 ∧ a_1, l_1 != 0``      | #180     |
-| T(v_2)     | ``(a_1 = 0 ∨ l_1 = 0) ∧ |l_2| = 1``| **#176** |
-| T(v_6)     | ``a_5 != 0 ∧ alpha_5 ∉ {0, π}``    | done     |
-| T(v_4)     | ``a_5 = 0 ∨ l_5 = 0``              | #177     |
-| T(v_5)     | right-chain double-degenerate case | #177     |
-+------------+------------------------------------+----------+
++------------+----------------------------------------------------+----------+
+| Variant    | Applies when                                       | Status   |
++============+====================================================+==========+
+| T(v_1)     | ``a_2 != 0 ∧ l_2 != 0``                            | done     |
+| T(v_3)     | ``(a_2 = 0 ∨ l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180     |
+| T(v_2)     | ``(a_2 = 0 ∨ l_2 = 0) ∧ (a_1 = 0 ∨ l_1 = 0)``      | **#176** |
+|            | -- 4 sub-cases: [a_1=0,a_2=0], [a_1=0,l_2=0],      |          |
+|            | [l_1=0,a_2=0], [l_1=0,l_2=0]                       |          |
+| T(v_6)     | ``a_4 != 0 ∧ l_4 != 0`` (right mirror)             | done     |
+| T(v_4)     | ``(a_4 = 0 ∨ l_4 = 0) ∧ a_5 != 0 ∧ l_5 != 0``      | #177     |
+| T(v_5)     | right-chain double-degenerate case                 | #177     |
++------------+----------------------------------------------------+----------+
 
-DH audit shows every locked-7R configuration on Franka, KUKA iiwa LBR,
-and xArm7 hits the **double-degenerate** ``T(v_2)`` case. Until #176
-lands, ``precompute_rrr_chain`` logs a one-time WARNING per degenerate
-DH and proceeds with ``T(v_1)`` -- the partial IK set it returns is
-still useful for many poses, but some branches are silently missed.
-Callers needing complete coverage on these arms should fall back to
-``ssik.solvers.ikgeo.gen_six_dof`` (Raghavan-Roth, slower) or wait for
-#176.
+The RRR-pattern eq. (5) simplified-form degeneracy is
+``a_2 = 0 ∨ l_2 = 0`` (NOT ``|l_2| = ±1`` -- that's the RRP rule;
+earlier ssik docstrings had this confused). DH audit shows every
+locked-7R configuration on Franka, KUKA iiwa LBR, and xArm7 hits the
+**RRR Tv2 sub-case [a_1=0, a_2=0]** specifically (a_1 = 0 universal on
+industrial 7R; locked sub-chains inherit a_2 = 0 at most lock
+positions). Implementing just that one sub-case unblocks 12/14 lock
+configs per arm.
+
+Until #176 lands, ``precompute_rrr_chain`` logs a one-time WARNING per
+degenerate DH and proceeds with ``T(v_1)`` -- the partial IK set it
+returns is still useful for many poses, but some branches are silently
+missed. Callers needing complete coverage on these arms should fall
+back to ``ssik.solvers.ikgeo.gen_six_dof`` (Raghavan-Roth, slower) or
+wait for #176.
 
 References:
 - Capco, Loquias, Manongsong, Nemenzo (2019), arXiv 1906.07813
+- Capco-Manongsong reference giac code, Zenodo 3157441 (MIT-licensed,
+  the authoritative dispatch logic)
 - Manongsong (2019), PhD thesis, UP Diliman -- T(v_2) derivation
 - Noferini & Townsend (2015), arXiv 1507.00272 -- Sylvester pencil
   instability and rotation cure (#178)
