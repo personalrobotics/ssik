@@ -167,10 +167,18 @@ def solve(
     )
 
     fk_atol = policy.subproblem_numerical
-    # Pass a loose fk_tol so solve_ik returns ALL back-sub seeds, not only
-    # those that algebraically close on the HP residue. The lm_refine pass
-    # below polishes each seed against the POE FK and filters non-converging
-    # spurious seeds.
+    # Pass loose tolerances so solve_ik returns ALL back-sub seeds, not
+    # only those that algebraically close to full HP precision:
+    #
+    # - ``fk_tol=0.5``: accept every back-sub q as a seed (the projective
+    #   Study DQ residue check is essentially disabled).
+    # - ``accept_residue_tol=1e-3``: don't reject pass-1 (u, w)
+    #   candidates whose 2-D Newton bottomed out above 1e-12. At
+    #   multi-root degenerate poses (locked-Franka multiplicity-4
+    #   cluster, IK at coincident axes, ...) Newton in 2-D plateaus at
+    #   ~1e-6 to 1e-8, which used to silently reject real-but-imperfect
+    #   IK candidates. The downstream lm_refine in 6-D joint space
+    #   recovers them; pass-1 should refine, not reject.
     sols_v = solve_ik(
         pre,
         sigma_E,
@@ -189,6 +197,7 @@ def solve(
         a_5=float(dh.a[4]),
         l_5=float(ls[4]),
         fk_tol=0.5,
+        accept_residue_tol=1e-3,
     )
 
     if sols_v.shape[0] == 0:
