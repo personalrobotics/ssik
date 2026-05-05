@@ -160,13 +160,14 @@ def _solve_2r_chain(
     ca_a = (1.0 - ls_a * ls_a) / denom_a
 
     # R_prime e_z = R_z(v_a) R_x(alpha_a) e_z = (sa_a sin v_a, -sa_a cos v_a, ca_a).
-    rxz, ryz, rzz = float(R_prime[0, 2]), float(R_prime[1, 2]), float(R_prime[2, 2])
-
-    # Consistency: rzz should equal ca_a. Discrepancy indicates the
-    # 2R chain target is unreachable -- caller's (u, w) candidate is
-    # spurious. Return empty so FK closure rejects it.
-    if abs(rzz - ca_a) > rot_tol * max(1.0, abs(ca_a)):
-        return []
+    # The consistency rzz = ca_a is exact when ``T_target`` is in the
+    # 2R image; the pencil's Newton-refined (u, w) at multiplicity-k
+    # polynomial roots can be off by ``machine_eps^(1/k)``, which
+    # propagates to a small rzz - ca_a discrepancy. We do NOT reject
+    # here -- atan2 still produces the closest-match (v_a, v_b) and
+    # the outer 6R FK closure in :func:`solve_ik` is the truth-level
+    # filter. (See _back_substitute.py rot_tol param for context.)
+    rxz, ryz = float(R_prime[0, 2]), float(R_prime[1, 2])
 
     if abs(sa_a) < rot_tol:
         # Gimbal lock: alpha_a = 0 or pi. v_a is degenerate; pick 0.0.
@@ -259,19 +260,19 @@ def back_substitute_one(
     w: float,
     *,
     a_1: float,
-    ls_1: float,
+    l_1: float,
     d_2: float,
     a_2: float,
-    ls_2: float,
+    l_2: float,
     d_3: float,
     a_3: float,
-    ls_3: float,
+    l_3: float,
     d_4: float,
     a_4: float,
-    ls_4: float,
+    l_4: float,
     d_5: float,
     a_5: float,
-    ls_5: float,
+    l_5: float,
 ) -> list[tuple[float, float, float, float]]:
     """Recover ``(v_2, v_3, v_4, v_5)`` for one ``(u, w)`` candidate.
 
@@ -286,7 +287,7 @@ def back_substitute_one(
     recoverable form.
     """
     # Build sigma_1(u) and sigma_6(w).
-    sigma_1 = _sigma_joint_full(u, a_1, ls_1, 0.0)  # joint 1: a_6 = d_6 = l_6 = 0 convention
+    sigma_1 = _sigma_joint_full(u, a_1, l_1, 0.0)  # joint 1: a_6 = d_6 = l_6 = 0 convention
     sigma_6 = _sigma_z(w)
 
     # Recover the Cramer cofactor P(u, w) at this refined point.
@@ -302,10 +303,10 @@ def back_substitute_one(
     T_left = se3_from_dq(sigma_left)
     T_right = se3_from_dq(sigma_right)
 
-    sols_23 = _solve_2r_chain(T_left, a_2, ls_2, d_2, a_3, ls_3, d_3)
-    sols_45 = _solve_2r_chain(T_right, a_4, ls_4, d_4, a_5, ls_5, d_5)
+    sol_23 = _solve_2r_chain(T_left, a_2, l_2, d_2, a_3, l_3, d_3)
+    sol_45 = _solve_2r_chain(T_right, a_4, l_4, d_4, a_5, l_5, d_5)
 
-    return [(v_2, v_3, v_4, v_5) for (v_2, v_3) in sols_23 for (v_4, v_5) in sols_45]
+    return [(v_2, v_3, v_4, v_5) for (v_2, v_3) in sol_23 for (v_4, v_5) in sol_45]
 
 
 def solve_ik(
@@ -313,19 +314,19 @@ def solve_ik(
     sigma_E: NDArray[np.float64],
     *,
     a_1: float,
-    ls_1: float,
+    l_1: float,
     d_2: float,
     a_2: float,
-    ls_2: float,
+    l_2: float,
     d_3: float,
     a_3: float,
-    ls_3: float,
+    l_3: float,
     d_4: float,
     a_4: float,
-    ls_4: float,
+    l_4: float,
     d_5: float,
     a_5: float,
-    ls_5: float,
+    l_5: float,
     fk_tol: float = 1e-8,
 ) -> NDArray[np.float64]:
     """Top-level HP IK solver.
@@ -356,32 +357,32 @@ def solve_ik(
             float(u),
             float(w),
             a_1=a_1,
-            ls_1=ls_1,
+            l_1=l_1,
             d_2=d_2,
             a_2=a_2,
-            ls_2=ls_2,
+            l_2=l_2,
             d_3=d_3,
             a_3=a_3,
-            ls_3=ls_3,
+            l_3=l_3,
             d_4=d_4,
             a_4=a_4,
-            ls_4=ls_4,
+            l_4=l_4,
             d_5=d_5,
             a_5=a_5,
-            ls_5=ls_5,
+            l_5=l_5,
         )
         for v_2, v_3, v_4, v_5 in candidates:
             # FK closure: build the full 6R chain DQ and compare.
             sigma_chain = dq_mul(
-                _sigma_joint_full(float(u), a_1, ls_1, 0.0),
+                _sigma_joint_full(float(u), a_1, l_1, 0.0),
                 dq_mul(
-                    _sigma_joint_full(v_2, a_2, ls_2, d_2),
+                    _sigma_joint_full(v_2, a_2, l_2, d_2),
                     dq_mul(
-                        _sigma_joint_full(v_3, a_3, ls_3, d_3),
+                        _sigma_joint_full(v_3, a_3, l_3, d_3),
                         dq_mul(
-                            _sigma_joint_full(v_4, a_4, ls_4, d_4),
+                            _sigma_joint_full(v_4, a_4, l_4, d_4),
                             dq_mul(
-                                _sigma_joint_full(v_5, a_5, ls_5, d_5),
+                                _sigma_joint_full(v_5, a_5, l_5, d_5),
                                 _sigma_z(float(w)),
                             ),
                         ),
