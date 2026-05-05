@@ -295,6 +295,7 @@ def solve_ik(
     l_5: float,
     fk_tol: float = 1e-8,
     accept_residue_tol: float | None = None,
+    drop_indices: tuple[int, ...] = (7, 4, 0),
 ) -> NDArray[np.float64]:
     """Top-level HP IK solver.
 
@@ -318,13 +319,26 @@ def solve_ik(
     :returns: 2-D array of shape ``(n, 6)`` with rows
         ``(v_1, v_2, v_3, v_4, v_5, v_6)``, each tan-half-angle.
     """
-    pairs = eliminate_uw_pairs(pre, sigma_E, accept_residue_tol=accept_residue_tol)
+    pairs = eliminate_uw_pairs(
+        pre,
+        sigma_E,
+        accept_residue_tol=accept_residue_tol,
+        drop_indices=drop_indices,
+    )
     if pairs.size == 0:
         return np.empty((0, 6), dtype=np.float64)
 
     sigma_E_arr = np.asarray(sigma_E, dtype=np.float64)
     sigma_E_norm = float(np.linalg.norm(sigma_E_arr))
     out: list[list[float]] = []
+    # Skip the projective Study-DQ closure check entirely when the
+    # caller passed a "disabled" tolerance (HP general_6r runs the FK
+    # check downstream in POE space via verify_candidates, so the
+    # 6-fold ``dq_mul`` chain build here is pure overhead -- ~3 ms per
+    # IK on locked-Franka with ~30 candidates). The threshold ``>= 0.1``
+    # captures every "FK closure not enforced" call site without
+    # affecting tight callers.
+    skip_chain_check = fk_tol >= 0.1
 
     for u, w in pairs:
         candidates = back_substitute_one(
@@ -348,6 +362,9 @@ def solve_ik(
             l_5=l_5,
         )
         for v_2, v_3, v_4, v_5 in candidates:
+            if skip_chain_check:
+                out.append([float(u), v_2, v_3, v_4, v_5, float(w)])
+                continue
             # FK closure: build the full 6R chain DQ and compare.
             sigma_chain = dq_mul(
                 _sigma_joint_full(float(u), a_1, l_1, 0.0),
