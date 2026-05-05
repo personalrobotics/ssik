@@ -34,6 +34,7 @@ from ssik.solvers.husty_pfurner._constraints import (
     _V2_SYM,
     hyperplane_residuals,
     tv1_hyperplanes_rrr,
+    tv2_hyperplanes_rrr,
     tv2_rrr_case_for,
     tv2_symbolic_in_v2,
     tv3_hyperplanes_rrr,
@@ -1350,4 +1351,48 @@ def test_tv2_rrr_case_for_picks_correct_subcase() -> None:
     assert tv2_rrr_case_for(0.5, 0.0, 0.5, 0.0) == "[l_1=0,l_2=0]"
     with pytest.raises(ValueError, match=r"do not match any T\(v_2\) RRR sub-case"):
         # Non-degenerate DH: T(v_1) applies, no T(v_2) sub-case.
-        tv2_rrr_case_for(0.5, 1.0, 0.5, 1.0) 
+        tv2_rrr_case_for(0.5, 1.0, 0.5, 1.0)
+
+
+@pytest.mark.parametrize("case_key", TV2_RRR_CASE_KEYS)
+@pytest.mark.parametrize("seed", list(range(5)))
+def test_tv2_full_hyperplanes_vanish_on_full_vl_chain(case_key: str, seed: int) -> None:
+    """Tv2_full hyperplanes (with joint-3 DH change of variables) vanish
+    on the FULL RRR left-chain DQ ``sigma_1 sigma_2 sigma_3`` (now
+    including joint-3 DH offsets ``a_3, l_3, d_3``) for random
+    (v_1, v_2, v_3) and random DH satisfying the sub-case condition.
+
+    This is the form ``_eliminate.precompute_rrr_chain`` consumes -- the
+    Study coords are at frame F_4, after joint 3's full transition has
+    acted.
+
+    Tolerance 1e-12 (post-numeric-SVD-kernel construction).
+    """
+    rng = np.random.default_rng(seed * 100 + (hash(case_key) % 1000) + 17)
+    dh = _random_dh_for_tv2_case(rng, case_key)
+    # Joint-3 DH parameters (free, not part of the sub-case).
+    d_3 = float(rng.uniform(-1.0, 1.0))
+    a_3 = float(rng.uniform(0.2, 1.0)) * float(rng.choice([-1.0, 1.0]))
+    l_3 = math.tan(0.5 * float(rng.uniform(0.3, math.pi - 0.3)))
+    v_1 = float(rng.uniform(-2.0, 2.0))
+    v_2 = float(rng.uniform(-2.0, 2.0))
+    v_3 = float(rng.uniform(-2.0, 2.0))
+
+    # Full RRR chain INCLUDING joint-3 DH offsets.
+    sigma_vl_full = _vl_chain_rrr(
+        v_1, dh["a_1"], dh["l_1"], dh["d_2"], v_2, dh["a_2"], dh["l_2"],
+        v_3, d_3, a_3, l_3,
+    )
+
+    coeffs_full = tv2_hyperplanes_rrr(
+        case_key,
+        a_1=dh["a_1"], l_1=dh["l_1"], d_2=dh["d_2"],
+        a_2=dh["a_2"], l_2=dh["l_2"],
+        d_3=d_3, a_3=a_3, l_3=l_3,
+        v_2=v_2,
+    )
+    residuals = coeffs_full @ sigma_vl_full
+    assert np.allclose(residuals, 0.0, atol=1e-12), (
+        f"case={case_key} seed={seed}: max|residual|="
+        f"{float(np.max(np.abs(residuals))):.2e}"
+    ) 

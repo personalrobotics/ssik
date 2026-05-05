@@ -52,6 +52,7 @@ __all__ = [
     "hyperplane_residuals",
     "tv1_hyperplanes_rrr",
     "tv1_symbolic_in_v1",
+    "tv2_hyperplanes_rrr",
     "tv2_rrr_case_for",
     "tv2_symbolic_in_v2",
     "tv3_hyperplanes_rrr",
@@ -533,6 +534,44 @@ def _quat_left_mult_matrix(p: NDArray[np.float64]) -> NDArray[np.float64]:
     )
 
 
+def _quat_right_mult_matrix(p: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return the 4x4 matrix ``R(p)`` such that ``R(p) @ q == q * p`` for
+    any quaternion ``q``.
+
+    Right-mult is non-commutative with left-mult; the column ordering
+    differs from :func:`_quat_left_mult_matrix`.
+    """
+    p0, p1, p2, p3 = float(p[0]), float(p[1]), float(p[2]), float(p[3])
+    return np.array(
+        [
+            [p0, -p1, -p2, -p3],
+            [p1, p0, p3, -p2],
+            [p2, -p3, p0, p1],
+            [p3, p2, -p1, p0],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _dq_right_mult_matrix(eta: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return the 8x8 matrix ``M_eta`` such that ``M_eta @ sigma == sigma * eta``
+    for any 8-vec dual quaternion ``sigma`` (using ``ssik.solvers.husty_pfurner._study.dq_mul``).
+
+    Block structure mirrors :func:`_dq_left_mult_matrix` but with
+    right-mult quaternion matrices: top-left and bottom-right are
+    ``R(eta_p)``; bottom-left is ``R(eta_q)``.
+    """
+    eta_p = eta[:4]
+    eta_q = eta[4:]
+    Rp = _quat_right_mult_matrix(eta_p)
+    Rq = _quat_right_mult_matrix(eta_q)
+    M = np.zeros((8, 8), dtype=np.float64)
+    M[:4, :4] = Rp
+    M[4:, :4] = Rq
+    M[4:, 4:] = Rp
+    return M
+
+
 def _dq_left_mult_matrix(eta: NDArray[np.float64]) -> NDArray[np.float64]:
     """Return the 8x8 matrix ``M_eta`` such that ``M_eta @ sigma == eta * sigma``
     for any 8-vec dual quaternion ``sigma`` (using ``ssik.solvers.husty_pfurner._study.dq_mul``).
@@ -949,3 +988,72 @@ def tv2_symbolic_in_v2(
                 float(kernel_basis[i, 8 + j])
             )
     return H
+
+
+def tv2_hyperplanes_rrr(
+    case_key: str,
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
+    d_3: float,
+    a_3: float,
+    l_3: float,
+    v_2: float,
+) -> NDArray[np.float64]:
+    """Full 4x8 ``T(v_2)`` coefficient matrix for the RRR case at one ``v_2``.
+
+    Mirrors Capco's ``rrr.py:Tv2_full(left=True)``: the simple-form
+    Tv2 hyperplanes (output of :func:`tv2_symbolic_in_v2`) are
+    expressed in Study coords ``xy`` at frame ``F_3`` (right after
+    joint 3 has rotated by ``v_3``). The full form transforms them to
+    coords ``uw`` at frame ``F_4`` (after joint 3's full DH transition
+    ``T_z(d_3) T_x(a_3) R_x(l_3)``) by the substitution
+
+        xy = uw . conj(T_z(d_3) T_x(a_3) R_x(l_3))
+
+    Equivalently, the 4x8 hyperplane matrix transforms as
+    ``H_full = H_simple @ R_right`` where ``R_right`` is the 8x8
+    matrix representation of right-multiplication by
+    ``conj(T_z(d_3) T_x(a_3) R_x(l_3))`` (see
+    :func:`_dq_right_mult_matrix`).
+
+    For any ``v_1, v_2, v_3 in R``, the 4 hyperplanes returned here
+    vanish on the projective Study DQ of the full RRR chain
+    ``sigma_1(v_1) sigma_2(v_2) sigma_3(v_3)`` -- the same V_L that
+    ``T(v_1)`` and ``T(v_3)`` describe, but parametrised by ``v_2``
+    when ``T(v_1)`` and ``T(v_3)`` are both degenerate.
+
+    Argument order matches :func:`tv1_hyperplanes_rrr` for
+    consistency: parameters of joints 1, 2, 3 in sequence; ``v_2``
+    last (it's the parametrising free variable).
+    """
+    h_sym = tv2_symbolic_in_v2(case_key, a_1, l_1, d_2, a_2, l_2)
+    # Substitute v_2 numerically -> 4x8 sympy float matrix.
+    h_at_v2 = h_sym.subs(_V2_SYM, sp.Float(v_2))
+    h_simple = np.array(h_at_v2.tolist(), dtype=np.float64)
+    if h_simple.shape != (4, 8):  # pragma: no cover -- defensive
+        raise RuntimeError(f"tv2 simple form: expected (4, 8), got {h_simple.shape}")
+
+    # Joint-3 DH transition: T_z(d_3) T_x(a_3) R_x(l_3) (no v_3 rotation;
+    # v_3 is encoded in xy at F_3 by the simple form already).
+    j3_dh = np.array(
+        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5 * d_3], dtype=np.float64
+    )  # T_z(d_3)
+    tx_dq = np.array(
+        [1.0, 0.0, 0.0, 0.0, 0.0, 0.5 * a_3, 0.0, 0.0], dtype=np.float64
+    )
+    rx_dq = np.array([1.0, l_3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
+    # Compose: J3_DH = T_z(d_3) T_x(a_3) R_x(l_3) via dq_mul.
+    from ssik.solvers.husty_pfurner._study import dq_conj, dq_mul as _dq_mul
+
+    j3_dh = _dq_mul(j3_dh, _dq_mul(tx_dq, rx_dq))
+    # conj(J3_DH) for the right-mult matrix.
+    j3_dh_conj = dq_conj(j3_dh)
+    R_right = _dq_right_mult_matrix(j3_dh_conj)
+
+    # H_full = H_simple @ R_right
+    h_full = h_simple @ R_right
+    return h_full
+
