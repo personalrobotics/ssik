@@ -115,15 +115,21 @@ def kinbody_jacobian(
 ) -> NDArray[np.float64]:
     """Closed-form 6xN spatial Jacobian for a POE-form ``KinBody``.
 
-    For each joint i, the column is the i-th screw axis in the world
-    frame at config ``q``::
+    The spatial Jacobian relates joint rates to the spatial twist of
+    the end-effector pose, ``T(q+dq) @ T(q)^{-1} ~ exp([J @ dq])``,
+    matching the convention used by :func:`se3_log_residual` (which
+    reads off the spatial twist of ``T_target @ T_q^{-1}``). For
+    revolute joint i with axis ``z_i`` (world frame at ``q``) and
+    origin ``p_i`` (world frame at ``q``)::
 
-        J[:3, i] = z_i x (p_e - p_i)    (linear-velocity component)
-        J[3:, i] = z_i                  (angular-velocity component)
+        J[:3, i] = -z_i x p_i = p_i x z_i    (linear, spatial)
+        J[3:, i] =  z_i                      (angular, spatial)
 
-    where ``z_i`` is the joint-i axis in the world frame at ``q``, and
-    ``p_i`` / ``p_e`` are the joint-i origin and end-effector position
-    respectively.
+    Note: this is *not* the so-called "geometric" or "hybrid" Jacobian
+    ``z_i x (p_e - p_i)`` that maps to end-effector POINT velocity in
+    world coordinates -- ``lm_refine`` consumes a spatial twist, so the
+    spatial form is what's needed for Newton-on-SE(3)-log convergence.
+    The two differ by ``z_i x p_e`` per column.
     """
     joints = kb.joints  # type: ignore[attr-defined]
     n = len(joints)
@@ -143,14 +149,13 @@ def kinbody_jacobian(
             ]
         )
         cum.append(cum[-1] @ joint.T_left @ rot @ joint.T_right)
-    p_e = cum[-1][:3, 3]
     j = np.zeros((6, n), dtype=np.float64)
     for i, joint in enumerate(joints):
         # Frame just *before* joint i acts: cum[i] @ T_left[i].
         t_pre = cum[i] @ joint.T_left
         z_i = t_pre[:3, :3] @ (joint.axis / np.linalg.norm(joint.axis))
         p_i = t_pre[:3, 3]
-        j[:3, i] = np.cross(z_i, p_e - p_i)
+        j[:3, i] = np.cross(p_i, z_i)
         j[3:, i] = z_i
     return j
 

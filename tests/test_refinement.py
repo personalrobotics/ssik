@@ -28,6 +28,7 @@ from ssik.refinement import (
     se3_log_residual,
     verify_candidates,
 )
+from tests.fixtures.franka_panda import franka_panda_specs
 from tests.fixtures.ur5 import ur5_specs
 
 
@@ -156,24 +157,52 @@ def test_lm_refine_returns_none_on_hopeless_seed(ur5_kb: KinBody) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_kinbody_jacobian_angular_block_matches_world_axes(ur5_kb: KinBody) -> None:
-    """The angular block J[3:, i] is the i-th joint axis in the world
-    frame at config ``q`` -- this is invariant of hybrid-vs-spatial
-    convention. (The linear block differs by ``z_i x p_e`` between the
-    two conventions; both are valid for Newton refinement on the
-    SE(3)-log residual, but ``lm_refine``'s convergence depends only on
-    full rank, not on which convention you pick.)"""
+@pytest.fixture
+def franka_kb() -> KinBody:
+    return build_kinbody(franka_panda_specs())
+
+
+@pytest.mark.parametrize("kb_name", ["ur5", "franka"])
+def test_kinbody_jacobian_matches_numerical_spatial(
+    kb_name: str, ur5_kb: KinBody, franka_kb: KinBody
+) -> None:
+    """Analytical and numerical (central-difference) spatial Jacobians
+    must agree to central-difference precision (~1e-5) on every block,
+    not just the angular one. Tested on multiple arm topologies (UR5
+    6R, Franka Panda 7R) to cover diverse axis configurations.
+
+    This is bulletproof correctness, not "close enough for Newton". The
+    Jacobian convention must match ``se3_log_residual`` -- which extracts
+    the spatial twist of ``T_target @ T_q^{-1}`` -- otherwise Newton in
+    ``lm_refine`` is a quasi-Newton with a wrong Hessian estimate, which
+    converges only from very-close seeds and silently fails on harder
+    initial guesses (the bug that locked-Franka HP back-substitution
+    ran into; see PR #176 / Phase 5h).
+
+    The hybrid / "geometric" Jacobian (``z_i x (p_e - p_i)`` linear part)
+    differs from the spatial Jacobian by ``z_i x p_e`` per column. Either
+    can be full rank, so a rank-only test passes on both. We pin the
+    actual values here.
+    """
+    kb = ur5_kb if kb_name == "ur5" else franka_kb
+    n_dof = len(kb.joints)
     rng = np.random.default_rng(0)
-    q = rng.uniform(-1.0, 1.0, size=6)
-    j_kb = kinbody_jacobian(ur5_kb, q)
-    fk_for_jac = lambda x: _fk_poe(ur5_kb, x)  # noqa: E731
-    j_num = numerical_jacobian(q, fk_for_jac)
-    # Angular block must agree to ~1e-5 (central-diff precision floor).
-    assert np.allclose(j_kb[3:], j_num[3:], atol=1e-5)
-    # Both Jacobians must be full-rank at a generic config (necessary
-    # for Newton to converge in ``lm_refine``).
-    assert np.linalg.matrix_rank(j_kb) == 6
-    assert np.linalg.matrix_rank(j_num) == 6
+    for _ in range(8):
+        q = rng.uniform(-2.0, 2.0, size=n_dof)
+        j_kb = kinbody_jacobian(kb, q)
+        fk_for_jac = lambda x: _fk_poe(kb, x)  # noqa: E731
+        j_num = numerical_jacobian(q, fk_for_jac)
+        # Tight bound: analytical must match central-difference truth to
+        # ~1e-5 (central-diff truncation floor). Loose bounds would mask
+        # convention bugs like the one PR #176 fixed.
+        max_abs = float(np.max(np.abs(j_kb - j_num)))
+        assert max_abs < 1e-5, (
+            f"{kb_name}: kinbody_jacobian disagrees with numerical_jacobian "
+            f"at q={q}: max abs diff {max_abs:.3e} (>1e-5). Likely a "
+            f"convention mismatch with se3_log_residual."
+        )
+        assert np.linalg.matrix_rank(j_kb) == min(6, n_dof)
+        assert np.linalg.matrix_rank(j_num) == min(6, n_dof)
 
 
 # ---------------------------------------------------------------------------

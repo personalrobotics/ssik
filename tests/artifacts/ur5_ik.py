@@ -404,9 +404,11 @@ def _spatial_jacobian(q):
     """6 x n_dof spatial Jacobian using the baked chain constants.
 
     Math identical to ssik.refinement.kinbody_jacobian: column i
-    is (z_i x (p_e - p_i), z_i) where z_i is the i-th joint axis
-    in the world frame at q and p_i / p_e are the i-th joint
-    origin and EE position respectively. Per-arm version with
+    is (p_i x z_i, z_i) where z_i is the i-th joint axis in the
+    world frame at q and p_i is the i-th joint origin. This is
+    the SPATIAL twist representation -- T(q+dq) @ T(q)^-1 ~
+    exp([J @ dq]) -- matching the residual extracted by
+    ssik.refinement.se3_log_residual. Per-arm version with
     baked _JOINT_AXES / _JOINT_T_LEFTS / _JOINT_T_RIGHTS so
     there's no KinBody walk at runtime.
     """
@@ -418,14 +420,13 @@ def _spatial_jacobian(q):
         rot[:3, :3] = _rotation_matrix(_JOINT_AXES[i], float(q[i]))
         cum = cum @ _JOINT_T_LEFTS[i] @ rot @ _JOINT_T_RIGHTS[i]
         cums.append(cum.copy())
-    p_e = cums[-1][:3, 3]
     J = np.zeros((6, n), dtype=np.float64)
     for i in range(n):
         t_pre = cums[i] @ _JOINT_T_LEFTS[i]
         axis_unit = _JOINT_AXES[i] / np.linalg.norm(_JOINT_AXES[i])
         z_i = t_pre[:3, :3] @ axis_unit
         p_i = t_pre[:3, 3]
-        J[:3, i] = np.cross(z_i, p_e - p_i)
+        J[:3, i] = np.cross(p_i, z_i)
         J[3:, i] = z_i
     return J
 
