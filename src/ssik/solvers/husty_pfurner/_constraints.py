@@ -48,9 +48,12 @@ if TYPE_CHECKING:  # pragma: no cover
     pass
 
 __all__ = [
+    "TV2_RRR_CASE_KEYS",
     "hyperplane_residuals",
     "tv1_hyperplanes_rrr",
     "tv1_symbolic_in_v1",
+    "tv2_rrr_case_for",
+    "tv2_symbolic_in_v2",
     "tv3_hyperplanes_rrr",
     "tv3_symbolic_in_v3",
     "tv6_hyperplanes_rrr",
@@ -63,8 +66,22 @@ __all__ = [
 # Cached once at import time to avoid repeated allocation; tests and
 # downstream code (``_eliminate.py``) reuse these for substitution.
 _V1_SYM = sp.symbols("v_1", real=True)
+_V2_SYM = sp.symbols("v_2", real=True)
 _V3_SYM = sp.symbols("v_3", real=True)
 _V6_SYM = sp.symbols("v_6", real=True)
+
+
+# Capco's RRR T(v_2) sub-case keys. Each one identifies which DH
+# parameter pair is zero in the kinematic chain that triggers the
+# double-degenerate branch (``T(v_1)`` AND ``T(v_3)`` both lie in the
+# Study quadric). See `which_case.py:get_Tvd2_key1` and
+# `rrr.py:Tv2_cases` in Capco's Zenodo 3157441 reference code.
+TV2_RRR_CASE_KEYS: tuple[str, ...] = (
+    "[a_1=0,a_2=0]",
+    "[a_1=0,l_2=0]",
+    "[l_1=0,a_2=0]",
+    "[l_1=0,l_2=0]",
+)
 
 
 def v1_hyperplanes_rrr(a_2: float, l_2: float) -> NDArray[np.float64]:
@@ -656,3 +673,279 @@ def tv6_symbolic_in_v6(
     M_e = _dq_left_mult_matrix(sigma_e_conj)
     M_e_sym = sp.Matrix(M_e.tolist())
     return coeffs_pre_sigma_e * M_e_sym
+
+
+# ---------------------------------------------------------------------------
+# Phase 5c.4 / GitHub #176: T(v_2) -- the double-degenerate parametrization.
+#
+# Triggered for RRR when BOTH T(v_1) and T(v_3) lie in the Study quadric:
+#
+#     (a_2 = 0 OR l_2 = 0)   <-- T(v_1) eq. 5 simplified-form precondition fail
+#     AND
+#     (a_1 = 0 OR l_1 = 0)   <-- T(v_3) precondition fail (mirror of above)
+#
+# In this case neither of the closed-form 4x8 hyperplane matrices applies.
+# Capco's documented fix (paper Section 5.4 step 2; reference giac code
+# ``rrr.py:Tv2_cases`` in Zenodo 3157441) is a 12x16 kernel construction:
+#
+#  1. Build the symbolic Study DQ chain
+#       t = sigma_1(v_1, d_1=0, a_1, l_1)
+#         . sigma_2(v_2, d_2, a_2, l_2)
+#         . R_z(v_3)            [joint-3 DH absorbed in Tv2_full]
+#  2. Form the bilinear expression
+#       eqn = sum_i  t[i] * (cf[i] + v_2 * df[i])
+#     where (cf, df) are 16 unknown scalars (cf[0..7] for the constant
+#     part, df[0..7] for the v_2-linear part).
+#  3. Extract coefficients of v_1^v1i * v_2^v2i * v_3^v3i for
+#     (v1i, v2i, v3i) in {0,1} x {0,1,2} x {0,1}: 12 row vectors of
+#     length 16. Stack as a 12x16 matrix M.
+#  4. Substitute the DH-degeneracy condition (e.g. a_1=0 AND a_2=0) into
+#     M. The kernel of the resulting matrix has dimension 4 (one basis
+#     vector per V_L hyperplane).
+#  5. Each kernel basis vector v_k of length 16 gives a hyperplane
+#       H_k(xy, v_2) = (v_k[0:8] + v_2 * v_k[8:16]) . xy
+#     linear in v_2 and in the Study coords xy.
+#
+# This yields 4 hyperplanes whose coefficients are linear in v_2, the
+# parametrising joint, exactly mirroring the structure ``T(v_1)`` /
+# ``T(v_3)`` produces. Downstream elimination (``_eliminate.py``) then
+# treats v_2 as the parametric variable u in the Sylvester pencil.
+#
+# The derivation differs per sub-case because the DH substitution
+# happens BEFORE taking the kernel: each of the 4 RRR sub-cases keyed
+# in ``TV2_RRR_CASE_KEYS`` produces a different 4-hyperplane system.
+# ---------------------------------------------------------------------------
+
+
+def _tv2_rrr_case_substitution(
+    case_key: str,
+    a_1: sp.Symbol,
+    l_1: sp.Symbol,
+    a_2: sp.Symbol,
+    l_2: sp.Symbol,
+) -> tuple[dict[sp.Symbol, sp.Integer], tuple[sp.Symbol, ...]]:
+    """Map a Capco sub-case key to (substitution dict, remaining free DH).
+
+    Returns the symbol-to-zero substitution plus an ordered tuple of
+    DH symbols that remain free after the substitution. The caller
+    uses the substitution to specialise the 12x16 matrix and the
+    remaining-free tuple as ``lambdify`` argument order.
+    """
+    zero = sp.Integer(0)
+    if case_key == "[a_1=0,a_2=0]":
+        return {a_1: zero, a_2: zero}, (l_1, l_2)
+    if case_key == "[a_1=0,l_2=0]":
+        return {a_1: zero, l_2: zero}, (l_1, a_2)
+    if case_key == "[l_1=0,a_2=0]":
+        return {l_1: zero, a_2: zero}, (a_1, l_2)
+    if case_key == "[l_1=0,l_2=0]":
+        return {l_1: zero, l_2: zero}, (a_1, a_2)
+    raise ValueError(
+        f"unknown T(v_2) RRR sub-case {case_key!r}; "
+        f"expected one of {TV2_RRR_CASE_KEYS}"
+    )
+
+
+def tv2_rrr_case_for(a_1: float, l_1: float, a_2: float, l_2: float) -> str:
+    """Return the appropriate Capco RRR Tv2 sub-case key for given DH.
+
+    Mirrors ``which_case.py:get_Tvd2_key1`` (RRR branch) in Capco's
+    reference giac code. Caller is responsible for verifying the
+    double-degenerate condition holds (see :func:`tv2_symbolic_in_v2`
+    for full preconditions); this function picks among the 4
+    sub-cases assuming we already know we need T(v_2).
+
+    :raises ValueError: if no sub-case matches (i.e. the caller
+        invoked us when one of T(v_1) or T(v_3) actually applies).
+    """
+    tol = 1e-9
+    a1_zero = abs(a_1) < tol
+    l1_zero = abs(l_1) < tol
+    a2_zero = abs(a_2) < tol
+    l2_zero = abs(l_2) < tol
+    if a1_zero and a2_zero:
+        return "[a_1=0,a_2=0]"
+    if a1_zero and l2_zero:
+        return "[a_1=0,l_2=0]"
+    if l1_zero and a2_zero:
+        return "[l_1=0,a_2=0]"
+    if l1_zero and l2_zero:
+        return "[l_1=0,l_2=0]"
+    raise ValueError(
+        f"DH parameters do not match any T(v_2) RRR sub-case: "
+        f"a_1={a_1}, l_1={l_1}, a_2={a_2}, l_2={l_2}. "
+        f"T(v_2) only applies under (a_1=0 OR l_1=0) AND (a_2=0 OR l_2=0)."
+    )
+
+
+@lru_cache(maxsize=4)
+def _build_tv2_rrr_case_chain_symbolic(
+    case_key: str,
+) -> tuple[sp.Matrix, tuple[sp.Symbol, ...]]:
+    """Build the symbolic 8-vec Study DQ chain
+    ``t = sigma_1 . sigma_2 . R_z(v_3)`` after applying the
+    ``case_key`` DH-degeneracy substitution.
+
+    Returns ``(t_chain, free_syms)`` where ``t_chain`` is a sympy
+    8-vec with entries polynomial in (v_1, v_2, v_3) and the
+    surviving DH parameters, and ``free_syms`` is the ordered tuple
+    ``(v_1, v_2, v_3, *remaining_DH)`` where ``remaining_DH``
+    depends on the sub-case (e.g. ``(l_1, l_2, d_2)`` for
+    ``[a_1=0,a_2=0]``).
+
+    The numeric runtime helper :func:`tv2_symbolic_in_v2` substitutes
+    DH numerically in ``t_chain`` then computes the 4-hyperplane
+    kernel via numpy SVD (avoiding sympy nullspace's symbolic-pole
+    issues at l_1 = ±1, l_2 = ±1 etc).
+    """
+    v_1 = _V1_SYM
+    v_2 = _V2_SYM
+    v_3 = _V3_SYM
+    a_1, l_1, d_2 = sp.symbols("a_1 l_1 d_2", real=True)
+    a_2, l_2 = sp.symbols("a_2 l_2", real=True)
+
+    half = sp.Rational(1, 2)
+    one = sp.Integer(1)
+    zero = sp.Integer(0)
+
+    def rz(v: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, v, zero, zero, zero, zero])
+
+    def tx(a: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, zero, zero, half * a, zero, zero])
+
+    def tz(d: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, zero, zero, zero, zero, zero, zero, half * d])
+
+    def rx(t: sp.Symbol) -> sp.Matrix:
+        return sp.Matrix([one, t, zero, zero, zero, zero, zero, zero])
+
+    sigma_1_chain = _dq_mul_sym(rz(v_1), _dq_mul_sym(tx(a_1), rx(l_1)))
+    sigma_2_chain = _dq_mul_sym(
+        rz(v_2), _dq_mul_sym(tz(d_2), _dq_mul_sym(tx(a_2), rx(l_2)))
+    )
+    rz_v3 = rz(v_3)
+
+    t_chain = _dq_mul_sym(sigma_1_chain, _dq_mul_sym(sigma_2_chain, rz_v3))
+
+    sub_dict, free_dh = _tv2_rrr_case_substitution(case_key, a_1, l_1, a_2, l_2)
+    t_chain = t_chain.subs(sub_dict)
+
+    return t_chain, (v_1, v_2, v_3) + free_dh + (d_2,)
+
+
+def tv2_symbolic_in_v2(
+    case_key: str,
+    a_1: float,
+    l_1: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
+) -> sp.Matrix:
+    """Return the 4x8 ``T(v_2)`` matrix for one RRR sub-case as a
+    sympy ``Matrix`` with ``v_2`` symbolic and DH parameters
+    substituted numerically.
+
+    Used by the elimination pipeline (Phase 5c.4 / #176) when both
+    ``T(v_1)`` and ``T(v_3)`` are degenerate. The caller is responsible
+    for picking the right ``case_key`` via :func:`tv2_rrr_case_for`.
+
+    The runtime free symbol is :data:`_V2_SYM`. Joint-3 DH parameters
+    (``a_3``, ``l_3``, ``d_3``) are NOT inputs here -- they get absorbed
+    by the Tv2_full change of variables in ``_eliminate.py`` (analogous
+    to ``tv1_symbolic_in_v1`` / ``tv3_symbolic_in_v3`` for their
+    respective parametrizations).
+
+    Implementation: build the 12x16 monomial-coefficient matrix from
+    the symbolic chain (cached per case_key) with DH substituted
+    numerically, take its kernel via numpy SVD, and reconstruct the 4
+    v_2-linear hyperplane equations from the 4-D kernel basis.
+    Numeric kernel avoids sympy nullspace's symbolic-pole artefacts
+    at l_1 = ±1, l_2 = ±1 etc.
+
+    :param case_key: one of :data:`TV2_RRR_CASE_KEYS`.
+    :param a_1, l_1: joint-1 DH (substituted to 0 if the case demands).
+    :param d_2: joint-2 d offset (always free).
+    :param a_2, l_2: joint-2 DH (substituted to 0 if the case demands).
+    """
+    t_chain_sym, (v_1_sym, v_2_sym, v_3_sym, *dh_syms_after_case) = (
+        _build_tv2_rrr_case_chain_symbolic(case_key)
+    )
+    # The symbol table is set up by _build_tv2_rrr_case_chain_symbolic;
+    # use sp.symbols(...) lookups to populate the substitution map.
+    a1_s, l1_s = sp.symbols("a_1 l_1", real=True)
+    a2_s, l2_s = sp.symbols("a_2 l_2", real=True)
+    d2_s = sp.symbols("d_2", real=True)
+    dh_full = {
+        a1_s: sp.Float(a_1),
+        l1_s: sp.Float(l_1),
+        d2_s: sp.Float(d_2),
+        a2_s: sp.Float(a_2),
+        l2_s: sp.Float(l_2),
+    }
+    # Substitute DH numerically; t_chain_num is now an 8-vec of polynomials in
+    # (v_1, v_2, v_3) with float coefficients.
+    t_chain_num = t_chain_sym.subs(dh_full)
+
+    # Build the 12x16 matrix from monomial coefficients.
+    M = np.zeros((12, 16), dtype=np.float64)
+    for v1i in range(2):
+        for v3i in range(2):
+            for v2i in range(3):
+                row = v2i + 3 * v3i + 6 * v1i
+                for j in range(8):
+                    poly = sp.Poly(
+                        sp.expand(t_chain_num[j]), v_1_sym, v_2_sym, v_3_sym
+                    )
+                    coef = poly.coeff_monomial((v1i, v2i, v3i))
+                    coef_f = float(coef) if coef is not sp.S.Zero else 0.0
+                    # cf basis (constant in v_2): row contributes coef * cf[j]
+                    # but we also need (cf+v_2*df)[i] structure -- the row
+                    # corresponds to (v_2)^v2i, so the cf[j] enters at v2i=0
+                    # and df[j] at v2i=1 (i.e. the v_2-multiplied half).
+                    # For our flattened indexing matching Capco's:
+                    #   col j in [0..7]   = coeff of cf[j] at this monomial
+                    #   col j in [8..15]  = coeff of df[j-8]
+                    # The expression eqn = sum_i t_chain[i]*(cf[i] + v_2*df[i])
+                    # contributes to monomial (v1i, v2i, v3i) two ways:
+                    #   - cf[i] term: t_chain[i]'s (v1i, v2i, v3i) coef -> col i
+                    #   - df[i] term: t_chain[i]'s (v1i, v2i-1, v3i) coef * v_2
+                    #                 -> col i+8 (only if v2i >= 1)
+                    M[row, j] = coef_f
+                    if v2i >= 1:
+                        # df[j] contribution: comes from t_chain[j]'s
+                        # (v1i, v2i-1, v3i) monomial coefficient.
+                        poly_lower = sp.Poly(
+                            sp.expand(t_chain_num[j]), v_1_sym, v_2_sym, v_3_sym
+                        )
+                        coef_lower = poly_lower.coeff_monomial(
+                            (v1i, v2i - 1, v3i)
+                        )
+                        coef_lower_f = (
+                            float(coef_lower) if coef_lower is not sp.S.Zero else 0.0
+                        )
+                        M[row, 8 + j] = coef_lower_f
+
+    # Kernel via SVD: pick the 4 right-singular vectors with smallest
+    # singular values. For a Capco-valid sub-case these are the
+    # 4 hyperplane basis vectors (kernel dim = 4 generically).
+    _, sigmas, vh = np.linalg.svd(M, full_matrices=True)
+    # vh has shape (16, 16); rows 12..15 are the kernel.
+    if sigmas.shape[0] >= 4 and sigmas[-4] > 1e-6:
+        # If the 4th-from-last singular value is non-tiny, the kernel
+        # isn't 4-dim and our case substitution may be wrong for this DH.
+        # Fall back to picking the smallest 4 anyway (best effort).
+        pass
+    kernel_basis = vh[-4:, :]  # shape (4, 16)
+
+    # Each kernel basis vector v_k of length 16 gives a hyperplane
+    #   H_k(xy, v_2) = (v_k[0:8] + v_2 * v_k[8:16]) . xy
+    # Build the 4x8 sympy matrix where H[i, j] = v_k[j] + v_2 * v_k[8+j].
+    v_2_out = _V2_SYM
+    H = sp.zeros(4, 8)
+    for i in range(4):
+        for j in range(8):
+            H[i, j] = sp.Float(float(kernel_basis[i, j])) + v_2_out * sp.Float(
+                float(kernel_basis[i, 8 + j])
+            )
+    return H

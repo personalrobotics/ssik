@@ -27,9 +27,15 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+import sympy as sp
+
 from ssik.solvers.husty_pfurner._constraints import (
+    TV2_RRR_CASE_KEYS,
+    _V2_SYM,
     hyperplane_residuals,
     tv1_hyperplanes_rrr,
+    tv2_rrr_case_for,
+    tv2_symbolic_in_v2,
     tv3_hyperplanes_rrr,
     tv6_hyperplanes_rrr,
     v1_hyperplanes_rrr,
@@ -1248,3 +1254,100 @@ def test_tv6_rejects_wrong_shape_sigma_e() -> None:
             sigma_E=np.zeros(7),  # wrong shape
             v_6=0.0,
         )
+
+
+# ----------------------------------------------------------------------------
+# T(v_2) -- Phase 5c.4 / GitHub #176 -- the double-degenerate parametrization.
+# Triggered for RRR when both T(v_1) (a_2!=0 AND l_2!=0) and T(v_3) (a_1!=0
+# AND l_1!=0) are violated. Capco enumerates 4 sub-cases keyed by which DH
+# parameter pair is zero -- each builds a different 4-hyperplane system
+# from the 12x16 kernel construction.
+# ----------------------------------------------------------------------------
+
+
+def _vl_chain_rrr_simple(
+    v_1: float, a_1: float, l_1: float,
+    v_2: float, d_2: float, a_2: float, l_2: float,
+    v_3: float,
+) -> np.ndarray:
+    """RRR left-chain DQ in the SIMPLE form ``T(v_2)`` derives against:
+    sigma_1(v_1, d_1=0, a_1, l_1) . sigma_2(v_2, d_2, a_2, l_2) . R_z(v_3).
+
+    Differs from :func:`_vl_chain_rrr` in that joint-3 DH parameters
+    (a_3, l_3, d_3) are absent -- they get absorbed by the Tv2_full
+    change of variables in ``_eliminate.py``.
+    """
+    sigma_1 = dq_mul(_rz_dq(v_1), dq_mul(_tx_dq(a_1), _rx_dq(l_1)))
+    sigma_2 = dq_mul(
+        _rz_dq(v_2),
+        dq_mul(_tz_dq(d_2), dq_mul(_tx_dq(a_2), _rx_dq(l_2))),
+    )
+    return dq_mul(sigma_1, dq_mul(sigma_2, _rz_dq(v_3)))
+
+
+_TV2_RRR_CASE_DH = {
+    "[a_1=0,a_2=0]": dict(a_1=0.0, a_2=0.0),
+    "[a_1=0,l_2=0]": dict(a_1=0.0, l_2=0.0),
+    "[l_1=0,a_2=0]": dict(l_1=0.0, a_2=0.0),
+    "[l_1=0,l_2=0]": dict(l_1=0.0, l_2=0.0),
+}
+
+
+def _random_dh_for_tv2_case(rng: np.random.Generator, case_key: str) -> dict[str, float]:
+    """Random non-degenerate DH satisfying the sub-case condition.
+    The DH params NOT pinned to zero by the sub-case are drawn from a
+    safe non-degenerate range.
+    """
+    fixed = _TV2_RRR_CASE_DH[case_key]
+    out = {
+        "a_1": float(rng.uniform(0.2, 1.0)) * float(rng.choice([-1.0, 1.0])),
+        "l_1": math.tan(0.5 * float(rng.uniform(0.3, math.pi - 0.3))),
+        "d_2": float(rng.uniform(-1.0, 1.0)),
+        "a_2": float(rng.uniform(0.2, 1.0)) * float(rng.choice([-1.0, 1.0])),
+        "l_2": math.tan(0.5 * float(rng.uniform(0.3, math.pi - 0.3))),
+    }
+    out.update(fixed)
+    return out
+
+
+@pytest.mark.parametrize("case_key", TV2_RRR_CASE_KEYS)
+@pytest.mark.parametrize("seed", list(range(5)))
+def test_tv2_hyperplanes_vanish_on_full_vl_chain(case_key: str, seed: int) -> None:
+    """T(v_2) hyperplanes vanish on the full RRR left-chain DQ (in the
+    simple form -- joint-3 DH absent) for random (v_1, v_2, v_3) and
+    random DH satisfying the sub-case degeneracy condition.
+
+    Tolerance 1e-12 (post-numeric-SVD-kernel construction; tighter than
+    T(v_1)/T(v_3) which use sympy lambdify and lose ~3 digits to numpy
+    contraction order).
+    """
+    rng = np.random.default_rng(seed * 100 + (hash(case_key) % 1000))
+    dh = _random_dh_for_tv2_case(rng, case_key)
+    v_1 = float(rng.uniform(-2.0, 2.0))
+    v_2 = float(rng.uniform(-2.0, 2.0))
+    v_3 = float(rng.uniform(-2.0, 2.0))
+
+    sigma_vl = _vl_chain_rrr_simple(
+        v_1, dh["a_1"], dh["l_1"], v_2, dh["d_2"], dh["a_2"], dh["l_2"], v_3
+    )
+
+    h_sym = tv2_symbolic_in_v2(case_key, **dh)
+    h_at_v2 = h_sym.subs(_V2_SYM, sp.Float(v_2))
+    h_np = np.array(h_at_v2.tolist(), dtype=np.float64)
+
+    residuals = h_np @ sigma_vl
+    assert np.allclose(residuals, 0.0, atol=1e-12), (
+        f"case={case_key} seed={seed}: max|residual|="
+        f"{float(np.max(np.abs(residuals))):.2e}"
+    )
+
+
+def test_tv2_rrr_case_for_picks_correct_subcase() -> None:
+    """``tv2_rrr_case_for`` mirrors Capco's which_case.py dispatch."""
+    assert tv2_rrr_case_for(0.0, 1.0, 0.0, 1.0) == "[a_1=0,a_2=0]"
+    assert tv2_rrr_case_for(0.0, 1.0, 0.5, 0.0) == "[a_1=0,l_2=0]"
+    assert tv2_rrr_case_for(0.5, 0.0, 0.0, 1.0) == "[l_1=0,a_2=0]"
+    assert tv2_rrr_case_for(0.5, 0.0, 0.5, 0.0) == "[l_1=0,l_2=0]"
+    with pytest.raises(ValueError, match=r"do not match any T\(v_2\) RRR sub-case"):
+        # Non-degenerate DH: T(v_1) applies, no T(v_2) sub-case.
+        tv2_rrr_case_for(0.5, 1.0, 0.5, 1.0) 
