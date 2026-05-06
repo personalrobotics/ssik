@@ -9,7 +9,7 @@ precision and refinement:
   -- not the user's tolerance, the actual measurement.
 - ``refinement_used`` says whether numerical refinement fired. Closed-form
   solvers (Pieper, three-parallel, etc.) always have ``"none"``. Numeric
-  solvers (Raghavan-Roth, gen_six_dof grid-search) report ``"lm"`` when
+  solvers (Raghavan-Roth, Husty-Pfurner) report ``"lm"`` when
   :func:`ssik.refinement.lm_refine` polished the algebraic candidate.
 - ``branch_id`` and ``solver_name`` let callers distinguish parallel
   branches and identify which dispatched solver produced the result.

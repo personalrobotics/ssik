@@ -43,10 +43,14 @@ ordering would route it through ``two_parallel`` at ~261 ms median; instead
 we route it through ``general_6r`` at ~5 ms median (#85). The 50x-200x
 difference is consistent across non-Pieper geometries.
 
-This dispatcher will eventually be shared with
-:mod:`ssik.solvers.jointlock.seven_r` (which still routes its tier-2 fallback
-through the slower ``gen_six_dof`` oracle); that consolidation is tracked as
-a follow-up to #110.
+This dispatcher is shared in spirit with
+:mod:`ssik.solvers.jointlock.seven_r` (whose internal tier-2 fallback is
+``husty_pfurner.general_6r`` for locked sub-chains where no Pieper /
+parallel-axis predicate matches). Top-level tier-2 routes to
+``ikgeo.general_6r`` (Raghavan-Roth) which is faster on
+well-conditioned native 6R arms (e.g. JACO 2 at ~0.6 ms); HP is
+preferred for the ill-conditioned post-lock geometries that the
+jointlock fallback hits.
 """
 
 from __future__ import annotations
@@ -114,7 +118,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "ikgeo.two_parallel": (1, 261.0, 141_569),
     "ikgeo.two_intersecting": (1, 1184.0, 2_650_681),
     "ikgeo.general_6r": (2, 5.0, 30_000_000),
-    "ikgeo.gen_six_dof": (2, 26_800.0, 31_478_656),
+    "husty_pfurner.general_6r": (2, 120.0, 50_000_000),
     "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 

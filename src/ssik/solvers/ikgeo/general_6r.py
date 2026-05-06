@@ -26,10 +26,13 @@ overhead). Per-arm cold-cache cost is one-time sympy preprocessing
 (~30-100s for AE-3 leftvar selection); subsequent IKs are warm-cache
 single-digit milliseconds.
 
-Naming note: the Tier-2 grid-search solver in
-:mod:`ssik.solvers.ikgeo.gen_six_dof` is being kept as a reference / fallback
-for now; this solver supersedes it on speed and precision (AE-3 + algebraic
-back-substitute typically ~ms, vs. minutes for the 100x100 grid).
+Tier-2 alternative: :mod:`ssik.solvers.husty_pfurner.general_6r` uses
+Husty-Pfurner Study quaternion algebra. RR is faster on well-conditioned
+arms (~ ms); HP is more robust on highly-symmetric DH geometries
+(alpha = pi/2 with a_i = 0 throughout, e.g. KUKA iiwa locked sub-chains)
+where RR's m_quad conditioning blows up. The jointlock dispatcher
+prefers HP for post-lock geometries; the top-level dispatcher prefers
+RR for native 6R arms.
 """
 
 from __future__ import annotations

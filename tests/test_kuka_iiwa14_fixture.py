@@ -8,11 +8,16 @@ fix in :func:`ssik.kinematics.predicates.three_consecutive_intersecting`
 (#155) keeps the dispatcher from silently mis-classifying iiwa as a
 spherical-wrist arm.
 
-iiwa IK currently routes through ``gen_six_dof`` (tier-2 grid search)
-which takes ~30 s per solve; #143 (SRS analytical solver) will land
-the right path with sub-millisecond timing. These tests validate the
-fixture itself + the predicate regression -- they do **not** exercise
-the slow tier-2 IK path.
+iiwa IK currently routes through ``husty_pfurner.general_6r`` (HP's
+universal-6R fallback in jointlock) at ~120 ms per inner 6R x 16 lock
+samples = ~2 s per 7R IK. #143 (native SRS analytical solver) will
+land the right path with sub-millisecond timing.
+
+Pre-#176/#177: iiwa14 routed through the deleted ``gen_six_dof`` grid
+search at 18+ seconds with **zero** solutions returned. The HP
+perturbation path (#176) handles iiwa14's measure-zero Tv2 singularity
+correctly, polishing each algebraic seed via 6-D LM to machine
+precision.
 """
 
 from __future__ import annotations
@@ -115,22 +120,25 @@ def test_iiwa14_seven_r_returns_cleanly_at_unreachable_target() -> None:
     assert len(sols) == 0
 
 
-@pytest.mark.slow
-def test_iiwa14_ik_via_gen_six_dof() -> None:
-    """Slow path validation: with #143 (SRS analytical solver) absent,
-    iiwa IK runs through ``gen_six_dof`` tier-2 grid search. This test
-    verifies the path returns *something* on a reachable target -- it
-    does not assert solution count or pin a specific timing budget. Marked
-    ``slow`` (~10-60 s per IK depending on grid hit) so it's opt-in via
-    ``pytest -m slow``.
+def test_iiwa14_ik_via_hp_fallback() -> None:
+    """With #143 (native SRS analytical solver) still absent, iiwa14 IK
+    routes through ``husty_pfurner.general_6r`` for each post-lock 6R
+    sub-chain. HP's perturbation path (#176) handles the symmetric-DH
+    Tv2 case that arises in iiwa14's locked sub-chains; 6-D LM polish
+    then converges each algebraic seed to machine precision.
+
+    Per-IK budget: ~120 ms x 16 lock samples = ~2 s. Acceptable while
+    #143 remains open; previously this path went through ``gen_six_dof``
+    grid-search at 18+ seconds with 0 solutions returned.
     """
     kb = build_kinbody(kuka_iiwa14_specs())
     rng = np.random.default_rng(7)
     q_star = rng.uniform(-0.5, 0.5, size=7)
     T = poe_forward_kinematics(kb, q_star)
-    sols, _is_ls = seven_r.solve(kb, T, max_solutions=1)
-    # Either we get a solution or the tier-2 fallback also can't (which
-    # is acceptable here -- iiwa is the motivating fixture for #143).
-    if sols:
-        T_check = poe_forward_kinematics(kb, sols[0].q)
-        assert np.allclose(T_check, T, atol=1e-6)
+    sols, is_ls = seven_r.solve(kb, T, max_solutions=1, allow_refinement=True)
+    assert sols, "iiwa14 reachable pose should produce at least one IK via HP fallback"
+    assert not is_ls
+    T_check = poe_forward_kinematics(kb, sols[0].q)
+    assert np.allclose(T_check, T, atol=1e-6), (
+        f"FK closure failed: max|diff|={np.max(np.abs(T_check - T)):.2e}"
+    )
