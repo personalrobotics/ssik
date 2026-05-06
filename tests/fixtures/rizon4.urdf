@@ -1,0 +1,93 @@
+<?xml version="1.0"?>
+<!--
+  Flexiv Rizon 4 7-DOF arm.
+
+  Source: rendered from
+    https://github.com/flexivrobotics/flexiv_description (humble branch)
+  via:
+    - urdf/common/rizon_arm.xacro    (joint chain + axis layout)
+    - config/Rizon4/default_kinematics.yaml  (per-joint xyz/rpy)
+    - config/Rizon4/joint_limits.yaml        (lower/upper/effort/velocity)
+
+  Joint axes follow the rizon_arm macro: alternating Z/Y per joint
+  (joint1 Z, joint2 Y, joint3 Z, ..., joint7 Z). Joint origins carry
+  the offsets that make this arm NOT pure SRS: shoulder y-offsets
+  ~30 mm and wrist offsets ~25 mm displace it from textbook
+  Singh-Kreutz layout.
+
+  Mesh references intentionally omitted; ssik's URDF loader uses
+  lazy_load_meshes=True for kinematic-only fixtures.
+-->
+<robot name="Rizon4">
+  <link name="base_link" />
+  <link name="link1" />
+  <link name="link2" />
+  <link name="link3" />
+  <link name="link4" />
+  <link name="link5" />
+  <link name="link6" />
+  <link name="link7" />
+  <link name="flange" />
+
+  <joint name="joint1" type="revolute">
+    <origin xyz="0 0 0.155" rpy="0 0 -3.141592654" />
+    <parent link="base_link" />
+    <child link="link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.8798" upper="2.8798" effort="123" velocity="2.0944" />
+  </joint>
+
+  <joint name="joint2" type="revolute">
+    <origin xyz="0 0.03 0.21" rpy="0 0 0" />
+    <parent link="link1" />
+    <child link="link2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.3562" upper="2.3562" effort="123" velocity="2.0944" />
+  </joint>
+
+  <joint name="joint3" type="revolute">
+    <origin xyz="0 0.035 0.205" rpy="0 0 0" />
+    <parent link="link2" />
+    <child link="link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.0543" upper="3.0543" effort="64" velocity="2.4435" />
+  </joint>
+
+  <joint name="joint4" type="revolute">
+    <origin xyz="-0.02 -0.03 0.19" rpy="0 0 -3.141592654" />
+    <parent link="link3" />
+    <child link="link4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.9548" upper="2.7751" effort="64" velocity="2.4435" />
+  </joint>
+
+  <joint name="joint5" type="revolute">
+    <origin xyz="-0.02 0.025 0.195" rpy="0 0 -3.141592654" />
+    <parent link="link4" />
+    <child link="link5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.0543" upper="3.0543" effort="39" velocity="4.8869" />
+  </joint>
+
+  <joint name="joint6" type="revolute">
+    <origin xyz="0 0.03 0.19" rpy="0 0 0" />
+    <parent link="link5" />
+    <child link="link6" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.4835" upper="4.6251" effort="39" velocity="4.8869" />
+  </joint>
+
+  <joint name="joint7" type="revolute">
+    <origin xyz="-0.015 0.073 0.11" rpy="0 -1.570796327 0" />
+    <parent link="link6" />
+    <child link="link7" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.0543" upper="3.0543" effort="39" velocity="4.8869" />
+  </joint>
+
+  <joint name="link7_to_flange" type="fixed">
+    <origin xyz="0 0 0.081" rpy="0 0 -3.141592654" />
+    <parent link="link7" />
+    <child link="flange" />
+  </joint>
+</robot>

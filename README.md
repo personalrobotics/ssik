@@ -16,7 +16,7 @@ Analytical inverse kinematics for non-Pieper 6R arms — the **EAIK gap**. The a
 Two differentiators:
 
 1. **Non-Pieper 6R analytical solver** (`ikgeo.general_6r`, Raghavan–Roth + Manocha–Canny). No other library in the ecosystem ships analytical IK for arms whose geometry deliberately violates Pieper's condition for mechanical-design reasons (JACO 2 with 60° non-orthogonal twists is the canonical example). ssik does, with all branches recovered at machine precision in sub-ms. See `docs/tutorial/04_raghavan_roth.md` for the math and `docs/tutorial/05_conditioning.md` for the robustness fixes (AE-1, AE-3, AE-4, Möbius reparameterisation) that make the textbook pipeline survive on real ill-conditioned arms.
-2. **Native SRS-class 7R solver** (`seven_r.srs`, Singh-Kreutz 1989) — closed-form parameterised by elbow swivel angle. Predicate-driven dispatch (`is_srs_7r`) auto-applies to any 7R arm matching the topology: shoulder axes (0,1,2) concurrent + wrist axes (4,5,6) concurrent. iiwa14 is the canonical fixture; Rizon 4, Gen3, Sawyer, Baxter, Kassow KR* light up automatically when their fixtures land.
+2. **Native SRS-class 7R solver** (`seven_r.srs`, Singh-Kreutz 1989) — closed-form parameterised by elbow swivel angle. Predicate-driven dispatch (`is_srs_7r`) auto-applies to any 7R arm matching the topology: shoulder axes (0,1,2) concurrent + wrist axes (4,5,6) concurrent. iiwa14 is the canonical fixture. Many arms cited as SRS in the literature (Gen3, Rizon 4, Kassow KR*) actually have non-zero shoulder/wrist offsets in their URDFs and are routed through the universal `jointlock+HP` fallback today; a generalised approximate-SRS + Newton-polish solver (#193) is the planned fast path for the small-drift cases.
 
 ## Supported arms & solver coverage
 
@@ -41,27 +41,29 @@ Status legend: ✅ in-repo URDF/MJCF fixture exercised by the test suite — �
 | Agilex Piper | `ikgeo.general_6r` | expected ~5 ms | 🔗 [mujoco_menagerie/agilex_piper](https://github.com/google-deepmind/mujoco_menagerie/tree/main/agilex_piper) |
 | Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~5 ms | URDF intake via [#95](https://github.com/siddhss5/ikfastpy/issues/95) |
 
-### 7R redundant arms — SRS-class (`seven_r.srs`)
+### 7R redundant arms — pure SRS (`seven_r.srs`)
 
 Closed-form Singh-Kreutz 1989 algorithm for arms with shoulder-spherical + wrist-spherical topology + elbow roll. Predicate-driven dispatch via `is_srs_7r` (no per-arm hardcoding); auto-applies to any 7R chain whose shoulder axes (0,1,2) and wrist axes (4,5,6) each meet at a common point. Default 16 swivel samples × 8 branches = 128 IK candidates per call.
 
 | Arm | Full-sweep speed | Status |
 |-----|:---:|:---:|
-| **KUKA iiwa LBR 14** | **~17 ms (128 IKs, FK ≤ 1e-13)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| **KUKA iiwa LBR 14** | **~8.5 ms (128 IKs, FK ≤ 1e-13)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | KUKA iiwa LBR 7 (R820 / R14) | expected ~8.5 ms | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
-| Flexiv Rizon 4 / 10 | expected ~8.5 ms | 🔗 [flexivrobotics/flexiv_description](https://github.com/flexivrobotics/flexiv_description) |
-| Kinova Gen3 (7-DOF) | expected ~8.5 ms | 🔗 [mujoco_menagerie/kinova_gen3](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kinova_gen3) |
-| Sawyer / Baxter (Rethink Robotics) | expected ~8.5 ms | 🔗 (vendor URDF) |
-| Kassow KR810 / KR1410 | expected ~8.5 ms | 🔗 (vendor URDF) |
 
 ### 7R redundant arms — non-SRS (`jointlock.seven_r`)
 
-For 7R arms whose topology doesn't match SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. Tier-2 fallback inside jointlock is `husty_pfurner.general_6r` for sub-chains with no Pieper / parallel-axis structure. 16-sample lock sweep × inner 6R solver per call.
+For 7R arms whose topology doesn't match strict SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. Tier-2 fallback inside jointlock is `husty_pfurner.general_6r` for sub-chains with no Pieper / parallel-axis structure. 16-sample lock sweep × inner 6R solver per call.
 
-| Arm | Inner 6R dispatch | Full-sweep speed | Status |
+Includes the "literature-SRS but URDF-non-SRS" arms — those whose published DH classifies as SRS but whose URDFs carry mm- to cm-scale shoulder/wrist offsets. ssik solves their **real URDF** kinematics, not a simplified DH; a generalised approximate-SRS + LM-polish path (#193) is the planned fast solver for the small-drift cases.
+
+| Arm | Drift (shoulder / wrist) | Full-sweep speed | Status |
 |-----|---|:---:|:---:|
-| Franka Emika Panda / FR3 | `reversed:spherical_*` (typical) | ~20 ms (48 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| uFactory xArm7 | `reversed:spherical` | ~32 ms (56 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| Franka Emika Panda / FR3 | non-SRS by design | ~20 ms (48 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| uFactory xArm7 | non-SRS by design | ~32 ms (56 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | ~1 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — #193 polished-SRS candidate |
+| **Flexiv Rizon 4** | 65 mm / 151 mm | ~1.5 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — wrist drift outside Newton basin |
+| Kassow KR810 / KR1410 | ~50 mm shoulder | not measured | 🔗 (vendor URDF) |
+| Sawyer / Baxter (Rethink Robotics) | not measured | not measured | 🔗 (vendor URDF) |
 
 ### Solver tier reference
 
