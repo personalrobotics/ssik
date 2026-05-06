@@ -62,7 +62,8 @@ Includes the "literature-SRS but URDF-non-SRS" arms — those whose published DH
 | uFactory xArm7 | non-SRS by design | ~32 ms (56 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | ~1 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — #193 polished-SRS candidate |
 | **Flexiv Rizon 4** | 65 mm / 151 mm | ~1.5 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — wrist drift outside Newton basin |
-| Kassow KR810 / KR1410 | ~50 mm shoulder | not measured | 🔗 (vendor URDF) |
+| **Kassow KR810** | 86 mm / 111 mm | ~1.5 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — wrist drift outside Newton basin |
+| Kassow KR1018 / KR1410 / KR1805 | similar geometry, expected ~80-110 mm | not measured | 🔗 [rcruzoliver/kr_ros2](https://github.com/rcruzoliver/kr_ros2) |
 | Sawyer / Baxter (Rethink Robotics) | not measured | not measured | 🔗 (vendor URDF) |
 
 ### Solver tier reference
