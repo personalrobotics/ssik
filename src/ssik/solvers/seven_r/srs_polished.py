@@ -57,7 +57,7 @@ from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import is_approximately_srs_7r
-from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian
+from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian, lm_refine
 from ssik.solvers.seven_r import srs
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
@@ -68,74 +68,6 @@ __all__ = ["solve"]
 _SOLVER_NAME = "seven_r.srs_polished"
 _LOG = logging.getLogger(__name__)
 _DEFAULT_MAX_DRIFT_M = 0.04
-
-
-def _polish_to_frobenius(
-    q_seed: NDArray[np.float64],
-    kb: KinBody,
-    T_target: NDArray[np.float64],
-    *,
-    fk_atol: float,
-    max_iters: int,
-    step_clip: float = 0.5,
-    divergence_factor: float = 5.0,
-) -> tuple[NDArray[np.float64], float, int] | None:
-    """Newton polish on the spatial twist of ``T_target @ T_q^{-1}``,
-    convergent on the **Frobenius** ``||FK(q) - T_target||_F`` norm.
-
-    This is a workaround for the near-identity precision loss in
-    :func:`ssik.refinement.se3_log_residual` (the ``cos_a = (trace-1)/2``
-    formulation rounds to ``1.0`` in float64 when the rotation error is
-    below ~3e-8, silently zeroing the rotation part of the residual).
-    See #199.
-
-    The fix: compute the rotation part of the twist via the
-    skew-symmetric vee of ``R_err - R_err.T``, which preserves
-    precision down to machine epsilon. Translation is read directly
-    from ``T_err``. The convergence gate is the actual Frobenius FK
-    residual, so candidates can't slip through with hidden rotation
-    error.
-    """
-    q = q_seed.astype(np.float64).copy()
-    r_best = float("inf")
-    for it in range(max_iters):
-        T_q = poe_forward_kinematics(kb, q)
-        # Frobenius gate -- the contract callers expect.
-        frob = float(np.linalg.norm(T_q - T_target))
-        if frob < fk_atol:
-            return q, frob, it
-        if frob < r_best:
-            r_best = frob
-        elif it >= 4 and frob > divergence_factor * r_best:
-            return None
-        # Robust spatial twist: read translation directly, rotation via
-        # skew-vee of (R_err - R_err.T) / 2 (works at machine precision
-        # near identity).
-        T_err = T_target @ np.linalg.inv(T_q)
-        r_err = T_err[:3, :3]
-        omega = 0.5 * np.array(
-            [
-                r_err[2, 1] - r_err[1, 2],
-                r_err[0, 2] - r_err[2, 0],
-                r_err[1, 0] - r_err[0, 1],
-            ]
-        )
-        twist = np.concatenate([T_err[:3, 3], omega])
-        J = kinbody_jacobian(kb, q)
-        try:
-            dq = np.linalg.solve(J, twist)
-        except np.linalg.LinAlgError:
-            damping = max(1e-9, 1e-6 * frob)
-            n = J.shape[1]
-            dq = np.linalg.solve(J.T @ J + damping * np.eye(n), J.T @ twist)
-        dq = np.clip(dq, -step_clip, step_clip)
-        q = q + dq
-    # Final convergence check.
-    T_q = poe_forward_kinematics(kb, q)
-    frob = float(np.linalg.norm(T_q - T_target))
-    if frob < fk_atol:
-        return q, frob, max_iters
-    return None
 
 
 def solve(
@@ -208,21 +140,34 @@ def solve(
         # SRS produced nothing even at huge fk_atol; truly unreachable.
         return [], True
 
-    # Step 3: LM polish each candidate against the original URDF FK,
-    # using a Frobenius-FK convergence gate to avoid the near-identity
-    # precision loss in se3_log_residual (#199).
+    # Step 3: LM polish each candidate against the original URDF FK.
+    # Re-using the existing closures keeps the Cython Jacobian path
+    # active (kinbody_jacobian is the analytical 6xN spatial Jacobian).
+    def fk_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
+        return poe_forward_kinematics(kb, q)
+
+    def jac_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
+        return kinbody_jacobian(kb, q)
+
     polished: list[Solution] = []
     for c in raw:
-        result = _polish_to_frobenius(
+        result = lm_refine(
             c.q,
-            kb,
+            fk_fn,
             T_target,
             fk_atol=polish_fk_atol,
             max_iters=polish_max_iters,
+            jacobian_fn=jac_fn,
         )
         if result is None:
             continue
-        q_polished, fk_frob, iters = result
+        q_polished, _se3_residual, iters = result
+        # Recompute the Frobenius residual: this is the user-visible
+        # ``Solution.fk_residual`` and matches the test contract. Post #199
+        # the se3_log_residual norm and Frobenius are both machine-precision
+        # consistent, but the contract is Frobenius so we materialise that.
+        T_check = poe_forward_kinematics(kb, q_polished)
+        fk_frob = float(np.linalg.norm(T_check - T_target))
         polished.append(
             replace(
                 c,
