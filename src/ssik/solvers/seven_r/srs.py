@@ -32,13 +32,13 @@ Algorithm (verified end-to-end on iiwa14 — see
    rotation via ZYZ Euler decomposition (2 branches via the sign of
    ``q_5``).
 
-Total: 2 (q_3) × 2 (q_1) × 1 (q_2) × 2 (q_5) = 8 candidates per swivel.
+Total: 2 (q_3) x 2 (q_1) x 1 (q_2) x 2 (q_5) = 8 candidates per swivel.
 FK closure filters spurious; cluster-merge (wrap-to-π) deduplicates
 across swivel samples.
 
 Per-arm cold-cache cost: ~0 (no symbolic precompute -- the algorithm is
-purely numeric). Hot-path: dominated by branch enumeration ×
-swivel-sweep × per-branch FK closure check. Pure-Python; sub-millisecond
+purely numeric). Hot-path: dominated by branch enumeration x
+swivel-sweep x per-branch FK closure check. Pure-Python; sub-millisecond
 target reachable with #186 Cython compile if the bench gate misses.
 
 References:
@@ -67,6 +67,7 @@ from ssik.kinematics.predicates import (
     joint_origins,
 )
 from ssik.refinement import dedup_by_wrap_close
+from ssik.subproblems import sp1
 from ssik.subproblems._rotation import rotation_matrix
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
@@ -111,36 +112,38 @@ def _swivel_basis(
 # ---------------------------------------------------------------------------
 
 
-def _joint_origin_at_q(kb: KinBody, q: NDArray[np.float64], joint_idx: int) -> NDArray[np.float64]:
-    """Return joint ``joint_idx``'s origin in the world frame at config ``q``."""
-    T = np.eye(4)
-    for i, j in enumerate(kb.joints):
-        T = T @ j.T_left
-        if i == joint_idx:
-            return T[:3, 3].copy()
-        R = rotation_matrix(j.axis, q[i])
-        T_full = np.eye(4)
-        T_full[:3, :3] = R
-        T = T @ T_full @ j.T_right
-    return T[:3, 3].copy()
-
-
-def _orientation_up_to_joint(
+def _frame_at_joint(
     kb: KinBody, q: NDArray[np.float64], joint_idx: int
-) -> NDArray[np.float64]:
-    """Return the 3x3 world rotation of joint ``joint_idx``'s frame BEFORE its
-    own rotation (i.e., after applying joints ``0..joint_idx-1`` and joint
-    ``joint_idx``'s ``T_left``)."""
-    T = np.eye(4)
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return ``(R, p)`` -- the world frame at joint ``joint_idx`` BEFORE its
+    own rotation (i.e., after joints ``0..joint_idx-1`` and joint
+    ``joint_idx``'s ``T_left``).
+
+    Tracks rotation and position separately to avoid 4x4 matmul overhead.
+    POE-normalized chains have pure-translation ``T_left`` and (for non-final
+    joints) pure-translation ``T_right``, so position propagation reduces to
+    ``p_new = p + R @ t`` and rotation propagation to one matmul per joint.
+
+    Replaces the older ``_joint_origin_at_q`` + ``_orientation_up_to_joint``
+    helpers with a single 2-3x faster version.
+    """
+    R = np.eye(3)
+    p = np.zeros(3)
     for i, j in enumerate(kb.joints):
-        T = T @ j.T_left
+        # Apply T_left's translation (rotation block of T_left is identity
+        # in POE-normalized chains).
+        p = p + R @ j.T_left[:3, 3]
         if i == joint_idx:
-            return T[:3, :3].copy()
-        R = rotation_matrix(j.axis, q[i])
-        T_full = np.eye(4)
-        T_full[:3, :3] = R
-        T = T @ T_full @ j.T_right
-    return T[:3, :3].copy()
+            return R, p
+        # Apply joint i's rotation.
+        R = R @ rotation_matrix(j.axis, float(q[i]))
+        # Apply T_right (translation always; rotation only matters on the
+        # last joint but applying R @ I on the others is cheap and avoids
+        # an expensive `array_equal` test in the hot loop).
+        T_right = j.T_right
+        R = R @ T_right[:3, :3]
+        p = p + R @ T_right[:3, 3]
+    return R, p
 
 
 # ---------------------------------------------------------------------------
@@ -149,25 +152,31 @@ def _orientation_up_to_joint(
 # ---------------------------------------------------------------------------
 
 
-def _solve_one_branch(
+def _solve_pre_wrist(
     kb: KinBody,
     cls: SrsClassification,
     L_se: float,
-    L_ew: float,
     R_target: NDArray[np.float64],
     W_t: NDArray[np.float64],
     swivel_data: tuple[NDArray[np.float64], float, float, NDArray[np.float64], NDArray[np.float64]],
     swivel: float,
     q_3_signed: float,
     q_1_sign: int,
-    q_5_sign: int,
-    consistency_tol: float = 1e-7,
-) -> NDArray[np.float64] | None:
-    """Solve one of the 8 branches at the given swivel angle.
+    policy: TolerancePolicy,
+) -> tuple[float, float, float, NDArray[np.float64]] | None:
+    """Solve the SHOULDER + ELBOW triple (q_0, q_1, q_2, q_3) at given swivel
+    + branch signs. Returns (q_0, q_1, q_2, R_pre_wrist) where R_pre_wrist
+    is the world orientation of joint 4's pre-rotation frame (joints 0..3
+    applied + joint 4's ``T_left``). Wrist branches share these.
 
-    Returns a 7-vector ``q`` if the branch is consistent (FK-traceable), or
-    ``None`` if the branch is degenerate (gimbal lock, branch inconsistent
-    with the chain's home orientation, etc.).
+    This is the part of the algorithm that doesn't depend on the wrist
+    branch sign (q_5 sign), so we factor it out to compute it once per
+    swivel x q_3 x q_1 combination instead of once per full branch.
+
+    Reuses subproblem-composition style from
+    :mod:`ssik.solvers.ikgeo.spherical`: the shoulder + elbow analytical
+    closed-form, then a single ``sp1`` for q_2 from the wrist-pivot
+    constraint.
     """
     u_sw, x_c, r_circle, u_perp1, u_perp2 = swivel_data
     S = cls.shoulder_pivot
@@ -175,79 +184,59 @@ def _solve_one_branch(
     # Step 4a: elbow position on the swivel circle.
     E_t = S + x_c * u_sw + r_circle * (np.cos(swivel) * u_perp1 + np.sin(swivel) * u_perp2)
 
-    # Step 4b: recover (q_0, q_1) from elbow direction.
+    # Step 4b: recover (q_0, q_1) from elbow direction analytically.
     # For ZY shoulder: d = R_z(q_0) R_y(q_1) (0, 0, 1) =
     #   (sin(q_1) cos(q_0), sin(q_1) sin(q_0), cos(q_1)).
     d = (E_t - S) / L_se
     cos_q1 = float(np.clip(d[2], -1.0, 1.0))
     q_1 = q_1_sign * np.arccos(cos_q1)
     sin_q1 = np.sin(q_1)
-    if abs(sin_q1) > 1e-9:
+    if abs(sin_q1) > 1e-9:  # noqa: SIM108
         q_0 = np.arctan2(d[1] / sin_q1, d[0] / sin_q1)
     else:
         # Gimbal lock: elbow on the shoulder z-axis. q_0 is free; pick 0.
         q_0 = 0.0
 
-    # Verify (q_0, q_1) actually places the elbow at E_t.
-    E_check = S + L_se * np.array(
-        [
-            np.sin(q_1) * np.cos(q_0),
-            np.sin(q_1) * np.sin(q_0),
-            np.cos(q_1),
-        ]
-    )
-    if np.linalg.norm(E_check - E_t) > consistency_tol:
-        return None
-
-    # Step 5: recover q_2 from wrist pivot constraint.
-    # Build q_partial = (q_0, q_1, 0, q_3, 0, 0, 0); the wrist pivot at
-    # this q is some specific point. Rotating q_2 about the upper-arm axis
-    # rotates this wrist-pivot offset around the upper arm. q_2 is the
-    # signed angle from the q_2=0 offset to W_t in the plane perpendicular
-    # to the upper arm.
+    # Step 5: recover q_2 from wrist pivot constraint via a single SP1.
+    # The "q_2 = 0 wrist pivot" is computed by partial FK once at q_2 = 0;
+    # the SP1 then rotates that pivot offset (in plane perp to upper arm)
+    # to align with the target wrist pivot. q_2 is unique up to a 2π
+    # ambiguity that SP1 resolves.
     q_partial = np.array([q_0, q_1, 0.0, q_3_signed, 0.0, 0.0, 0.0], dtype=np.float64)
-    W_at_q2_zero = _joint_origin_at_q(kb, q_partial, 5)
+    _, W_at_q2_zero = _frame_at_joint(kb, q_partial, 5)
 
     u_upper = (E_t - S) / L_se  # upper arm direction
-    v0 = W_at_q2_zero - E_t  # from elbow to q_2=0 wrist pivot (in world)
-    v_t = W_t - E_t  # from elbow to target wrist pivot
-
-    # Project both onto the plane perpendicular to u_upper.
-    v0_perp = v0 - np.dot(v0, u_upper) * u_upper
-    vt_perp = v_t - np.dot(v_t, u_upper) * u_upper
-    if np.linalg.norm(v0_perp) < 1e-9 or np.linalg.norm(vt_perp) < 1e-9:
-        # Singular: lower arm aligned with upper arm (can happen at
-        # full extension, q_3 near 0 / 2π). q_2 is free in this branch.
+    p_from = W_at_q2_zero - E_t  # from elbow to q_2=0 wrist pivot
+    p_to = W_t - E_t  # from elbow to target wrist pivot
+    if np.linalg.norm(p_from) < 1e-9 or np.linalg.norm(p_to) < 1e-9:
         return None
+    q_2, _ = sp1.solve(u_upper, p_from, p_to, policy)
 
-    v0_perp_n = v0_perp / np.linalg.norm(v0_perp)
-    vt_perp_n = vt_perp / np.linalg.norm(vt_perp)
-    cos_q2 = float(np.dot(v0_perp_n, vt_perp_n))
-    sin_q2 = float(np.dot(np.cross(v0_perp_n, vt_perp_n), u_upper))
-    q_2 = np.arctan2(sin_q2, cos_q2)
+    # Compute the world orientation of joint 4's pre-rotation frame (used
+    # by the wrist triple; doesn't depend on q_5 sign so we cache it).
+    q_post = np.array([q_0, q_1, q_2, q_3_signed, 0.0, 0.0, 0.0], dtype=np.float64)
+    R_pre_wrist, _ = _frame_at_joint(kb, q_post, 4)
 
-    # Verify q_2 places W at W_t.
-    q_check = np.array([q_0, q_1, q_2, q_3_signed, 0.0, 0.0, 0.0], dtype=np.float64)
-    W_check = _joint_origin_at_q(kb, q_check, 5)
-    if np.linalg.norm(W_check - W_t) > consistency_tol:
-        return None
+    return q_0, q_1, q_2, R_pre_wrist
 
-    # Step 6: wrist triple from residual rotation.
-    # Compute the world rotation up to and including joint 3, then the world
-    # rotation of joint 4's PRE-rotation frame (joint 4's T_left applied).
-    R_pre_wrist = _orientation_up_to_joint(kb, q_check, 4)
-    # The remaining rotation that joints 4-6 must produce, in the body frame
-    # at joint 4 (pre-rotation). We also account for the last joint's T_right
-    # (any tool rotation).
+
+def _solve_wrist_triple(
+    kb: KinBody,
+    R_target: NDArray[np.float64],
+    R_pre_wrist: NDArray[np.float64],
+    q_5_sign: int,
+) -> tuple[float, float, float] | None:
+    """Solve (q_4, q_5, q_6) from the residual rotation via ZYZ Euler.
+
+    For SRS arms with canonical wrist axes (z, y, z) in the body frame at
+    joint 4 (post joint-4-T_left), the residual rotation
+    ``R_res = R_pre_wrist^T @ R_target @ R_post_wrist^T`` factorises as
+    ``R_z(q_4) R_y(q_5) R_z(q_6) = R_res``. The two branches via the sign
+    of ``q_5`` are enumerated by the caller.
+    """
     R_post_wrist = kb.joints[6].T_right[:3, :3]
     R_res = R_pre_wrist.T @ R_target @ R_post_wrist.T
 
-    # ZYZ Euler decomposition for axes (joint 4 = z, joint 5 = y, joint 6 = z
-    # in iiwa14's body frame at the wrist). Generalizes by reading the
-    # actual body-frame axes from kb.joints[4..6].axis -- but for SRS arms
-    # these are typically the canonical (z, y, z) at q=0.
-    # R_z(q_4) R_y(q_5) R_z(q_6) = R_res.
-    # q_5 = ±acos(R_res[2,2]); q_4, q_6 from off-diagonals.
     cos_q5 = float(np.clip(R_res[2, 2], -1.0, 1.0))
     q_5 = q_5_sign * np.arccos(cos_q5)
     sin_q5 = np.sin(q_5)
@@ -255,15 +244,14 @@ def _solve_one_branch(
         q_4 = np.arctan2(q_5_sign * R_res[1, 2], q_5_sign * R_res[0, 2])
         q_6 = np.arctan2(q_5_sign * R_res[2, 1], q_5_sign * -R_res[2, 0])
     else:
-        # Gimbal lock at q_5 = 0 or π: q_4 + q_6 (or q_4 - q_6) is determined
-        # but split is arbitrary; pick q_4 = 0, q_6 absorbs the rest.
+        # Gimbal lock at q_5 = 0 or π: q_4 + q_6 (or q_4 - q_6) is
+        # determined but the split is arbitrary; pick q_4 = 0.
         q_4 = 0.0
         if cos_q5 > 0:
-            q_6 = np.arctan2(-R_res[0, 1], R_res[0, 0])
+            q_6 = float(np.arctan2(-R_res[0, 1], R_res[0, 0]))
         else:
-            q_6 = np.arctan2(R_res[0, 1], -R_res[0, 0])
-
-    return np.array([q_0, q_1, q_2, q_3_signed, q_4, q_5, q_6], dtype=np.float64)
+            q_6 = float(np.arctan2(R_res[0, 1], -R_res[0, 0]))
+    return q_4, q_5, q_6
 
 
 # ---------------------------------------------------------------------------
@@ -277,8 +265,8 @@ def solve(
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     *,
     swivel_samples: int | NDArray[np.float64] = _DEFAULT_SWIVEL_SAMPLES,
-    allow_refinement: bool = False,  # noqa: ARG001 -- accepted for solver-API parity; SRS reaches machine precision algebraically
-    refinement_max_iters: int = 15,  # noqa: ARG001 -- ditto
+    allow_refinement: bool = False,
+    refinement_max_iters: int = 15,
     max_solutions: int | None = None,
     fk_atol: float | None = None,
 ) -> tuple[list[Solution], bool]:
@@ -352,22 +340,29 @@ def solve(
     for swivel in swivels:
         for q_3_signed in q_3_branches:
             for q_1_sign in (+1, -1):
+                # Solve the shoulder + elbow + q_2 once per (swivel, q_3, q_1)
+                # since the wrist branch sign doesn't affect them.
+                pre_wrist = _solve_pre_wrist(
+                    kb,
+                    cls,
+                    L_se,
+                    R_target,
+                    W_t,
+                    swivel_data,
+                    float(swivel),
+                    q_3_signed,
+                    q_1_sign,
+                    policy,
+                )
+                if pre_wrist is None:
+                    continue
+                q_0, q_1, q_2, R_pre_wrist = pre_wrist
                 for q_5_sign in (+1, -1):
-                    q = _solve_one_branch(
-                        kb,
-                        cls,
-                        L_se,
-                        L_ew,
-                        R_target,
-                        W_t,
-                        swivel_data,
-                        float(swivel),
-                        q_3_signed,
-                        q_1_sign,
-                        q_5_sign,
-                    )
-                    if q is None:
+                    wrist = _solve_wrist_triple(kb, R_target, R_pre_wrist, q_5_sign)
+                    if wrist is None:
                         continue
+                    q_4, q_5, q_6 = wrist
+                    q = np.array([q_0, q_1, q_2, q_3_signed, q_4, q_5, q_6], dtype=np.float64)
                     # FK closure check
                     T_fk = poe_forward_kinematics(kb, q)
                     fk_residual = float(np.linalg.norm(T_fk - t_target))

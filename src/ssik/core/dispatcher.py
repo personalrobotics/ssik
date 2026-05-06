@@ -119,7 +119,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "ikgeo.two_intersecting": (1, 1184.0, 2_650_681),
     "ikgeo.general_6r": (2, 5.0, 30_000_000),
     "husty_pfurner.general_6r": (2, 120.0, 50_000_000),
-    "seven_r.srs": (0, 0.5, 80_000),  # native SRS-class 7R, max_solutions=1
+    "seven_r.srs": (0, 8.5, 1_900),  # native SRS-class 7R, full sweep (16 swivel x 8 branches)
     "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 

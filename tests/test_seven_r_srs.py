@@ -34,7 +34,6 @@ from ssik._kinbody import build_kinbody
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.solvers.seven_r.srs import solve as srs_solve
 
-
 # ----------------------------------------------------------------------------
 # Reachability sanity + FK closure on hand-picked poses
 # ----------------------------------------------------------------------------
@@ -143,9 +142,8 @@ def test_iiwa14_srs_vs_jointlock_both_find_fk_correct_ik(q_star: np.ndarray) -> 
     # Both must agree the target is reachable.
     assert not srs_is_ls
     assert not hp_is_ls
-    assert srs_sols and hp_sols, (
-        f"q*={q_star.tolist()}: srs_sols={len(srs_sols)}, hp_sols={len(hp_sols)}"
-    )
+    assert srs_sols, f"q*={q_star.tolist()}: srs_sols={len(srs_sols)}"
+    assert hp_sols, f"q*={q_star.tolist()}: hp_sols={len(hp_sols)}"
 
     # Best FK closure from each solver must hit machine precision (SRS) or
     # near-machine (HP -- LM converges to ~1e-7 to ~1e-13).
