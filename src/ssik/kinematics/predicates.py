@@ -36,9 +36,11 @@ if TYPE_CHECKING:  # pragma: no cover -- typing only
     from ssik._kinbody import Joint, KinBody
 
 __all__ = [
+    "ApproxSrsClassification",
     "axes_meet_at_common_point",
     "axis_intersect",
     "axis_parallel",
+    "is_approximately_srs_7r",
     "is_srs_7r",
     "joint_origins",
     "three_consecutive_intersecting",
@@ -61,6 +63,26 @@ class SrsClassification:
     wrist_indices: tuple[int, int, int]
     shoulder_pivot: NDArray[np.float64]
     wrist_pivot: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class ApproxSrsClassification:
+    """Result of :func:`is_approximately_srs_7r` -- approximate SRS evidence
+    plus the measured drift magnitudes that disqualified strict
+    classification.
+
+    Consumed by :mod:`ssik.solvers.seven_r.srs_polished`, which uses the
+    Singh-Kreutz solver as a warm-start factory and LM-polishes each
+    candidate against the original (non-snapped) URDF FK.
+    """
+
+    base: SrsClassification
+    shoulder_drift_m: float
+    wrist_drift_m: float
+
+    @property
+    def max_drift_m(self) -> float:
+        return max(self.shoulder_drift_m, self.wrist_drift_m)
 
 
 def joint_origins(joints: list[Joint]) -> list[NDArray[np.float64]]:
@@ -341,4 +363,85 @@ def is_srs_7r(
         wrist_indices=wrist,
         shoulder_pivot=s_pivot,
         wrist_pivot=w_pivot,
+    )
+
+
+def _max_axis_drift(
+    joints: list[Joint], indices: tuple[int, ...]
+) -> tuple[float, NDArray[np.float64] | None]:
+    """Best-fit common point + max perpendicular drift across the triple.
+
+    Always returns a numerical drift (does not refuse via tolerance).
+    Used by :func:`is_approximately_srs_7r` to gate on a user-supplied
+    drift budget.
+    """
+    if len(indices) < 2:
+        return 0.0, None
+    origins = joint_origins(joints)
+    axes = [joints[i].axis for i in indices]
+    pts = [origins[i] for i in indices]
+    # Pairwise non-parallel guard
+    for k in range(len(indices) - 1):
+        cross = _cross3(axes[k], axes[k + 1])
+        if float(_norm3(cross)) < 1e-9:
+            return float("inf"), None
+    M = np.column_stack([axes[0], -axes[1]])
+    sol, *_ = np.linalg.lstsq(M, pts[1] - pts[0], rcond=None)
+    common = pts[0] + float(sol[0]) * axes[0]
+    max_perp = 0.0
+    for k in range(len(indices)):
+        delta = common - pts[k]
+        perp = delta - _dot3(delta, axes[k]) * axes[k]
+        max_perp = max(max_perp, float(_norm3(perp)))
+    return max_perp, common
+
+
+def is_approximately_srs_7r(
+    kb: KinBody,
+    max_drift_m: float = 0.04,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+) -> ApproxSrsClassification | None:
+    """Detect approximate SRS-class 7R topology with a user-supplied drift gate.
+
+    Strict :func:`is_srs_7r` rejects arms whose shoulder/wrist axes only
+    *approximately* meet at a common point (Kinova Gen3: 12 mm shoulder
+    drift, 0.4 mm wrist drift; well above the default ``axis_intersect =
+    1e-8``). This relaxed variant accepts any arm whose maximum axis
+    drift is at most ``max_drift_m`` -- typically picked to keep the
+    snap-and-polish trajectory inside Newton's basin (~3-5 cm task
+    space empirically).
+
+    Returns :class:`ApproxSrsClassification` carrying the best-fit
+    pivots + the measured per-triple drifts. Caller is expected to
+    polish the algebraic candidates via LM (see
+    :mod:`ssik.solvers.seven_r.srs_polished`).
+
+    The drift gate refuses arms whose offsets exceed the basin (Flexiv
+    Rizon 4: 151 mm wrist drift; Kassow KR810: 111 mm wrist drift).
+    Those arms continue to dispatch to ``jointlock + HP``.
+
+    Parallel-axis triples are still rejected (the SRS algorithm is
+    ill-defined when axes are parallel, regardless of drift).
+    """
+    if len(kb.joints) != 7:
+        return None
+    shoulder = (0, 1, 2)
+    wrist = (4, 5, 6)
+    s_drift, s_pivot = _max_axis_drift(kb.joints, shoulder)
+    w_drift, w_pivot = _max_axis_drift(kb.joints, wrist)
+    if s_pivot is None or w_pivot is None:
+        return None
+    if s_drift > max_drift_m or w_drift > max_drift_m:
+        return None
+    base = SrsClassification(
+        shoulder_indices=shoulder,
+        elbow_index=3,
+        wrist_indices=wrist,
+        shoulder_pivot=s_pivot,
+        wrist_pivot=w_pivot,
+    )
+    return ApproxSrsClassification(
+        base=base,
+        shoulder_drift_m=s_drift,
+        wrist_drift_m=w_drift,
     )

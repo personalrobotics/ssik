@@ -50,17 +50,23 @@ Closed-form Singh-Kreutz 1989 algorithm for arms with shoulder-spherical + wrist
 | **KUKA iiwa LBR 14** | **~8.5 ms (128 IKs, FK ≤ 1e-13)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | KUKA iiwa LBR 7 (R820 / R14) | expected ~8.5 ms | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
 
+### 7R redundant arms — approximately-SRS with LM polish (`seven_r.srs_polished`)
+
+For arms whose URDF axes only **nearly** meet at common shoulder/wrist points (Kinova Gen3: 12 mm shoulder + 0.4 mm wrist drift), the strict SRS predicate refuses but the relaxed-predicate Singh-Kreutz solver still produces good warm-start candidates. Each is LM-polished against the original URDF FK to reach machine-precision closure (FK ≤ 1e-10). 16-30× faster than `jointlock + HP` on small-drift arms, with no IK error against the real URDF (unlike EAIK's simplified-DH path).
+
+Refused (drift exceeds Newton's basin, ~3-5 cm): falls back to `jointlock + HP`.
+
 ### 7R redundant arms — non-SRS (`jointlock.seven_r`)
 
-For 7R arms whose topology doesn't match strict SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. Tier-2 fallback inside jointlock is `husty_pfurner.general_6r` for sub-chains with no Pieper / parallel-axis structure. 16-sample lock sweep × inner 6R solver per call.
+For 7R arms whose topology doesn't match strict or approximate SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. Tier-2 fallback inside jointlock is `husty_pfurner.general_6r` for sub-chains with no Pieper / parallel-axis structure. 16-sample lock sweep × inner 6R solver per call.
 
-Includes the "literature-SRS but URDF-non-SRS" arms — those whose published DH classifies as SRS but whose URDFs carry mm- to cm-scale shoulder/wrist offsets. ssik solves their **real URDF** kinematics, not a simplified DH; a generalised approximate-SRS + LM-polish path (#193) is the planned fast solver for the small-drift cases.
+Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and the literature-SRS-but-URDF-far-from-SRS arms whose drift exceeds the polished-SRS basin (Flexiv Rizon 4: 151 mm wrist drift; Kassow KR810: 111 mm wrist drift).
 
 | Arm | Drift (shoulder / wrist) | Full-sweep speed | Status |
 |-----|---|:---:|:---:|
 | Franka Emika Panda / FR3 | non-SRS by design | ~20 ms (48 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | uFactory xArm7 | non-SRS by design | ~32 ms (56 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | ~1 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — #193 polished-SRS candidate |
+| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | **~95 ms (`seven_r.srs_polished`)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | **Flexiv Rizon 4** | 65 mm / 151 mm | ~1.5 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — wrist drift outside Newton basin |
 | **Kassow KR810** | 86 mm / 111 mm | ~1.5 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — wrist drift outside Newton basin |
 | Kassow KR1018 / KR1410 / KR1805 | similar geometry, expected ~80-110 mm | not measured | 🔗 [rcruzoliver/kr_ros2](https://github.com/rcruzoliver/kr_ros2) |
@@ -72,6 +78,7 @@ Includes the "literature-SRS but URDF-non-SRS" arms — those whose published DH
 |---|---|---|---|
 | 0 — closed-form 6R | `three_parallel`, `spherical_two_parallel`, `spherical_two_intersecting`, `spherical` | ~1 ms | SP1–SP6 composition; one branch per Pieper specialisation |
 | 0 — closed-form 7R (SRS) | `seven_r.srs` | ~8.5 ms full sweep | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × 16 swivel samples = 128 IKs |
+| 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~95 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + Newton polish to machine precision against the original URDF FK |
 | 1 — univariate search | `two_parallel`, `two_intersecting` | ~100 ms – 2 s | tan-half-angle reduction + 200-sample search + Newton polish |
 | 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms | lock one joint, dispatch inner 6R, sweep 16 lock samples |
 | 2 — Raghavan–Roth + Manocha–Canny | `ikgeo.general_6r` | ~0.6-5 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |

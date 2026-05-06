@@ -7,15 +7,18 @@ that displace joint-3's axis ~12 mm off the joint-0/1 common point.
 The wrist is closer to spherical (~0.4 mm drift on joint-7).
 
 ssik's `is_srs_7r` predicate correctly rejects Gen3, and the
-dispatcher routes it through `jointlock + HP` for slow-but-correct IK.
-A future fast path is tracked in #193 (generalised approximate-SRS
-+ LM polish).
+dispatcher routes it through `seven_r.srs_polished` (#193 fast path,
+~95 ms median; covered by tests/test_seven_r_srs_polished.py). The
+universal `jointlock + HP` fallback (~1.5 s) remains correct as a
+backup and is also exercised here.
 
 This test contract:
 
-- predicate refuses Gen3 (correct non-SRS classification).
-- dispatcher picks `jointlock.seven_r`.
-- hand-picked + random poses solve via jointlock+HP, FK closure < 1e-10.
+- predicate refuses Gen3 (correct strict non-SRS classification).
+- dispatcher picks `seven_r.srs_polished` (post-#193).
+- hand-picked + random poses solve via jointlock+HP directly (the
+  invariant: HP works correctly on Gen3 even though it isn't the
+  default route anymore).
 
 Source URDF: ``tests/fixtures/gen3.urdf``, vendored from
 https://github.com/Kinovarobotics/ros_kortex (noetic-devel branch,
@@ -69,11 +72,15 @@ def test_gen3_is_not_pure_srs() -> None:
     assert is_srs_7r(kb, DEFAULT_TOLERANCE_POLICY) is None
 
 
-def test_gen3_dispatches_to_jointlock_hp() -> None:
-    """Dispatcher routes Gen3 through jointlock+HP (universal fallback)."""
+def test_gen3_dispatches_to_polished_srs() -> None:
+    """Dispatcher routes Gen3 through `seven_r.srs_polished` (#193 fast path).
+
+    Pre-#193 Gen3 routed to ``jointlock + HP`` (~1.5 s); the polished
+    variant brings it to ~95 ms via Singh-Kreutz + LM polish.
+    """
     kb = _gen3_kinbody()
     plan = dispatch(kb)
-    assert plan.solver_name == "jointlock.seven_r"
+    assert plan.solver_name == "seven_r.srs_polished"
 
 
 # ----------------------------------------------------------------------------

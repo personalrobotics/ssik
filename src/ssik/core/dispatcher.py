@@ -120,6 +120,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "ikgeo.general_6r": (2, 5.0, 30_000_000),
     "husty_pfurner.general_6r": (2, 120.0, 50_000_000),
     "seven_r.srs": (0, 8.5, 1_900),  # native SRS-class 7R, full sweep (16 swivel x 8 branches)
+    "seven_r.srs_polished": (0, 95.0, 200_000),  # approximate-SRS + LM polish (Gen3 et al.)
     "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 
@@ -144,10 +145,10 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
     """
     if len(kb.joints) == 7:
         # Tier-0 7R: native SRS-class analytical solver (Singh-Kreutz).
-        # Detects shoulder-spherical + wrist-spherical topology by axis
-        # concurrence. Auto-applies to KUKA iiwa LBR, Flexiv Rizon, Kinova
-        # Gen3, Sawyer, Baxter, Kassow KR* -- all the SRS-class arms.
-        from ssik.kinematics.predicates import is_srs_7r
+        # Detects shoulder-spherical + wrist-spherical topology by exact
+        # axis concurrence. Covers KUKA iiwa LBR (the canonical strict-SRS
+        # arm).
+        from ssik.kinematics.predicates import is_approximately_srs_7r, is_srs_7r
 
         if is_srs_7r(kb, policy) is not None:
             plan = _make_plan(
@@ -157,13 +158,36 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "one point + wrist axes (joints 4, 5, 6) meet at one\n"
                     "point + joint 3 is the elbow. Closed-form Singh-Kreutz\n"
                     "1989 algorithm, parameterised by elbow swivel angle.\n"
-                    "Covers KUKA iiwa LBR, Flexiv Rizon 4/10, Kinova Gen3,\n"
-                    "Sawyer, Baxter, Kassow KR810/KR1410."
+                    "Covers KUKA iiwa LBR (canonical strict-SRS)."
                 ),
                 needs_symbolic_precompute=False,
             )
             _LOG.info("dispatch: chose %s (tier 0, native SRS-7R)", plan.solver_name)
             return plan
+
+        # Tier-0 7R: approximate-SRS variant for arms whose URDF axes only
+        # nearly meet (Kinova Gen3: 12 mm shoulder + 0.4 mm wrist drift).
+        # Singh-Kreutz solver as warm-start factory + LM polish to
+        # machine precision against the original URDF FK.
+        approx = is_approximately_srs_7r(kb, max_drift_m=0.04, policy=policy)
+        if approx is not None:
+            plan = _make_plan(
+                "seven_r.srs_polished",
+                reason=(
+                    "Approximately-SRS 7R: shoulder axes meet within "
+                    f"{approx.shoulder_drift_m * 1000:.1f} mm, wrist axes "
+                    f"meet within {approx.wrist_drift_m * 1000:.1f} mm.\n"
+                    "Singh-Kreutz on the relaxed pivots produces algebraic\n"
+                    "candidates; LM polish recovers machine-precision FK\n"
+                    "against the original URDF. 16-30x faster than the\n"
+                    "universal jointlock+HP fallback on small-drift arms.\n"
+                    "Covers Kinova Gen3 (12 mm / 0.4 mm drift)."
+                ),
+                needs_symbolic_precompute=False,
+            )
+            _LOG.info("dispatch: chose %s (tier 0, approximate-SRS-7R)", plan.solver_name)
+            return plan
+
         # Tier-1 7R fallback: joint-lock + dispatch the inner 6R.
         plan = _make_plan(
             "jointlock.seven_r",
