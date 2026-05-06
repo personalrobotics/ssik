@@ -9,10 +9,14 @@ Analytical inverse kinematics for non-Pieper 6R arms — the **EAIK gap**. The a
 | arm class | EAIK / IK-Geo | mink / KDL (numeric) | ssik |
 |---|---|---|---|
 | Pieper-class (UR5, Puma 560, Fanuc, KUKA KR) | ~0.2 ms, all branches | ~20 ms, one solution | ~1-2 ms, all branches |
-| Non-Pieper 6R (JACO 2, Piper) | not supported | ~20 ms, one solution | **~5 ms median, all branches** |
-| Non-SRS 7R (Flexiv Rizon, Franka, iiwa) | not supported | ~30 ms, one solution | ~40-60 ms via joint-locking |
+| Non-Pieper 6R (JACO 2, Piper) | not supported | ~20 ms, one solution | **~0.6 ms median, all branches** |
+| SRS-class 7R (KUKA iiwa, Rizon 4, Gen3, Sawyer, Kassow) | sub-ms | ~30 ms, one solution | **0.23 ms (max=1) / 17 ms full sweep** |
+| Anthropomorphic 7R (Franka Panda, FR3) | sub-ms | ~30 ms, one solution | ~4 ms (max=1) / 20 ms full sweep via joint-locking |
 
-The differentiator is the **non-Pieper 6R analytical solver** (`ikgeo.general_6r`, Raghavan–Roth + Manocha–Canny). No other library in the ecosystem ships analytical IK for arms whose geometry deliberately violates Pieper's condition for mechanical-design reasons. ssik does, with all branches recovered at machine precision in single-digit milliseconds. See `docs/tutorial/04_raghavan_roth.md` for the math and `docs/tutorial/05_conditioning.md` for the four robustness fixes (AE-1, AE-3, AE-4, Möbius reparameterisation) that make the textbook pipeline survive on real ill-conditioned arms.
+Two differentiators:
+
+1. **Non-Pieper 6R analytical solver** (`ikgeo.general_6r`, Raghavan–Roth + Manocha–Canny). No other library in the ecosystem ships analytical IK for arms whose geometry deliberately violates Pieper's condition for mechanical-design reasons (JACO 2 with 60° non-orthogonal twists is the canonical example). ssik does, with all branches recovered at machine precision in sub-ms. See `docs/tutorial/04_raghavan_roth.md` for the math and `docs/tutorial/05_conditioning.md` for the robustness fixes (AE-1, AE-3, AE-4, Möbius reparameterisation) that make the textbook pipeline survive on real ill-conditioned arms.
+2. **Native SRS-class 7R solver** (`seven_r.srs`, Singh-Kreutz 1989) — closed-form parameterised by elbow swivel angle. Predicate-driven dispatch (`is_srs_7r`) auto-applies to any 7R arm matching the topology: shoulder axes (0,1,2) concurrent + wrist axes (4,5,6) concurrent. iiwa14 is the canonical fixture; Rizon 4, Gen3, Sawyer, Baxter, Kassow KR* light up automatically when their fixtures land.
 
 ## Supported arms & solver coverage
 
@@ -37,28 +41,38 @@ Status legend: ✅ in-repo URDF/MJCF fixture exercised by the test suite — �
 | Agilex Piper | `ikgeo.general_6r` | expected ~5 ms | 🔗 [mujoco_menagerie/agilex_piper](https://github.com/google-deepmind/mujoco_menagerie/tree/main/agilex_piper) |
 | Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~5 ms | URDF intake via [#95](https://github.com/siddhss5/ikfastpy/issues/95) |
 
-### 7R redundant arms (joint-locking)
+### 7R redundant arms — SRS-class (`seven_r.srs`)
 
-`jointlock.seven_r` covers any 7R arm by locking one joint and dispatching the resulting 6R sub-chain to the best-matching tier-0/1 ikgeo solver. Per-arm topology is auto-selected at warm-cache time. Synthetic SRS arm benches at ~40-60 ms median. Real-arm validation pending.
+Closed-form Singh-Kreutz 1989 algorithm for arms with shoulder-spherical + wrist-spherical topology + elbow roll. Predicate-driven dispatch via `is_srs_7r` (no per-arm hardcoding); auto-applies to any 7R chain whose shoulder axes (0,1,2) and wrist axes (4,5,6) each meet at a common point. Sub-millisecond per IK with `max_solutions=1`; ~17 ms full swivel sweep returning ~120 IKs.
 
-| Arm | Inner 6R after lock | Status |
-|-----|---|:-----:|
-| Franka Emika Panda / FR3 | `ikgeo.spherical_two_intersecting` (typically) | 🔗 [mujoco_menagerie/franka_emika_panda](https://github.com/google-deepmind/mujoco_menagerie/tree/main/franka_emika_panda) |
-| KUKA iiwa 14 | `ikgeo.spherical_two_parallel` | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
-| Kinova Gen3 | `ikgeo.spherical_two_parallel` | 🔗 [mujoco_menagerie/kinova_gen3](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kinova_gen3) |
-| Flexiv Rizon 4 / 10 | `ikgeo.spherical_two_parallel` | 🔗 [flexivrobotics/flexiv_description](https://github.com/flexivrobotics/flexiv_description) |
-| uFactory xArm7 | `ikgeo.spherical_two_parallel` | 🔗 [xArm-Developer/xarm_ros](https://github.com/xArm-Developer/xarm_ros) |
-| Synthetic SRS arm | `ikgeo.spherical_two_parallel` | 📐 |
+| Arm | Speed | Status |
+|-----|:---:|:---:|
+| **KUKA iiwa LBR 14** | **0.23 ms (max=1) / 17 ms full sweep** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| KUKA iiwa LBR 7 (R820 / R14) | expected ~0.2 ms | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
+| Flexiv Rizon 4 / 10 | expected ~0.2 ms | 🔗 [flexivrobotics/flexiv_description](https://github.com/flexivrobotics/flexiv_description) |
+| Kinova Gen3 (7-DOF) | expected ~0.2 ms | 🔗 [mujoco_menagerie/kinova_gen3](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kinova_gen3) |
+| Sawyer / Baxter (Rethink Robotics) | expected ~0.2 ms | 🔗 (vendor URDF) |
+| Kassow KR810 / KR1410 | expected ~0.2 ms | 🔗 (vendor URDF) |
+
+### 7R redundant arms — non-SRS (`jointlock.seven_r`)
+
+For 7R arms whose topology doesn't match SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. Tier-2 fallback inside jointlock is `husty_pfurner.general_6r` for sub-chains with no Pieper / parallel-axis structure. Per-IK cost dominated by the 16-sample lock sweep × inner 6R solver.
+
+| Arm | Inner 6R dispatch | Speed | Status |
+|-----|---|:---:|:---:|
+| Franka Emika Panda / FR3 | `reversed:spherical_*` (typical) | ~4 ms (max=1) / ~20 ms full sweep | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| uFactory xArm7 | `reversed:spherical` | ~3 ms (max=1) / ~32 ms full sweep | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 
 ### Solver tier reference
 
 | Tier | Solver modules | Typical IK time | Algorithm |
 |---|---|---|---|
-| 0 — closed-form | `three_parallel`, `spherical_two_parallel`, `spherical_two_intersecting`, `spherical` | ~1-10 ms | SP1–SP6 composition; one branch per Pieper specialisation |
+| 0 — closed-form 6R | `three_parallel`, `spherical_two_parallel`, `spherical_two_intersecting`, `spherical` | ~1 ms | SP1–SP6 composition; one branch per Pieper specialisation |
+| 0 — closed-form 7R (SRS) | `seven_r.srs` | **~0.2 ms** (max=1) | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × N swivel samples |
 | 1 — univariate search | `two_parallel`, `two_intersecting` | ~100 ms – 2 s | tan-half-angle reduction + 200-sample search + Newton polish |
-| 2 — Raghavan–Roth + Manocha–Canny | `general_6r` | ~5-50 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |
-| 2 — fallback oracle | `gen_six_dof` | ~10-100 s | 100×100 grid + Nelder–Mead; correctness oracle only |
-| 7R wrapper | `jointlock.seven_r` | ~40-60 ms | lock one joint, dispatch inner 6R, sweep 16 lock samples |
+| 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms | lock one joint, dispatch inner 6R, sweep 16 lock samples |
+| 2 — Raghavan–Roth + Manocha–Canny | `ikgeo.general_6r` | ~0.6-5 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |
+| 2 — Husty-Pfurner universal fallback | `husty_pfurner.general_6r` | ~25-200 ms | Study-quaternion algebra; perturbation path (#176) handles symmetric-DH singularities; backstops RR on ill-conditioned arms |
 
 ## Per-arm artifact builder (`ssik build`)
 
