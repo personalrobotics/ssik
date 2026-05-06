@@ -255,9 +255,7 @@ def _back_sub_tv2_left(
     P_se3 = se3_from_dq(P)
 
     # Joint-3 DH offset: T_z(d_3) T_x(a_3) R_x(l_3) (no v_3 rotation).
-    j3_dh_dq = dq_mul(
-        _sigma_tz(d_3), dq_mul(_sigma_tx(a_3), _sigma_rx(l_3))
-    )
+    j3_dh_dq = dq_mul(_sigma_tz(d_3), dq_mul(_sigma_tx(a_3), _sigma_rx(l_3)))
     j3_se3 = se3_from_dq(j3_dh_dq)
     Q_prime = P_se3 @ np.linalg.inv(j3_se3)
 
@@ -363,9 +361,7 @@ def back_substitute_one(
     if pre.parametric_var == "v_2":
         # Tv2 path: u is v_2, recover (v_1, v_3) via _back_sub_tv2_left.
         v_2 = u
-        v_1, v_3 = _back_sub_tv2_left(
-            P, v_2, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3
-        )
+        v_1, v_3 = _back_sub_tv2_left(P, v_2, a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3)
         return [(v_1, v_2, v_3, v_4, v_5, v_6) for (v_4, v_5, v_6) in sol_right]
 
     # Default Tv1 path: u is v_1.
@@ -374,9 +370,7 @@ def back_substitute_one(
     sigma_left = dq_mul(_dq_inv(sigma_1), P)
     sol_23 = _solve_2r_chain(sigma_left, a_2, l_2, d_2, a_3, l_3, d_3)
     return [
-        (v_1, v_2, v_3, v_4, v_5, v_6)
-        for (v_2, v_3) in sol_23
-        for (v_4, v_5, v_6) in sol_right
+        (v_1, v_2, v_3, v_4, v_5, v_6) for (v_2, v_3) in sol_23 for (v_4, v_5, v_6) in sol_right
     ]
 
 

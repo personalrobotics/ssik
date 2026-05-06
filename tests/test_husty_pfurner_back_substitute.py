@@ -289,19 +289,37 @@ def test_solve_ik_recovers_truth_hypothesis(
 
 
 _DH_TV4_A4_ZERO = dict(
-    a_1=0.30, l_1=math.tan(0.5 * 0.4), d_2=0.20,
-    a_2=0.40, l_2=math.tan(0.5 * 0.6), d_3=0.10,
-    a_3=0.50, l_3=math.tan(0.5 * 0.5), d_4=0.30,
-    a_4=0.0, l_4=math.tan(0.5 * 0.3), d_5=0.40,
-    a_5=0.30, l_5=math.tan(0.5 * 0.7),
+    a_1=0.30,
+    l_1=math.tan(0.5 * 0.4),
+    d_2=0.20,
+    a_2=0.40,
+    l_2=math.tan(0.5 * 0.6),
+    d_3=0.10,
+    a_3=0.50,
+    l_3=math.tan(0.5 * 0.5),
+    d_4=0.30,
+    a_4=0.0,
+    l_4=math.tan(0.5 * 0.3),
+    d_5=0.40,
+    a_5=0.30,
+    l_5=math.tan(0.5 * 0.7),
 )
 
 _DH_TV4_L4_ZERO = dict(
-    a_1=0.30, l_1=math.tan(0.5 * 0.4), d_2=0.20,
-    a_2=0.40, l_2=math.tan(0.5 * 0.6), d_3=0.10,
-    a_3=0.50, l_3=math.tan(0.5 * 0.5), d_4=0.30,
-    a_4=0.20, l_4=0.0, d_5=0.40,
-    a_5=0.30, l_5=math.tan(0.5 * 0.7),
+    a_1=0.30,
+    l_1=math.tan(0.5 * 0.4),
+    d_2=0.20,
+    a_2=0.40,
+    l_2=math.tan(0.5 * 0.6),
+    d_3=0.10,
+    a_3=0.50,
+    l_3=math.tan(0.5 * 0.5),
+    d_4=0.30,
+    a_4=0.20,
+    l_4=0.0,
+    d_5=0.40,
+    a_5=0.30,
+    l_5=math.tan(0.5 * 0.7),
 )
 
 _TV4_HAND_PICKED_CASES: list[tuple[dict[str, float], tuple[float, ...]]] = [
@@ -335,9 +353,7 @@ def test_tv4_dispatch_recovers_truth_and_fk_closes(
         sigma_chain = _sigma_for(dh, tuple(sol))
         scale = float(sigma_chain @ sigma_E) / max(float(sigma_chain @ sigma_chain), 1e-300)
         residue = float(np.linalg.norm(sigma_chain * scale - sigma_E)) / max(sigma_E_norm, 1e-300)
-        assert residue < 1e-7, (
-            f"FK closure failed for sol={sol}, residue={residue:.3e}, DH={dh}"
-        )
+        assert residue < 1e-7, f"FK closure failed for sol={sol}, residue={residue:.3e}, DH={dh}"
 
     # FK truth must be among returned solutions.
     nearest_err = min(_max_q_diff(sol, v_truth) for sol in sols)
@@ -372,9 +388,20 @@ def test_tv4_dispatch_random_dh_recovers_truth(seed: int) -> None:
     v_truth = tuple(float(rng.uniform(-1.0, 1.0)) for _ in range(6))
 
     dh = dict(
-        a_1=a_1, l_1=l_1, d_2=d_2, a_2=a_2, l_2=l_2, d_3=d_3,
-        a_3=a_3, l_3=l_3, d_4=d_4, a_4=a_4, l_4=l_4, d_5=d_5,
-        a_5=a_5, l_5=l_5,
+        a_1=a_1,
+        l_1=l_1,
+        d_2=d_2,
+        a_2=a_2,
+        l_2=l_2,
+        d_3=d_3,
+        a_3=a_3,
+        l_3=l_3,
+        d_4=d_4,
+        a_4=a_4,
+        l_4=l_4,
+        d_5=d_5,
+        a_5=a_5,
+        l_5=l_5,
     )
     pre = precompute_rrr_chain(**dh)
     assert pre.right_parametric_var == "v_4"

@@ -24,14 +24,13 @@ import math
 
 import numpy as np
 import pytest
+import sympy as sp
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-import sympy as sp
-
 from ssik.solvers.husty_pfurner._constraints import (
-    TV2_RRR_CASE_KEYS,
     _V2_SYM,
+    TV2_RRR_CASE_KEYS,
     hyperplane_residuals,
     tv1_hyperplanes_rrr,
     tv2_hyperplanes_rrr,
@@ -1277,8 +1276,14 @@ def test_tv4_shape() -> None:
     """tv4_hyperplanes_rrr returns the 4x8 hyperplane coefficient matrix."""
     sigma_E = np.array([1.0, 0.1, 0.2, 0.3, 0.0, 0.5, 0.4, 0.3])
     coeffs = tv4_hyperplanes_rrr(
-        a_4=0.5, l_4=0.4, d_4=0.1, a_5=0.6, l_5=0.3, d_5=0.2,
-        sigma_E=sigma_E, v_4=0.7,
+        a_4=0.5,
+        l_4=0.4,
+        d_4=0.1,
+        a_5=0.6,
+        l_5=0.3,
+        d_5=0.2,
+        sigma_E=sigma_E,
+        v_4=0.7,
     )
     assert coeffs.shape == (4, 8)
     assert coeffs.dtype == np.float64
@@ -1289,22 +1294,41 @@ def test_tv4_rejects_wrong_shape_sigma_e() -> None:
     """sigma_E must be 8-vec; otherwise raise ValueError."""
     with pytest.raises(ValueError, match="sigma_E must be 8-vec"):
         tv4_hyperplanes_rrr(
-            a_4=0.5, l_4=0.4, d_4=0.1, a_5=0.6, l_5=0.3, d_5=0.2,
-            sigma_E=np.zeros(7), v_4=0.0,
+            a_4=0.5,
+            l_4=0.4,
+            d_4=0.1,
+            a_5=0.6,
+            l_5=0.3,
+            d_5=0.2,
+            sigma_E=np.zeros(7),
+            v_4=0.0,
         )
 
 
 def test_tv4_symbolic_matches_numeric() -> None:
     """tv4_symbolic_in_v4 with v_4 substituted matches tv4_hyperplanes_rrr."""
     import sympy as sp
+
     from ssik.solvers.husty_pfurner._constraints import _V4_SYM
+
     sigma_E = np.array([1.0, 0.1, 0.2, 0.3, 0.0, 0.5, 0.4, 0.3])
     H_num = tv4_hyperplanes_rrr(
-        a_4=0.5, l_4=0.4, d_4=0.1, a_5=0.6, l_5=0.3, d_5=0.2,
-        sigma_E=sigma_E, v_4=0.7,
+        a_4=0.5,
+        l_4=0.4,
+        d_4=0.1,
+        a_5=0.6,
+        l_5=0.3,
+        d_5=0.2,
+        sigma_E=sigma_E,
+        v_4=0.7,
     )
     H_sym = tv4_symbolic_in_v4(
-        a_4=0.5, l_4=0.4, d_4=0.1, a_5=0.6, l_5=0.3, d_5=0.2,
+        a_4=0.5,
+        l_4=0.4,
+        d_4=0.1,
+        a_5=0.6,
+        l_5=0.3,
+        d_5=0.2,
         sigma_E=sigma_E,
     )
     H_sym_at = np.asarray(H_sym.subs(_V4_SYM, sp.Float(0.7)).tolist(), dtype=np.float64)
@@ -1346,9 +1370,26 @@ def test_tv4_hyperplanes_vanish_on_left_chain_dq(seed: int) -> None:
     v_6 = float(rng.uniform(-2.0, 2.0))
 
     sigma_E = _full_6r_chain_dq(
-        v_1, a_1, l_1, d_2, v_2, a_2, l_2,
-        v_3, d_3, a_3, l_3, v_4, d_4, a_4, l_4,
-        v_5, d_5, a_5, l_5, v_6,
+        v_1,
+        a_1,
+        l_1,
+        d_2,
+        v_2,
+        a_2,
+        l_2,
+        v_3,
+        d_3,
+        a_3,
+        l_3,
+        v_4,
+        d_4,
+        a_4,
+        l_4,
+        v_5,
+        d_5,
+        a_5,
+        l_5,
+        v_6,
     )
     tau = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
 
@@ -1378,9 +1419,26 @@ def test_tv4_invariant_under_v5_v6_changes(v_5: float, v_6: float) -> None:
     v_1, v_2, v_3, v_4 = 0.3, -0.4, 0.5, 0.7
 
     sigma_E = _full_6r_chain_dq(
-        v_1, a_1, l_1, d_2, v_2, a_2, l_2,
-        v_3, d_3, a_3, l_3, v_4, d_4, a_4, l_4,
-        v_5, d_5, a_5, l_5, v_6,
+        v_1,
+        a_1,
+        l_1,
+        d_2,
+        v_2,
+        a_2,
+        l_2,
+        v_3,
+        d_3,
+        a_3,
+        l_3,
+        v_4,
+        d_4,
+        a_4,
+        l_4,
+        v_5,
+        d_5,
+        a_5,
+        l_5,
+        v_6,
     )
     tau = _vl_chain_rrr(v_1, a_1, l_1, d_2, v_2, a_2, l_2, v_3, d_3, a_3, l_3)
     coeffs = tv4_hyperplanes_rrr(a_4, l_4, d_4, a_5, l_5, d_5, sigma_E, v_4)
@@ -1395,34 +1453,96 @@ def test_tv4_invariant_under_v5_v6_changes(v_5: float, v_6: float) -> None:
 
 
 @given(
-    a_1=_safe_dh, s_a1=_sign, alpha_1=_safe_alpha,
-    d_2=_safe_dist, a_2=_safe_dh, s_a2=_sign, alpha_2=_safe_alpha,
-    d_3=_safe_dist, a_3=_safe_dh, s_a3=_sign, alpha_3=_safe_alpha,
-    d_4=_safe_dist, a_4=_safe_dh, s_a4=_sign, alpha_4=_safe_alpha,
-    d_5=_safe_dist, a_5=_safe_dh, s_a5=_sign, alpha_5=_safe_alpha,
-    v_1=_safe_dist, v_2=_safe_dist, v_3=_safe_dist,
-    v_4=_safe_dist, v_5=_safe_dist, v_6=_safe_dist,
+    a_1=_safe_dh,
+    s_a1=_sign,
+    alpha_1=_safe_alpha,
+    d_2=_safe_dist,
+    a_2=_safe_dh,
+    s_a2=_sign,
+    alpha_2=_safe_alpha,
+    d_3=_safe_dist,
+    a_3=_safe_dh,
+    s_a3=_sign,
+    alpha_3=_safe_alpha,
+    d_4=_safe_dist,
+    a_4=_safe_dh,
+    s_a4=_sign,
+    alpha_4=_safe_alpha,
+    d_5=_safe_dist,
+    a_5=_safe_dh,
+    s_a5=_sign,
+    alpha_5=_safe_alpha,
+    v_1=_safe_dist,
+    v_2=_safe_dist,
+    v_3=_safe_dist,
+    v_4=_safe_dist,
+    v_5=_safe_dist,
+    v_6=_safe_dist,
 )
 @settings(
-    max_examples=500, deadline=None,
+    max_examples=500,
+    deadline=None,
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
 )
 def test_tv4_hypothesis_fuzz_500_examples(
-    a_1, s_a1, alpha_1, d_2, a_2, s_a2, alpha_2,
-    d_3, a_3, s_a3, alpha_3, d_4, a_4, s_a4, alpha_4,
-    d_5, a_5, s_a5, alpha_5, v_1, v_2, v_3, v_4, v_5, v_6,
+    a_1,
+    s_a1,
+    alpha_1,
+    d_2,
+    a_2,
+    s_a2,
+    alpha_2,
+    d_3,
+    a_3,
+    s_a3,
+    alpha_3,
+    d_4,
+    a_4,
+    s_a4,
+    alpha_4,
+    d_5,
+    a_5,
+    s_a5,
+    alpha_5,
+    v_1,
+    v_2,
+    v_3,
+    v_4,
+    v_5,
+    v_6,
 ):
     """500-pose fuzz for T(v_4) vanishing property."""
     a_1s, a_2s, a_3s, a_4s, a_5s = (
-        s_a1 * a_1, s_a2 * a_2, s_a3 * a_3, s_a4 * a_4, s_a5 * a_5,
+        s_a1 * a_1,
+        s_a2 * a_2,
+        s_a3 * a_3,
+        s_a4 * a_4,
+        s_a5 * a_5,
     )
     l_1, l_2, l_3, l_4, l_5 = (
         math.tan(0.5 * x) for x in (alpha_1, alpha_2, alpha_3, alpha_4, alpha_5)
     )
     sigma_E = _full_6r_chain_dq(
-        v_1, a_1s, l_1, d_2, v_2, a_2s, l_2,
-        v_3, d_3, a_3s, l_3, v_4, d_4, a_4s, l_4,
-        v_5, d_5, a_5s, l_5, v_6,
+        v_1,
+        a_1s,
+        l_1,
+        d_2,
+        v_2,
+        a_2s,
+        l_2,
+        v_3,
+        d_3,
+        a_3s,
+        l_3,
+        v_4,
+        d_4,
+        a_4s,
+        l_4,
+        v_5,
+        d_5,
+        a_5s,
+        l_5,
+        v_6,
     )
     tau = _vl_chain_rrr(v_1, a_1s, l_1, d_2, v_2, a_2s, l_2, v_3, d_3, a_3s, l_3)
     coeffs = tv4_hyperplanes_rrr(a_4s, l_4, d_4, a_5s, l_5, d_5, sigma_E, v_4)
@@ -1431,9 +1551,7 @@ def test_tv4_hypothesis_fuzz_500_examples(
     row_norms = np.linalg.norm(coeffs, axis=1)
     expected_scales = np.maximum(row_norms * sigma_norm, 1e-12)
     relative = np.abs(residuals) / expected_scales
-    assert np.all(relative < 1e-9), (
-        f"max relative residual={float(np.max(relative)):.2e}"
-    )
+    assert np.all(relative < 1e-9), f"max relative residual={float(np.max(relative)):.2e}"
 
 
 def test_tv4_handles_a4_zero() -> None:
@@ -1443,8 +1561,14 @@ def test_tv4_handles_a4_zero() -> None:
     """
     sigma_E = np.array([1.0, 0.1, 0.2, 0.3, 0.0, 0.5, 0.4, 0.3])
     coeffs = tv4_hyperplanes_rrr(
-        a_4=0.0, l_4=0.5, d_4=0.1, a_5=0.6, l_5=0.4, d_5=0.2,
-        sigma_E=sigma_E, v_4=0.5,
+        a_4=0.0,
+        l_4=0.5,
+        d_4=0.1,
+        a_5=0.6,
+        l_5=0.4,
+        d_5=0.2,
+        sigma_E=sigma_E,
+        v_4=0.5,
     )
     assert coeffs.shape == (4, 8)
     assert np.all(np.isfinite(coeffs))
@@ -1455,8 +1579,14 @@ def test_tv4_handles_l4_zero() -> None:
     """T(v_4) is well-defined when l_4 = 0 (alpha_4 = 0)."""
     sigma_E = np.array([1.0, 0.1, 0.2, 0.3, 0.0, 0.5, 0.4, 0.3])
     coeffs = tv4_hyperplanes_rrr(
-        a_4=0.3, l_4=0.0, d_4=0.1, a_5=0.6, l_5=0.4, d_5=0.2,
-        sigma_E=sigma_E, v_4=0.5,
+        a_4=0.3,
+        l_4=0.0,
+        d_4=0.1,
+        a_5=0.6,
+        l_5=0.4,
+        d_5=0.2,
+        sigma_E=sigma_E,
+        v_4=0.5,
     )
     assert coeffs.shape == (4, 8)
     assert np.all(np.isfinite(coeffs))
@@ -1473,8 +1603,13 @@ def test_tv4_handles_l4_zero() -> None:
 
 
 def _vl_chain_rrr_simple(
-    v_1: float, a_1: float, l_1: float,
-    v_2: float, d_2: float, a_2: float, l_2: float,
+    v_1: float,
+    a_1: float,
+    l_1: float,
+    v_2: float,
+    d_2: float,
+    a_2: float,
+    l_2: float,
     v_3: float,
 ) -> np.ndarray:
     """RRR left-chain DQ in the SIMPLE form ``T(v_2)`` derives against:
@@ -1544,8 +1679,7 @@ def test_tv2_hyperplanes_vanish_on_full_vl_chain(case_key: str, seed: int) -> No
 
     residuals = h_np @ sigma_vl
     assert np.allclose(residuals, 0.0, atol=1e-12), (
-        f"case={case_key} seed={seed}: max|residual|="
-        f"{float(np.max(np.abs(residuals))):.2e}"
+        f"case={case_key} seed={seed}: max|residual|={float(np.max(np.abs(residuals))):.2e}"
     )
 
 
@@ -1586,19 +1720,32 @@ def test_tv2_full_hyperplanes_vanish_on_full_vl_chain(case_key: str, seed: int) 
 
     # Full RRR chain INCLUDING joint-3 DH offsets.
     sigma_vl_full = _vl_chain_rrr(
-        v_1, dh["a_1"], dh["l_1"], dh["d_2"], v_2, dh["a_2"], dh["l_2"],
-        v_3, d_3, a_3, l_3,
+        v_1,
+        dh["a_1"],
+        dh["l_1"],
+        dh["d_2"],
+        v_2,
+        dh["a_2"],
+        dh["l_2"],
+        v_3,
+        d_3,
+        a_3,
+        l_3,
     )
 
     coeffs_full = tv2_hyperplanes_rrr(
         case_key,
-        a_1=dh["a_1"], l_1=dh["l_1"], d_2=dh["d_2"],
-        a_2=dh["a_2"], l_2=dh["l_2"],
-        d_3=d_3, a_3=a_3, l_3=l_3,
+        a_1=dh["a_1"],
+        l_1=dh["l_1"],
+        d_2=dh["d_2"],
+        a_2=dh["a_2"],
+        l_2=dh["l_2"],
+        d_3=d_3,
+        a_3=a_3,
+        l_3=l_3,
         v_2=v_2,
     )
     residuals = coeffs_full @ sigma_vl_full
     assert np.allclose(residuals, 0.0, atol=1e-12), (
-        f"case={case_key} seed={seed}: max|residual|="
-        f"{float(np.max(np.abs(residuals))):.2e}"
-    ) 
+        f"case={case_key} seed={seed}: max|residual|={float(np.max(np.abs(residuals))):.2e}"
+    )

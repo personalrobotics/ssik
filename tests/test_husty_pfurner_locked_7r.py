@@ -2,7 +2,7 @@
 
 Phase 5c.4 / GitHub #176: HP must produce machine-precision IK on every
 locked sub-chain of every 7R arm in the fixture set. The DH audit
-(franka_panda, kuka_iiwa14, xarm7 × 7 lock indices = 21 configs) shows
+(franka_panda, kuka_iiwa14, xarm7 x 7 lock indices = 21 configs) shows
 that 15/21 hit the **Tv2 sub-case `[a_1=0, a_2=0]`** (V_L lies in the
 Study quadric structurally — measure-zero singularity). HP resolves
 this by perturbing ``a_2 → ε = 1e-3`` (and/or ``a_5 → ε`` for the
@@ -76,13 +76,8 @@ def _closest_q_err_modulo_2pi(q_returned: np.ndarray, q_truth: np.ndarray) -> fl
 
 
 @pytest.mark.parametrize(
-    "arm_name,lock_idx",
-    [
-        (arm, lock)
-        for arm, _ in ARMS
-        for lock in range(7)
-        if (arm, lock) not in _SINGULAR_CONFIGS
-    ],
+    ("arm_name", "lock_idx"),
+    [(arm, lock) for arm, _ in ARMS for lock in range(7) if (arm, lock) not in _SINGULAR_CONFIGS],
 )
 def test_locked_7r_fk_closure(arm_name: str, lock_idx: int) -> None:
     """Every returned IK on every locked-7R config FK-closes at machine
@@ -118,13 +113,8 @@ def test_locked_7r_fk_closure(arm_name: str, lock_idx: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "arm_name,lock_idx",
-    [
-        (arm, lock)
-        for arm, _ in ARMS
-        for lock in range(7)
-        if (arm, lock) not in _SINGULAR_CONFIGS
-    ],
+    ("arm_name", "lock_idx"),
+    [(arm, lock) for arm, _ in ARMS for lock in range(7) if (arm, lock) not in _SINGULAR_CONFIGS],
 )
 def test_locked_7r_q_truth_recovery(arm_name: str, lock_idx: int) -> None:
     """Non-singular locked-7R configs recover q_truth at machine precision
@@ -141,9 +131,7 @@ def test_locked_7r_q_truth_recovery(arm_name: str, lock_idx: int) -> None:
     sols, _ = hp_solve(kb6, T_target, allow_refinement=True)
     assert sols, f"{arm_name} lock={lock_idx}: 0 IK"
 
-    best_q_err = min(
-        _closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols
-    )
+    best_q_err = min(_closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols)
     assert best_q_err < 1e-6, (
         f"{arm_name} lock={lock_idx}: closest IK to q_truth has max |q - q_truth| "
         f"= {best_q_err:.3e} > 1e-6. HP returned {len(sols)} IK candidates "
@@ -151,10 +139,8 @@ def test_locked_7r_q_truth_recovery(arm_name: str, lock_idx: int) -> None:
     )
 
 
-@pytest.mark.parametrize("arm_name,lock_idx", sorted(_SINGULAR_CONFIGS))
-def test_locked_7r_singular_returns_some_valid_ik(
-    arm_name: str, lock_idx: int
-) -> None:
+@pytest.mark.parametrize(("arm_name", "lock_idx"), sorted(_SINGULAR_CONFIGS))
+def test_locked_7r_singular_returns_some_valid_ik(arm_name: str, lock_idx: int) -> None:
     """Structurally-singular configs (Jacobian rank-deficient at q_truth)
     have a continuous IK family; HP returns a valid family member with
     FK closure at machine precision but not necessarily q_truth.
@@ -170,15 +156,10 @@ def test_locked_7r_singular_returns_some_valid_ik(
     # outcomes: (a) zero solutions with is_ls=True, OR (b) at least one
     # solution with FK closure ≤ 1e-8.
     if not sols:
-        assert is_ls, (
-            f"{arm_name} lock={lock_idx} (singular): HP returned 0 IK but "
-            f"is_ls=False"
-        )
+        assert is_ls, f"{arm_name} lock={lock_idx} (singular): HP returned 0 IK but is_ls=False"
         return
     best_fk = min(s.fk_residual for s in sols)
-    assert best_fk < 1e-8, (
-        f"{arm_name} lock={lock_idx} (singular): best FK {best_fk:.3e} > 1e-8"
-    )
+    assert best_fk < 1e-8, f"{arm_name} lock={lock_idx} (singular): best FK {best_fk:.3e} > 1e-8"
 
 
 def test_locked_franka_q_truth_to_machine_precision() -> None:
@@ -194,9 +175,7 @@ def test_locked_franka_q_truth_to_machine_precision() -> None:
     T_target = poe_forward_kinematics(kb6, q_truth)
     sols, _ = hp_solve(kb6, T_target, allow_refinement=True)
     assert sols
-    best_q_err = min(
-        _closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols
-    )
+    best_q_err = min(_closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols)
     best_fk = min(s.fk_residual for s in sols)
     assert best_q_err < 1e-6, f"locked-Franka q_truth not recovered: q_err={best_q_err:.3e}"
     assert best_fk < 1e-13, f"locked-Franka FK not at machine precision: {best_fk:.3e}"
@@ -219,12 +198,8 @@ def test_locked_franka_user_can_loosen_fk_atol() -> None:
     # Both should find the IK (loose is just willing to terminate sooner),
     # so both should have at least one solution within machine precision
     # of q_truth.
-    best_tight = min(
-        _closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols_tight
-    )
-    best_loose = min(
-        _closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols_loose
-    )
+    best_tight = min(_closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols_tight)
+    best_loose = min(_closest_q_err_modulo_2pi(np.asarray(s.q), q_truth) for s in sols_loose)
     assert best_tight < 1e-6
     # Loose still recovers q_truth, just may polish less inside LM.
     assert best_loose < 1e-3

@@ -44,17 +44,17 @@ giac code at Zenodo 3157441 (``which_case.py:74-80``):
 | Variant    | Applies when                                       | Status   |
 +============+====================================================+==========+
 | T(v_1)     | ``a_2 != 0 ∧ l_2 != 0``                            | done     |
-| T(v_3)     | ``(a_2 = 0 ∨ l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180     |
-| T(v_2)     | ``(a_2 = 0 ∨ l_2 = 0) ∧ (a_1 = 0 ∨ l_1 = 0)``      | **#176** |
+| T(v_3)     | ``(a_2 = 0 OR l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180     |
+| T(v_2)     | ``(a_2 = 0 OR l_2 = 0) ∧ (a_1 = 0 OR l_1 = 0)``      | **#176** |
 |            | -- 4 sub-cases: [a_1=0,a_2=0], [a_1=0,l_2=0],      |          |
 |            | [l_1=0,a_2=0], [l_1=0,l_2=0]                       |          |
 | T(v_6)     | ``a_4 != 0 ∧ l_4 != 0`` (right mirror)             | done     |
-| T(v_4)     | ``(a_4 = 0 ∨ l_4 = 0) ∧ a_5 != 0 ∧ l_5 != 0``      | #177     |
+| T(v_4)     | ``(a_4 = 0 OR l_4 = 0) ∧ a_5 != 0 ∧ l_5 != 0``      | #177     |
 | T(v_5)     | right-chain double-degenerate case                 | #177     |
 +------------+----------------------------------------------------+----------+
 
 The RRR-pattern eq. (5) simplified-form degeneracy is
-``a_2 = 0 ∨ l_2 = 0`` (NOT ``|l_2| = ±1`` -- that's the RRP rule;
+``a_2 = 0 OR l_2 = 0`` (NOT ``|l_2| = ±1`` -- that's the RRP rule;
 earlier ssik docstrings had this confused). DH audit shows every
 locked-7R configuration on Franka, KUKA iiwa LBR, and xArm7 hits the
 **RRR Tv2 sub-case [a_1=0, a_2=0]** specifically (a_1 = 0 universal on

@@ -188,7 +188,7 @@ class EliminatePrecompute:
         for the given DH (e.g. locked-Franka with ``a_4 = 0``).
     """
 
-    __slots__ = ("T_u", "T_w_pre", "parametric_var", "tv2_case_key", "right_parametric_var")
+    __slots__ = ("T_u", "T_w_pre", "parametric_var", "right_parametric_var", "tv2_case_key")
 
     def __init__(
         self,
@@ -203,21 +203,15 @@ class EliminatePrecompute:
         if T_w_pre.shape != (4, 8, 2):
             raise ValueError(f"T_w_pre must be (4, 8, 2), got {T_w_pre.shape}")
         if parametric_var not in ("v_1", "v_2"):
-            raise ValueError(
-                f"parametric_var must be 'v_1' or 'v_2', got {parametric_var!r}"
-            )
+            raise ValueError(f"parametric_var must be 'v_1' or 'v_2', got {parametric_var!r}")
         if right_parametric_var not in ("v_6", "v_4"):
             raise ValueError(
                 f"right_parametric_var must be 'v_6' or 'v_4', got {right_parametric_var!r}"
             )
         if parametric_var == "v_2" and tv2_case_key is None:
-            raise ValueError(
-                "parametric_var='v_2' requires tv2_case_key to be set"
-            )
+            raise ValueError("parametric_var='v_2' requires tv2_case_key to be set")
         if parametric_var == "v_1" and tv2_case_key is not None:
-            raise ValueError(
-                "parametric_var='v_1' should not carry a tv2_case_key"
-            )
+            raise ValueError("parametric_var='v_1' should not carry a tv2_case_key")
         self.T_u = T_u.astype(np.float64, copy=True)
         self.T_w_pre = T_w_pre.astype(np.float64, copy=True)
         self.parametric_var = parametric_var
@@ -284,9 +278,7 @@ def precompute_from_sympy(
     """
     T_u = extract_uv_linear_tensor(T_u_sym, u_sym)
     T_w_pre = extract_uv_linear_tensor(T_w_pre_sym, w_sym)
-    return EliminatePrecompute(
-        T_u, T_w_pre, parametric_var, tv2_case_key, right_parametric_var
-    )
+    return EliminatePrecompute(T_u, T_w_pre, parametric_var, tv2_case_key, right_parametric_var)
 
 
 _TV1_DEGEN_WARNED: set[tuple[float, ...]] = set()
@@ -335,7 +327,10 @@ def _check_hp_preconditions(a_1: float, l_1: float, a_2: float, l_2: float) -> N
             "iiwa LBR / xArm7 hit the case [a_1=0, a_2=0]. Proceeding with "
             "T(v_1) anyway -- partial IK set is still useful but some "
             "branches are silently missed.",
-            a_1, l_1, a_2, l_2,
+            a_1,
+            l_1,
+            a_2,
+            l_2,
         )
     else:
         _LOG.warning(
@@ -345,7 +340,10 @@ def _check_hp_preconditions(a_1: float, l_1: float, a_2: float, l_2: float) -> N
             "yet wired into back-substitution, see #180) is the well-conditioned "
             "alternative. Proceeding with T(v_1) -- some IK branches may be "
             "silently missed.",
-            a_1, l_1, a_2, l_2,
+            a_1,
+            l_1,
+            a_2,
+            l_2,
         )
 
 
@@ -393,8 +391,8 @@ def precompute_rrr_chain(
     +===========+====================================================+========+
     | Left:     |                                                    |        |
     | T(v_1)    | ``a_2 != 0 ∧ l_2 != 0``                            | OK     |
-    | T(v_3)    | ``(a_2 = 0 ∨ l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180   |
-    | T(v_2)    | ``(a_2 = 0 ∨ l_2 = 0) ∧ (a_1 = 0 ∨ l_1 = 0)``,     | #176   |
+    | T(v_3)    | ``(a_2 = 0 OR l_2 = 0) ∧ a_1 != 0 ∧ l_1 != 0``      | #180   |
+    | T(v_2)    | ``(a_2 = 0 OR l_2 = 0) ∧ (a_1 = 0 OR l_1 = 0)``,     | #176   |
     |           | sub-case keyed by which DH param(s) are zero       |        |
     |           | -- 4 RRR sub-cases: ``[a_1=0,a_2=0]``,             |        |
     |           | ``[a_1=0,l_2=0]``, ``[l_1=0,a_2=0]``,              |        |
@@ -402,9 +400,9 @@ def precompute_rrr_chain(
     +-----------+----------------------------------------------------+--------+
     | Right:    |                                                    |        |
     | T(v_6)    | ``a_4 != 0 ∧ l_4 != 0``  (mirror of Tv1)           | OK     |
-    | T(v_4)    | ``(a_4 = 0 ∨ l_4 = 0) ∧ a_5 != 0 ∧ l_5 != 0``      | OK     |
+    | T(v_4)    | ``(a_4 = 0 OR l_4 = 0) ∧ a_5 != 0 ∧ l_5 != 0``      | OK     |
     |           |   (mirror of Tv3, #177)                            |        |
-    | T(v_5)    | ``(a_4 = 0 ∨ l_4 = 0) ∧ (a_5 = 0 ∨ l_5 = 0)``      | TODO   |
+    | T(v_5)    | ``(a_4 = 0 OR l_4 = 0) ∧ (a_5 = 0 OR l_5 = 0)``      | TODO   |
     +-----------+----------------------------------------------------+--------+
 
     Dispatch logic: left chain uses T(v_1) (Tv2/Tv3 unwired); right chain
@@ -494,9 +492,7 @@ def precompute_rrr_chain(
     # with T_w, take the rank-7 stacked system's kernel via SVD with
     # Study-quadric disambiguation). Substantial work; the partial
     # Tv2 infrastructure landing here is the foundation.
-    T_u_sym = tv1_symbolic_in_v1(
-        a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3
-    ).subs(_V1_SYM, _V1_SYM)
+    T_u_sym = tv1_symbolic_in_v1(a_1, l_1, d_2, a_2, l_2, d_3, a_3, l_3).subs(_V1_SYM, _V1_SYM)
     return precompute_from_sympy(
         T_u_sym,
         _V1_SYM,
@@ -840,9 +836,7 @@ def _refine_uw_inline(
         u_new = u + du
         w_new = w + dw
         f_new, g_new, _, _, _, _, sf_new, sg_new = _eval(u_new, w_new)
-        residue_new = max(
-            abs(f_new) / max(sf_new, 1e-300), abs(g_new) / max(sg_new, 1e-300)
-        )
+        residue_new = max(abs(f_new) / max(sf_new, 1e-300), abs(g_new) / max(sg_new, 1e-300))
         u, w = u_new, w_new
         if residue_new < best_residue:
             best_u, best_w, best_residue = u_new, w_new, residue_new
@@ -1083,9 +1077,7 @@ def eliminate_uw_numeric(
 
     :returns: sorted 1-D array of real candidate ``u = v_1`` values.
     """
-    pairs = eliminate_uw_pairs(
-        pre, sigma_E, drop_indices=drop_indices, residue_tol=residue_tol
-    )
+    pairs = eliminate_uw_pairs(pre, sigma_E, drop_indices=drop_indices, residue_tol=residue_tol)
     if pairs.size == 0:
         return np.asarray([], dtype=np.float64)
     # Project to u only; re-cluster in 1-D since two pairs at the same u

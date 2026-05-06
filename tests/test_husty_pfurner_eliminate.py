@@ -706,12 +706,20 @@ def test_pencil_returns_bounded_real_eigenvalue_count() -> None:
 # in shape and structure; only the right-chain parametric variable swaps.
 
 _DH_TV4_DISPATCH = dict(
-    a_1=0.30, l_1=math.tan(0.5 * 0.4), d_2=0.20,
-    a_2=0.40, l_2=math.tan(0.5 * 0.6), d_3=0.10,
-    a_3=0.50, l_3=math.tan(0.5 * 0.5), d_4=0.30,
-    a_4=0.0,                                # forces Tv4 dispatch
-    l_4=math.tan(0.5 * 0.3), d_5=0.40,
-    a_5=0.30, l_5=math.tan(0.5 * 0.7),
+    a_1=0.30,
+    l_1=math.tan(0.5 * 0.4),
+    d_2=0.20,
+    a_2=0.40,
+    l_2=math.tan(0.5 * 0.6),
+    d_3=0.10,
+    a_3=0.50,
+    l_3=math.tan(0.5 * 0.5),
+    d_4=0.30,
+    a_4=0.0,  # forces Tv4 dispatch
+    l_4=math.tan(0.5 * 0.3),
+    d_5=0.40,
+    a_5=0.30,
+    l_5=math.tan(0.5 * 0.7),
 )
 
 
@@ -753,6 +761,7 @@ def test_precompute_rrr_chain_falls_back_to_tv6_when_a5_zero() -> None:
 
 def test_eliminate_precompute_rejects_invalid_right_parametric_var() -> None:
     from ssik.solvers.husty_pfurner._eliminate import EliminatePrecompute
+
     T = np.zeros((4, 8, 2))
     with pytest.raises(ValueError, match="right_parametric_var"):
         EliminatePrecompute(T, T, parametric_var="v_1", right_parametric_var="v_5")

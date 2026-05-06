@@ -916,8 +916,7 @@ def _tv2_rrr_case_substitution(
     if case_key == "[l_1=0,l_2=0]":
         return {l_1: zero, l_2: zero}, (a_1, a_2)
     raise ValueError(
-        f"unknown T(v_2) RRR sub-case {case_key!r}; "
-        f"expected one of {TV2_RRR_CASE_KEYS}"
+        f"unknown T(v_2) RRR sub-case {case_key!r}; expected one of {TV2_RRR_CASE_KEYS}"
     )
 
 
@@ -996,9 +995,7 @@ def _build_tv2_rrr_case_chain_symbolic(
         return sp.Matrix([one, t, zero, zero, zero, zero, zero, zero])
 
     sigma_1_chain = _dq_mul_sym(rz(v_1), _dq_mul_sym(tx(a_1), rx(l_1)))
-    sigma_2_chain = _dq_mul_sym(
-        rz(v_2), _dq_mul_sym(tz(d_2), _dq_mul_sym(tx(a_2), rx(l_2)))
-    )
+    sigma_2_chain = _dq_mul_sym(rz(v_2), _dq_mul_sym(tz(d_2), _dq_mul_sym(tx(a_2), rx(l_2))))
     rz_v3 = rz(v_3)
 
     t_chain = _dq_mul_sym(sigma_1_chain, _dq_mul_sym(sigma_2_chain, rz_v3))
@@ -1006,7 +1003,7 @@ def _build_tv2_rrr_case_chain_symbolic(
     sub_dict, free_dh = _tv2_rrr_case_substitution(case_key, a_1, l_1, a_2, l_2)
     t_chain = t_chain.subs(sub_dict)
 
-    return t_chain, (v_1, v_2, v_3) + free_dh + (d_2,)
+    return t_chain, (v_1, v_2, v_3, *free_dh, d_2)
 
 
 def tv2_symbolic_in_v2(
@@ -1043,7 +1040,7 @@ def tv2_symbolic_in_v2(
     :param d_2: joint-2 d offset (always free).
     :param a_2, l_2: joint-2 DH (substituted to 0 if the case demands).
     """
-    t_chain_sym, (v_1_sym, v_2_sym, v_3_sym, *dh_syms_after_case) = (
+    t_chain_sym, (v_1_sym, v_2_sym, v_3_sym, *_dh_syms_after_case) = (
         _build_tv2_rrr_case_chain_symbolic(case_key)
     )
     # The symbol table is set up by _build_tv2_rrr_case_chain_symbolic;
@@ -1069,9 +1066,7 @@ def tv2_symbolic_in_v2(
             for v2i in range(3):
                 row = v2i + 3 * v3i + 6 * v1i
                 for j in range(8):
-                    poly = sp.Poly(
-                        sp.expand(t_chain_num[j]), v_1_sym, v_2_sym, v_3_sym
-                    )
+                    poly = sp.Poly(sp.expand(t_chain_num[j]), v_1_sym, v_2_sym, v_3_sym)
                     coef = poly.coeff_monomial((v1i, v2i, v3i))
                     coef_f = float(coef) if coef is not sp.S.Zero else 0.0
                     # cf basis (constant in v_2): row contributes coef * cf[j]
@@ -1090,15 +1085,9 @@ def tv2_symbolic_in_v2(
                     if v2i >= 1:
                         # df[j] contribution: comes from t_chain[j]'s
                         # (v1i, v2i-1, v3i) monomial coefficient.
-                        poly_lower = sp.Poly(
-                            sp.expand(t_chain_num[j]), v_1_sym, v_2_sym, v_3_sym
-                        )
-                        coef_lower = poly_lower.coeff_monomial(
-                            (v1i, v2i - 1, v3i)
-                        )
-                        coef_lower_f = (
-                            float(coef_lower) if coef_lower is not sp.S.Zero else 0.0
-                        )
+                        poly_lower = sp.Poly(sp.expand(t_chain_num[j]), v_1_sym, v_2_sym, v_3_sym)
+                        coef_lower = poly_lower.coeff_monomial((v1i, v2i - 1, v3i))
+                        coef_lower_f = float(coef_lower) if coef_lower is not sp.S.Zero else 0.0
                         M[row, 8 + j] = coef_lower_f
 
     # Kernel via SVD: pick the 4 right-singular vectors with smallest
@@ -1174,15 +1163,12 @@ def tv2_hyperplanes_rrr(
 
     # Joint-3 DH transition: T_z(d_3) T_x(a_3) R_x(l_3) (no v_3 rotation;
     # v_3 is encoded in xy at F_3 by the simple form already).
-    j3_dh = np.array(
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5 * d_3], dtype=np.float64
-    )  # T_z(d_3)
-    tx_dq = np.array(
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.5 * a_3, 0.0, 0.0], dtype=np.float64
-    )
+    j3_dh = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5 * d_3], dtype=np.float64)  # T_z(d_3)
+    tx_dq = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.5 * a_3, 0.0, 0.0], dtype=np.float64)
     rx_dq = np.array([1.0, l_3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], dtype=np.float64)
     # Compose: J3_DH = T_z(d_3) T_x(a_3) R_x(l_3) via dq_mul.
-    from ssik.solvers.husty_pfurner._study import dq_conj, dq_mul as _dq_mul
+    from ssik.solvers.husty_pfurner._study import dq_conj
+    from ssik.solvers.husty_pfurner._study import dq_mul as _dq_mul
 
     j3_dh = _dq_mul(j3_dh, _dq_mul(tx_dq, rx_dq))
     # conj(J3_DH) for the right-mult matrix.
@@ -1192,4 +1178,3 @@ def tv2_hyperplanes_rrr(
     # H_full = H_simple @ R_right
     h_full = h_simple @ R_right
     return h_full
-
