@@ -125,24 +125,36 @@ def solve(
     *,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
+    fk_atol: float = 1e-12,
 ) -> tuple[list[Solution], bool]:
     """Universal 6R analytical IK via Husty-Pfurner.
 
     :param kb: POE-normalised :class:`KinBody` with 6 revolute joints.
         (6R/P variants will land in Phase 5c.4 / future iterations.)
     :param T_target: 4x4 target end-effector pose in the POE base frame.
-    :param policy: tolerance policy. ``subproblem_numerical`` is the
-        FK-closure threshold passed through to
-        :func:`~ssik.solvers.husty_pfurner._back_substitute.solve_ik`.
+    :param policy: tolerance policy. Used for structural predicates and
+        deduplication; the FK-closure threshold is ``fk_atol`` (separate
+        knob -- see #183 for the planned unified tolerance policy that
+        derives both from a single primary).
     :param allow_refinement: opt into Newton polish for seeds that
-        don't already meet ``policy.subproblem_numerical`` after
-        algebraic elimination + back-sub. Defaults to ``False`` to match
-        the other solvers' contract; Phase 5g multi-root configs (locked
-        Franka, etc.) require ``True`` to recover machine-precision IK
-        because pencil eigenvalues at multiplicity-k roots sit at
-        ``O(eps^{1/k})`` from truth.
+        don't already meet ``fk_atol`` after algebraic elimination +
+        back-sub. Defaults to ``False`` to match the other solvers'
+        contract; Phase 5g multi-root configs (locked Franka, etc.)
+        require ``True`` to recover machine-precision IK because pencil
+        eigenvalues at multiplicity-k roots sit at ``O(eps^{1/k})`` from
+        truth, AND singular-DH perturbed seeds (#176, e.g. locked-7R)
+        sit at ``O(epsilon)`` and need LM polish to converge.
     :param refinement_max_iters: cap on Newton iterations per seed
         when ``allow_refinement=True``.
+    :param fk_atol: target FK closure (Frobenius norm of ``FK(q) -
+        T_target``). Default ``1e-12`` is tight enough to satisfy the
+        bulletproof-validation contract (FK ≤ 1e-10) for HP, which can
+        algebraically reach machine precision on non-degenerate chains
+        and reaches ``epsilon`` precision on perturbed seeds via LM
+        polish. Loosen for speed (looser ``fk_atol`` -> fewer LM
+        iterations); tighten for precision (down to machine ~1e-15).
+        See #183 for the unified policy that exposes this knob through
+        :class:`TolerancePolicy.fk_closure`.
 
     :returns: ``(solutions, is_ls)``. ``is_ls=True`` iff no candidate
         passed FK closure -- typically means the ``T_target`` is
@@ -152,24 +164,6 @@ def solve(
         raise ValueError(f"husty_pfurner.general_6r requires a 6-joint chain, got {len(kb.joints)}")
 
     dh = poe_to_dh(kb)
-
-    # Capco eq.5 precondition: a_5 != 0 AND alpha_5 not in {0, pi}.
-    # The RRR-variant T(v_1) hyperplane construction relies on this
-    # (the 4-flat collapses at a_5 = 0 or sin(alpha_5) = 0). The
-    # alternative T(v_2) / T(v_3) parametrisations cover the
-    # degenerate cases (Phase 5c.4 / Capco's per-pattern files);
-    # until they land we raise an informative error.
-    a_5 = float(dh.a[4])
-    alpha_5 = float(dh.alpha[4])
-    if abs(a_5) < 1e-9 or abs(np.sin(alpha_5)) < 1e-9:
-        raise ValueError(
-            f"husty_pfurner.general_6r requires a_5 != 0 and alpha_5 "
-            f"not in {{0, pi}} (Capco eq.5 precondition). Got "
-            f"a_5={a_5}, alpha_5={alpha_5}. Pieper-class arms (Puma, "
-            f"UR, JACO 2 -- chains where joint-5 has no x-axis offset) "
-            f"don't satisfy this; use the IK-Geo solver instead. "
-            f"Phase 5c.4 will add the V_2/V_3 fallbacks."
-        )
 
     t_target = np.asarray(T_target, dtype=np.float64)
     t_target_dh = np.linalg.solve(dh.t_pre, t_target) @ np.linalg.inv(dh.t_post)
@@ -193,24 +187,62 @@ def solve(
     # variables; the (a_i, alpha_i, d_i) DH conversion is straightforward
     # for the 5 inner joints.
     ls = np.tan(0.5 * dh.alpha)
+
+    # Singular-DH perturbation (#176): when a_2 = 0 AND no Tv3 fallback
+    # (Tv3 requires a_1 != 0 AND l_1 != 0), the Tv2 case applies and
+    # V_L lies entirely in the Study quadric -- the algebraic variety
+    # becomes bigger than the IK set, and the elimination produces
+    # spurious roots. V_L ⊂ S is measure-zero in DH parameter space:
+    # perturb a_2 (or l_2, whichever is zero) by epsilon = 1e-3 and the
+    # singularity breaks. The standard Tv1 + Tv4 dispatch then applies.
+    # Downstream verify_candidates polishes each O(epsilon) seed via 6-D
+    # Newton on the *unperturbed* POE FK -> machine precision in 4-8
+    # iters. Same mechanism for the right chain (a_4 = 0 -> Tv5 case;
+    # perturb a_5 to enable Tv4 dispatch).
+    _SINGULAR_TOL = 1e-9
+    _EPS_PERTURB = 1e-3
+    a_1, l_1 = float(dh.a[0]), float(ls[0])
+    a_2, l_2 = float(dh.a[1]), float(ls[1])
+    a_4, l_4 = float(dh.a[3]), float(ls[3])
+    a_5, l_5 = float(dh.a[4]), float(ls[4])
+
+    left_tv1_ok = abs(a_2) > _SINGULAR_TOL and abs(l_2) > _SINGULAR_TOL
+    left_tv3_ok = abs(a_1) > _SINGULAR_TOL and abs(l_1) > _SINGULAR_TOL
+    if not left_tv1_ok and not left_tv3_ok:
+        if abs(a_2) < _SINGULAR_TOL:
+            a_2 = _EPS_PERTURB
+        elif abs(l_2) < _SINGULAR_TOL:
+            l_2 = _EPS_PERTURB
+
+    right_tv6_ok = abs(a_4) > _SINGULAR_TOL and abs(l_4) > _SINGULAR_TOL
+    right_tv4_ok = (
+        (abs(a_4) < _SINGULAR_TOL or abs(l_4) < _SINGULAR_TOL)
+        and abs(a_5) > _SINGULAR_TOL
+        and abs(l_5) > _SINGULAR_TOL
+    )
+    if not right_tv6_ok and not right_tv4_ok:
+        if abs(a_5) < _SINGULAR_TOL:
+            a_5 = _EPS_PERTURB
+        elif abs(l_5) < _SINGULAR_TOL:
+            l_5 = _EPS_PERTURB
+
     pre = precompute_rrr_chain(
-        a_1=float(dh.a[0]),
-        l_1=float(ls[0]),
+        a_1=a_1,
+        l_1=l_1,
         d_2=float(dh.d[1]),
-        a_2=float(dh.a[1]),
-        l_2=float(ls[1]),
+        a_2=a_2,
+        l_2=l_2,
         d_3=float(dh.d[2]),
         a_3=float(dh.a[2]),
         l_3=float(ls[2]),
         d_4=float(dh.d[3]),
-        a_4=float(dh.a[3]),
-        l_4=float(ls[3]),
+        a_4=a_4,
+        l_4=l_4,
         d_5=float(dh.d[4]),
-        a_5=float(dh.a[4]),
-        l_5=float(ls[4]),
+        a_5=a_5,
+        l_5=l_5,
     )
 
-    fk_atol = policy.subproblem_numerical
     # Pass loose tolerances so solve_ik returns ALL back-sub seeds, not
     # only those that algebraically close to full HP precision:
     #
@@ -227,20 +259,20 @@ def solve(
     sols_v = solve_ik(
         pre,
         sigma_E,
-        a_1=float(dh.a[0]),
-        l_1=float(ls[0]),
+        a_1=a_1,
+        l_1=l_1,
         d_2=float(dh.d[1]),
-        a_2=float(dh.a[1]),
-        l_2=float(ls[1]),
+        a_2=a_2,
+        l_2=l_2,
         d_3=float(dh.d[2]),
         a_3=float(dh.a[2]),
         l_3=float(ls[2]),
         d_4=float(dh.d[3]),
-        a_4=float(dh.a[3]),
-        l_4=float(ls[3]),
+        a_4=a_4,
+        l_4=l_4,
         d_5=float(dh.d[4]),
-        a_5=float(dh.a[4]),
-        l_5=float(ls[4]),
+        a_5=a_5,
+        l_5=l_5,
         fk_tol=0.5,
         accept_residue_tol=1e-3,
     )

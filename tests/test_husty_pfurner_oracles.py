@@ -77,7 +77,12 @@ def _fk_closure_oracle(
     cross-checks against the same problem.
     """
     T = poe_forward_kinematics(kb, q_star)
-    sols, is_ls = hp_solve(kb, T)
+    # ``allow_refinement=True``: HP returns algebraic seeds that may be
+    # at O(eps^{1/k}) precision for multi-root configs; LM polish (post
+    # #176 perturbation work) brings them to machine precision in 4-8
+    # iters per seed. The post-perturbation HP is "correct + precise"
+    # only with refinement enabled.
+    sols, is_ls = hp_solve(kb, T, allow_refinement=True)
     assert not is_ls, f"HP returned is_ls=True for reachable pose q={q_star}"
     assert sols, "HP returned zero solutions for a reachable pose"
     for sol in sols:
@@ -126,8 +131,8 @@ def _determinism_oracle(kb: KinBody, q_star: np.ndarray) -> None:
     Ordering must also match (HP is deterministic per branch enumeration).
     """
     T = poe_forward_kinematics(kb, q_star)
-    sols_1, is_ls_1 = hp_solve(kb, T)
-    sols_2, is_ls_2 = hp_solve(kb, T)
+    sols_1, is_ls_1 = hp_solve(kb, T, allow_refinement=True)
+    sols_2, is_ls_2 = hp_solve(kb, T, allow_refinement=True)
     assert is_ls_1 == is_ls_2
     assert len(sols_1) == len(sols_2)
     for s1, s2 in zip(sols_1, sols_2, strict=True):
@@ -139,7 +144,6 @@ def _determinism_oracle(kb: KinBody, q_star: np.ndarray) -> None:
 # ----------------------------------------------------------------------------
 
 
-@XFAIL
 def test_oracle1_fk_closure_jaco2() -> None:
     """JACO 2 (non-Pieper 6R) -- the canonical HP target."""
     kb = build_kinbody(jaco2_specs())
@@ -148,7 +152,6 @@ def test_oracle1_fk_closure_jaco2() -> None:
     _fk_closure_oracle(kb, q_star)
 
 
-@XFAIL
 def test_oracle1_fk_closure_ur5() -> None:
     """UR5 (Pieper-class 6R, three parallel axes) -- HP must also handle
     arms that the dispatcher would normally route to a faster Pieper
@@ -215,7 +218,16 @@ def test_oracle3_gen_six_dof_parity_jaco2() -> None:
 # ----------------------------------------------------------------------------
 
 
-@XFAIL
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "HP and Raghavan-Roth may return different solution counts on "
+        "non-Pieper 6R arms when the algebraic systems have different "
+        "spurious-root filtering. Both produce FK-correct IKs but may "
+        "miss/include different branches. Tracked via #82 (RR coverage) "
+        "and #176 (HP coverage)."
+    ),
+)
 def test_oracle4_jaco2_rr_composer_cross_check() -> None:
     """HP and ``ssik.solvers.ikgeo.general_6r`` (the Raghavan-Roth composer)
     must agree on JACO 2 q-sets within 1e-8 wrap-to-pi. Two independent
@@ -227,7 +239,7 @@ def test_oracle4_jaco2_rr_composer_cross_check() -> None:
     rng = np.random.default_rng(0)
     q_star = rng.uniform(-1.0, 1.0, size=6)
     T = poe_forward_kinematics(kb, q_star)
-    hp_sols, hp_is_ls = hp_solve(kb, T)
+    hp_sols, hp_is_ls = hp_solve(kb, T, allow_refinement=True)
     rr_sols, rr_is_ls = rr_general_6r.solve(kb, T)
     assert hp_is_ls == rr_is_ls
     _q_set_match_oracle(hp_sols, rr_sols, atol=1e-8)
@@ -278,16 +290,21 @@ def test_oracle5_hypothesis_fuzz_random_6r_chains() -> None:
 # ----------------------------------------------------------------------------
 
 
-@XFAIL
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "JACO 2 home pose (q=0) is at a kinematic singularity where "
+        "Jacobian rank drops -- HP returns valid IKs from the continuous "
+        "family but may not include the all-zero seed. FK closure assertion "
+        "still holds for what's returned; the test contract should be "
+        "reformulated for singular poses (#176 / #183 work)."
+    ),
+)
 def test_oracle6_numerical_stability_near_singular() -> None:
     """At a near-singular pose (joints aligned to a degenerate configuration),
     HP must either return stable solutions OR raise a structured
     ``NumericConditioningError`` -- not a silent wrong answer or an
     unhandled exception.
-
-    Phase 5a stub uses JACO 2 at a known-near-singular pose; Phase 5g
-    expands to a parametrised suite over (parallel-axis tangency,
-    coincident-origin near-miss, joint-limit edge).
     """
     kb = build_kinbody(jaco2_specs())
     # All-zero q is the canonical home-pose singularity for many arms.
@@ -300,7 +317,6 @@ def test_oracle6_numerical_stability_near_singular() -> None:
 # ----------------------------------------------------------------------------
 
 
-@XFAIL
 def test_oracle7_determinism_jaco2() -> None:
     """Two consecutive ``solve`` calls on the same input return byte-equal
     q vectors in the same order. No reliance on hash randomisation,
@@ -313,21 +329,8 @@ def test_oracle7_determinism_jaco2() -> None:
 
 
 # ----------------------------------------------------------------------------
-# Skeleton smoke tests (no xfail -- these document the current state)
+# Module-level smoke tests (HP is now implemented; skeleton tests retired).
 # ----------------------------------------------------------------------------
-
-
-def test_skeleton_solve_raises_not_implemented() -> None:
-    """The Phase 5a skeleton raises NotImplementedError with a pointer
-    to the tracking issue. When Phase 5g lands the implementation, this
-    test flips to a skeleton-removal test (or is deleted).
-    """
-    kb = build_kinbody(jaco2_specs())
-    T = poe_forward_kinematics(kb, np.zeros(6))
-    with pytest.raises(
-        NotImplementedError, match=r"https://github.com/siddhss5/ikfastpy/issues/162"
-    ):
-        hp_solve(kb, T)
 
 
 def test_skeleton_solver_module_imports_cleanly() -> None:
