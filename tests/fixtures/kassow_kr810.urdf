@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<!--
+  Kassow Robots KR810 7-DOF arm.
+
+  Source: rendered from
+    https://github.com/rcruzoliver/kr_ros2 (main branch)
+    kr_robot_description/kr810/urdf/kr810_description.urdf.xacro
+
+  The xacro represents the chain with phantom fixed links between
+  active revolute joints (jointPL2, jointPL4, jointPL6 carry the
+  motor-housing offsets). This flat URDF inlines those fixed
+  transforms into the next active joint's origin to keep the chain
+  linear.
+
+  Active-joint origin computation (scale = 0.001 m / mm):
+
+    joint_1 (Z):  (0, 0, base_outer_height + base_inner_height)
+                = (0, 0, 0.035)
+    joint_2 (Y):  (joint1_x, joint1_y, joint1_z)
+                = (0.050, 0, 0.2737)
+    joint_3 (Z):  (jointPL2_x, jointPL2_y, 0) + (0, 0, link2_length)
+                = (-0.050, -0.0857, 0.274)
+    joint_4 (Y):  (joint3_x, joint3_y, joint3_z)
+                = (0.040, 0, 0.1429)
+    joint_5 (Z):  (jointPL4_x, jointPL4_y, jointPL4_z) + (0, 0, link4_length)
+                = (-0.040, 0.08405, 0.271)
+    joint_6 (Y):  (0, 0, joint5_zoffset)
+                = (0, 0, 0.1035)
+    joint_7 (Z):  (0, jointPL6_y, 0) + (0, 0, joint6_zoffset)
+                = (0, 0.111, 0.108)
+
+  No tool/flange offset post-joint-7; end_effector is joint_7's
+  direct child in the source xacro. Mesh references intentionally
+  omitted; ssik's URDF loader uses lazy_load_meshes=True.
+-->
+<robot name="KassowKR810">
+  <link name="base" />
+  <link name="link1" />
+  <link name="link2" />
+  <link name="link3" />
+  <link name="link4" />
+  <link name="link5" />
+  <link name="link6" />
+  <link name="end_effector" />
+
+  <joint name="joint_1" type="revolute">
+    <origin xyz="0 0 0.035" rpy="0 0 0" />
+    <parent link="base" />
+    <child link="link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.283185307" upper="6.283185307" effort="204" velocity="3.927" />
+  </joint>
+
+  <joint name="joint_2" type="revolute">
+    <origin xyz="0.050 0 0.2737" rpy="0 0 0" />
+    <parent link="link1" />
+    <child link="link2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.221730476" upper="3.141592654" effort="204" velocity="3.927" />
+  </joint>
+
+  <joint name="joint_3" type="revolute">
+    <origin xyz="-0.050 -0.0857 0.274" rpy="0 0 0" />
+    <parent link="link2" />
+    <child link="link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.283185307" upper="6.283185307" effort="85" velocity="3.927" />
+  </joint>
+
+  <joint name="joint_4" type="revolute">
+    <origin xyz="0.040 0 0.1429" rpy="0 0 0" />
+    <parent link="link3" />
+    <child link="link4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.221730476" upper="3.141592654" effort="85" velocity="3.927" />
+  </joint>
+
+  <joint name="joint_5" type="revolute">
+    <origin xyz="-0.040 0.08405 0.271" rpy="0 0 0" />
+    <parent link="link4" />
+    <child link="link5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.283185307" upper="6.283185307" effort="51" velocity="3.927" />
+  </joint>
+
+  <joint name="joint_6" type="revolute">
+    <origin xyz="0 0 0.1035" rpy="0 0 0" />
+    <parent link="link5" />
+    <child link="link6" />
+    <axis xyz="0 1 0" />
+    <limit lower="-6.283185307" upper="6.283185307" effort="51" velocity="3.927" />
+  </joint>
+
+  <joint name="joint_7" type="revolute">
+    <origin xyz="0 0.111 0.108" rpy="0 0 0" />
+    <parent link="link6" />
+    <child link="end_effector" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.283185307" upper="6.283185307" effort="51" velocity="3.927" />
+  </joint>
+</robot>
