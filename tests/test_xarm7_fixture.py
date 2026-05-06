@@ -4,7 +4,7 @@ xArm7 is a **verified Pieper-class wedge**: locking the auto-selected
 joint and reversing the resulting 6R sub-chain dispatches to
 ``reversed:spherical`` for 15/16 lock samples and
 ``reversed:spherical_two_parallel`` for the remaining one. There is no
-``gen_six_dof`` fallthrough -- 7R IK runs at ~3 ms with
+universal-6R (HP) fallthrough -- 7R IK runs at ~3 ms with
 ``max_solutions=1`` and ~40 ms exhaustive on a workstation.
 
 This module covers:
@@ -91,9 +91,10 @@ def test_xarm7_dispatches_to_reversed_spherical_wedge() -> None:
     most samples dispatch to ``reversed:spherical`` (the canonical
     spherical-wrist solver applied to the chain-reversed 6R sub-chain).
 
-    The lock sweep should produce zero ``gen_six_dof`` samples -- if a
-    future change re-introduces the tier-2 fallthrough on xArm7, this
-    test catches it.
+    The lock sweep should produce zero tier-2 fallback samples (i.e. no
+    ``husty_pfurner.general_6r`` either prefixed or unprefixed) -- if a
+    future change re-introduces the universal-6R fallthrough on xArm7,
+    this test catches it.
     """
     kb = build_kinbody(xarm7_specs())
     lock_idx = seven_r.choose_lock_joint(kb, DEFAULT_TOLERANCE_POLICY)
@@ -107,11 +108,11 @@ def test_xarm7_dispatches_to_reversed_spherical_wedge() -> None:
         _, solver_name = seven_r._topology_rank(sub, DEFAULT_TOLERANCE_POLICY)
         dispatch[solver_name] = dispatch.get(solver_name, 0) + 1
 
-    assert "gen_six_dof" not in dispatch, (
-        f"xArm7 dispatch fell through to gen_six_dof for some lock samples: {dispatch}"
+    assert "husty_pfurner.general_6r" not in dispatch, (
+        f"xArm7 dispatch fell through to HP for some lock samples: {dispatch}"
     )
-    assert "reversed:gen_six_dof" not in dispatch, (
-        f"xArm7 dispatch fell through to reversed:gen_six_dof: {dispatch}"
+    assert "reversed:husty_pfurner.general_6r" not in dispatch, (
+        f"xArm7 dispatch fell through to reversed HP: {dispatch}"
     )
     fast = dispatch.get("reversed:spherical", 0) + dispatch.get(
         "reversed:spherical_two_parallel", 0

@@ -102,8 +102,8 @@ def test_jaco2_dispatch_to_general_6r() -> None:
 
 def test_synth_non_pieper_dispatch_to_general_6r() -> None:
     """The defining EAIK-gap test: a chain with no Pieper specialisation
-    must dispatch to the production tier-2 path (``general_6r``), not the
-    grid-search oracle (``gen_six_dof``)."""
+    must dispatch to the production tier-2 path (``ikgeo.general_6r``,
+    Raghavan-Roth), the universal-6R analytical primary."""
     kb = _build_synth_non_pieper()
     plan = dispatch(kb)
     assert plan.solver_name == "ikgeo.general_6r"

@@ -13,8 +13,9 @@ Oracles (per #158):
 2. **EAIK cross-check** (skipped if EAIK not installed) -- same arm,
    same poses, same solution sets within wrap-to-pi at 1e-6 on
    Pieper-class arms.
-3. **gen_six_dof solution-count parity** -- HP must not return fewer
-   solutions than the brute-force grid on reachable poses (slow; opt-in).
+3. **Raghavan-Roth solution-count parity** -- HP must not return fewer
+   solutions than RR on reachable poses (cross-checks two universal-6R
+   algebras).
 4. **JACO 2 RR composer cross-check** -- two independent algorithms on
    the same 6R arm produce the same q-set within wrap-to-pi at 1e-8.
 5. **Hypothesis fuzz over random 6R chains** -- FK closure on every
@@ -188,28 +189,37 @@ def test_oracle2_eaik_cross_check_ur5() -> None:
 
 
 # ----------------------------------------------------------------------------
-# Oracle 3: gen_six_dof solution-count parity (slow; opt-in via -m slow)
+# Oracle 3: solution-count parity vs Raghavan-Roth (the other universal-6R
+# tier-2 algebra). HP and RR use independent algebraic systems; cross-
+# checking them catches missing IK branches in either solver.
 # ----------------------------------------------------------------------------
 
 
-@pytest.mark.slow
-@XFAIL
-def test_oracle3_gen_six_dof_parity_jaco2() -> None:
-    """HP must not return fewer solutions than ``gen_six_dof`` on a
-    reachable JACO 2 pose. The brute-force grid is slow (~30 s) but
-    correct on the chains where HP claims coverage.
+@pytest.mark.xfail(
+    strict=False,
+    reason=(
+        "HP and Raghavan-Roth may return different solution counts when "
+        "their algebraic spurious-root filters disagree on edge cases. "
+        "Both produce FK-correct IKs; this oracle catches MISSING branches "
+        "where one returns 0 sols and the other returns >0. Tracked via "
+        "#82 (RR coverage) and #176 (HP coverage)."
+    ),
+)
+def test_oracle3_rr_parity_jaco2() -> None:
+    """HP must not return fewer solutions than RR on a reachable JACO 2
+    pose. Two independent universal-6R algebras on the same arm.
     """
-    from ssik.solvers.ikgeo import gen_six_dof
+    from ssik.solvers.ikgeo import general_6r as rr_general_6r
 
     kb = build_kinbody(jaco2_specs())
     rng = np.random.default_rng(0)
     q_star = rng.uniform(-1.0, 1.0, size=6)
     T = poe_forward_kinematics(kb, q_star)
-    hp_sols, _ = hp_solve(kb, T)
-    grid_sols, _ = gen_six_dof.solve(kb, T)
-    assert len(hp_sols) >= len(grid_sols), (
-        f"HP returned {len(hp_sols)} solutions but gen_six_dof found "
-        f"{len(grid_sols)} -- HP is missing solutions."
+    hp_sols, _ = hp_solve(kb, T, allow_refinement=True)
+    rr_sols, _ = rr_general_6r.solve(kb, T)
+    assert len(hp_sols) >= len(rr_sols), (
+        f"HP returned {len(hp_sols)} solutions but RR found "
+        f"{len(rr_sols)} -- HP is missing solutions."
     )
 
 
@@ -335,7 +345,7 @@ def test_oracle7_determinism_jaco2() -> None:
 
 def test_skeleton_solver_module_imports_cleanly() -> None:
     """The skeleton module imports without dragging in heavy dependencies
-    (sympy, gen_six_dof). HP's runtime entry point should be lightweight.
+    (sympy). HP's runtime entry point should be lightweight.
     """
     import importlib
 

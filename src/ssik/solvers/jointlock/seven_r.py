@@ -48,8 +48,8 @@ from ssik.kinematics.predicates import (
 )
 from ssik.kinematics.reverse import map_reversed_q, reverse_kinematic_chain
 from ssik.refinement import dedup_by_wrap_close
+from ssik.solvers.husty_pfurner import general_6r as hp_general_6r
 from ssik.solvers.ikgeo import (
-    gen_six_dof,
     spherical,
     spherical_two_intersecting,
     spherical_two_parallel,
@@ -176,8 +176,15 @@ def _topology_rank_direct(sub_kb: KinBody, policy: TolerancePolicy) -> tuple[int
         return (2, "two_intersecting")
     if axis_parallel(sub_kb.joints[1].axis, sub_kb.joints[2].axis, policy):
         return (2, "two_parallel")
-    # Tier-2 fallback (slow but correct).
-    return (3, "gen_six_dof")
+    # Tier-2 fallback (universal 6R analytical via Husty-Pfurner).
+    # HP handles arms where no Pieper / parallel-axis predicate matches
+    # the locked sub-chain (typical for KUKA iiwa / Rizon / non-Pieper 7R
+    # arms). HP's perturbation path (#176) covers the measure-zero
+    # singularities common in locked-7R DHs (Tv2 case [a_1=0, a_2=0]).
+    # Faster than Raghavan-Roth for these symmetric DHs (RR's m_quad
+    # conditioning blows up; empirically RR takes 25-60 s on iiwa14
+    # locked sub-chains while HP takes 100-220 ms).
+    return (3, "husty_pfurner.general_6r")
 
 
 def _topology_rank(sub_kb: KinBody, policy: TolerancePolicy) -> tuple[int, str]:
@@ -281,7 +288,7 @@ def _dispatch(
         "spherical": spherical.solve,
         "two_intersecting": two_intersecting.solve,
         "two_parallel": two_parallel.solve,
-        "gen_six_dof": gen_six_dof.solve,
+        "husty_pfurner.general_6r": hp_general_6r.solve,
     }
     # ``Cython.Shadow``'s ``@cython.locals`` decorator widens the wrapped
     # function's signature for mypy, so the dispatch-table lookup returns

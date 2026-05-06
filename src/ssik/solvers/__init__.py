@@ -36,19 +36,27 @@ Current contents:
   ``search_1d`` over ``theta_0`` with an inner SP6 coupling (q4, q6)
   per sample. Narrower applicability than ``three_parallel`` and
   fewer returned solutions due to tier-1 search sparsity.
-- :mod:`ssik.solvers.ikgeo.gen_six_dof` -- tier-2 general 6R solver
-  for arms with no special structure. Uses a 100x100 grid over
-  ``(theta_0, theta_1)`` + Nelder-Mead refinement, with an inner
-  SP5 solve per grid cell. Handles any 6R but is slow (seconds per
-  IK in pure Python); dispatcher uses this only as a fallback when
-  no tier-0 or tier-1 specialisation matches.
+- :mod:`ssik.solvers.ikgeo.general_6r` -- tier-2 general 6R solver via
+  Raghavan-Roth m_quad polynomial. Universal-6R coverage with
+  ms-scale runtime on well-conditioned arms (JACO 2 ~ 0.6 ms). The
+  m_quad matrix conditioning degrades on highly-symmetric DH
+  geometries (alpha = pi/2 with a_i = 0 throughout, e.g. KUKA iiwa
+  locked sub-chains); when RR stalls, ``husty_pfurner.general_6r``
+  is the alternative-algebra fallback.
+- :mod:`ssik.solvers.husty_pfurner.general_6r` -- tier-2 universal 6R
+  solver via Husty-Pfurner Study quaternion + dual-quaternion
+  algebra. Slower than RR on well-conditioned arms (~ 100 ms) but
+  robust to ill-conditioning; covers locked-7R sub-chains where
+  RR's m_quad blows up. Singular-DH perturbation (#176) handles the
+  measure-zero V_L-in-Study-quadric structure that arises in real
+  industrial 7R arms.
 - :mod:`ssik.solvers.jointlock.seven_r` -- universal 7R wrapper that
   locks one joint (auto-selected by topology) and dispatches the
-  resulting 6R sub-chain to the best-matching ikgeo solver. Covers
+  resulting 6R sub-chain to the best-matching solver. Covers
   Franka Panda, KUKA iiwa, Flexiv Rizon, Kinova Gen3, uFactory xArm7
-  and any other 7R arm by reusing the tier-0 6R speed. ms-scale
-  per-pose; user can supply explicit lock-joint samples or default
-  to a uniform sweep.
+  and any other 7R arm. Tier-2 fallback within jointlock is HP (not
+  RR) because post-lock geometries hit the symmetric-DH conditioning
+  case.
 
-Future: Husty-Pfurner universal fallback, specialist 7R, dispatcher.
+Future: native SRS-class 7R closed-form (#143).
 """

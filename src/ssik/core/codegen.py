@@ -122,7 +122,7 @@ _SOLVER_IMPORT_PATHS: dict[str, str] = {
     "ikgeo.two_parallel": "ssik.solvers.ikgeo.two_parallel",
     "ikgeo.two_intersecting": "ssik.solvers.ikgeo.two_intersecting",
     "ikgeo.general_6r": "ssik.solvers.ikgeo.general_6r",
-    "ikgeo.gen_six_dof": "ssik.solvers.ikgeo.gen_six_dof",
+    "husty_pfurner.general_6r": "ssik.solvers.husty_pfurner.general_6r",
     "jointlock.seven_r": "ssik.solvers.jointlock.seven_r",
 }
 

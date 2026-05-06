@@ -62,12 +62,12 @@ industrial 7R; locked sub-chains inherit a_2 = 0 at most lock
 positions). Implementing just that one sub-case unblocks 12/14 lock
 configs per arm.
 
-Until #176 lands, ``precompute_rrr_chain`` logs a one-time WARNING per
-degenerate DH and proceeds with ``T(v_1)`` -- the partial IK set it
-returns is still useful for many poses, but some branches are silently
-missed. Callers needing complete coverage on these arms should fall
-back to ``ssik.solvers.ikgeo.gen_six_dof`` (Raghavan-Roth, slower) or
-wait for #176.
+#176 closed via DH perturbation + 6-D Levenberg-Marquardt polish:
+when the singular Tv2 case [a_1=0, a_2=0] is detected, ``a_2 → 1e-3``
+breaks the V_L⊂S structure, the standard Tv1 + Tv4 (#177) dispatch
+applies, and downstream ``verify_candidates`` 6-D Newton on the
+unperturbed POE FK polishes each O(epsilon) seed to machine precision
+in 4-8 iters. 22/23 fixture coverage at FK ≤ 1e-10.
 
 References:
 - Capco, Loquias, Manongsong, Nemenzo (2019), arXiv 1906.07813

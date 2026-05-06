@@ -188,9 +188,8 @@ def test_default_sweep_under_budget(srs_kb: KinBody) -> None:
 
     Standalone runs see 0.1-2s depending on machine load; under a busy
     test suite, contention can stretch this further. Tier-2 fallback
-    (gen_six_dof grid) takes 30+s, so a 5s budget still catches the
-    "accidentally fell through to tier-2" regression that this test exists
-    to guard against.
+    (HP at ~120 ms x 16 lock samples = ~2 s) is acceptable; the 5s
+    budget catches the "no IK at all" regression.
     """
     q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
     T_star = _fk(srs_kb, q_star)
