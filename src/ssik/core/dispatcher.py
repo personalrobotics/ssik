@@ -119,6 +119,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "ikgeo.two_intersecting": (1, 1184.0, 2_650_681),
     "ikgeo.general_6r": (2, 5.0, 30_000_000),
     "husty_pfurner.general_6r": (2, 120.0, 50_000_000),
+    "seven_r.srs": (0, 0.5, 80_000),  # native SRS-class 7R, max_solutions=1
     "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 
@@ -142,13 +143,36 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
     and any other 7R revolute arm.
     """
     if len(kb.joints) == 7:
+        # Tier-0 7R: native SRS-class analytical solver (Singh-Kreutz).
+        # Detects shoulder-spherical + wrist-spherical topology by axis
+        # concurrence. Auto-applies to KUKA iiwa LBR, Flexiv Rizon, Kinova
+        # Gen3, Sawyer, Baxter, Kassow KR* -- all the SRS-class arms.
+        from ssik.kinematics.predicates import is_srs_7r
+
+        if is_srs_7r(kb, policy) is not None:
+            plan = _make_plan(
+                "seven_r.srs",
+                reason=(
+                    "SRS-class 7R: shoulder axes (joints 0, 1, 2) meet at\n"
+                    "one point + wrist axes (joints 4, 5, 6) meet at one\n"
+                    "point + joint 3 is the elbow. Closed-form Singh-Kreutz\n"
+                    "1989 algorithm, parameterised by elbow swivel angle.\n"
+                    "Covers KUKA iiwa LBR, Flexiv Rizon 4/10, Kinova Gen3,\n"
+                    "Sawyer, Baxter, Kassow KR810/KR1410."
+                ),
+                needs_symbolic_precompute=False,
+            )
+            _LOG.info("dispatch: chose %s (tier 0, native SRS-7R)", plan.solver_name)
+            return plan
+        # Tier-1 7R fallback: joint-lock + dispatch the inner 6R.
         plan = _make_plan(
             "jointlock.seven_r",
             reason=(
-                "7R revolute chain. Locking one joint (auto-selected by\n"
-                "topology rank of the resulting 6R sub-chain) reduces this\n"
-                "to a series of 6R IK problems. Covers Franka Panda, FR3,\n"
-                "KUKA iiwa, Flexiv Rizon, Kinova Gen3, uFactory xArm7."
+                "7R revolute chain (non-SRS). Locking one joint\n"
+                "(auto-selected by topology rank of the resulting 6R\n"
+                "sub-chain) reduces this to a series of 6R IK problems.\n"
+                "Covers Franka Panda, FR3, uFactory xArm7, and any other\n"
+                "non-SRS 7R revolute arm."
             ),
             needs_symbolic_precompute=False,
         )

@@ -45,7 +45,7 @@ SOLVER_NAME = "jointlock.seven_r"
 SOLVER_TIER = 1
 EXPECTED_MS_MEDIAN = 50.0
 FLOP_BUDGET = 30274
-DISPATCH_REASON = '7R revolute chain. Locking one joint (auto-selected by\ntopology rank of the resulting 6R sub-chain) reduces this\nto a series of 6R IK problems. Covers Franka Panda, FR3,\nKUKA iiwa, Flexiv Rizon, Kinova Gen3, uFactory xArm7.'
+DISPATCH_REASON = '7R revolute chain (non-SRS). Locking one joint\n(auto-selected by topology rank of the resulting 6R\nsub-chain) reduces this to a series of 6R IK problems.\nCovers Franka Panda, FR3, uFactory xArm7, and any other\nnon-SRS 7R revolute arm.'
 
 # --- baked KinBody constants ---
 
