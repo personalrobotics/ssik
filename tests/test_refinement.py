@@ -83,12 +83,21 @@ def test_se3_log_residual_pure_rotation_recovers_axis_angle() -> None:
     assert np.allclose(r[3:], angle * axis, atol=1e-12)
 
 
-def test_se3_log_residual_small_angle_clamped_to_zero_rotation() -> None:
-    """Below 1e-9 rad we return a zero rotation (avoids division by ~zero)."""
+def test_se3_log_residual_small_angle_recovers_actual_rotation() -> None:
+    """Below 1e-9 rad we recover the actual rotation residual (#199 fix).
+
+    The previous trace-arccos implementation rounded ``cos_a`` to
+    ``1.0`` in float64 for any rotation below ~3e-8 rad, silently
+    zeroing the rotation part. The antisymmetric-vee formulation
+    preserves precision down to machine epsilon: a 1e-12 rad rotation
+    around z maps to ``[0, 0, 1e-12]`` in the rotation residual.
+    """
     axis = np.array([0.0, 0.0, 1.0])
     T = _rot_axis(axis, 1e-12)
     r = se3_log_residual(T)
-    assert np.allclose(r[3:], 0.0, atol=1e-15)
+    assert np.allclose(r[:3], 0.0, atol=1e-15)
+    # Rotation residual recovers the small angle (was: zeroed out).
+    assert np.linalg.norm(r[3:] - 1e-12 * axis) < 1e-15
 
 
 # ---------------------------------------------------------------------------

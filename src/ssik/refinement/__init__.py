@@ -60,24 +60,61 @@ def se3_log_residual(t_err: NDArray[np.float64]) -> NDArray[np.float64]:
 
     For ``t_err = T_target @ FK(q)^{-1}``, returns the local twist
     coordinate that drives ``q`` toward the target. Translation is read
-    directly; rotation is via Rodrigues' formula ``log(R) -> axis*angle``
-    with cosine clamping for numerical safety near identity.
+    directly; rotation uses the antisymmetric ``vee((R - R.T) / 2) =
+    sin(angle) * axis`` formulation (precise at all scales, including
+    near identity) combined with ``atan2(sin_angle, cos_angle)`` for
+    the magnitude (well-conditioned at every angle).
+
+    Three regimes:
+
+    1. Generic (``sin_angle > 1e-9``): ``rot_err = (angle / sin_angle)
+       * skew_vec``. The scale factor is well-defined and converges to
+       1 as ``angle -> 0``.
+    2. Near identity (``sin_angle <= 1e-9`` and ``cos_angle > 0``): the
+       skew vector is itself the angle-scaled axis to first order
+       (``skew_vec ≈ angle * axis``); return as-is.
+    3. Near π (``sin_angle <= 1e-9`` and ``cos_angle < 0``): the skew
+       vector vanishes; recover the rotation axis from the dominant
+       eigenvector of ``R + I`` (which has rank 1 with eigenvalue 2
+       along the axis at exactly π).
+
+    This formulation fixes the precision-loss bug in the prior
+    ``arccos(0.5 * (trace - 1))`` implementation, which silently zeroed
+    the rotation residual when the rotation error was below ~3e-8 rad.
+    See #199 for the bug + fix discussion. Newton trajectories that
+    used to stop at ~1e-8 Frobenius FK now converge to machine
+    precision.
     """
     trans_err = t_err[:3, 3]
     r_err = t_err[:3, :3]
-    cos_a = max(-1.0, min(1.0, 0.5 * (np.trace(r_err) - 1.0)))
-    angle = float(np.arccos(cos_a))
-    if angle < 1e-9:
-        rot_err = np.zeros(3)
+
+    # vee((R - R.T) / 2) = sin(angle) * axis -- exact at all scales,
+    # since float64 captures off-diagonal differences faithfully near
+    # identity (the lossy step in the old formulation was the trace).
+    skew_vec = np.array(
+        [
+            0.5 * (r_err[2, 1] - r_err[1, 2]),
+            0.5 * (r_err[0, 2] - r_err[2, 0]),
+            0.5 * (r_err[1, 0] - r_err[0, 1]),
+        ]
+    )
+    sin_angle = float(np.linalg.norm(skew_vec))
+    cos_angle = max(-1.0, min(1.0, 0.5 * (float(np.trace(r_err)) - 1.0)))
+
+    # atan2 is well-conditioned at every angle (unlike arccos near 0 or π).
+    angle = math.atan2(sin_angle, cos_angle)
+
+    if sin_angle > 1e-9:
+        rot_err = (angle / sin_angle) * skew_vec
+    elif cos_angle > 0:
+        # Near identity: skew_vec ≈ angle * axis to leading order.
+        rot_err = skew_vec
     else:
-        s = 1.0 / (2.0 * np.sin(angle))
-        rot_err = np.array(
-            [
-                s * (r_err[2, 1] - r_err[1, 2]) * angle,
-                s * (r_err[0, 2] - r_err[2, 0]) * angle,
-                s * (r_err[1, 0] - r_err[0, 1]) * angle,
-            ]
-        )
+        # Near π: skew_vec vanished; recover axis from R + I.
+        r_plus_i = r_err + np.eye(3)
+        norms = np.linalg.norm(r_plus_i, axis=0)
+        idx = int(np.argmax(norms))
+        rot_err = (angle / norms[idx]) * r_plus_i[:, idx]
     return np.concatenate([trans_err, rot_err])
 
 
