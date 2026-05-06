@@ -339,3 +339,118 @@ def test_default_tolerance_policy_is_singleton_like() -> None:
     assert isinstance(DEFAULT_TOLERANCE_POLICY, TolerancePolicy)
     assert DEFAULT_TOLERANCE_POLICY.axis_parallel > 0
     assert DEFAULT_TOLERANCE_POLICY.axis_intersect > 0
+
+
+# ============================================================================
+# axes_meet_at_common_point + is_srs_7r (#187)
+# ============================================================================
+
+
+def _load_fixture_kb(spec_module: str) -> KinBody:
+    """Build a KinBody from a fixture module name (e.g. 'kuka_iiwa14')."""
+    import importlib
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
+    from ssik._kinbody import build_kinbody as _build
+
+    mod = importlib.import_module(spec_module)
+    specs_fn = getattr(mod, f"{spec_module}_specs")
+    return _build(specs_fn())
+
+
+def test_axes_meet_at_common_point_iiwa14_shoulder() -> None:
+    """iiwa14 shoulder (joints 0, 1, 2) axes meet at z = 0.36."""
+    from ssik.kinematics.predicates import axes_meet_at_common_point
+
+    kb = _load_fixture_kb("kuka_iiwa14")
+    pivot = axes_meet_at_common_point(kb.joints, (0, 1, 2))
+    assert pivot is not None, "iiwa14 shoulder must concur"
+    assert np.allclose(pivot, [0.0, 0.0, 0.36], atol=1e-6)
+
+
+def test_axes_meet_at_common_point_iiwa14_wrist() -> None:
+    """iiwa14 wrist (joints 4, 5, 6) axes meet at z = 1.18."""
+    from ssik.kinematics.predicates import axes_meet_at_common_point
+
+    kb = _load_fixture_kb("kuka_iiwa14")
+    pivot = axes_meet_at_common_point(kb.joints, (4, 5, 6))
+    assert pivot is not None, "iiwa14 wrist must concur"
+    assert np.allclose(pivot, [0.0, 0.0, 1.18], atol=1e-6)
+
+
+def test_axes_meet_at_common_point_xarm7_wrist_does_not_meet() -> None:
+    """xarm7's nominal wrist (joints 4, 5, 6) does not concur at one point
+    in the home pose -- structure is non-canonical.
+    """
+    from ssik.kinematics.predicates import axes_meet_at_common_point
+
+    kb = _load_fixture_kb("xarm7")
+    pivot = axes_meet_at_common_point(kb.joints, (4, 5, 6))
+    assert pivot is None, "xarm7 wrist (4, 5, 6) does not all meet at one point"
+
+
+def test_axes_meet_at_common_point_returns_none_when_parallel() -> None:
+    """Two parallel axes have ill-defined intersection point."""
+    from ssik.kinematics.predicates import axes_meet_at_common_point
+
+    kb = _make_chain(
+        positions=[(0, 0, 0.1), (0, 0, 0.2), (0, 0, 0.3)],
+        axes=[(0, 0, 1), (0, 0, 1), (1, 0, 0)],
+    )
+    # Joints 0 and 1 are parallel z-axes -- the predicate must return None.
+    assert axes_meet_at_common_point(kb.joints, (0, 1, 2)) is None
+
+
+def test_axes_meet_at_common_point_drift_rejection() -> None:
+    """When axes meet pairwise but not at a common point (drift > tol),
+    the predicate returns None.
+    """
+    from ssik.kinematics.predicates import axes_meet_at_common_point
+
+    # Axis 0 (z) at origin; axis 1 (y) at z=0.1 -- they meet at (0,0,0.1).
+    # Axis 2 (z) at (0.5, 0, 0.1) -- the z-line at x=0.5 doesn't pass
+    # through (0, 0, 0.1).
+    kb = _make_chain(
+        positions=[(0, 0, 0), (0, 0, 0.1), (0.5, 0, 0.1)],
+        axes=[(0, 0, 1), (0, 1, 0), (0, 0, 1)],
+    )
+    assert axes_meet_at_common_point(kb.joints, (0, 1, 2)) is None
+
+
+def test_is_srs_7r_iiwa14_classified_as_srs() -> None:
+    """iiwa14 is the canonical SRS-class 7R; the predicate must accept."""
+    from ssik.kinematics.predicates import is_srs_7r
+
+    kb = _load_fixture_kb("kuka_iiwa14")
+    cls = is_srs_7r(kb)
+    assert cls is not None
+    assert cls.shoulder_indices == (0, 1, 2)
+    assert cls.elbow_index == 3
+    assert cls.wrist_indices == (4, 5, 6)
+    assert np.allclose(cls.shoulder_pivot, [0.0, 0.0, 0.36], atol=1e-6)
+    assert np.allclose(cls.wrist_pivot, [0.0, 0.0, 1.18], atol=1e-6)
+
+
+def test_is_srs_7r_franka_rejected() -> None:
+    """Franka Panda is anthropomorphic, not SRS -- the predicate must reject."""
+    from ssik.kinematics.predicates import is_srs_7r
+
+    kb = _load_fixture_kb("franka_panda")
+    assert is_srs_7r(kb) is None
+
+
+def test_is_srs_7r_xarm7_rejected() -> None:
+    """xArm7 has non-canonical wrist (axes don't all meet at one point)."""
+    from ssik.kinematics.predicates import is_srs_7r
+
+    kb = _load_fixture_kb("xarm7")
+    assert is_srs_7r(kb) is None
+
+
+def test_is_srs_7r_rejects_non_7r() -> None:
+    """The predicate is 7R-specific. 6R and 5R chains must return None."""
+    from ssik.kinematics.predicates import is_srs_7r
+
+    kb = _load_fixture_kb("ur5")  # 6R
+    assert is_srs_7r(kb) is None
