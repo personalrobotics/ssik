@@ -433,6 +433,77 @@ def _cached_derivation(
 
 
 # ---------------------------------------------------------------------------
+# Build-time priming for jointlock cached-RR (#210).
+# ---------------------------------------------------------------------------
+
+# Set of (alpha, a, d, linearity, apply_so3) tuples whose derivations have
+# been primed. Populated by ssik build artifacts at module-import time;
+# checked by ssik.solvers.jointlock.seven_r._dispatch to decide whether
+# RR can be used for a non-tier-0 inner sub-chain (cache-miss == cold-cache
+# 8-50 sec per call; cache-hit == ~1 ms).
+_DhTuple = tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]
+# Map from (alpha, a, d) to (linearity_joint, apply_so3) for primed sub-chains.
+# Lets jointlock dispatch look up the baked AE-3 leftvar choice without
+# running the expensive ``_cached_best_leftvar`` probe (which would do
+# 3 * (sympy derivation) = ~90 s cold per arm).
+_PRIMED_LINEARITY_MAP: dict[_DhTuple, tuple[int, bool]] = {}
+
+
+def prime_derivation(
+    alpha: tuple[float, ...] | NDArray[np.float64],
+    a: tuple[float, ...] | NDArray[np.float64],
+    d: tuple[float, ...] | NDArray[np.float64],
+    linearity_joint: int = 2,
+    apply_so3: bool = False,
+) -> None:
+    """Pre-populate the RR derivation cache for a (DH, linearity) tuple.
+
+    Called by ``ssik build`` artifacts at module-import time to warm the
+    ``_cached_derivation`` lru_cache. Subsequent ``solve()`` calls on
+    sub-chains with this DH hit the cache and run at ~1 ms instead of
+    8-50 s cold-cache. See #210.
+
+    Also records the (DH -> linearity) mapping so the jointlock dispatch
+    can look up the baked AE-3 leftvar choice without running the
+    expensive runtime probe; :func:`primed_linearity_for_dh` returns the
+    cached value after this call.
+
+    :param alpha, a, d: DH parameters as 6-tuples (or 6-element arrays).
+    :param linearity_joint: AE-3 leftvar choice. Pass the result of
+        :func:`_cached_best_leftvar` for production-grade conditioning.
+    :param apply_so3: SO(3)-ideal reduction flag (default False;
+        sufficient for jointlock-inner sub-chains).
+    """
+    alpha_t = tuple(float(x) for x in alpha)
+    a_t = tuple(float(x) for x in a)
+    d_t = tuple(float(x) for x in d)
+    _PRIMED_LINEARITY_MAP[(alpha_t, a_t, d_t)] = (int(linearity_joint), bool(apply_so3))
+    # Actually compute (populates lru_cache too).
+    _cached_derivation(alpha_t, a_t, d_t, int(linearity_joint), bool(apply_so3))
+
+
+def primed_linearity_for_dh(
+    alpha: tuple[float, ...] | NDArray[np.float64],
+    a: tuple[float, ...] | NDArray[np.float64],
+    d: tuple[float, ...] | NDArray[np.float64],
+) -> tuple[int, bool] | None:
+    """Look up the baked (linearity_joint, apply_so3) for a sub-chain DH.
+
+    Returns ``None`` if :func:`prime_derivation` hasn't been called for
+    this DH (cache miss == cold-cache RR would fire == fall back to
+    original solver).
+
+    Used by ``jointlock.seven_r._dispatch`` to gate the cached-RR
+    fast-path. The lookup is O(1) and free of sympy work, so it's safe
+    to call on every per-sample inner dispatch.
+    """
+    alpha_t = tuple(float(x) for x in alpha)
+    a_t = tuple(float(x) for x in a)
+    d_t = tuple(float(x) for x in d)
+    return _PRIMED_LINEARITY_MAP.get((alpha_t, a_t, d_t))
+
+
+# ---------------------------------------------------------------------------
 # Public API.
 # ---------------------------------------------------------------------------
 

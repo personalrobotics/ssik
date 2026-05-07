@@ -62,6 +62,8 @@ def solve(
     *,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
+    linearity_joint: int | str = "auto",
+    apply_so3: bool = False,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for any 6R chain via Raghavan-Roth + AE-3 leftvar selection.
 
@@ -99,7 +101,8 @@ def solve(
         t_target_dh,
         fk_atol=fk_atol,
         dedup_atol=dedup_atol,
-        linearity_joint="auto",
+        linearity_joint=linearity_joint,
+        apply_so3=apply_so3,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
         solver_name=_SOLVER_NAME,

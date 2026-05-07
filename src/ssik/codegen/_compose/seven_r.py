@@ -48,8 +48,11 @@ import numpy as np
 
 from ssik._kinbody import KinBody
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+from ssik.kinematics.poe_to_dh import poe_to_dh
+from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar
 from ssik.solvers.jointlock.seven_r import (
     _DEFAULT_SAMPLES,
+    _RR_ELIGIBLE_INNER_SOLVERS,
     _lock_joint,
     _topology_rank,
     choose_lock_joint,
@@ -59,7 +62,13 @@ __all__ = ["compose", "render_constants_header"]
 
 
 def render_constants_header() -> str:
-    """Imports needed by the rendered seven_r artifact."""
+    """Imports needed by the rendered seven_r artifact.
+
+    Note: the ``prime_derivation`` import for cached-RR priming (#210)
+    is added inline in :func:`compose` only when the arm has at least
+    one eligible non-tier-0 inner sample. Arms with all-tier-0 dispatch
+    (e.g. Franka) keep their artifact byte-identical to pre-#210.
+    """
     return (
         "import math\n"
         "import numpy as np\n"
@@ -97,13 +106,62 @@ def compose(kb: KinBody) -> str:
         lo, hi = joint_limits
     samples = np.linspace(lo, hi, _DEFAULT_SAMPLES, endpoint=False)
     dispatch: list[str] = []
+    rr_prime_dhs: list[tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], int]] = []
     for q_lock in samples:
         sub_kb = _lock_joint(kb, lock_idx, float(q_lock))
         _, name = _topology_rank(sub_kb, policy)
         dispatch.append(name)
+        # If the inner sample would route through a non-tier-0 path,
+        # collect its DH so the artifact can prime RR's derivation cache
+        # at module-import time (#210). The runtime jointlock dispatch
+        # uses cached RR (~1 ms) instead of HP/two_parallel/spherical
+        # (~13-260 ms) when the cache is primed.
+        bare_name = name[len("reversed:") :] if name.startswith("reversed:") else name
+        if bare_name in _RR_ELIGIBLE_INNER_SOLVERS:
+            sub_kb_for_dh = sub_kb
+            if name.startswith("reversed:"):
+                # Reversed dispatch runs RR on the chain-reversed sub_kb.
+                from ssik.kinematics.reverse import reverse_kinematic_chain
+
+                sub_kb_for_dh = reverse_kinematic_chain(sub_kb)
+            dh = poe_to_dh(sub_kb_for_dh)
+            alpha = tuple(float(x) for x in dh.alpha)
+            a = tuple(float(x) for x in dh.a)
+            d = tuple(float(x) for x in dh.d)
+            linearity = _cached_best_leftvar(alpha, a, d)
+            rr_prime_dhs.append((alpha, a, d, linearity))
 
     samples_repr = ", ".join(repr(float(s)) for s in samples)
     dispatch_repr = ",\n            ".join(repr(name) for name in dispatch)
+    if rr_prime_dhs:
+        rr_prime_lines = []
+        for alpha, a, d, lin in rr_prime_dhs:
+            rr_prime_lines.append(f"            ({alpha!r}, {a!r}, {d!r}, {lin}),")
+        # Local import within the artifact (kept inline rather than at
+        # the module-header level so arms without priming stay byte-
+        # identical to pre-#210 artifacts).
+        rr_prime_block = (
+            "\n\n        from ssik.solvers.ikgeo._raghavan_roth import (\n"
+            "            prime_derivation as _ssik_rr_prime,\n"
+            "        )\n\n"
+            "        # Cached-RR priming list (#210). For each non-tier-0 inner\n"
+            "        # sample, the (alpha, a, d, linearity_joint) tuple to pre-warm\n"
+            "        # Raghavan-Roth's symbolic derivation. Module-init below calls\n"
+            "        # ``prime_derivation`` for each entry; subsequent jointlock\n"
+            "        # dispatches use cached RR (~1 ms) instead of HP / two_parallel /\n"
+            "        # spherical (~7-260 ms) for matching sub-chains. ~12-25x speedup\n"
+            "        # post-warmup; module import pays a one-time ~80-130 s cold-cache\n"
+            "        # cost which amortises across the deployment lifetime.\n"
+            "        _RR_PRIME_DHS = (\n" + "\n".join(rr_prime_lines) + "\n        )\n\n"
+            "        for _alpha, _a, _d, _lin in _RR_PRIME_DHS:\n"
+            "            _ssik_rr_prime(_alpha, _a, _d, linearity_joint=_lin, apply_so3=False)\n"
+        )
+    else:
+        # Arms whose dispatch cache is entirely tier-0 don't need priming
+        # (e.g. Franka -- all 16 samples route to ``reversed:spherical``).
+        # Skip the block entirely to keep artifacts byte-stable with
+        # pre-#210.
+        rr_prime_block = ""
 
     return textwrap.dedent(
         f"""\
@@ -130,7 +188,7 @@ def compose(kb: KinBody) -> str:
         # permutes the cache alongside the samples.
         _DISPATCH_CACHE = (
             {dispatch_repr},
-        )
+        ){rr_prime_block}
 
 
         def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
