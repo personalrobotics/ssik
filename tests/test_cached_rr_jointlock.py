@@ -5,7 +5,7 @@ When ``ssik build`` emits a per-arm artifact for a non-tier-0 7R arm
 tuples and primes Raghavan-Roth's symbolic derivation cache at
 module-import time. Subsequent jointlock dispatches use cached RR
 (~1 ms warm) instead of HP / two_parallel / spherical (~13-260 ms),
-yielding 12-25× post-warmup speedup.
+yielding 12-25x post-warmup speedup.
 
 The URDF-loaded path (no artifact, e.g. tests via
 ``load_urdf_kinbody_normalized``) does NOT prime the cache, so it
@@ -44,7 +44,6 @@ from ssik.solvers.jointlock.seven_r import (
     _try_cached_rr,
 )
 
-
 # ---------------------------------------------------------------------------
 # Prime API
 # ---------------------------------------------------------------------------
@@ -71,7 +70,7 @@ def test_prime_derivation_populates_lookup_map() -> None:
     # populated.
     try:
         prime_derivation(alpha, a, d, linearity_joint=2, apply_so3=False)
-    except Exception:  # noqa: BLE001 -- sentinel DH may be degenerate
+    except Exception:
         # Even when the sympy preprocess fails on the sentinel DH, the
         # _PRIMED_LINEARITY_MAP entry should have been registered first.
         pass

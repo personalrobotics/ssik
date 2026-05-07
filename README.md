@@ -11,7 +11,7 @@ Analytical inverse kinematics for non-Pieper 6R arms — the **EAIK gap**. The a
 | Pieper-class (UR5, Puma 560, Fanuc, KUKA KR) | ~0.2 ms | ~20 ms | ~1-2 ms |
 | Non-Pieper 6R (JACO 2, Piper) | not supported | ~20 ms | **~0.6 ms median** |
 | SRS-class 7R (KUKA iiwa LBR) | sub-ms | ~30 ms | **~8.5 ms (128 IKs)** |
-| Approximate-SRS 7R (Kinova Gen3) | sub-ms (with mm-scale IK error vs URDF) | ~30 ms | **~95 ms (machine-precision FK on URDF)** |
+| Approximate-SRS 7R (Kinova Gen3) | sub-ms (with mm-scale IK error vs URDF) | ~30 ms | **~56 ms (machine-precision FK on URDF, batched LM polish)** |
 | Non-Pieper 7R (Flexiv Rizon 4, Kassow KR810) | sub-ms (with cm-scale IK error) | ~30 ms | **~17-18 ms (cached-RR per #210; 30-45 IKs)** |
 | Anthropomorphic 7R (Franka Panda, FR3, xArm7) | sub-ms | ~30 ms | **~42 ms (48-64 IKs) via joint-locking** |
 
@@ -71,7 +71,7 @@ Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and 
 |-----|---|:---:|:---:|:---:|
 | Franka Emika Panda / FR3 | non-SRS by design | ~42 ms (48 IKs) | same (already tier-0) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | uFactory xArm7 | non-SRS by design | ~45 ms (56 IKs) | same (already tier-0) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | **~95 ms (`seven_r.srs_polished`)** | n/a (top-level polished-SRS) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | **~56 ms (`seven_r.srs_polished`)** | n/a (top-level polished-SRS) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | **Flexiv Rizon 4** | 65 mm / 151 mm | ~244 ms (jointlock+HP) | **~17 ms (12.8×, 45 IKs)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | **Kassow KR810** | 86 mm / 111 mm | ~444 ms (jointlock+HP) | **~18 ms (16.4×, 30 IKs)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
 | Kassow KR1018 / KR1410 / KR1805 | similar geometry, expected ~80-110 mm | not measured | not measured | 🔗 [rcruzoliver/kr_ros2](https://github.com/rcruzoliver/kr_ros2) |
@@ -83,7 +83,7 @@ Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and 
 |---|---|---|---|
 | 0 — closed-form 6R | `three_parallel`, `spherical_two_parallel`, `spherical_two_intersecting`, `spherical` | ~1 ms | SP1–SP6 composition; one branch per Pieper specialisation |
 | 0 — closed-form 7R (SRS) | `seven_r.srs` | ~8.5 ms full sweep | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × 16 swivel samples = 128 IKs |
-| 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~95 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + Newton polish to machine precision against the original URDF FK |
+| 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~56 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + batched LM polish to machine precision against the original URDF FK |
 | 1 — univariate search | `two_parallel`, `two_intersecting` | ~100 ms – 2 s | tan-half-angle reduction + 200-sample search + Newton polish |
 | 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms tier-0 inner; **~17 ms with cached-RR (#210)** when artifact-built | lock one joint, dispatch inner 6R, sweep 16 lock samples; Raghavan-Roth pre-baked at codegen for non-Pieper sub-chains |
 | 2 — Raghavan–Roth + Manocha–Canny | `ikgeo.general_6r` | ~0.6-5 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |

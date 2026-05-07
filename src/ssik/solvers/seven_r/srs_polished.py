@@ -57,7 +57,11 @@ from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import is_approximately_srs_7r
-from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian, lm_refine
+from ssik.refinement import (
+    dedup_by_wrap_close,
+    kinbody_jacobian,
+    lm_refine_batch,
+)
 from ssik.solvers.seven_r import srs
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
@@ -140,52 +144,43 @@ def solve(
         # SRS produced nothing even at huge fk_atol; truly unreachable.
         return [], True
 
-    # Step 3: LM polish each candidate against the original URDF FK.
-    # Re-using the existing closures keeps the Cython Jacobian path
-    # active (kinbody_jacobian is the analytical 6xN spatial Jacobian).
+    # Step 3: batched LM polish for all candidates simultaneously (#205).
+    # Synchronises the Newton iter loop across the N raw seeds so per-iter
+    # ``np.linalg.{solve, inv, norm}`` dispatch overhead amortises over N.
+    # Empirically ~30-50% faster than the sequential ``lm_refine`` loop on
+    # Gen3 (where N is typically 75-128). Tighter divergence detection
+    # (factor=2.0, min_iters=2) inherited from #203 keeps dead-end seeds
+    # from wasting iter budget.
     def fk_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
         return poe_forward_kinematics(kb, q)
 
     def jac_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
         return kinbody_jacobian(kb, q)
 
-    # Tighter divergence detection (#203): factor=2.0, min_iters=2 aborts
-    # dead-end seeds at iter ~2-3 instead of iter ~5, freeing iter budget
-    # for the genuinely-bumpy convergers. Empirically 44% faster on Gen3
-    # *and* recovers 9% more converged candidates than the lm_refine
-    # default (5.0, 4) -- the iter budget freed by aggressive dead-end
-    # abandonment lets convergers with rough trajectories actually finish.
-    polished: list[Solution] = []
-    for c in raw:
-        result = lm_refine(
-            c.q,
-            fk_fn,
-            T_target,
-            fk_atol=polish_fk_atol,
-            max_iters=polish_max_iters,
-            jacobian_fn=jac_fn,
-            divergence_factor=2.0,
-            divergence_min_iters=2,
+    q_seeds = np.array([c.q for c in raw], dtype=np.float64)
+    q_polished_arr, fk_residuals, iters_used = lm_refine_batch(
+        q_seeds,
+        fk_fn,
+        jac_fn,
+        T_target,
+        fk_atol=polish_fk_atol,
+        max_iters=polish_max_iters,
+        divergence_factor=2.0,
+        divergence_min_iters=2,
+    )
+
+    polished: list[Solution] = [
+        replace(
+            c,
+            q=q_polished_arr[i],
+            fk_residual=float(fk_residuals[i]),
+            refinement_used="lm",
+            refinement_iters=int(iters_used[i]),
+            solver_name=_SOLVER_NAME,
         )
-        if result is None:
-            continue
-        q_polished, _se3_residual, iters = result
-        # Recompute the Frobenius residual: this is the user-visible
-        # ``Solution.fk_residual`` and matches the test contract. Post #199
-        # the se3_log_residual norm and Frobenius are both machine-precision
-        # consistent, but the contract is Frobenius so we materialise that.
-        T_check = poe_forward_kinematics(kb, q_polished)
-        fk_frob = float(np.linalg.norm(T_check - T_target))
-        polished.append(
-            replace(
-                c,
-                q=q_polished,
-                fk_residual=fk_frob,
-                refinement_used="lm",
-                refinement_iters=iters,
-                solver_name=_SOLVER_NAME,
-            )
-        )
+        for i, c in enumerate(raw)
+        if fk_residuals[i] < polish_fk_atol
+    ]
 
     if not polished:
         return [], True
