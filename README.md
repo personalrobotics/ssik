@@ -10,13 +10,16 @@ Analytical inverse kinematics for non-Pieper 6R arms — the **EAIK gap**. The a
 |---|---|---|---|
 | Pieper-class (UR5, Puma 560, Fanuc, KUKA KR) | ~0.2 ms | ~20 ms | ~1-2 ms |
 | Non-Pieper 6R (JACO 2, Piper) | not supported | ~20 ms | **~0.6 ms median** |
-| SRS-class 7R (KUKA iiwa, Rizon 4, Gen3, Sawyer, Kassow) | sub-ms | ~30 ms | **~8.5 ms (128 IKs)** |
-| Anthropomorphic 7R (Franka Panda, FR3) | sub-ms | ~30 ms | **~20 ms (48 IKs) via joint-locking** |
+| SRS-class 7R (KUKA iiwa LBR) | sub-ms | ~30 ms | **~8.5 ms (128 IKs)** |
+| Approximate-SRS 7R (Kinova Gen3) | sub-ms (with mm-scale IK error vs URDF) | ~30 ms | **~95 ms (machine-precision FK on URDF)** |
+| Non-Pieper 7R (Flexiv Rizon 4, Kassow KR810) | sub-ms (with cm-scale IK error) | ~30 ms | **~17-18 ms (cached-RR per #210; 30-45 IKs)** |
+| Anthropomorphic 7R (Franka Panda, FR3, xArm7) | sub-ms | ~30 ms | **~42 ms (48-64 IKs) via joint-locking** |
 
-Two differentiators:
+Three differentiators:
 
 1. **Non-Pieper 6R analytical solver** (`ikgeo.general_6r`, Raghavan–Roth + Manocha–Canny). No other library in the ecosystem ships analytical IK for arms whose geometry deliberately violates Pieper's condition for mechanical-design reasons (JACO 2 with 60° non-orthogonal twists is the canonical example). ssik does, with all branches recovered at machine precision in sub-ms. See `docs/tutorial/04_raghavan_roth.md` for the math and `docs/tutorial/05_conditioning.md` for the robustness fixes (AE-1, AE-3, AE-4, Möbius reparameterisation) that make the textbook pipeline survive on real ill-conditioned arms.
-2. **Native SRS-class 7R solver** (`seven_r.srs`, Singh-Kreutz 1989) — closed-form parameterised by elbow swivel angle. Predicate-driven dispatch (`is_srs_7r`) auto-applies to any 7R arm matching the topology: shoulder axes (0,1,2) concurrent + wrist axes (4,5,6) concurrent. iiwa14 is the canonical fixture. Many arms cited as SRS in the literature (Gen3, Rizon 4, Kassow KR*) actually have non-zero shoulder/wrist offsets in their URDFs and are routed through the universal `jointlock+HP` fallback today; a generalised approximate-SRS + Newton-polish solver (#193) is the planned fast path for the small-drift cases.
+2. **Native SRS-class 7R solver** (`seven_r.srs`, Singh-Kreutz 1989) — closed-form parameterised by elbow swivel angle. Predicate-driven dispatch (`is_srs_7r`) auto-applies to any 7R arm matching the topology: shoulder axes (0,1,2) concurrent + wrist axes (4,5,6) concurrent. iiwa14 is the canonical fixture; an approximate-SRS variant (`seven_r.srs_polished`) extends the framework to small-drift arms (Kinova Gen3) via Singh-Kreutz seeds + LM polish against the original URDF FK.
+3. **Cached Raghavan-Roth for jointlock 7R** (#210). Many "literature-SRS" 7R arms (Rizon 4, Kassow KR810) have URDF offsets that break strict SRS structure and previously fell through to the universal jointlock+HP fallback at ~244-444 ms per call. `ssik build` now bakes per-arm RR symbolic derivations into the artifact; the runtime jointlock dispatch uses cached RR (~1 ms warm) instead of HP, yielding **12-25× post-import speedup**. Produces machine-precision FK closure on the actual URDF, not a simplified DH (unlike EAIK's sub-ms-with-cm-scale-error path).
 
 ## Supported arms & solver coverage
 
@@ -58,19 +61,21 @@ Refused (drift exceeds Newton's basin, ~3-5 cm): falls back to `jointlock + HP`.
 
 ### 7R redundant arms — non-SRS (`jointlock.seven_r`)
 
-For 7R arms whose topology doesn't match strict or approximate SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. Tier-2 fallback inside jointlock is `husty_pfurner.general_6r` for sub-chains with no Pieper / parallel-axis structure. 16-sample lock sweep × inner 6R solver per call.
+For 7R arms whose topology doesn't match strict or approximate SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. 16-sample lock sweep × inner 6R solver per call.
+
+**Cached-RR fast path (#210)**: when an arm hits the universal fallback for non-Pieper sub-chains, `ssik build` bakes the per-(DH, linearity) Raghavan-Roth derivation into the artifact. Module import primes the cache once (~1-2 min one-time per arm); every subsequent `solve(T)` call uses cached RR (~1 ms warm) instead of HP / two_parallel (~13-260 ms). **12-25× speedup post-import** on Rizon 4, Kassow, and other previously-slow non-Pieper 7R arms. The URDF-loaded path (no artifact) keeps the original solver — no cold-cache cost in tests.
 
 Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and the literature-SRS-but-URDF-far-from-SRS arms whose drift exceeds the polished-SRS basin (Flexiv Rizon 4: 151 mm wrist drift; Kassow KR810: 111 mm wrist drift).
 
-| Arm | Drift (shoulder / wrist) | Full-sweep speed | Status |
-|-----|---|:---:|:---:|
-| Franka Emika Panda / FR3 | non-SRS by design | ~20 ms (48 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| uFactory xArm7 | non-SRS by design | ~32 ms (56 IKs) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | **~95 ms (`seven_r.srs_polished`)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| **Flexiv Rizon 4** | 65 mm / 151 mm | ~1.5 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — wrist drift outside Newton basin |
-| **Kassow KR810** | 86 mm / 111 mm | ~1.5 s (jointlock+HP) | ✅ in [`tests/fixtures/`](tests/fixtures/) — wrist drift outside Newton basin |
-| Kassow KR1018 / KR1410 / KR1805 | similar geometry, expected ~80-110 mm | not measured | 🔗 [rcruzoliver/kr_ros2](https://github.com/rcruzoliver/kr_ros2) |
-| Sawyer / Baxter (Rethink Robotics) | not measured | not measured | 🔗 (vendor URDF) |
+| Arm | Drift (shoulder / wrist) | URDF path | **Built artifact (cached-RR)** | Status |
+|-----|---|:---:|:---:|:---:|
+| Franka Emika Panda / FR3 | non-SRS by design | ~42 ms (48 IKs) | same (already tier-0) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| uFactory xArm7 | non-SRS by design | ~45 ms (56 IKs) | same (already tier-0) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | **~95 ms (`seven_r.srs_polished`)** | n/a (top-level polished-SRS) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| **Flexiv Rizon 4** | 65 mm / 151 mm | ~244 ms (jointlock+HP) | **~17 ms (12.8×, 45 IKs)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| **Kassow KR810** | 86 mm / 111 mm | ~444 ms (jointlock+HP) | **~18 ms (16.4×, 30 IKs)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| Kassow KR1018 / KR1410 / KR1805 | similar geometry, expected ~80-110 mm | not measured | not measured | 🔗 [rcruzoliver/kr_ros2](https://github.com/rcruzoliver/kr_ros2) |
+| Sawyer / Baxter (Rethink Robotics) | not measured | not measured | not measured | 🔗 (vendor URDF) |
 
 ### Solver tier reference
 
@@ -80,7 +85,7 @@ Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and 
 | 0 — closed-form 7R (SRS) | `seven_r.srs` | ~8.5 ms full sweep | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × 16 swivel samples = 128 IKs |
 | 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~95 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + Newton polish to machine precision against the original URDF FK |
 | 1 — univariate search | `two_parallel`, `two_intersecting` | ~100 ms – 2 s | tan-half-angle reduction + 200-sample search + Newton polish |
-| 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms | lock one joint, dispatch inner 6R, sweep 16 lock samples |
+| 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms tier-0 inner; **~17 ms with cached-RR (#210)** when artifact-built | lock one joint, dispatch inner 6R, sweep 16 lock samples; Raghavan-Roth pre-baked at codegen for non-Pieper sub-chains |
 | 2 — Raghavan–Roth + Manocha–Canny | `ikgeo.general_6r` | ~0.6-5 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |
 | 2 — Husty-Pfurner universal fallback | `husty_pfurner.general_6r` | ~25-200 ms | Study-quaternion algebra; perturbation path (#176) handles symmetric-DH singularities; backstops RR on ill-conditioned arms |
 

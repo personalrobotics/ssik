@@ -41,6 +41,7 @@ from ssik._kinbody import Joint, KinBody
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics._scalar3 import _se3_inv
+from ssik.kinematics.poe_to_dh import poe_to_dh
 from ssik.kinematics.predicates import (
     axis_parallel,
     three_consecutive_intersecting,
@@ -50,6 +51,9 @@ from ssik.kinematics.reverse import map_reversed_q, reverse_kinematic_chain
 from ssik.refinement import dedup_by_wrap_close
 from ssik.solvers.husty_pfurner import general_6r as hp_general_6r
 from ssik.solvers.ikgeo import (
+    general_6r as rr_general_6r,
+)
+from ssik.solvers.ikgeo import (
     spherical,
     spherical_two_intersecting,
     spherical_two_parallel,
@@ -57,6 +61,7 @@ from ssik.solvers.ikgeo import (
     two_intersecting,
     two_parallel,
 )
+from ssik.solvers.ikgeo._raghavan_roth import primed_linearity_for_dh
 from ssik.subproblems._rotation import rotation_matrix
 
 __all__ = ["choose_lock_joint", "solve"]
@@ -281,6 +286,24 @@ def _dispatch(
         sub_sols_orig = [replace(sol, q=map_reversed_q(sol.q)) for sol in sub_sols_rev]
         return sub_sols_orig, is_ls
 
+    # Cached-RR fast path (#210): for any non-strict-tier-0 inner solver,
+    # try Raghavan-Roth first IF its symbolic derivation has been primed
+    # at artifact-import time. Primed cache => ~1 ms warm solve; no prime
+    # => the original solver (HP / two_parallel / etc.) runs as before.
+    # This keeps the URDF-loaded path (tests, interactive use) on the
+    # original solvers (no cold-cache cost) while letting production
+    # artifacts opt in to the 15-30x speedup.
+    if solver_name in _RR_ELIGIBLE_INNER_SOLVERS:
+        rr_result = _try_cached_rr(
+            sub_kb,
+            T_target,
+            policy,
+            allow_refinement=allow_refinement,
+            refinement_max_iters=refinement_max_iters,
+        )
+        if rr_result is not None:
+            return rr_result
+
     table = {
         "three_parallel": three_parallel.solve,
         "spherical_two_parallel": spherical_two_parallel.solve,
@@ -302,6 +325,82 @@ def _dispatch(
         refinement_max_iters=refinement_max_iters,
     )
     return result
+
+
+# Inner solvers eligible for cached-RR fast path (#210). The set excludes:
+#   - Strict tier-0 specialisations (three_parallel, spherical_two_*): they
+#     already run 1-2 ms per call and beat RR's per-call cost.
+#   - rank-1 ``spherical`` (~7.5 ms): the prime cost (~14 s of cold RR
+#     derivation per sub-chain DH) is not worth the ~6.5 ms per-call savings
+#     for arms where this is the dominant inner solver (e.g. Franka's
+#     ``reversed:spherical`` samples). Including it would add ~210 s to
+#     module-import for ~100 ms warm-IK savings -- bad UX trade-off.
+# Only the truly expensive inner solvers (tier-1 search-based, tier-2 HP)
+# are eligible. Rizon 4 and Kassow KR810 -- whose dominant inner solvers
+# are HP and two_parallel -- get the full 12-25x post-warmup speedup.
+_RR_ELIGIBLE_INNER_SOLVERS: frozenset[str] = frozenset(
+    {
+        "two_intersecting",  # rank 2: tier-1 search, ~1.2 s
+        "two_parallel",  # rank 2: tier-1 search, ~261 ms
+        "husty_pfurner.general_6r",  # rank 3: ~13-35 ms
+    }
+)
+
+
+def _try_cached_rr(
+    sub_kb: KinBody,
+    T_target: NDArray[np.float64],
+    policy: TolerancePolicy,
+    *,
+    allow_refinement: bool,
+    refinement_max_iters: int,
+) -> tuple[list[Solution], bool] | None:
+    """Attempt cached-RR solve on the sub-chain. Returns ``(sols, is_ls)``
+    if RR's derivation cache is primed for this DH AND it produces a
+    valid IK; ``None`` otherwise (caller falls back to original solver).
+
+    Bulletproof gate: only accepts RR's output if (a) ``is_ls=False``,
+    (b) at least one solution exists, and (c) max FK closure passes
+    ``policy.subproblem_numerical``.
+    """
+    # poe_to_dh is cached on the kb object, so this is fast after first call.
+    dh = poe_to_dh(sub_kb)
+    alpha = tuple(float(x) for x in dh.alpha)
+    a = tuple(float(x) for x in dh.a)
+    d = tuple(float(x) for x in dh.d)
+
+    # Look up the baked (linearity, apply_so3) for this DH. None means
+    # the artifact hasn't primed RR for this sub-chain -- fall back to
+    # the original solver to avoid the 30-150s cold-cache + leftvar
+    # probe cost.
+    primed = primed_linearity_for_dh(alpha, a, d)
+    if primed is None:
+        return None
+
+    linearity, apply_so3 = primed
+    try:
+        # Pass the baked linearity to bypass the runtime AE-3 leftvar
+        # probe inside ``solve_all_ik`` -- the leftvar selection at
+        # codegen time is recorded in the prime; running it again at
+        # runtime would cost ~42 s (3 derivations) per unique sub-chain.
+        rr_sols, rr_is_ls = rr_general_6r.solve(
+            sub_kb,
+            T_target,
+            policy,
+            allow_refinement=allow_refinement,
+            refinement_max_iters=refinement_max_iters,
+            linearity_joint=linearity,
+            apply_so3=apply_so3,
+        )
+    except Exception as exc:
+        _LOG.debug("jointlock cached-RR raised %s; falling back", type(exc).__name__)
+        return None
+
+    if rr_is_ls or not rr_sols:
+        return None
+    if max(s.fk_residual for s in rr_sols) >= policy.subproblem_numerical:
+        return None
+    return rr_sols, rr_is_ls
 
 
 # ---------------------------------------------------------------------------
