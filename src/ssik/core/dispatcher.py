@@ -120,7 +120,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "ikgeo.general_6r": (2, 5.0, 30_000_000),
     "husty_pfurner.general_6r": (2, 120.0, 50_000_000),
     "seven_r.srs": (0, 8.5, 1_900),  # native SRS-class 7R, full sweep (16 swivel x 8 branches)
-    "seven_r.srs_polished": (0, 95.0, 200_000),  # approximate-SRS + LM polish (Gen3 et al.)
+    "seven_r.srs_polished": (0, 65.0, 140_000),  # approximate-SRS + LM polish (Gen3 et al.)
     "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 

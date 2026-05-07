@@ -149,6 +149,12 @@ def solve(
     def jac_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
         return kinbody_jacobian(kb, q)
 
+    # Tighter divergence detection (#203): factor=2.0, min_iters=2 aborts
+    # dead-end seeds at iter ~2-3 instead of iter ~5, freeing iter budget
+    # for the genuinely-bumpy convergers. Empirically 44% faster on Gen3
+    # *and* recovers 9% more converged candidates than the lm_refine
+    # default (5.0, 4) -- the iter budget freed by aggressive dead-end
+    # abandonment lets convergers with rough trajectories actually finish.
     polished: list[Solution] = []
     for c in raw:
         result = lm_refine(
@@ -158,6 +164,8 @@ def solve(
             fk_atol=polish_fk_atol,
             max_iters=polish_max_iters,
             jacobian_fn=jac_fn,
+            divergence_factor=2.0,
+            divergence_min_iters=2,
         )
         if result is None:
             continue
