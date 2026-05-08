@@ -64,6 +64,7 @@ def solve(
     refinement_max_iters: int = 15,
     linearity_joint: int | str = "auto",
     apply_so3: bool = False,
+    max_solutions: int | None = None,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for any 6R chain via Raghavan-Roth + AE-3 leftvar selection.
 
@@ -106,6 +107,7 @@ def solve(
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
         solver_name=_SOLVER_NAME,
+        max_solutions=max_solutions,
     )
 
     # The bridge ``T_pre @ FK_DH(theta) @ T_post = FK_POE(q)`` uses SE(3)-

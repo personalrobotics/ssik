@@ -797,6 +797,7 @@ def verify_candidates(
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
     jacobian_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]] | None = None,
+    max_solutions: int | None = None,
 ) -> list[Solution]:
     """FK-verify, optionally polish, and dedup IK candidates.
 
@@ -830,11 +831,19 @@ def verify_candidates(
     :param allow_refinement: opt into Newton polish for near-misses.
     :param refinement_max_iters: cap on Newton iterations per candidate.
     :param jacobian_fn: optional analytical Jacobian for ``lm_refine``.
+    :param max_solutions: optional early-exit cap (#198). When set, stop
+        iterating ``candidates`` once the deduped count reaches the cap.
+        Default ``None`` preserves full enumeration. The check runs after
+        every appended candidate; the post-dedup gate guarantees the cap
+        is met by *unique* solutions.
     """
+    if max_solutions is not None and max_solutions < 1:
+        raise ValueError(f"max_solutions must be >= 1 or None; got {max_solutions}")
     verified: list[Solution] = []
     for branch_idx, q in enumerate(candidates):
         q = np.asarray(q, dtype=np.float64)
         fk_resid = float(np.linalg.norm(fk_fn(q) - t_target))
+        appended = False
         if fk_resid <= fk_atol:
             verified.append(
                 Solution(
@@ -846,31 +855,46 @@ def verify_candidates(
                     solver_name=solver_name,
                 )
             )
-            continue
-        if not allow_refinement:
-            continue
-        refined = lm_refine(
-            q,
-            fk_fn,
-            t_target,
-            fk_atol=fk_atol,
-            max_iters=refinement_max_iters,
-            jacobian_fn=jacobian_fn,
-        )
-        if refined is None:
-            continue
-        q_ref, resid, iters = refined
-        verified.append(
-            Solution(
-                q=q_ref,
-                fk_residual=resid,
-                refinement_used="lm",
-                refinement_iters=iters,
-                branch_id=branch_idx,
-                solver_name=solver_name,
+            appended = True
+        elif allow_refinement:
+            refined = lm_refine(
+                q,
+                fk_fn,
+                t_target,
+                fk_atol=fk_atol,
+                max_iters=refinement_max_iters,
+                jacobian_fn=jacobian_fn,
             )
-        )
+            if refined is not None:
+                q_ref, resid, iters = refined
+                verified.append(
+                    Solution(
+                        q=q_ref,
+                        fk_residual=resid,
+                        refinement_used="lm",
+                        refinement_iters=iters,
+                        branch_id=branch_idx,
+                        solver_name=solver_name,
+                    )
+                )
+                appended = True
+
+        # Early-exit gate (#198): once we have the requested number of
+        # *unique* solutions, stop iterating remaining candidates. The
+        # post-dedup check is mandatory because algebraic enumeration
+        # often emits duplicate q-vectors across branches.
+        if appended and max_solutions is not None and len(verified) >= max_solutions:
+            if dedup_atol is None:
+                return verified[:max_solutions]
+            deduped = dedup_by_wrap_close(verified, dedup_atol)
+            if len(deduped) >= max_solutions:
+                return deduped[:max_solutions]
 
     if dedup_atol is None:
+        if max_solutions is not None:
+            return verified[:max_solutions]
         return verified
-    return dedup_by_wrap_close(verified, dedup_atol)
+    deduped_final = dedup_by_wrap_close(verified, dedup_atol)
+    if max_solutions is not None:
+        return deduped_final[:max_solutions]
+    return deduped_final
