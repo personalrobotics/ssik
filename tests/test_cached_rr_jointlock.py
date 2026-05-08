@@ -35,7 +35,6 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.poe_to_dh import poe_to_dh
 from ssik.solvers.ikgeo._raghavan_roth import (
     _PRIMED_LINEARITY_MAP,
-    prime_derivation,
     primed_linearity_for_dh,
 )
 from ssik.solvers.jointlock.seven_r import (
@@ -49,38 +48,24 @@ from ssik.solvers.jointlock.seven_r import (
 # ---------------------------------------------------------------------------
 
 
-def test_prime_derivation_populates_lookup_map() -> None:
-    """``prime_derivation(alpha, a, d, linearity)`` adds the DH to the
-    primed-linearity map, recoverable by :func:`primed_linearity_for_dh`.
-
-    Uses a synthetic DH to avoid running the actual sympy preprocess
-    (which is what makes the prime expensive in real arms; for this
-    structural test we just want to verify the map machinery).
+def test_primed_linearity_map_lookup() -> None:
+    """:func:`primed_linearity_for_dh` reads the module-level
+    ``_PRIMED_LINEARITY_MAP``. Phase 2 artifacts populate this dict
+    directly via assignment in the registration block; this test
+    verifies the lookup contract without going through the (slow)
+    :func:`prime_derivation` sympy path.
     """
-    # Use a unique sentinel DH that no real arm will produce.
+    # Direct map insertion (mimics the artifact's registration block).
     alpha = (0.123, 0.456, 0.789, 0.111, 0.222, 0.333)
     a = (1.234, 2.345, 3.456, 4.567, 5.678, 6.789)
     d = (0.987, 0.876, 0.765, 0.654, 0.543, 0.432)
-    # Sanity check: not primed before.
-    assert primed_linearity_for_dh(alpha, a, d) is None
-    # Note: prime_derivation also calls _cached_derivation, which would
-    # take 10-50 sec on a real DH. The sentinel values here may produce
-    # a degenerate Manocha-Canny system -- catch any exception and fail
-    # gracefully if so. For the structural test we just need the map
-    # populated.
+    assert primed_linearity_for_dh(alpha, a, d) is None  # not primed
+    _PRIMED_LINEARITY_MAP[(alpha, a, d)] = (2, False)
     try:
-        prime_derivation(alpha, a, d, linearity_joint=2, apply_so3=False)
-    except Exception:
-        # Even when the sympy preprocess fails on the sentinel DH, the
-        # _PRIMED_LINEARITY_MAP entry should have been registered first.
-        pass
-    finally:
-        # Verify the map was updated regardless of preprocess outcome.
         result = primed_linearity_for_dh(alpha, a, d)
-        # Clean up the sentinel entry so it doesn't pollute other tests.
-        key = (alpha, a, d)
-        _PRIMED_LINEARITY_MAP.pop(key, None)
-    assert result == (2, False), f"expected primed (2, False), got {result}"
+        assert result == (2, False)
+    finally:
+        _PRIMED_LINEARITY_MAP.pop((alpha, a, d), None)
 
 
 def test_primed_linearity_returns_none_for_unprimed_dh() -> None:
@@ -123,9 +108,7 @@ def test_urdf_loaded_rizon_does_not_trigger_cached_rr() -> None:
         allow_refinement=False,
         refinement_max_iters=15,
     )
-    assert result is None, (
-        f"expected None (no prime in test path); got {type(result).__name__}"
-    )
+    assert result is None, f"expected None (no prime in test path); got {type(result).__name__}"
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +117,7 @@ def test_urdf_loaded_rizon_does_not_trigger_cached_rr() -> None:
 
 
 def test_composer_skips_priming_for_franka() -> None:
-    """Franka's all-tier-0 dispatch -> ``_RR_PRIME_DHS`` should be omitted
+    """Franka's all-tier-0 dispatch -> RR baking should be omitted
     from the artifact entirely, keeping the artifact byte-stable with
     pre-#210.
 
@@ -153,22 +136,20 @@ def test_composer_skips_priming_for_franka() -> None:
 
     kb = build_kinbody(franka_panda_specs())
     artifact_source = compose(kb)
-    assert "_RR_PRIME_DHS" not in artifact_source
-    assert "_ssik_rr_prime" not in artifact_source
+    # Phase 2 sentinels: no CSE'd builder + no insert_derivation calls.
+    assert "_build_pq_jointlock_sample_" not in artifact_source
+    assert "insert_derivation" not in artifact_source
 
 
 @pytest.mark.slow
-def test_composer_emits_priming_for_rizon4() -> None:
+def test_composer_emits_baked_rr_for_rizon4() -> None:
     """Rizon 4's non-tier-0 inner samples (HP / two_parallel) trigger the
-    composer to emit ``_RR_PRIME_DHS`` and the module-init prime loop.
+    composer to bake CSE'd RR builders + ``insert_derivation`` calls.
 
-    Marked slow because :func:`compose` runs ``_cached_best_leftvar``
-    (AE-3 leftvar probing) at codegen time -- ~30 s per unique sub-chain
-    DH on cold cache, ~3-5 minutes total for Rizon's 8 unique DHs. The
-    cost is intentional at codegen time; we mark slow so default test
-    runs skip it. The structural integration is verified by
-    :func:`test_rizon4_composer_prime_dh_matches_runtime_dh` (fast --
-    no leftvar probing).
+    Marked slow because :func:`compose` runs both ``_cached_best_leftvar``
+    (AE-3 leftvar probing) AND the symbolic preprocessing for each unique
+    sub-chain DH at codegen time -- the whole point of #210 Phase 2 is
+    to pay this cost ONCE at build time so module-import is sympy-free.
     """
     from ssik.codegen._compose.seven_r import compose
 
@@ -178,10 +159,11 @@ def test_composer_emits_priming_for_rizon4() -> None:
         "flange",
     )
     artifact_source = compose(kb)
-    assert "_RR_PRIME_DHS = (" in artifact_source
-    assert "_ssik_rr_prime" in artifact_source
-    # Module-init prime loop is present.
-    assert "for _alpha, _a, _d, _lin in _RR_PRIME_DHS:" in artifact_source
+    # Phase 2 sentinels: at least one CSE'd builder + insert_derivation calls.
+    assert "_build_pq_jointlock_sample_0(" in artifact_source
+    assert "_ssik_rr_insert(" in artifact_source
+    # The runtime jointlock dispatch lookup map is also populated.
+    assert "_PRIMED_LINEARITY_MAP[(" in artifact_source
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +201,7 @@ def test_rr_eligible_set_includes_slow_inner_solvers() -> None:
         "husty_pfurner.general_6r",
     }
     assert expected.issubset(_RR_ELIGIBLE_INNER_SOLVERS), (
-        f"slow inner solvers should be RR-eligible: missing "
-        f"{expected - _RR_ELIGIBLE_INNER_SOLVERS}"
+        f"slow inner solvers should be RR-eligible: missing {expected - _RR_ELIGIBLE_INNER_SOLVERS}"
     )
 
 

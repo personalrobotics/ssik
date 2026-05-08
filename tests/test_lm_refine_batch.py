@@ -81,9 +81,7 @@ def test_batch_marks_diverged_seeds_with_inf() -> None:
     def jac_fn(q):
         return kinbody_jacobian(kb, q)
 
-    _q_pol, fk_res, _ = lm_refine_batch(
-        seeds, fk_fn, jac_fn, T_target, fk_atol=1e-10, max_iters=20
-    )
+    _q_pol, fk_res, _ = lm_refine_batch(seeds, fk_fn, jac_fn, T_target, fk_atol=1e-10, max_iters=20)
     # Most should diverge or fail to converge.
     assert (fk_res == np.inf).any() or (fk_res > 1e-10).any()
     # The ones that converge must hit machine precision.
@@ -141,9 +139,7 @@ def test_batch_matches_scalar_on_easy_seeds() -> None:
         scalar_results.append(result is not None)
 
     # Batch
-    _q_pol, fk_res, _ = lm_refine_batch(
-        seeds, fk_fn, jac_fn, T_target, fk_atol=1e-12, max_iters=20
-    )
+    _q_pol, fk_res, _ = lm_refine_batch(seeds, fk_fn, jac_fn, T_target, fk_atol=1e-12, max_iters=20)
     batch_converged = fk_res < 1e-12
 
     # Both must agree on convergence per candidate within tolerance

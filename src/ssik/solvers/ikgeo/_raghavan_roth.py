@@ -414,22 +414,110 @@ def _derive_pq_for_arm(
     return p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata
 
 
-# Cache the per-arm derivation. Keys are immutable (DH, linearity, so3) tuples.
-@lru_cache(maxsize=64)
+# Per-arm derivation cache. Keys are (DH, linearity, so3) tuples.
+# Replaced lru_cache with a plain dict (#210 Phase 2) so build-time
+# bake can insert pre-computed derivations directly via
+# :func:`insert_derivation`. The dict is unbounded but in practice
+# only holds ~16-128 entries per loaded arm (one per locked-sub-chain
+# DH x leftvar choice).
+_DerivationKey = tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], int, bool]
+_DerivationValue = tuple[
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    dict[str, object],
+]
+_DERIVATION_CACHE: dict[_DerivationKey, _DerivationValue] = {}
+
+
 def _cached_derivation(
     alpha: tuple[float, ...],
     a: tuple[float, ...],
     d: tuple[float, ...],
     linearity_joint: int = 2,
     apply_so3: bool = False,
-) -> tuple[
-    Callable[..., NDArray[np.float64]],
-    Callable[..., NDArray[np.float64]],
-    Callable[..., NDArray[np.float64]],
-    Callable[..., NDArray[np.float64]],
-    dict[str, object],
-]:
-    return _derive_pq_for_arm(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
+) -> _DerivationValue:
+    key = (
+        tuple(alpha),
+        tuple(a),
+        tuple(d),
+        int(linearity_joint),
+        bool(apply_so3),
+    )
+    cached = _DERIVATION_CACHE.get(key)
+    if cached is not None:
+        return cached
+    result = _derive_pq_for_arm(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
+    _DERIVATION_CACHE[key] = result
+    return result
+
+
+def insert_derivation(
+    alpha: tuple[float, ...] | NDArray[np.float64],
+    a: tuple[float, ...] | NDArray[np.float64],
+    d: tuple[float, ...] | NDArray[np.float64],
+    linearity_joint: int,
+    apply_so3: bool,
+    build_pq_combined: Callable[..., tuple[NDArray, NDArray, NDArray, NDArray]],
+    metadata: dict[str, object],
+) -> None:
+    """Insert a pre-built (CSE'd, sympy-free) RR derivation into the cache.
+
+    Used by ``ssik build`` artifacts emitted via #210 Phase 2: the
+    artifact bakes ``build_pq_combined`` as a plain numpy function (no
+    sympy at runtime) and calls this function at module-import time to
+    register the derivation for each pre-baked sub-chain DH.
+
+    The combined builder takes the 12 ``T_target`` entries and returns
+    ``(p_sin, p_cos, p_one, q)`` -- one CSE pass produces all four
+    matrices. Internally we wrap it as 4 separate lambdas matching
+    the existing :func:`_cached_derivation` API; each wrapper calls
+    the combined builder and extracts the relevant matrix. Memoising
+    across the 4 wrappers per call (via a tiny ``_per_T_cache``
+    keyed on ``id(T)`` plus the entries) avoids 4x redundant work.
+
+    :param alpha, a, d: DH parameter 6-tuples.
+    :param linearity_joint: AE-3 leftvar choice (0, 1, or 2).
+    :param apply_so3: AE-4 SO(3) ideal reduction flag.
+    :param build_pq_combined: ``(*T_args) -> (p_sin, p_cos, p_one, q)``.
+    :param metadata: dict matching :func:`_derive_pq_for_arm`'s metadata
+        contract (linearity_joint, left_bilinear, right_bilinear, etc.).
+    """
+    key = (
+        tuple(float(x) for x in alpha),
+        tuple(float(x) for x in a),
+        tuple(float(x) for x in d),
+        int(linearity_joint),
+        bool(apply_so3),
+    )
+
+    # Tiny single-slot cache keyed on the T_target arg tuple. Lets the
+    # 4 wrappers below compute the matrices once per T and reuse across
+    # all four extractions. Per-IK overhead: ~1 us for the cache lookup
+    # vs ~50 us for a redundant CSE'd builder call -- 50x amortisation.
+    cache_t: list[tuple[tuple, tuple]] = [((), ())]  # [(t_args, (p_sin, p_cos, p_one, q))]
+
+    def _compute(*t_args):
+        if t_args == cache_t[0][0]:
+            return cache_t[0][1]
+        result = build_pq_combined(*t_args)
+        cache_t[0] = (t_args, result)
+        return result
+
+    def p_sin_fn(*t_args):
+        return _compute(*t_args)[0]
+
+    def p_cos_fn(*t_args):
+        return _compute(*t_args)[1]
+
+    def p_one_fn(*t_args):
+        return _compute(*t_args)[2]
+
+    def q_fn(*t_args):
+        return _compute(*t_args)[3]
+
+    _DERIVATION_CACHE[key] = (p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata)
 
 
 # ---------------------------------------------------------------------------
