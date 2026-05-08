@@ -89,9 +89,29 @@ Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and 
 | 2 — Raghavan–Roth + Manocha–Canny | `ikgeo.general_6r` | ~0.6-5 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |
 | 2 — Husty-Pfurner universal fallback | `husty_pfurner.general_6r` | ~25-200 ms | Study-quaternion algebra; perturbation path (#176) handles symmetric-DH singularities; backstops RR on ill-conditioned arms |
 
+## Onboarding a new arm (`ssik add-arm`)
+
+Hand us a URDF + the base/EE link names, get back a vendored fixture and a bulletproof test scaffold tailored to the dispatched solver:
+
+```bash
+$ ssik add-arm path/to/my_arm.urdf --base base_link --ee tool0 --name my_arm
+[ssik add-arm] Loading path/to/my_arm.urdf
+[ssik add-arm]   7 joints, 8 links — POE-normalized OK
+[ssik add-arm] Classifying topology
+[ssik]   → Best solver: jointlock.seven_r (tier 1)
+[ssik]   → Expected median IK time: ~50.0 ms
+[ssik add-arm] Vendoring URDF -> tests/fixtures/my_arm.urdf
+[ssik add-arm] Generating test scaffold -> tests/test_my_arm.py
+[ssik add-arm]   wrote 4,203 bytes (113 lines)
+[ssik add-arm] ✓ Done. Try:
+[ssik add-arm]     uv run pytest tests/test_my_arm.py -v
+```
+
+The generated test asserts URDF load, dispatcher routing, and FK closure ≤ 1e-10 on hand-picked + Hypothesis-fuzzed reachable poses. Solver-specific scaffolds dispatch to whichever solver the URDF would route to (`seven_r.srs`, `seven_r.srs_polished`, `jointlock.seven_r`, `ikgeo.*`, `husty_pfurner.general_6r`).
+
 ## Per-arm artifact builder (`ssik build`)
 
-The user-facing flow: hand us a URDF, get back a self-contained Python module.
+For production deployment: build a self-contained Python module wrapping the chosen solver.
 
 ```bash
 $ ssik build path/to/ur5.urdf --base base_link --ee ee_link
