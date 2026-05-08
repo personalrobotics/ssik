@@ -123,9 +123,7 @@ def test_urdf_loaded_rizon_does_not_trigger_cached_rr() -> None:
         allow_refinement=False,
         refinement_max_iters=15,
     )
-    assert result is None, (
-        f"expected None (no prime in test path); got {type(result).__name__}"
-    )
+    assert result is None, f"expected None (no prime in test path); got {type(result).__name__}"
 
 
 # ---------------------------------------------------------------------------
@@ -219,8 +217,7 @@ def test_rr_eligible_set_includes_slow_inner_solvers() -> None:
         "husty_pfurner.general_6r",
     }
     assert expected.issubset(_RR_ELIGIBLE_INNER_SOLVERS), (
-        f"slow inner solvers should be RR-eligible: missing "
-        f"{expected - _RR_ELIGIBLE_INNER_SOLVERS}"
+        f"slow inner solvers should be RR-eligible: missing {expected - _RR_ELIGIBLE_INNER_SOLVERS}"
     )
 
 
