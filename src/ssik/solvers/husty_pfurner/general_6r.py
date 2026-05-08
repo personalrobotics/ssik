@@ -126,6 +126,7 @@ def solve(
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
     fk_atol: float = 1e-12,
+    max_solutions: int | None = None,
 ) -> tuple[list[Solution], bool]:
     """Universal 6R analytical IK via Husty-Pfurner.
 
@@ -303,6 +304,7 @@ def solve(
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
         jacobian_fn=jac_fn,
+        max_solutions=max_solutions,
     )
 
     if not solutions:

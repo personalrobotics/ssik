@@ -261,6 +261,7 @@ def _dispatch(
     *,
     allow_refinement: bool,
     refinement_max_iters: int,
+    max_solutions: int | None = None,
 ) -> tuple[list[Solution], bool]:
     """Call the named ikgeo solver on ``sub_kb``. Returns ``(solutions, is_ls)``.
 
@@ -269,6 +270,10 @@ def _dispatch(
     with target ``T_target^{-1}``; the returned q-vectors are then mapped
     back to the original-chain ordering. This handles the EAIK
     ``REVERSED`` decomposition family (e.g. Franka post-lock-4).
+
+    ``max_solutions`` (#198) is plumbed through to the inner solver so a
+    capped-IK request stops branch enumeration once the cap is reached
+    inside the sub-chain, avoiding wasted Newton polish on extra seeds.
     """
     if solver_name.startswith("reversed:"):
         inner_name = solver_name[len("reversed:") :]
@@ -281,6 +286,7 @@ def _dispatch(
             policy,
             allow_refinement=allow_refinement,
             refinement_max_iters=refinement_max_iters,
+            max_solutions=max_solutions,
         )
         # Map reversed-chain q's back to original-chain ordering.
         sub_sols_orig = [replace(sol, q=map_reversed_q(sol.q)) for sol in sub_sols_rev]
@@ -300,6 +306,7 @@ def _dispatch(
             policy,
             allow_refinement=allow_refinement,
             refinement_max_iters=refinement_max_iters,
+            max_solutions=max_solutions,
         )
         if rr_result is not None:
             return rr_result
@@ -323,6 +330,7 @@ def _dispatch(
         policy,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
+        max_solutions=max_solutions,
     )
     return result
 
@@ -354,6 +362,7 @@ def _try_cached_rr(
     *,
     allow_refinement: bool,
     refinement_max_iters: int,
+    max_solutions: int | None = None,
 ) -> tuple[list[Solution], bool] | None:
     """Attempt cached-RR solve on the sub-chain. Returns ``(sols, is_ls)``
     if RR's derivation cache is primed for this DH AND it produces a
@@ -391,6 +400,7 @@ def _try_cached_rr(
             refinement_max_iters=refinement_max_iters,
             linearity_joint=linearity,
             apply_so3=apply_so3,
+            max_solutions=max_solutions,
         )
     except Exception as exc:
         _LOG.debug("jointlock cached-RR raised %s; falling back", type(exc).__name__)
@@ -563,6 +573,7 @@ def solve(
                 policy,
                 allow_refinement=allow_refinement,
                 refinement_max_iters=refinement_max_iters,
+                max_solutions=max_solutions,
             )
         except ValueError:
             # Topology may fail marginally on some lock values (e.g.

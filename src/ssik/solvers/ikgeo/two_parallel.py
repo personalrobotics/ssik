@@ -47,6 +47,7 @@ def solve(
     *,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
+    max_solutions: int | None = None,
 ) -> tuple[list[Solution], bool]:
     if len(kb.joints) != 6:
         raise ValueError(f"two_parallel requires a 6-DOF chain; got {len(kb.joints)} joints")
@@ -143,6 +144,7 @@ def solve(
         solver_name=_SOLVER_NAME,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
+        max_solutions=max_solutions,
     )
     _LOG.info(
         "%s: %d candidates from %d q1-search branches -> %d solutions (is_ls=%s)",

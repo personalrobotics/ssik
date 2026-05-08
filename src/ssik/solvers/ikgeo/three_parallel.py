@@ -69,6 +69,7 @@ def solve(
     *,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
+    max_solutions: int | None = None,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for three-parallel 6R chains.
 
@@ -177,6 +178,7 @@ def solve(
         solver_name=_SOLVER_NAME,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
+        max_solutions=max_solutions,
     )
     _LOG.info(
         "%s: %d candidates -> %d solutions (is_ls=%s)",

@@ -42,7 +42,7 @@ import sympy as sp
 from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
-from ssik.refinement import lm_refine
+from ssik.refinement import dedup_by_wrap_close, lm_refine
 
 __all__ = [
     "back_substitute",
@@ -1522,6 +1522,7 @@ def solve_all_ik(
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
     solver_name: str = "ikgeo._raghavan_roth",
+    max_solutions: int | None = None,
 ) -> tuple[list[Solution], bool]:
     """Run the full Raghavan-Roth pipeline and return all valid IK solutions.
 
@@ -1558,10 +1559,15 @@ def solve_all_ik(
         when ``allow_refinement=True``.
     :param solver_name: tag stored on each returned :class:`Solution` for
         provenance when results pass through a dispatcher.
+    :param max_solutions: optional early-exit cap (#198). When set, stop
+        back-substituting roots once the post-dedup count reaches the cap.
+        Default ``None`` enumerates all up-to-16 algebraic branches.
     :returns: ``(solutions, is_ls)`` where solutions is a list of
         :class:`~ssik.core.solution.Solution` and ``is_ls`` is True iff no
         candidate survived FK validation.
     """
+    if max_solutions is not None and max_solutions < 1:
+        raise ValueError(f"max_solutions must be >= 1 or None; got {max_solutions}")
     if linearity_joint == "auto":
         # AE-3 (#70): pick the best leftvar (cached per arm; the structural
         # pathology that determines the choice is geometry-driven, not
@@ -1613,6 +1619,7 @@ def solve_all_ik(
         # the chain matrices it had to build for drop-joint recovery, so
         # we don't pay for a separate ``_fk_dh(q_cand, dh)`` here (#86).
         q_cand, fk_err_alg = bs_result
+        appended = False
         if fk_err_alg <= fk_atol:
             candidates.append(
                 Solution(
@@ -1624,32 +1631,37 @@ def solve_all_ik(
                     solver_name=solver_name,
                 )
             )
-            continue
-        if not allow_refinement:
-            # Default path: drop candidates that miss fk_atol algebraically.
-            continue
-        # Opt-in refinement: lm_refine polishes the algebraic seed.
-        refined = lm_refine(
-            q_cand,
-            fk_fn,
-            t_target,
-            fk_atol=fk_atol,
-            max_iters=refinement_max_iters,
-            jacobian_fn=jacobian_fn,
-        )
-        if refined is None:
-            continue
-        q_refined, fk_resid, iters = refined
-        candidates.append(
-            Solution(
-                q=q_refined,
-                fk_residual=fk_resid,
-                refinement_used="lm",
-                refinement_iters=iters,
-                branch_id=branch_idx,
-                solver_name=solver_name,
+            appended = True
+        elif allow_refinement:
+            # Opt-in refinement: lm_refine polishes the algebraic seed.
+            refined = lm_refine(
+                q_cand,
+                fk_fn,
+                t_target,
+                fk_atol=fk_atol,
+                max_iters=refinement_max_iters,
+                jacobian_fn=jacobian_fn,
             )
-        )
+            if refined is not None:
+                q_refined, fk_resid, iters = refined
+                candidates.append(
+                    Solution(
+                        q=q_refined,
+                        fk_residual=fk_resid,
+                        refinement_used="lm",
+                        refinement_iters=iters,
+                        branch_id=branch_idx,
+                        solver_name=solver_name,
+                    )
+                )
+                appended = True
+
+        # Early-exit gate (#198): once we have enough unique solutions, stop
+        # back-substituting remaining algebraic roots.
+        if appended and max_solutions is not None and len(candidates) >= max_solutions:
+            deduped_partial = dedup_by_wrap_close(candidates, dedup_atol)
+            if len(deduped_partial) >= max_solutions:
+                return deduped_partial[:max_solutions], False
 
     # Deduplicate with wrap-to-pi joint distance. Keep the lower-fk_residual
     # candidate when two collapse.
@@ -1669,4 +1681,6 @@ def solve_all_ik(
         elif cand.fk_residual < solutions[dup_idx].fk_residual:
             solutions[dup_idx] = cand
 
+    if max_solutions is not None and len(solutions) > max_solutions:
+        solutions = solutions[:max_solutions]
     return solutions, len(solutions) == 0
