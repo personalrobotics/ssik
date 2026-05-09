@@ -182,6 +182,7 @@ def solve(
     refinement_max_iters: int = 15,
     max_solutions: int | None = None,
     fk_atol: float | None = None,
+    reach_slack: float = 0.0,
 ) -> tuple[list[Solution], bool]:
     """Native SRS-class 7R analytical IK via Singh-Kreutz parameterization.
 
@@ -198,6 +199,14 @@ def solve(
         many deduplicated solutions have been found.
     :param fk_atol: FK closure tolerance for accepting a candidate. Default
         ``policy.subproblem_numerical``.
+    :param reach_slack: slacken the cosine-rule reach check by this many
+        meters in both directions (#200). Default ``0.0`` preserves strict-SRS
+        behaviour. Approximate-SRS callers (:mod:`ssik.solvers.seven_r.srs_polished`)
+        pass ``2 * max_drift_m`` so the offset between approximated and true
+        shoulder/wrist pivots doesn't push borderline-reachable poses past
+        ``L_se + L_ew``. Spurious candidates from slackening fail FK closure
+        downstream; the cost is a few extra LM-polish iterations on those
+        seeds, not incorrect IKs.
 
     :returns: ``(solutions, is_ls)``. ``is_ls=True`` iff zero candidates
         passed FK closure.
@@ -224,7 +233,10 @@ def solve(
     # Step 2: shoulder-to-wrist
     SW = W_t - cls.shoulder_pivot
     d_sw = float(np.linalg.norm(SW))
-    if d_sw > L_se + L_ew or d_sw < abs(L_se - L_ew):
+    # Reach check with optional slack (#200): approximate-SRS callers slacken
+    # by ``2 * max_drift_m`` so offsets between approximated and true pivots
+    # don't reject borderline-reachable poses (notably elbow-singular q_3 ≈ 0).
+    if d_sw > L_se + L_ew + reach_slack or d_sw < max(0.0, abs(L_se - L_ew) - reach_slack):
         # Target wrist out of reach.
         return [], True
     u_sw = SW / d_sw
