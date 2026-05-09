@@ -33,6 +33,7 @@ Algorithmic specifics chosen here:
 
 from __future__ import annotations
 
+import pickle
 from collections.abc import Callable
 from functools import lru_cache
 from typing import Literal, cast, overload
@@ -414,34 +415,43 @@ def _derive_pq_for_arm(
     return p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata
 
 
-# Cache the per-arm derivation. Keys are immutable (DH, linearity, so3) tuples.
-@lru_cache(maxsize=64)
+# Cache the per-arm derivation. Keyed on (DH, linearity, so3) tuples.
+#
+# Implemented as a module-level ``dict`` rather than ``functools.lru_cache``
+# so build artifacts can populate it from a deserialised pickle without
+# re-running the 7-50 s sympy derivation. (#210 Phase 2.)
+_DhTuple = tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]
+_DerivationKey = tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], int, bool]
+_DerivationValue = tuple[
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    Callable[..., NDArray[np.float64]],
+    dict[str, object],
+]
+_DERIVATION_CACHE: dict[_DerivationKey, _DerivationValue] = {}
+
+
 def _cached_derivation(
     alpha: tuple[float, ...],
     a: tuple[float, ...],
     d: tuple[float, ...],
     linearity_joint: int = 2,
     apply_so3: bool = False,
-) -> tuple[
-    Callable[..., NDArray[np.float64]],
-    Callable[..., NDArray[np.float64]],
-    Callable[..., NDArray[np.float64]],
-    Callable[..., NDArray[np.float64]],
-    dict[str, object],
-]:
-    return _derive_pq_for_arm(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
+) -> _DerivationValue:
+    key = (alpha, a, d, int(linearity_joint), bool(apply_so3))
+    cached = _DERIVATION_CACHE.get(key)
+    if cached is not None:
+        return cached
+    value = _derive_pq_for_arm(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
+    _DERIVATION_CACHE[key] = value
+    return value
 
 
 # ---------------------------------------------------------------------------
 # Build-time priming for jointlock cached-RR (#210).
 # ---------------------------------------------------------------------------
 
-# Set of (alpha, a, d, linearity, apply_so3) tuples whose derivations have
-# been primed. Populated by ssik build artifacts at module-import time;
-# checked by ssik.solvers.jointlock.seven_r._dispatch to decide whether
-# RR can be used for a non-tier-0 inner sub-chain (cache-miss == cold-cache
-# 8-50 sec per call; cache-hit == ~1 ms).
-_DhTuple = tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...]]
 # Map from (alpha, a, d) to (linearity_joint, apply_so3) for primed sub-chains.
 # Lets jointlock dispatch look up the baked AE-3 leftvar choice without
 # running the expensive ``_cached_best_leftvar`` probe (which would do
@@ -458,10 +468,9 @@ def prime_derivation(
 ) -> None:
     """Pre-populate the RR derivation cache for a (DH, linearity) tuple.
 
-    Called by ``ssik build`` artifacts at module-import time to warm the
-    ``_cached_derivation`` lru_cache. Subsequent ``solve()`` calls on
-    sub-chains with this DH hit the cache and run at ~1 ms instead of
-    8-50 s cold-cache. See #210.
+    Runs the full sympy derivation (~7 s per call) and stores the result.
+    Use :func:`prime_derivation_from_blob` instead when a pre-computed
+    serialised derivation is available -- it's ~30x faster (~0.25 s).
 
     Also records the (DH -> linearity) mapping so the jointlock dispatch
     can look up the baked AE-3 leftvar choice without running the
@@ -478,8 +487,100 @@ def prime_derivation(
     a_t = tuple(float(x) for x in a)
     d_t = tuple(float(x) for x in d)
     _PRIMED_LINEARITY_MAP[(alpha_t, a_t, d_t)] = (int(linearity_joint), bool(apply_so3))
-    # Actually compute (populates lru_cache too).
     _cached_derivation(alpha_t, a_t, d_t, int(linearity_joint), bool(apply_so3))
+
+
+def serialize_derivation(
+    alpha: tuple[float, ...] | NDArray[np.float64],
+    a: tuple[float, ...] | NDArray[np.float64],
+    d: tuple[float, ...] | NDArray[np.float64],
+    linearity_joint: int = 2,
+    apply_so3: bool = False,
+) -> bytes:
+    """Run the symbolic RR derivation for ``(alpha, a, d, linearity_joint,
+    apply_so3)`` and return a pickle-serialised blob containing the symbolic
+    matrices needed to re-lambdify at load time.
+
+    The serialised payload contains only the sympy ``Matrix`` expressions
+    + the ``T_target`` symbol tuple, NOT the lambdified callables (which
+    aren't picklable). At load time, :func:`prime_derivation_from_blob`
+    deserialises the matrices and runs ``sp.lambdify`` to reconstruct the
+    callables -- ~0.25 s on a 6-DOF chain vs ~7 s for the cold derivation.
+
+    Build-time use (#210 Phase 2): the ``ssik build`` codegen composer for
+    ``jointlock.seven_r`` calls this once per non-tier-0 inner sub-chain DH
+    at codegen time and writes the bytes to a sidecar ``.pkl`` file.
+    Module-init for the resulting artifact loads the pickle and primes the
+    derivation cache via :func:`prime_derivation_from_blob`, paying the
+    sympy cost once at build instead of on every ``import``.
+    """
+    alpha_t = tuple(float(x) for x in alpha)
+    a_t = tuple(float(x) for x in a)
+    d_t = tuple(float(x) for x in d)
+    _, _, _, _, meta = _cached_derivation(alpha_t, a_t, d_t, int(linearity_joint), bool(apply_so3))
+    payload = {
+        "version": 1,
+        "alpha": alpha_t,
+        "a": a_t,
+        "d": d_t,
+        "linearity_joint": int(linearity_joint),
+        "apply_so3": bool(apply_so3),
+        "sym_p_sin": meta["_sym_p_sin"],
+        "sym_p_cos": meta["_sym_p_cos"],
+        "sym_p_one": meta["_sym_p_one"],
+        "sym_q": meta["_sym_q"],
+        "sym_t_target": meta["_sym_t_target"],
+        "left_bilinear": meta["left_bilinear"],
+        "right_bilinear": meta["right_bilinear"],
+        "drop_joint": meta["drop_joint"],
+    }
+    return pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def prime_derivation_from_blob(blob: bytes) -> None:
+    """Deserialise a payload produced by :func:`serialize_derivation` and
+    populate the derivation cache + linearity map without re-running the
+    full sympy derivation.
+
+    Faster than :func:`prime_derivation` by ~30x (re-lambdify-only vs
+    full algebraic derivation). Used by ``ssik build`` artifacts at
+    module-import time: the artifact loads a sidecar ``.pkl`` and calls
+    this function once per primed sub-chain DH.
+
+    :raises ValueError: on payload version mismatch.
+    """
+    payload = pickle.loads(blob)
+    if payload.get("version") != 1:
+        raise ValueError(f"unsupported derivation payload version: {payload.get('version')}")
+    T_syms = payload["sym_t_target"]
+    p_sin_fn = sp.lambdify(T_syms, payload["sym_p_sin"], "numpy")
+    p_cos_fn = sp.lambdify(T_syms, payload["sym_p_cos"], "numpy")
+    p_one_fn = sp.lambdify(T_syms, payload["sym_p_one"], "numpy")
+    q_fn = sp.lambdify(T_syms, payload["sym_q"], "numpy")
+    metadata: dict[str, object] = {
+        "linearity_joint": payload["linearity_joint"],
+        "left_bilinear": payload["left_bilinear"],
+        "right_bilinear": payload["right_bilinear"],
+        "drop_joint": payload["drop_joint"],
+        "apply_so3": payload["apply_so3"],
+        "_sym_p_sin": payload["sym_p_sin"],
+        "_sym_p_cos": payload["sym_p_cos"],
+        "_sym_p_one": payload["sym_p_one"],
+        "_sym_q": payload["sym_q"],
+        "_sym_t_target": T_syms,
+    }
+    key = (
+        payload["alpha"],
+        payload["a"],
+        payload["d"],
+        payload["linearity_joint"],
+        payload["apply_so3"],
+    )
+    _DERIVATION_CACHE[key] = (p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata)
+    _PRIMED_LINEARITY_MAP[(payload["alpha"], payload["a"], payload["d"])] = (
+        payload["linearity_joint"],
+        payload["apply_so3"],
+    )
 
 
 def primed_linearity_for_dh(
