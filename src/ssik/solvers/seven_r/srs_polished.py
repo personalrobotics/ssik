@@ -129,6 +129,12 @@ def solve(
     # Step 2: run inner SRS with permissive FK tolerance to capture all
     # algebraic candidates. They will have FK residual ~max_drift_m
     # because the solver assumes axes meet exactly; LM polish corrects.
+    # Slacken the reach check by 2 * max_drift_m (#200): the offset between
+    # approximated and true shoulder/wrist pivots can otherwise push
+    # elbow-near-singular poses (q_3 ≈ 0, where d_sw → L_se + L_ew) past
+    # the cosine-rule envelope. LM polish later filters truly-unreachable
+    # candidates by FK residual; the cost of the extra LM iterations on
+    # spurious seeds is much smaller than dropping reachable poses.
     raw, _is_ls = srs.solve(
         kb,
         T_target,
@@ -138,6 +144,7 @@ def solve(
         # Don't cap raw candidates here -- some won't polish, and
         # we want to maximise survivors.
         max_solutions=None,
+        reach_slack=2.0 * max_drift_m,
     )
 
     if not raw:
