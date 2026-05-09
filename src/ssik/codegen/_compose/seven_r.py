@@ -42,14 +42,20 @@ recognises 7R and routes here automatically.
 
 from __future__ import annotations
 
+import base64
 import textwrap
+import time
+import zlib
 
 import numpy as np
 
 from ssik._kinbody import KinBody
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
 from ssik.kinematics.poe_to_dh import poe_to_dh
-from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar
+from ssik.solvers.ikgeo._raghavan_roth import (
+    _cached_best_leftvar,
+    serialize_derivation,
+)
 from ssik.solvers.jointlock.seven_r import (
     _DEFAULT_SAMPLES,
     _RR_ELIGIBLE_INNER_SOLVERS,
@@ -64,10 +70,11 @@ __all__ = ["compose", "render_constants_header"]
 def render_constants_header() -> str:
     """Imports needed by the rendered seven_r artifact.
 
-    Note: the ``prime_derivation`` import for cached-RR priming (#210)
-    is added inline in :func:`compose` only when the arm has at least
-    one eligible non-tier-0 inner sample. Arms with all-tier-0 dispatch
-    (e.g. Franka) keep their artifact byte-identical to pre-#210.
+    Note: the ``prime_derivation_from_blob`` import + sidecar-blob load
+    (cached-RR priming, #210 Phase 2) is added inline in :func:`compose`
+    only when the arm has at least one eligible non-tier-0 inner sample.
+    Arms with all-tier-0 dispatch (e.g. Franka pre-#219) keep their
+    artifact byte-identical to pre-#210.
     """
     return (
         "import math\n"
@@ -134,27 +141,49 @@ def compose(kb: KinBody) -> str:
     samples_repr = ", ".join(repr(float(s)) for s in samples)
     dispatch_repr = ",\n            ".join(repr(name) for name in dispatch)
     if rr_prime_dhs:
-        rr_prime_lines = []
+        # #210 Phase 2: pre-compute the symbolic derivation for each (alpha,
+        # a, d, linearity) tuple at codegen time and serialise to bytes.
+        # The artifact embeds these as zlib-compressed base85 strings; at
+        # module-import time, ``prime_derivation_from_blob`` deserialises
+        # and re-lambdifies in ~0.25s per blob (vs ~7s cold sympy
+        # derivation). ~30x faster import for arms that hit non-tier-0
+        # inner solvers (Rizon 4, Kassow KR810, future #219 expansion).
+        bake_start = time.perf_counter()
+        encoded_blobs: list[str] = []
         for alpha, a, d, lin in rr_prime_dhs:
-            rr_prime_lines.append(f"            ({alpha!r}, {a!r}, {d!r}, {lin}),")
-        # Local import within the artifact (kept inline rather than at
-        # the module-header level so arms without priming stay byte-
-        # identical to pre-#210 artifacts).
+            blob = serialize_derivation(alpha, a, d, linearity_joint=lin, apply_so3=False)
+            compressed = zlib.compress(blob, level=9)
+            encoded_blobs.append(base64.b85encode(compressed).decode("ascii"))
+        _LOG_TIME = time.perf_counter() - bake_start
+        # Wrap each base85 string at 76 columns and emit as a tuple of
+        # adjacent string literals (Python concatenates them at compile
+        # time).
+        chunked = []
+        for s in encoded_blobs:
+            lines = [s[i : i + 76] for i in range(0, len(s), 76)]
+            quoted = "\n".join(f'                "{line}"' for line in lines)
+            chunked.append(f"            (\n{quoted}\n            ),")
+        rr_blobs_repr = "\n".join(chunked)
         rr_prime_block = (
-            "\n\n        from ssik.solvers.ikgeo._raghavan_roth import (\n"
-            "            prime_derivation as _ssik_rr_prime,\n"
+            "\n\n        import base64 as _ssik_b64\n"
+            "        import zlib as _ssik_zlib\n\n"
+            "        from ssik.solvers.ikgeo._raghavan_roth import (\n"
+            "            prime_derivation_from_blob as _ssik_rr_prime_from_blob,\n"
             "        )\n\n"
-            "        # Cached-RR priming list (#210). For each non-tier-0 inner\n"
-            "        # sample, the (alpha, a, d, linearity_joint) tuple to pre-warm\n"
-            "        # Raghavan-Roth's symbolic derivation. Module-init below calls\n"
-            "        # ``prime_derivation`` for each entry; subsequent jointlock\n"
+            "        # Cached-RR priming blobs (#210 Phase 2). Each entry is a\n"
+            "        # base85-encoded zlib-compressed pickle of the pre-computed\n"
+            "        # Raghavan-Roth symbolic derivation for one (alpha, a, d, linearity)\n"
+            "        # sub-chain DH. Module-init re-lambdifies each blob in ~0.25s and\n"
+            "        # populates the per-arm derivation cache. Subsequent jointlock\n"
             "        # dispatches use cached RR (~1 ms) instead of HP / two_parallel /\n"
-            "        # spherical (~7-260 ms) for matching sub-chains. ~12-25x speedup\n"
-            "        # post-warmup; module import pays a one-time ~80-130 s cold-cache\n"
-            "        # cost which amortises across the deployment lifetime.\n"
-            "        _RR_PRIME_DHS = (\n" + "\n".join(rr_prime_lines) + "\n        )\n\n"
-            "        for _alpha, _a, _d, _lin in _RR_PRIME_DHS:\n"
-            "            _ssik_rr_prime(_alpha, _a, _d, linearity_joint=_lin, apply_so3=False)\n"
+            "        # spherical (~7-260 ms) for matching sub-chains. The build pays\n"
+            "        # the ~7s cold sympy derivation cost once per blob; module-import\n"
+            "        # pays only the ~0.25s re-lambdify cost.\n"
+            "        _RR_PRIME_BLOBS_B85 = (\n" + rr_blobs_repr + "\n        )\n\n"
+            "        for _b85 in _RR_PRIME_BLOBS_B85:\n"
+            "            _ssik_rr_prime_from_blob(\n"
+            "                _ssik_zlib.decompress(_ssik_b64.b85decode(_b85))\n"
+            "            )\n"
         )
     else:
         # Arms whose dispatch cache is entirely tier-0 don't need priming
