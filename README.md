@@ -10,7 +10,7 @@ Analytical inverse kinematics for non-Pieper 6R arms — the **EAIK gap**. The a
 |---|---|---|---|
 | Pieper-class (UR5, Puma 560, Fanuc, KUKA KR) | ~0.2 ms | ~20 ms | ~1-2 ms |
 | Non-Pieper 6R (JACO 2, Piper) | not supported | ~20 ms | **~0.6 ms median** |
-| SRS-class 7R (KUKA iiwa LBR) | sub-ms | ~30 ms | **~8.5 ms (128 IKs)** |
+| SRS-class 7R (KUKA iiwa LBR) | sub-ms | ~30 ms | **~4.3 ms (128 IKs)** |
 | Approximate-SRS 7R (Kinova Gen3) | sub-ms (with mm-scale IK error vs URDF) | ~30 ms | **~56 ms (machine-precision FK on URDF, batched LM polish)** |
 | Non-Pieper 7R (Flexiv Rizon 4, Kassow KR810) | sub-ms (with cm-scale IK error) | ~30 ms | **~17-18 ms (cached-RR per #210; 30-45 IKs)** |
 | Anthropomorphic 7R (Franka Panda, FR3, xArm7) | sub-ms | ~30 ms | **~42 ms (48-64 IKs) via joint-locking** |
@@ -50,8 +50,8 @@ Closed-form Singh-Kreutz 1989 algorithm for arms with shoulder-spherical + wrist
 
 | Arm | Full-sweep speed | Status |
 |-----|:---:|:---:|
-| **KUKA iiwa LBR 14** | **~8.5 ms (128 IKs, FK ≤ 1e-13)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| KUKA iiwa LBR 7 (R820 / R14) | expected ~8.5 ms | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
+| **KUKA iiwa LBR 14** | **~4.3 ms (128 IKs, FK ≤ 1e-13)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
+| KUKA iiwa LBR 7 (R820 / R14) | expected ~4.3 ms | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
 
 ### 7R redundant arms — approximately-SRS with LM polish (`seven_r.srs_polished`)
 
@@ -82,7 +82,7 @@ Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and 
 | Tier | Solver modules | Typical IK time | Algorithm |
 |---|---|---|---|
 | 0 — closed-form 6R | `three_parallel`, `spherical_two_parallel`, `spherical_two_intersecting`, `spherical` | ~1 ms | SP1–SP6 composition; one branch per Pieper specialisation |
-| 0 — closed-form 7R (SRS) | `seven_r.srs` | ~8.5 ms full sweep | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × 16 swivel samples = 128 IKs |
+| 0 — closed-form 7R (SRS) | `seven_r.srs` | ~4.3 ms full sweep | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × 16 swivel samples = 128 IKs (vectorised inner loop, #217) |
 | 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~56 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + batched LM polish to machine precision against the original URDF FK |
 | 1 — univariate search | `two_parallel`, `two_intersecting` | ~100 ms – 2 s | tan-half-angle reduction + 200-sample search + Newton polish |
 | 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms tier-0 inner; **~17 ms with cached-RR (#210)** when artifact-built | lock one joint, dispatch inner 6R, sweep 16 lock samples; Raghavan-Roth pre-baked at codegen for non-Pieper sub-chains |
