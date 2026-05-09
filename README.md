@@ -21,6 +21,31 @@ Three differentiators:
 2. **Native SRS-class 7R solver** (`seven_r.srs`, Singh-Kreutz 1989) — closed-form parameterised by elbow swivel angle. Predicate-driven dispatch (`is_srs_7r`) auto-applies to any 7R arm matching the topology: shoulder axes (0,1,2) concurrent + wrist axes (4,5,6) concurrent. iiwa14 is the canonical fixture; an approximate-SRS variant (`seven_r.srs_polished`) extends the framework to small-drift arms (Kinova Gen3) via Singh-Kreutz seeds + LM polish against the original URDF FK.
 3. **Cached Raghavan-Roth for jointlock 7R** (#210). Many "literature-SRS" 7R arms (Rizon 4, Kassow KR810) have URDF offsets that break strict SRS structure and previously fell through to the universal jointlock+HP fallback at ~244-444 ms per call. `ssik build` now bakes per-arm RR symbolic derivations into the artifact; the runtime jointlock dispatch uses cached RR (~1 ms warm) instead of HP, yielding **12-25× post-import speedup**. Produces machine-precision FK closure on the actual URDF, not a simplified DH (unlike EAIK's sub-ms-with-cm-scale-error path).
 
+## Quickstart
+
+```python
+import ssik
+import numpy as np
+
+# Load any URDF: the dispatcher picks the right analytical solver automatically.
+arm = ssik.Manipulator.from_urdf("ur5.urdf", base="base_link", ee="ee_link")
+print(arm)
+# <Manipulator: 6-DOF, dispatched to ikgeo.three_parallel (tier 0)>
+
+# Forward kinematics:
+T = arm.fk([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+
+# Inverse kinematics — full redundancy enumeration:
+sols, is_ls = arm.ik(T)
+for sol in sols:
+    print(sol.q, sol.fk_residual)
+
+# Trajectory tracking — "give me any IK", typically 10-15× faster on 7R arms:
+sols, is_ls = arm.ik(T, max_solutions=1, q_seed=q_previous)
+```
+
+That's the whole API for the common path. The Manipulator dispatches across every supported arm class — UR5 (tier-0), JACO 2 (non-Pieper 6R), iiwa14 (strict SRS), Gen3 (approximate-SRS + LM polish), Rizon 4 / Kassow / Franka / xArm7 (jointlock + cached-RR). Power users who need solver-specific knobs (`swivel_samples`, `linearity_joint`, etc.) pass them via `arm.ik(T, **solver_kwargs)`.
+
 ## Supported arms & solver coverage
 
 Status legend: ✅ in-repo URDF/MJCF fixture exercised by the test suite — 🔗 external URDF, fixture import pending — 📐 synthetic-only (no canonical commercial arm with this exact topology). Speed is typical median IK-call latency on Apple M3 single-thread, pure Python+numpy.
