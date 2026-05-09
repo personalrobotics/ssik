@@ -239,15 +239,40 @@ def solve(
     if d_sw > L_se + L_ew + reach_slack or d_sw < max(0.0, abs(L_se - L_ew) - reach_slack):
         # Target wrist out of reach.
         return [], True
+    if d_sw < 1e-12:
+        # Shoulder coincides with target wrist -- pathological configuration
+        # the algorithm can't parameterise (no SW direction). Empty solution
+        # set; LM-from-seed in srs_polished can recover.
+        return [], True
     u_sw = SW / d_sw
 
+    # Layer 2 of #223: clamp d_sw strictly inside the cosine-rule envelope
+    # ONLY for approximate-SRS callers (reach_slack > 0). Without clamp,
+    # d_sw exactly at the boundary gives r_circle = 0 (swivel circle
+    # collapses) and a degenerate q_2 atan2 that LM polish struggles to
+    # recover from. Clamping keeps r_circle > 0 so the standard 16-swivel
+    # sweep produces 16 nearby candidates instead of 16 collapsed copies.
+    #
+    # Strict-SRS callers (reach_slack=0; iiwa14 etc.) skip the clamp:
+    # introducing a 1e-6 m offset in d_sw translates to ~3e-7 FK residual
+    # which exceeds their 1e-10 strict-SRS contract. The original boundary
+    # handling via ``np.clip`` on ``cos_int`` and ``max(..., 0)`` on r_circle
+    # squared keeps strict-SRS behaviour byte-stable.
+    if reach_slack > 0.0:
+        _SINGULAR_EPS = 1e-6
+        d_sw_eff = float(
+            np.clip(d_sw, abs(L_se - L_ew) + _SINGULAR_EPS, L_se + L_ew - _SINGULAR_EPS)
+        )
+    else:
+        d_sw_eff = d_sw
+
     # Step 3: q_3 candidates from cosine rule.
-    cos_int = float(np.clip((L_se**2 + L_ew**2 - d_sw**2) / (2.0 * L_se * L_ew), -1.0, 1.0))
+    cos_int = float(np.clip((L_se**2 + L_ew**2 - d_sw_eff**2) / (2.0 * L_se * L_ew), -1.0, 1.0))
     base_q3 = np.pi - np.arccos(cos_int)
     q_3_branches = (base_q3, -base_q3)
 
-    # Step 4 setup: swivel circle.
-    x_c = (L_se**2 - L_ew**2 + d_sw**2) / (2.0 * d_sw)
+    # Step 4 setup: swivel circle (uses the clamped d_sw_eff so r_circle > 0).
+    x_c = (L_se**2 - L_ew**2 + d_sw_eff**2) / (2.0 * d_sw_eff)
     r_circle = float(np.sqrt(max(L_se**2 - x_c**2, 0.0)))
     u_perp1, u_perp2 = _swivel_basis(u_sw)
     swivel_data = (u_sw, x_c, r_circle, u_perp1, u_perp2)
@@ -279,6 +304,26 @@ def solve(
     )  # (N, 3)
     R_post_wrist = kb.joints[6].T_right[:3, :3]
 
+    # Layer 3 of #223: detect near-kinematic-singularity (r_circle small)
+    # ONLY for approximate-SRS callers (those passing reach_slack > 0). At
+    # the singularity the swivel circle collapses to a near-single point and
+    # the wrist-pivot SP1 for q_2 becomes numerically unstable on arms whose
+    # shoulder pivot is approximate (Gen3: 12 mm offset). Re-parameterising
+    # to sweep q_2 directly produces a 1-parameter family of seeds that
+    # LM polish (in srs_polished) can close to machine precision.
+    #
+    # Strict-SRS callers (reach_slack=0; iiwa14, etc.) keep the SP1 atan2
+    # path. The atan2 may be numerically loose at the exact singularity,
+    # but on a strict-SRS arm the algebraic candidates close to machine
+    # precision regardless -- there's no offset to compound the error.
+    # The strict-SRS test suite asserts FK closure at 1e-13, which the
+    # SP1 path meets and the q_2-sweep would not.
+    #
+    # Threshold 1e-2 m (1 cm): empirically separates the SP1-stable regime
+    # from the q_2-redundancy regime on Gen3-class arms.
+    _SINGULAR_R_CIRCLE = 1e-2
+    _is_singular: bool = reach_slack > 0.0 and r_circle < _SINGULAR_R_CIRCLE
+
     # Elbow direction d (N, 3) -- same for both q_1 signs because cos(q_1)
     # depends only on d[:, 2].
     d = (E_t - S) / L_se
@@ -306,17 +351,28 @@ def solve(
             q_partial[:, 3] = q_3_signed
             _, W_at_q2_zero = _frame_at_joint_batch(kb, q_partial, 5)
 
-            # SP1 vectorised: q_2 around upper-arm axis maps q_2=0 wrist pivot
-            # into target W_t. Closed-form: q = atan2(u . (p1 x p2), p1.p2 - (u.p1)(u.p2)).
-            u_upper = d  # (N, 3)
-            p_from = W_at_q2_zero - E_t
-            p_to = W_t - E_t  # (3,) -> broadcasts to (N, 3) below
-            up_dot_pf = (u_upper * p_from).sum(axis=1)
-            up_dot_pt = (u_upper * p_to).sum(axis=1)
-            cross_pf_pt = np.cross(p_from, p_to)
-            num = (u_upper * cross_pf_pt).sum(axis=1)
-            den = (p_from * p_to).sum(axis=1) - up_dot_pf * up_dot_pt
-            q_2 = np.arctan2(num, den)
+            if _is_singular:
+                # At the kinematic singularity, the wrist-pivot SP1 is
+                # degenerate -- replace q_2's atan2 derivation with a
+                # direct sweep of the swivel-grid values, treating q_2 as
+                # the redundancy parameter (#223 layer 3). The 16 swivel
+                # samples become 16 q_2 samples; the wrist triple computes
+                # correctly for each. LM polish closes the small offset
+                # induced by clamping d_sw to d_sw_eff.
+                q_2 = swivels
+            else:
+                # SP1 vectorised: q_2 around upper-arm axis maps q_2=0 wrist
+                # pivot into target W_t. Closed-form:
+                # q = atan2(u . (p1 x p2), p1.p2 - (u.p1)(u.p2)).
+                u_upper = d  # (N, 3)
+                p_from = W_at_q2_zero - E_t
+                p_to = W_t - E_t  # (3,) -> broadcasts to (N, 3) below
+                up_dot_pf = (u_upper * p_from).sum(axis=1)
+                up_dot_pt = (u_upper * p_to).sum(axis=1)
+                cross_pf_pt = np.cross(p_from, p_to)
+                num = (u_upper * cross_pf_pt).sum(axis=1)
+                den = (p_from * p_to).sum(axis=1) - up_dot_pf * up_dot_pt
+                q_2 = np.arctan2(num, den)
 
             # Frame at joint 4 with q_full_pre = (q_0, q_1, q_2, q_3, 0, 0, 0).
             q_post = q_partial.copy()
