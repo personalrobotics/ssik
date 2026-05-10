@@ -1,273 +1,128 @@
 # ssik
 
-Analytical inverse kinematics for non-Pieper 6R arms — the **EAIK gap**. The arms whose IK isn't a one-line call against EAIK or IK-Geo (Kinova JACO 2, Agilex Piper, Flexiv Rizon, custom geometries with no parallel or intersecting axis triples).
-
-> **Private repository.** This codebase is proprietary. Source distribution is not authorised; see [`LICENSE`](LICENSE). The user-facing artifact is a per-arm compiled wheel built from this codebase; users do not run this source directly. See [#95](https://github.com/siddhss5/ikfastpy/issues/95) for the distribution model.
-
-## What ssik does that the alternatives don't
-
-| arm class | EAIK / IK-Geo | mink / KDL (numeric) | ssik (full sweep, all branches) |
-|---|---|---|---|
-| Pieper-class (UR5, Puma 560, Fanuc, KUKA KR) | ~0.2 ms | ~20 ms | ~1-2 ms |
-| Non-Pieper 6R (JACO 2, Piper) | not supported | ~20 ms | **~0.6 ms median** |
-| SRS-class 7R (KUKA iiwa LBR) | sub-ms | ~30 ms | **~4.3 ms (128 IKs)** |
-| Approximate-SRS 7R (Kinova Gen3) | sub-ms (with mm-scale IK error vs URDF) | ~30 ms | **~56 ms (machine-precision FK on URDF, batched LM polish)** |
-| Non-Pieper 7R (Flexiv Rizon 4, Kassow KR810) | sub-ms (with cm-scale IK error) | ~30 ms | **~17-18 ms (cached-RR per #210; 30-45 IKs)** |
-| Anthropomorphic 7R (Franka Panda, FR3, xArm7) | sub-ms | ~30 ms | **~42 ms (48-64 IKs) via joint-locking** |
-
-Three differentiators:
-
-1. **Non-Pieper 6R analytical solver** (`ikgeo.general_6r`, Raghavan–Roth + Manocha–Canny). No other library in the ecosystem ships analytical IK for arms whose geometry deliberately violates Pieper's condition for mechanical-design reasons (JACO 2 with 60° non-orthogonal twists is the canonical example). ssik does, with all branches recovered at machine precision in sub-ms. See `docs/tutorial/04_raghavan_roth.md` for the math and `docs/tutorial/05_conditioning.md` for the robustness fixes (AE-1, AE-3, AE-4, Möbius reparameterisation) that make the textbook pipeline survive on real ill-conditioned arms.
-2. **Native SRS-class 7R solver** (`seven_r.srs`, Singh-Kreutz 1989) — closed-form parameterised by elbow swivel angle. Predicate-driven dispatch (`is_srs_7r`) auto-applies to any 7R arm matching the topology: shoulder axes (0,1,2) concurrent + wrist axes (4,5,6) concurrent. iiwa14 is the canonical fixture; an approximate-SRS variant (`seven_r.srs_polished`) extends the framework to small-drift arms (Kinova Gen3) via Singh-Kreutz seeds + LM polish against the original URDF FK.
-3. **Cached Raghavan-Roth for jointlock 7R** (#210). Many "literature-SRS" 7R arms (Rizon 4, Kassow KR810) have URDF offsets that break strict SRS structure and previously fell through to the universal jointlock+HP fallback at ~244-444 ms per call. `ssik build` now bakes per-arm RR symbolic derivations into the artifact; the runtime jointlock dispatch uses cached RR (~1 ms warm) instead of HP, yielding **12-25× post-import speedup**. Produces machine-precision FK closure on the actual URDF, not a simplified DH (unlike EAIK's sub-ms-with-cm-scale-error path).
-
-## Quickstart
+Analytical inverse kinematics for 6R and 7R revolute robot arms. Returns **every IK branch** at machine-precision FK closure, dispatches the right solver automatically, and ships a per-arm build artifact that contains the full IK pipeline as a self-contained Python module.
 
 ```python
 import ssik
-import numpy as np
 
-# Load any URDF: the dispatcher picks the right analytical solver automatically.
 arm = ssik.Manipulator.from_urdf("ur5.urdf", base="base_link", ee="ee_link")
-print(arm)
-# <Manipulator: 6-DOF, dispatched to ikgeo.three_parallel (tier 0)>
-
-# Forward kinematics:
 T = arm.fk([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
-
-# Inverse kinematics — full redundancy enumeration:
-sols, is_ls = arm.ik(T)
-for sol in sols:
-    print(sol.q, sol.fk_residual)
-
-# Trajectory tracking — "give me any IK", typically 10-15× faster on 7R arms:
-sols, is_ls = arm.ik(T, max_solutions=1, q_seed=q_previous)
+sols, is_ls = arm.ik(T)                                   # all 8 IK branches
+sols, _    = arm.ik(T, max_solutions=1, q_seed=q_prev)    # closest branch only
 ```
 
-That's the whole API for the common path. The Manipulator dispatches across every supported arm class — UR5 (tier-0), JACO 2 (non-Pieper 6R), iiwa14 (strict SRS), Gen3 (approximate-SRS + LM polish), Rizon 4 / Kassow / Franka / xArm7 (jointlock + cached-RR). Power users who need solver-specific knobs (`swivel_samples`, `linearity_joint`, etc.) pass them via `arm.ik(T, **solver_kwargs)`.
+## Returns all solutions, not one
 
-## Supported arms & solver coverage
+A single 6-DOF target pose admits up to **16 analytical IK branches** (8 typical for a Pieper-class arm: 4 shoulder × 2 elbow, with the wrist deterministic). For a 7R redundant arm, the IK is a 1-parameter family; ssik discretises it into 32–256 branches per pose depending on the swivel-sample count. Every returned `Solution` carries `q`, the per-IK FK residual, and which solver branch produced it.
 
-Status legend: ✅ in-repo URDF/MJCF fixture exercised by the test suite — 🔗 external URDF, fixture import pending — 📐 synthetic-only (no canonical commercial arm with this exact topology). Speed is typical median IK-call latency on Apple M3 single-thread, pure Python+numpy.
+This is what numerical IK libraries (MINK, TracIK, KDL-LMA) cannot give you: they take a seed, run damped least-squares to a single converged configuration, and stop. Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
 
-### 6R industrial arms
+## Coverage relative to existing libraries
 
-| Arm | Solver | Speed | Status |
-|-----|--------|:-----:|:-----:|
-| Universal Robots UR3 / UR5 / UR10 / UR16 | `ikgeo.three_parallel` | ~1-2 ms | ✅ UR5 in [`tests/fixtures/`](tests/fixtures/), others 🔗 |
-| Puma 560 | `ikgeo.spherical_two_parallel`, `ikgeo.spherical_two_intersecting` | ~1-2 ms | ✅ |
-| ABB IRB120 / IRB4600 | `ikgeo.spherical_two_parallel` | ~1-2 ms | 🔗 [ros-industrial/abb](https://github.com/ros-industrial/abb) |
-| Fanuc LR Mate / CR | `ikgeo.spherical_two_parallel` | ~1-2 ms | 🔗 (vendor URDF) |
-| KUKA KR | `ikgeo.spherical_two_parallel` | ~1-2 ms | 🔗 [ros-industrial/kuka_experimental](https://github.com/ros-industrial/kuka_experimental) |
-| uFactory lite6 / xArm6 | `ikgeo.spherical_two_parallel`, `ikgeo.spherical_two_intersecting` | ~1-2 ms | 🔗 [xArm-Developer/xarm_ros](https://github.com/xArm-Developer/xarm_ros) |
+|   | EAIK | IK-Geo | MINK / TracIK (numeric) | ssik |
+|---|:---:|:---:|:---:|:---:|
+| Pieper-class 6R (UR5, Puma 560, KUKA KR) | analytical | analytical | iterative | analytical |
+| **Non-Pieper 6R** (JACO 2 j2n6s200, Agilex Piper) | refuses | refuses | iterative, single solution | analytical (`ikgeo.general_6r`) |
+| SRS-class 7R (KUKA iiwa14) | analytical | analytical | iterative | analytical (`seven_r.srs`) |
+| **Approximate-SRS 7R** (Kinova Gen3, ~12 mm offset) | analytical against simplified DH (mm IK error) | similar | iterative | analytical against original URDF FK |
+| **Non-SRS 7R** (Flexiv Rizon, Kassow KR810) | analytical against simplified DH (cm IK error) | refuses | iterative | analytical (`jointlock.seven_r` + cached Raghavan–Roth) |
+| Anthropomorphic 7R (Franka, FR3, xArm7) | analytical | analytical | iterative | analytical (joint-locking) |
+| FK closure on returned IK | varies | machine precision | 1e-3 to 1e-6 | ≤ 1e-10 every retained IK |
+| Returns all branches | yes (where supported) | yes (where supported) | no | yes |
 
-### 6R non-Pieper (the EAIK gap)
+The arms ssik exists for are the ones where EAIK and IK-Geo refuse: non-Pieper 6R chains where the geometry deliberately violates Pieper's three-axes-intersect condition (the JACO 2's 60° non-orthogonal twists are the canonical example), and 7R arms whose URDF axes don't quite meet at the canonical SRS shoulder/wrist points. Numeric solvers handle these but at 100× the cost, without redundancy enumeration, and with FK error proportional to the convergence tolerance rather than machine precision.
 
-| Arm | Solver | Speed | Status |
-|-----|--------|:-----:|:-----:|
-| **Kinova JACO 2 (j2n6s200, 55° DH)** | `ikgeo.general_6r` (RR + AE-3) | **~5 ms median** | ✅ real MJCF in [`tests/fixtures/`](tests/fixtures/) |
-| Agilex Piper | `ikgeo.general_6r` | expected ~5 ms | 🔗 [mujoco_menagerie/agilex_piper](https://github.com/google-deepmind/mujoco_menagerie/tree/main/agilex_piper) |
-| Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~5 ms | URDF intake via [#95](https://github.com/siddhss5/ikfastpy/issues/95) |
+The algorithmic ingredients are not novel — Raghavan–Roth (1990), Manocha–Canny (1994), Singh–Kreutz (1989), Husty–Pfurner (2007). What's new is making the textbook pipelines survive on real ill-conditioned arms (AE-3 leftvar selection on JACO 2 drops `cond(m_quad)` from 3.75 × 10^16 to 127), composing them with a uniform dispatch layer, and packaging the whole thing as a deployable artifact.
 
-### 7R redundant arms — pure SRS (`seven_r.srs`)
+## The build artifact is the deployment story
 
-Closed-form Singh-Kreutz 1989 algorithm for arms with shoulder-spherical + wrist-spherical topology + elbow roll. Predicate-driven dispatch via `is_srs_7r` (no per-arm hardcoding); auto-applies to any 7R chain whose shoulder axes (0,1,2) and wrist axes (4,5,6) each meet at a common point. Default 16 swivel samples × 8 branches = 128 IK candidates per call.
+ssik supports two execution paths. They share the same public API but solve different problems.
 
-| Arm | Full-sweep speed | Status |
+**Development / interactive** — `ssik.Manipulator.from_urdf(...)`:
+
+```python
+arm = ssik.Manipulator.from_urdf("my_arm.urdf", base="base_link", ee="ee_link")
+sols, _ = arm.ik(T)
+```
+
+The runtime parses the URDF, classifies the topology, dispatches a solver, and runs IK. First-call symbolic preprocessing (when the dispatch lands on the universal Raghavan-Roth fallback) is paid lazily — fine for tests and one-off use. Requires `urchin` for URDF parsing and `sympy` for any symbolic preprocessing on first call.
+
+**Production / embedded** — `ssik build` artifact:
+
+```bash
+ssik build my_arm.urdf --base base_link --ee tool0
+# → my_arm_ik.py    (~1-5 min build, all symbolic preprocessing baked in)
+```
+
+```python
+import my_arm_ik
+sols, is_ls = my_arm_ik.solve(T_target)         # same signature as Manipulator.ik()
+```
+
+The artifact is a single `.py` file that contains:
+- the per-arm KinBody constants inlined as numpy literals,
+- the dispatch choice baked at build time (no runtime classification),
+- for non-Pieper sub-chains, the cached Raghavan–Roth symbolic derivations as base85-encoded zlib-compressed pickle blobs.
+
+Module-init takes ~5 seconds (deserialise + re-`lambdify` the cached blobs); every subsequent `solve()` call hits warm-cache speed. **No URDF parsing, no `urchin` dependency, no cold-cache symbolic preprocessing at runtime, no sympy on the import path of the deployed artifact.** A robot stack that imports `my_arm_ik.py` carries no algorithmic complexity beyond what the build pipeline already resolved.
+
+This is the same idea OpenRAVE's IKFast had — generate per-arm specialised IK code at design time, run pure numeric at deployment — but without IKFast's brittleness on non-Pieper geometries.
+
+## Speed (typical median, Apple M3 single-thread, pure Python + numpy)
+
+| Arm | Full sweep (all branches) | `max_solutions=1` (single closest branch) |
 |-----|:---:|:---:|
-| **KUKA iiwa LBR 14** | **~4.3 ms (128 IKs, FK ≤ 1e-13)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| KUKA iiwa LBR 7 (R820 / R14) | expected ~4.3 ms | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
+| UR5 (6R, three-parallel) | 1.6 ms (8 IKs) | 0.2 ms |
+| Puma 560 (6R, spherical wrist) | 1.2 ms (8 IKs) | 0.2 ms |
+| JACO 2 (non-Pieper 6R) | 5 ms (8 IKs) | 0.6 ms |
+| iiwa14 (SRS 7R) | 4.3 ms (128 IKs) | 0.5 ms |
+| Gen3 (approximate-SRS 7R) | 56 ms (40 IKs, machine-precision LM polish) | 5 ms |
+| Rizon 4 (non-SRS 7R, built artifact) | 17 ms (45 IKs) | 1.5 ms |
+| Kassow KR810 (non-SRS 7R, built artifact) | 18 ms (30 IKs) | 1.6 ms |
+| Franka Panda (anthropomorphic 7R) | 42 ms (64 IKs) | 2.4 ms |
 
-### 7R redundant arms — approximately-SRS with LM polish (`seven_r.srs_polished`)
+Cython hot loops cover the leaf primitives (Rodrigues rotations, POE forward kinematics, SP1–SP6 subproblems); the rest is pure Python so it stays inspectable. Numbers above are post-`ssik build` artifact load.
 
-For arms whose URDF axes only **nearly** meet at common shoulder/wrist points (Kinova Gen3: 12 mm shoulder + 0.4 mm wrist drift), the strict SRS predicate refuses but the relaxed-predicate Singh-Kreutz solver still produces good warm-start candidates. Each is LM-polished against the original URDF FK to reach machine-precision closure (FK ≤ 1e-10). 16-30× faster than `jointlock + HP` on small-drift arms, with no IK error against the real URDF (unlike EAIK's simplified-DH path).
+## Bulletproof discipline
 
-Refused (drift exceeds Newton's basin, ~3-5 cm): falls back to `jointlock + HP`.
+Every solver lands with: N-way cross-solver agreement on shared fixtures, FK closure ≤ 1e-10 on every retained IK, 500+ Hypothesis-fuzzed random poses per fixture, and an explicit speed bench that has to clear a regression gate. The current suite has **1284 tests across 11 fixture arms**. Negative-result spikes (a Cython estimate that misses by 2-5×, a codegen-bake on a part that's 0.3% of runtime) are published as closed issues with profile data so the next contributor doesn't repeat the path.
 
-### 7R redundant arms — non-SRS (`jointlock.seven_r`)
-
-For 7R arms whose topology doesn't match strict or approximate SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. 16-sample lock sweep × inner 6R solver per call.
-
-**Cached-RR fast path (#210)**: when an arm hits the universal fallback for non-Pieper sub-chains, `ssik build` bakes the per-(DH, linearity) Raghavan-Roth derivation into the artifact. Module import primes the cache once (~1-2 min one-time per arm); every subsequent `solve(T)` call uses cached RR (~1 ms warm) instead of HP / two_parallel (~13-260 ms). **12-25× speedup post-import** on Rizon 4, Kassow, and other previously-slow non-Pieper 7R arms. The URDF-loaded path (no artifact) keeps the original solver — no cold-cache cost in tests.
-
-Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and the literature-SRS-but-URDF-far-from-SRS arms whose drift exceeds the polished-SRS basin (Flexiv Rizon 4: 151 mm wrist drift; Kassow KR810: 111 mm wrist drift).
-
-| Arm | Drift (shoulder / wrist) | URDF path | **Built artifact (cached-RR)** | Status |
-|-----|---|:---:|:---:|:---:|
-| Franka Emika Panda / FR3 | non-SRS by design | ~42 ms (48 IKs) | same (already tier-0) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| uFactory xArm7 | non-SRS by design | ~45 ms (56 IKs) | same (already tier-0) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | **~56 ms (`seven_r.srs_polished`)** | n/a (top-level polished-SRS) | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| **Flexiv Rizon 4** | 65 mm / 151 mm | ~244 ms (jointlock+HP) | **~17 ms (12.8×, 45 IKs)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| **Kassow KR810** | 86 mm / 111 mm | ~444 ms (jointlock+HP) | **~18 ms (16.4×, 30 IKs)** | ✅ in [`tests/fixtures/`](tests/fixtures/) |
-| Kassow KR1018 / KR1410 / KR1805 | similar geometry, expected ~80-110 mm | not measured | not measured | 🔗 [rcruzoliver/kr_ros2](https://github.com/rcruzoliver/kr_ros2) |
-| Sawyer / Baxter (Rethink Robotics) | not measured | not measured | not measured | 🔗 (vendor URDF) |
-
-### Solver tier reference
-
-| Tier | Solver modules | Typical IK time | Algorithm |
-|---|---|---|---|
-| 0 — closed-form 6R | `three_parallel`, `spherical_two_parallel`, `spherical_two_intersecting`, `spherical` | ~1 ms | SP1–SP6 composition; one branch per Pieper specialisation |
-| 0 — closed-form 7R (SRS) | `seven_r.srs` | ~4.3 ms full sweep | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × 16 swivel samples = 128 IKs (vectorised inner loop, #217) |
-| 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~56 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + batched LM polish to machine precision against the original URDF FK |
-| 1 — univariate search | `two_parallel`, `two_intersecting` | ~100 ms – 2 s | tan-half-angle reduction + 200-sample search + Newton polish |
-| 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms tier-0 inner; **~17 ms with cached-RR (#210)** when artifact-built | lock one joint, dispatch inner 6R, sweep 16 lock samples; Raghavan-Roth pre-baked at codegen for non-Pieper sub-chains |
-| 2 — Raghavan–Roth + Manocha–Canny | `ikgeo.general_6r` | ~0.6-5 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |
-| 2 — Husty-Pfurner universal fallback | `husty_pfurner.general_6r` | ~25-200 ms | Study-quaternion algebra; perturbation path (#176) handles symmetric-DH singularities; backstops RR on ill-conditioned arms |
-
-## Onboarding a new arm (`ssik add-arm`)
-
-Hand us a URDF + the base/EE link names, get back a vendored fixture and a bulletproof test scaffold tailored to the dispatched solver:
+## Install
 
 ```bash
-$ ssik add-arm path/to/my_arm.urdf --base base_link --ee tool0 --name my_arm
-[ssik add-arm] Loading path/to/my_arm.urdf
-[ssik add-arm]   7 joints, 8 links — POE-normalized OK
-[ssik add-arm] Classifying topology
-[ssik]   → Best solver: jointlock.seven_r (tier 1)
-[ssik]   → Expected median IK time: ~50.0 ms
-[ssik add-arm] Vendoring URDF -> tests/fixtures/my_arm.urdf
-[ssik add-arm] Generating test scaffold -> tests/test_my_arm.py
-[ssik add-arm]   wrote 4,203 bytes (113 lines)
-[ssik add-arm] ✓ Done. Try:
-[ssik add-arm]     uv run pytest tests/test_my_arm.py -v
+pip install ssik              # core + analytical solvers
+pip install ssik[urdf]        # adds URDF loader (urchin) for from_urdf
 ```
 
-The generated test asserts URDF load, dispatcher routing, and FK closure ≤ 1e-10 on hand-picked + Hypothesis-fuzzed reachable poses. Solver-specific scaffolds dispatch to whichever solver the URDF would route to (`seven_r.srs`, `seven_r.srs_polished`, `jointlock.seven_r`, `ikgeo.*`, `husty_pfurner.general_6r`).
+Python 3.11+. Wheels for Linux x86_64 and macOS arm64.
 
-## Per-arm artifact builder (`ssik build`)
-
-For production deployment: build a self-contained Python module wrapping the chosen solver.
+## Onboarding a new arm
 
 ```bash
-$ ssik build path/to/ur5.urdf --base base_link --ee ee_link
-[ssik] Loading path/to/ur5.urdf
-[ssik]   6 joints, 7 links — POE-normalized OK
-[ssik] Classifying topology
-[ssik]   → Best solver: ikgeo.three_parallel (tier 0)
-[ssik]   → Expected median IK time: ~1.6 ms
-[ssik]   → FLOP budget: ~2,519 FLOPs / solve
-[ssik]   → Reasoning:
-[ssik]       Three consecutive parallel axes at joints (1, 2, 3) — the UR-class structure.
-[ssik]       Closed-form via SP6 (joints 0+4) + SP1 + SP3.
-[ssik] No build-time precompute needed (tier-0 closed-form)
-[ssik] Emitting ./ur5_ik.py
-[ssik]   Wrote 5,004 bytes
-[ssik] Validating (100 random poses)
-[ssik]   ✓ 100 poses, median 0.78 ms, max FK error 6e-09, 0 failures
-[ssik] ✓ Done. Try:
-[ssik]     >>> import ur5_ik
-[ssik]     >>> sols, is_ls = ur5_ik.solve(T_target)
+ssik add-arm my_arm.urdf --base base_link --ee flange --name my_arm
+# → tests/fixtures/my_arm.urdf and tests/test_my_arm.py with FK-closure assertions
+uv run pytest tests/test_my_arm.py -v
 ```
 
-For tier-0 arms (Pieper-class: UR, Puma, generic spherical-wrist), the artifact body is **per-arm specialised IKFast-style trig**: explicit `sin`, `cos`, `atan2` of target-pose entries with the arm's geometry constants substituted. For tier-2 (non-Pieper, e.g. JACO 2) the artifact is currently a thin wrapper around the runtime solver; specialising tier-2 with build-time symbolic precompute baking is in progress (#112).
+The generated test scaffold checks dispatcher routing and FK closure on hand-picked + Hypothesis-fuzzed reachable poses. Catches regressions before they land.
 
-A snippet of the emitted Puma 560 artifact:
+## Documentation
 
-```python
-# SP4 for q1 (shoulder pan).
-q1_x0 = math.atan2(1.0*p_x, -1.0*p_y)
-q1_x1 = 0.15005 - 6.12e-17*p_z      # 0.15005 = Puma wrist y-offset
-q1_x2 = 1.0*p_x**2 + 1.0*p_y**2
-theta_q1_plus = q1_x0 + math.acos(q1_x1/math.sqrt(q1_x2))
-theta_q1_minus = q1_x0 - math.acos(q1_x1/math.sqrt(q1_x2))
-```
-
-The same for q2/q3/q4/q5/q6 with Puma's link-length constants (0.4318, etc.) substituted throughout.
-
-The emitted artifact wraps the dispatched solver around baked KinBody constants and exposes a rich API:
-
-```python
-import ur5_ik
-from ssik import TolerancePolicy
-
-# Default: fastest path, no Newton polish.
-sols, is_ls = ur5_ik.solve(T_target)
-
-# Tighter FK-closure threshold for high-precision applications.
-strict = TolerancePolicy(subproblem_numerical=1e-9)
-sols, is_ls = ur5_ik.solve(T_target, policy=strict)
-
-# Newton polish for near-singular poses (off by default).
-sols, is_ls = ur5_ik.solve(T_target, allow_refinement=True, refinement_max_iters=8)
-
-# is_ls=True signals the algebraic path didn't close; sols is best-LS or empty.
-# Callers wanting only "exact" solutions check is_ls and discard.
-if is_ls:
-    raise NoExactIK
-for sol in sols:
-    print(sol.q, sol.fk_residual, sol.refinement_used)
-```
-
-The dispatcher picks the best solver from the catalog above based on topology predicates (`three_consecutive_parallel`, `three_consecutive_intersecting`, etc.). Tier-1 univariate-search solvers are not auto-selected: tier-2 Raghavan–Roth (`general_6r`) handles the same chains at ~5 ms vs tier-1's 100 ms–2 s. Tier-1 modules remain importable for users who want them explicitly.
-
-For inspection without emitting an artifact:
-
-```bash
-$ ssik classify path/to/your.urdf --base base_link --ee tcp_link
-```
-
-Tier-2 (non-Pieper) arms today still trigger the symbolic preprocessing on first `solve()` call (~150–300 s). Phase 2 of [#110](https://github.com/siddhss5/ikfastpy/issues/110) bakes the preprocessing output into the artifact at build time so first-call latency is gone.
-
-## Repository layout
-
-This is the **internal development codebase**. Public users never see this; they receive a per-arm wheel built from this source.
-
-- `src/ssik/` — solver implementations.
-  - `core/` — `Solution` dataclass, tolerance policies.
-  - `kinematics/` — POE → DH bridge, predicates.
-  - `subproblems/` — SP1–SP6 closed-form primitives + `_rotation` helpers.
-  - `solvers/ikgeo/` — tier-0/1/2 solver modules.
-  - `solvers/jointlock/` — 7R wrapper.
-  - `refinement/` — universal opt-in Newton polish layer.
-- `tests/` — unit + hypothesis fuzz + cross-solver agreement + slow round-trips.
-  - `tests/fixtures/` — UR5, Puma 560, JACO 2 (real MJCF), synthetic arms.
-- `scripts/` — bench, profile, diagnostic harnesses.
-- `docs/` — internal documentation.
-  - `docs/tutorial/` — ten chapters covering the IK problem, the Pieper class, the EAIK gap, the Raghavan–Roth pipeline, conditioning fixes, refinement architecture, KinBody bridge, bulletproof validation, practical guide, roadmap. **Internal only**; the public marketing site (per [#95](https://github.com/siddhss5/ikfastpy/issues/95)) is a stripped subset hosted in a separate public repo.
-
-## Development quick-start
-
-```bash
-# Install dev dependencies
-uv sync
-
-# Fast tests (excludes slow symbolic-preprocessing tests)
-uv run pytest
-
-# Slow tests (sympy preprocessing for tier-2 RR; ~5 min)
-uv run pytest -m slow
-
-# Lint, format, typecheck
-uv run ruff check
-uv run ruff format --check
-uv run mypy src tests
-
-# Bench any solver (machine-invariant FLOP budget + wall-clock)
-uv run python scripts/bench_three_parallel.py     # UR5
-uv run python scripts/bench_real_jaco2.py         # JACO 2, RR pipeline
-uv run python scripts/bench_seven_r.py            # synthetic 7R
-
-# Build internal docs
-uv run mkdocs serve
-```
-
-## Distribution model
-
-Customers submit a URDF / MJCF via [#95](https://github.com/siddhss5/ikfastpy/issues/95)'s intake mechanism. We run `ssik build` (above) which produces a per-arm `.py` artifact today; the [#110](https://github.com/siddhss5/ikfastpy/issues/110) phasing extends this to a Cython `.so` artifact with the same `solve(T, *, policy=..., allow_refinement=..., refinement_max_iters=...)` API. The wheel ships the artifact and nothing else — customer source code never imports ssik internals.
-
-The Cython port (gated on the Python pipeline being stable) closes the ~10000× gap the FLOP budget says is on the table: every solver is currently dispatch-bound at ~1 MFLOP/s achieved, and a native port should hit ~µs IK on Pieper-class arms — the original IKFast promise, this time without IKFast's fragility.
+- [docs/arm_coverage.md](docs/arm_coverage.md) — per-arm fixture tables, tested speeds, source URDFs
+- [docs/architecture.md](docs/architecture.md) — solver tier catalog, dispatch flow, build artifact internals, algorithmic lineage
+- [CONTRIBUTING.md](CONTRIBUTING.md) — repo layout, dev setup, testing discipline
 
 ## License
 
-Proprietary. See [`LICENSE`](LICENSE) for full terms; in summary: all rights reserved, no public reproduction or distribution without prior written permission. The library incorporates clean-room reimplementations of algorithms from BSD-3-licensed [IK-Geo](https://github.com/rpiRobotics/ik-geo) (Elias–Wen 2022/2025) and from the academic publications of Raghavan–Roth (1990) and Manocha–Canny (1994); the BSD-3 attribution is preserved in `LICENSE` for the algorithmic lineage.
+[BSD-3-Clause](LICENSE). The library incorporates clean-room reimplementations of algorithms from BSD-3-licensed [IK-Geo](https://github.com/rpiRobotics/ik-geo) (Elias–Wen 2022/2025) and from the academic publications of Raghavan–Roth (1990), Manocha–Canny (1994), Singh–Kreutz (1989), and Husty–Pfurner (2007). Algorithmic lineage is documented in module docstrings.
 
-## Tracking
+## Citation
 
-- Per-arm artifact builder + Cython port: [#110](https://github.com/siddhss5/ikfastpy/issues/110).
-- Strategic distribution model: [#95](https://github.com/siddhss5/ikfastpy/issues/95).
-- Speed work across all solver pathways: [#93](https://github.com/siddhss5/ikfastpy/issues/93).
-- Tier-2 RR speed (already ~2× since baseline): [#86](https://github.com/siddhss5/ikfastpy/issues/86).
-- Cold-cache symbolic preprocessing speed: [#97](https://github.com/siddhss5/ikfastpy/issues/97).
-- Tutorial / internal docs: [#87](https://github.com/siddhss5/ikfastpy/issues/87).
-- Pre-existing hypothesis flake on `test_ikgeo_spherical`: [#101](https://github.com/siddhss5/ikfastpy/issues/101).
-- Known coverage gap on synthetic MC Table I: [#82](https://github.com/siddhss5/ikfastpy/issues/82).
+```bibtex
+@software{ssik,
+  author = {Srinivasa, Siddhartha},
+  title  = {ssik: analytical inverse kinematics for 6R and 7R revolute arms},
+  url    = {https://github.com/siddhss5/ikfastpy},
+  year   = {2026},
+}
+```
