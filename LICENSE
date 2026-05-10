@@ -1,34 +1,29 @@
-Copyright (c) 2026 Siddhartha Srinivasa.
+BSD 3-Clause License
 
-All rights reserved. This software and its documentation are proprietary
-and confidential. No part of this work may be reproduced, distributed, or
-transmitted in any form or by any means, including photocopying, recording,
-or other electronic or mechanical methods, without prior written permission
-from the copyright holder, except in the case of brief quotations embodied
-in critical reviews and certain other non-commercial uses permitted by
-copyright law.
+Copyright (c) 2026, Siddhartha Srinivasa
+All rights reserved.
 
-For licensing inquiries, contact the copyright holder.
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
 
-================================================================================
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
 
-Third-party components
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
 
-This project incorporates the algorithms (clean-room reimplemented from the
-academic literature) of:
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
 
-* IK-Geo (Elias & Wen, 2022/2025; arXiv:2211.05737), originally distributed
-  under the BSD 3-Clause license. The subproblem catalog (SP1-SP6) and the
-  per-family compositions in `ssik.subproblems` and `ssik.solvers.ikgeo`
-  derive from that work. BSD-3 attribution: Copyright (c) the IK-Geo
-  authors; see https://github.com/rpiRobotics/ik-geo for the upstream
-  source. ssik's reimplementation is independent code; the BSD-3 attribution
-  is preserved in good faith for the algorithmic lineage.
-
-* The Raghavan-Roth (1990) and Manocha-Canny (1994) inverse-kinematics
-  algorithms are reimplemented from the original academic publications.
-  Algorithms are not copyrightable; ssik's implementation is original code.
-
-Runtime dependencies (numpy, sympy, scipy when available, urchin via the
-`[urdf]` extra) are distributed under their own permissive licenses; refer
-to each package's LICENSE for terms.
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

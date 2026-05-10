@@ -4,16 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ssik"
-description = "Analytical inverse kinematics for non-Pieper 6R arms."
+description = "Analytical inverse kinematics for 6R and 7R revolute arms. Returns every IK branch at machine precision."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Siddhartha Srinivasa" }]
 keywords = ["robotics", "inverse-kinematics", "ik-geo", "kinematics"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -44,8 +44,8 @@ urdf = [
 ]
 
 [project.urls]
-Repository = "https://github.com/siddhss5/ikfastpy"
-Issues = "https://github.com/siddhss5/ikfastpy/issues"
+Repository = "https://github.com/personalrobotics/ssik"
+Issues = "https://github.com/personalrobotics/ssik/issues"
 
 [project.scripts]
 ssik = "ssik.cli:main"

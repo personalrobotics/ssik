@@ -122,7 +122,7 @@ The generated test scaffold checks dispatcher routing and FK closure on hand-pic
 @software{ssik,
   author = {Srinivasa, Siddhartha},
   title  = {ssik: analytical inverse kinematics for 6R and 7R revolute arms},
-  url    = {https://github.com/siddhss5/ikfastpy},
+  url    = {https://github.com/personalrobotics/ssik},
   year   = {2026},
 }
 ```

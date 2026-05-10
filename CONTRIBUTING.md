@@ -31,8 +31,8 @@ ssik/
 ## Dev setup
 
 ```bash
-git clone https://github.com/siddhss5/ikfastpy.git
-cd ikfastpy
+git clone https://github.com/personalrobotics/ssik.git
+cd ssik
 uv sync                                 # install dev deps
 uv run python scripts/build_cython.py   # one-time: build .so files for hot loops
 ```
