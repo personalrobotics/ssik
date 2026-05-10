@@ -79,6 +79,8 @@ def solve(
     T_target: NDArray[np.float64],
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     *,
+    allow_refinement: bool = True,
+    refinement_max_iters: int | None = None,
     max_drift_m: float = _DEFAULT_MAX_DRIFT_M,
     swivel_samples: int | NDArray[np.float64] = 16,
     polish_max_iters: int = 30,
@@ -91,6 +93,11 @@ def solve(
     :param T_target: 4x4 target end-effector pose in the base frame.
     :param policy: tolerance policy. ``policy.subproblem_dedup`` controls
         the cluster-merge gate after polish.
+    :param allow_refinement: accepted for API parity with other solvers.
+        ``srs_polished`` always runs LM polish (that's its definition);
+        the flag is ignored. Default ``True`` reflects the actual behaviour.
+    :param refinement_max_iters: alias for ``polish_max_iters`` for API
+        parity. When given, overrides ``polish_max_iters``.
     :param max_drift_m: refusal gate; arms whose shoulder/wrist drift
         exceeds this value (default 4 cm) raise :class:`ValueError`.
         Tuned to keep the snap-and-polish trajectory inside Newton's
@@ -121,6 +128,11 @@ def solve(
             f"max axis drift <= {max_drift_m} m. Use "
             f"ssik.kinematics.predicates.is_approximately_srs_7r to check."
         )
+
+    # API-parity alias: prefer the standard `refinement_max_iters` name when
+    # given, otherwise fall back to the solver-specific `polish_max_iters`.
+    if refinement_max_iters is not None:
+        polish_max_iters = refinement_max_iters
 
     # Step 1: build a relaxed policy that lets the inner SRS solver
     # accept the approximate pivots.

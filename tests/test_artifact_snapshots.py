@@ -1,4 +1,4 @@
-"""Snapshot tests for committed reference artifacts under tests/artifacts/.
+"""Snapshot tests for committed reference artifacts under prebuilt/.
 
 Each fixture arm has a committed ``<arm>_ik.py`` artifact. This test re-emits
 each one in-memory and asserts byte-equal against the committed file.
@@ -9,7 +9,7 @@ this test fails until you regenerate:
 
     uv run python scripts/regen_artifacts.py
 
-Then commit the updated ``tests/artifacts/*.py`` files alongside your codegen
+Then commit the updated ``prebuilt/*.py`` files alongside your codegen
 change. The artifact diff is signal, not noise: it shows reviewers exactly
 what user-facing output the change produces.
 
@@ -41,7 +41,7 @@ from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
 
 FIXTURES = Path(__file__).parent / "fixtures"
-ARTIFACTS = Path(__file__).parent / "artifacts"
+ARTIFACTS = Path(__file__).parent.parent / "prebuilt"
 
 sys.path.insert(0, str(FIXTURES))
 from jaco2 import jaco2_specs  # noqa: E402
@@ -88,6 +88,21 @@ def _emit_franka_panda() -> str:
     return result.source
 
 
+def _emit_iiwa14() -> str:
+    from kuka_iiwa14 import kuka_iiwa14_specs
+
+    kb = build_kinbody(kuka_iiwa14_specs())
+    plan = dispatch(kb)
+    result = emit_artifact(
+        kb=kb,
+        plan=plan,
+        module_name="iiwa14_ik",
+        output_path=None,
+        arm_label="KUKA iiwa LBR 14",
+    )
+    return result.source
+
+
 @pytest.mark.parametrize(
     ("module_name", "emit_fn"),
     [
@@ -107,6 +122,17 @@ def _emit_franka_panda() -> str:
         ),
         ("jaco2_ik", _emit_jaco2),
         ("franka_panda_ik", _emit_franka_panda),
+        ("iiwa14_ik", _emit_iiwa14),
+        (
+            "gen3_ik",
+            lambda: _emit_urdf(
+                "gen3.urdf",
+                "base_link",
+                "end_effector_link",
+                "gen3_ik",
+                "Kinova Gen3 (7-DOF)",
+            ),
+        ),
     ],
 )
 def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: object) -> None:
@@ -155,7 +181,7 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
             f"output. The codegen module produced different bytes -- this is "
             f"likely an intentional codegen change. Regenerate with:\n"
             f"    uv run python scripts/regen_artifacts.py\n"
-            f"and commit the updated tests/artifacts/*.py alongside your codegen "
+            f"and commit the updated prebuilt/*.py alongside your codegen "
             f"change so reviewers can see the user-facing impact.\n\n"
             f"Diff (committed -> regenerated):\n{diff}"
         )

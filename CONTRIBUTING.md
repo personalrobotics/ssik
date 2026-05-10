@@ -62,6 +62,22 @@ uv run python scripts/bench_real_jaco2.py         # JACO 2 (RR pipeline)
 uv run python scripts/bench_seven_r.py            # synthetic 7R
 ```
 
+## Pre-built reference artifacts
+
+The `prebuilt/` directory holds committed `.py` artifacts emitted by `ssik build` for popular arms (UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka Panda, Rizon 4, Kassow KR810). They serve as:
+
+1. **User-facing demos** — alpha users can `import prebuilt.ur5_ik` and immediately get a working IK solver.
+2. **Codegen-drift snapshot tests** — `tests/test_artifact_snapshots.py` re-emits each artifact and asserts byte-equal against the committed copy.
+
+If you change `ssik.core.codegen` or any solver's dispatch reasoning, the snapshot test will fail. Regenerate with:
+
+```bash
+uv run python scripts/regen_artifacts.py                  # fast arms (~30 s total)
+uv run python scripts/regen_artifacts.py --include-slow   # also Rizon 4 (~7 min) + Kassow (~20 min)
+```
+
+Then commit the updated `prebuilt/*.py` alongside the codegen change so reviewers see the user-facing diff.
+
 ## Adding a new arm fixture
 
 ```bash
