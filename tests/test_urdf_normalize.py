@@ -31,8 +31,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _axis_angle(axis: np.ndarray, angle: float) -> np.ndarray:
-    """Rodrigues rotation as 4x4, matching what ikfast's internal chain
-    evaluation does for a revolute joint."""
+    """Rodrigues rotation as 4x4, matching the per-joint POE FK convention
+    for a revolute joint."""
     norm = float(np.linalg.norm(axis))
     if norm == 0:
         return np.eye(4)
@@ -81,7 +81,8 @@ def test_ur5_normalized_exposes_parallel_axes() -> None:
     """UR5's three inner parallel axes (joints 1, 2, 3 and also 5 in the
     shoulder-lift-elbow-wrist-1 cluster) should all be aligned along the
     base-frame ``-y`` axis after normalization. That's the structure
-    ikfast's ``TestIntersectingAxes`` needs to see for a Pieper-class solve.
+    :func:`ssik.kinematics.predicates.three_consecutive_parallel` needs
+    to see for a Pieper-class solve.
     """
     kb = load_urdf_kinbody_normalized(FIXTURES / "ur5.urdf", "base_link", "wrist_3_link")
 

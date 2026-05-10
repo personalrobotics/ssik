@@ -25,10 +25,11 @@ import numpy as np
 
 print = functools.partial(print, flush=True)
 
-sys.path.insert(0, "/Users/siddh/code/ikfastpy/tests")
-sys.path.insert(0, "/Users/siddh/code/ikfastpy/scripts")
-
 from pathlib import Path  # noqa: E402
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT / "tests"))
+sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 from _flop_budget import flop_budget, print_flop_summary  # noqa: E402
 
@@ -58,7 +59,7 @@ def fk_poe(kb, q):
     return T
 
 
-FIXTURES = Path("/Users/siddh/code/ikfastpy/tests/fixtures")
+FIXTURES = _REPO_ROOT / "tests" / "fixtures"
 kb = load_urdf_kinbody_normalized(FIXTURES / "ur5.urdf", "base_link", "ee_link")
 
 print("warming caches...")

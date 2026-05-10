@@ -173,8 +173,9 @@ def test_mimic_equation_raises() -> None:
 
 
 def test_joint_transforms_returned_are_copies() -> None:
-    """Defensive: ikfast passes transforms through sympy, but mutation would
-    be nasty. Make sure the shim returns fresh arrays.
+    """Defensive: callers may mutate returned transforms (and sympy
+    serialisation in the build pipeline assumes immutability). Make sure
+    KinBody returns fresh arrays.
     """
     kb = build_kinbody([_spec()])
     j = kb.joints[0]
