@@ -55,7 +55,7 @@ from ssik.solvers.husty_pfurner.general_6r import solve as hp_solve
 
 XFAIL_REASON = (
     "Husty-Pfurner solver not yet implemented; tracked in "
-    "https://github.com/siddhss5/ikfastpy/issues/162"
+    "https://github.com/personalrobotics/ssik/issues/162"
 )
 XFAIL = pytest.mark.xfail(strict=True, reason=XFAIL_REASON, raises=NotImplementedError)
 

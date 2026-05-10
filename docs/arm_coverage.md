@@ -25,7 +25,7 @@ The arms ssik exists for: deliberate non-orthogonal twists that violate Pieper's
 |-----|--------|:-----:|:-----:|
 | **Kinova JACO 2 (j2n6s200, 55° DH)** | `ikgeo.general_6r` (RR + AE-3) | **~5 ms median** | ✅ real MJCF in [`tests/fixtures/`](../tests/fixtures/) |
 | Agilex Piper | `ikgeo.general_6r` | expected ~5 ms | 🔗 [mujoco_menagerie/agilex_piper](https://github.com/google-deepmind/mujoco_menagerie/tree/main/agilex_piper) |
-| Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~5 ms | URDF intake via [#95](https://github.com/siddhss5/ikfastpy/issues/95) |
+| Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~5 ms | URDF intake via [#95](https://github.com/personalrobotics/ssik/issues/95) |
 
 ## 7R redundant — pure SRS (`seven_r.srs`)
 
@@ -46,7 +46,7 @@ Refused (drift exceeds Newton's basin, ~3-5 cm): falls back to `jointlock + HP`.
 
 For 7R arms whose topology doesn't match strict or approximate SRS, `jointlock.seven_r` is the universal fallback: locks one joint (auto-selected by topology rank of the resulting 6R sub-chain) and dispatches the 6R IK to the best-matching tier-0/1 ikgeo solver. 16-sample lock sweep × inner 6R solver per call.
 
-**Cached-RR fast path** ([#210](https://github.com/siddhss5/ikfastpy/issues/210)): when an arm hits the universal fallback for non-Pieper sub-chains, `ssik build` bakes the per-(DH, linearity) Raghavan-Roth derivation into the artifact. Module import primes the cache once (~5 seconds via #210 Phase 2 / #220); every subsequent `solve(T)` call uses cached RR (~1 ms warm) instead of HP / two_parallel (~13-260 ms). **12-25× speedup post-import** on Rizon 4, Kassow, and other previously-slow non-Pieper 7R arms. The URDF-loaded path (no artifact) keeps the original solver — no cold-cache cost in tests.
+**Cached-RR fast path** ([#210](https://github.com/personalrobotics/ssik/issues/210)): when an arm hits the universal fallback for non-Pieper sub-chains, `ssik build` bakes the per-(DH, linearity) Raghavan-Roth derivation into the artifact. Module import primes the cache once (~5 seconds via #210 Phase 2 / #220); every subsequent `solve(T)` call uses cached RR (~1 ms warm) instead of HP / two_parallel (~13-260 ms). **12-25× speedup post-import** on Rizon 4, Kassow, and other previously-slow non-Pieper 7R arms. The URDF-loaded path (no artifact) keeps the original solver — no cold-cache cost in tests.
 
 Covers Franka Panda (anthropomorphic 7R), uFactory xArm7 (mixed structure), and the literature-SRS-but-URDF-far-from-SRS arms whose drift exceeds the polished-SRS basin (Flexiv Rizon 4: 151 mm wrist drift; Kassow KR810: 111 mm wrist drift).
 
