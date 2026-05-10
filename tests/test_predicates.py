@@ -275,9 +275,8 @@ def test_three_consecutive_intersecting_rejects_parallel_triple() -> None:
 
 def test_three_consecutive_intersecting_puma560() -> None:
     kb = load_urdf_kinbody_normalized(FIXTURES / "puma560.urdf", "base_link", "wrist_3_link")
-    # Puma 560 has a classic spherical wrist at joints 3, 4, 5 -- that's the
-    # textbook proof-of-concept for Pieper's decomposition (and what makes
-    # the vendored ikfast's TestIntersectingAxes recognize it, per #36).
+    # Puma 560 has a classic spherical wrist at joints 3, 4, 5 -- the
+    # textbook proof-of-concept for Pieper's decomposition.
     assert three_consecutive_intersecting(kb.joints) == (3, 4, 5)
 
 

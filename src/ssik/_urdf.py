@@ -188,7 +188,7 @@ def load_urdf_kinbody_normalized(
 
     The resulting chain is kinematically identical to :func:`load_urdf_kinbody`
     (same FK at every ``q``) but uses a different internal encoding that
-    exposes the robot's kinematic structure to ikfast's pattern-matcher:
+    exposes the robot's kinematic structure to the topology dispatcher:
 
     - Each active joint's ``T_left`` is a **pure translation** (no rotation).
     - Each active joint's ``axis`` is expressed in the **base frame at q=0**.
@@ -200,11 +200,13 @@ def load_urdf_kinbody_normalized(
     <https://en.wikipedia.org/wiki/Product_of_exponentials_formula>`_
     flattened into our ``T_left @ R(axis, q) @ T_right`` chain format.
 
-    **Why this matters.** ikfast's ``TestIntersectingAxes`` and similar
-    pattern-matchers symbolically inspect joint axes *in each joint's local
-    frame*. With URDF's native encoding, joint axes live in frames that
-    accumulate arbitrary ``rpy`` rotations from upstream joint origins, so
-    structural patterns like "three parallel axes" (UR5) are hidden behind
+    **Why this matters.** Topology predicates like
+    :func:`ssik.kinematics.predicates.three_consecutive_parallel` and
+    :func:`ssik.kinematics.predicates.three_consecutive_intersecting`
+    inspect joint axes *in each joint's local frame*. With URDF's native
+    encoding, joint axes live in frames that accumulate arbitrary ``rpy``
+    rotations from upstream joint origins, so structural patterns like
+    "three parallel axes" (UR5) are hidden behind
     symbolic rotation products that sympy can't simplify into recognizable
     form. POE-normalizing the chain puts axes directly in the base frame at
     q=0, making the structure visible. See #33 for the full analysis.
