@@ -213,7 +213,7 @@ class Manipulator:
     # Inverse kinematics
     # ------------------------------------------------------------------
 
-    def ik(
+    def solve(
         self,
         T_target: ArrayLike,
         *,
@@ -223,8 +223,8 @@ class Manipulator:
         allow_refinement: bool = False,
         refinement_max_iters: int = 15,
         **solver_kwargs: Any,
-    ) -> tuple[list[Solution], bool]:
-        """Inverse kinematics: find ``q`` such that ``fk(q) ≈ T_target``.
+    ) -> list[Solution]:
+        """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
 
         :param T_target: 4x4 SE(3) target pose.
         :param max_solutions: optional cap on returned IKs. ``None`` = full
@@ -253,16 +253,17 @@ class Manipulator:
             etc.). Unknown kwargs raise :class:`TypeError` from the
             underlying solver.
 
-        :returns: ``(solutions, is_ls)``. ``is_ls=True`` iff no candidate
-            FK-closed within ``policy.subproblem_numerical``; the returned
-            list is then either a single best-LS approximation or empty.
+        :returns: list of :class:`Solution`, one per analytical IK branch.
+            Empty list iff no candidate FK-closed within
+            ``policy.subproblem_numerical``. Check ``if not sols:`` for the
+            "unreachable target" case.
 
         :raises ValueError: if ``T_target.shape != (4, 4)`` or
             ``len(q_seed) != dof`` when ``q_seed`` is given.
         """
         T = np.asarray(T_target, dtype=np.float64)
         if T.shape != (4, 4):
-            raise ValueError(f"ik expected T_target of shape (4, 4), got {T.shape}")
+            raise ValueError(f"solve expected T_target of shape (4, 4), got {T.shape}")
         if q_seed is not None:
             q_seed_arr: NDArray[np.float64] | None = np.asarray(q_seed, dtype=np.float64)
             assert q_seed_arr is not None
@@ -290,5 +291,8 @@ class Manipulator:
         # Power-user kwargs override our defaults.
         kwargs.update(solver_kwargs)
 
-        result: tuple[list[Solution], bool] = self._solver_module.solve(self._kb, T, **kwargs)
-        return result
+        # Internal solver functions still return (sols, is_ls); unwrap the
+        # tuple at the public-API boundary. `is_ls` is redundant with
+        # `len(sols) == 0` in every shipped solver -- ssik #238 item 1.
+        sols, _is_ls = self._solver_module.solve(self._kb, T, **kwargs)
+        return sols

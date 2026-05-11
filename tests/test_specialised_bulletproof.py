@@ -107,8 +107,8 @@ def _bulletproof_check(
         q_star = rng.uniform(-1.0, 1.0, size=n_dof)
         T_star = _fk(kb, q_star)
 
-        sols, is_ls = artifact.solve(T_star)  # type: ignore[attr-defined]
-        if is_ls or not sols:
+        sols = artifact.solve(T_star)  # type: ignore[attr-defined]
+        if not sols:
             fails += 1
             continue
 
@@ -276,8 +276,8 @@ def test_specialised_artifact_refinement_path_works(tmp_path: Path) -> None:
     # Tight policy that triggers the near-miss path on at least some poses.
     tight_policy = TolerancePolicy(subproblem_numerical=1e-13)
 
-    sols_off, _ = artifact.solve(T_star, policy=tight_policy, allow_refinement=False)  # type: ignore[attr-defined]
-    sols_on, _ = artifact.solve(T_star, policy=tight_policy, allow_refinement=True)  # type: ignore[attr-defined]
+    sols_off = artifact.solve(T_star, policy=tight_policy, allow_refinement=False)  # type: ignore[attr-defined]
+    sols_on = artifact.solve(T_star, policy=tight_policy, allow_refinement=True)  # type: ignore[attr-defined]
 
     # Refinement should recover at least as many candidates as the no-refine path.
     assert len(sols_on) >= len(sols_off), (

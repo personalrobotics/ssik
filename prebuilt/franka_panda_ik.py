@@ -17,13 +17,13 @@ Usage:
     import numpy as np
     T_target = np.eye(4)  # 4x4 SE(3) pose
     T_target[:3, 3] = [0.5, 0.1, 0.3]
-    solutions, is_ls = franka_panda_ik.solve(T_target)
+    solutions = franka_panda_ik.solve(T_target)
     for sol in solutions:
         print(sol.q, sol.fk_residual)
 
-``solve(T)`` returns ``(list[Solution], is_ls)``. ``is_ls=True``
-signals that no solution closed within the solver's FK tolerance,
-and the returned list is the best-LS approximation (or empty).
+``solve(T)`` returns ``list[Solution]``. Empty list iff no
+candidate closed within the solver's FK tolerance -- check
+``if not solutions:`` for the "unreachable" case.
 """
 
 from __future__ import annotations
@@ -426,13 +426,13 @@ def solve(
     Common idioms::
 
         # Exhaustive search (default).
-        solutions, _ = solve(T_target)
+        solutions = solve(T_target)
 
         # "Just give me one IK" -- ~17x faster.
-        solutions, _ = solve(T_target, max_solutions=1)
+        solutions = solve(T_target, max_solutions=1)
 
         # Track current config -- ~37x faster.
-        solutions, _ = solve(
+        solutions = solve(
             T_target, q_seed=q_current, max_solutions=1,
         )
     """
@@ -505,7 +505,7 @@ def solve(
         )
         for i, (q, residual, ref_used, ref_iters) in enumerate(deduped)
     ]
-    return solutions, len(solutions) == 0
+    return solutions
 
 
 __all__ = [

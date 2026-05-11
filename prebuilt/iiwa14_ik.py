@@ -17,13 +17,13 @@ Usage:
     import numpy as np
     T_target = np.eye(4)  # 4x4 SE(3) pose
     T_target[:3, 3] = [0.5, 0.1, 0.3]
-    solutions, is_ls = iiwa14_ik.solve(T_target)
+    solutions = iiwa14_ik.solve(T_target)
     for sol in solutions:
         print(sol.q, sol.fk_residual)
 
-``solve(T)`` returns ``(list[Solution], is_ls)``. ``is_ls=True``
-signals that no solution closed within the solver's FK tolerance,
-and the returned list is the best-LS approximation (or empty).
+``solve(T)`` returns ``list[Solution]``. Empty list iff no
+candidate closed within the solver's FK tolerance -- check
+``if not solutions:`` for the "unreachable" case.
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ def solve(
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
 ):
-    """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
+    """Inverse kinematics. Returns ``list[Solution]``.
 
     :param T_target: 4x4 SE(3) target end-effector pose, np.float64.
     :param policy: tolerance policy. Pass a custom
@@ -150,22 +150,23 @@ def solve(
         kinematic singularities).
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
-    :returns: ``(solutions, is_ls)``. Each ``solution.q`` is a joint
-        vector matching the source URDF's joint ordering;
-        ``solution.fk_residual`` reports closure against
-        ``T_target``. ``is_ls=True`` iff the algebraic path produced
-        no candidate meeting the FK tolerance -- callers wanting
-        only "exact" solutions check ``is_ls`` and discard.
+    :returns: list of :class:`Solution`, one per analytical IK
+        branch. Each ``solution.q`` is a joint vector matching
+        the source URDF's joint ordering; ``solution.fk_residual``
+        reports closure against ``T_target``. Empty list iff no
+        candidate met the FK tolerance -- check ``if not sols:``
+        for the "unreachable target" case.
 
     Solver: srs.
     """
-    return _solver_solve(
+    sols, _is_ls = _solver_solve(
         _KB,
         T_target,
         policy=policy,
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
     )
+    return sols
 
 
 __all__ = [

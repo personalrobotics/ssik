@@ -17,13 +17,13 @@ Usage:
     import numpy as np
     T_target = np.eye(4)  # 4x4 SE(3) pose
     T_target[:3, 3] = [0.5, 0.1, 0.3]
-    solutions, is_ls = jaco2_ik.solve(T_target)
+    solutions = jaco2_ik.solve(T_target)
     for sol in solutions:
         print(sol.q, sol.fk_residual)
 
-``solve(T)`` returns ``(list[Solution], is_ls)``. ``is_ls=True``
-signals that no solution closed within the solver's FK tolerance,
-and the returned list is the best-LS approximation (or empty).
+``solve(T)`` returns ``list[Solution]``. Empty list iff no
+candidate closed within the solver's FK tolerance -- check
+``if not solutions:`` for the "unreachable" case.
 """
 
 from __future__ import annotations
@@ -857,7 +857,7 @@ def solve(
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
 ):
-    """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
+    """Inverse kinematics. Returns ``list[Solution]``.
 
     :param T_target: 4x4 SE(3) target end-effector pose.
     :param policy: tolerance policy (FK closure + dedup tolerance).
@@ -866,6 +866,8 @@ def solve(
         doesn't quite meet ``fk_atol``). Default off.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
+    :returns: list of :class:`Solution`; empty list iff no IK
+        closed within ``policy.subproblem_numerical``.
     """
     T = np.asarray(T_target, dtype=np.float64)
     candidates = _solve_algebraic(T)
@@ -927,7 +929,7 @@ def solve(
         )
         for i, (q, residual, ref_used, ref_iters) in enumerate(deduped)
     ]
-    return solutions, len(solutions) == 0
+    return solutions
 
 
 __all__ = [
