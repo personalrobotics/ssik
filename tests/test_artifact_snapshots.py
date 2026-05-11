@@ -152,12 +152,28 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
         f"is missing -- run `uv run python scripts/regen_artifacts.py` to create it."
     )
 
-    if module_name == "jaco2_ik" and sys.platform != "darwin":
-        # Structural smoke check: artifact emits + has the expected
-        # scaffolding. Byte-equality is enforced on macOS only.
-        assert "_solve_algebraic" in rendered
-        assert "_build_pq_matrices" in rendered
-        assert 'SOLVER_NAME = "ikgeo.general_6r"' in rendered
+    # Artifacts whose bytes drift across platforms by a last-digit float
+    # representation. JACO 2 (tier-2 RR): drift comes from sympy.cse /
+    # sympy.pycode internals. Gen3 (SRS-polished thin wrapper): drift
+    # comes from the URDF -> KinBody float arithmetic (urchin / numpy).
+    # Pinning full bit-determinism is deferred to a follow-up (#124).
+    # macOS is the regen platform; enforce byte-equality there, run a
+    # structural smoke check elsewhere.
+    _PLATFORM_DRIFT_ARTIFACTS = {
+        "jaco2_ik": [
+            "_solve_algebraic",
+            "_build_pq_matrices",
+            'SOLVER_NAME = "ikgeo.general_6r"',
+        ],
+        "gen3_ik": [
+            "_solver_solve",
+            'SOLVER_NAME = "seven_r.srs_polished"',
+            "def fk(q):",
+        ],
+    }
+    if module_name in _PLATFORM_DRIFT_ARTIFACTS and sys.platform != "darwin":
+        for marker in _PLATFORM_DRIFT_ARTIFACTS[module_name]:
+            assert marker in rendered, f"{module_name}: missing structural marker {marker!r}"
         return
 
     committed = committed_path.read_text()
