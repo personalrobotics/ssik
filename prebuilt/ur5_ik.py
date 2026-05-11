@@ -537,11 +537,8 @@ def solve(
             q=q,
             fk_residual=residual,
             refinement_used=ref_used,
-            refinement_iters=ref_iters,
-            branch_id=i,
-            solver_name=SOLVER_NAME,
         )
-        for i, (q, residual, ref_used, ref_iters) in enumerate(deduped)
+        for q, residual, ref_used, _ref_iters in deduped
     ]
     return solutions
 

@@ -235,10 +235,7 @@ def test_verify_candidates_passes_through_exact_match(ur5_kb: KinBody) -> None:
     assert len(sols) == 1
     s = sols[0]
     assert s.refinement_used == "none"
-    assert s.refinement_iters == 0
     assert s.fk_residual < 1e-9
-    assert s.solver_name == "test"
-    assert s.branch_id == 0
 
 
 def test_verify_candidates_drops_misses_when_refinement_off(ur5_kb: KinBody) -> None:
@@ -278,7 +275,6 @@ def test_verify_candidates_polishes_misses_when_refinement_on(ur5_kb: KinBody) -
     assert len(sols) == 1
     s = sols[0]
     assert s.refinement_used == "lm"
-    assert s.refinement_iters >= 1
     assert s.fk_residual < 1e-10
 
 

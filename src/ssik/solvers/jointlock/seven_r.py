@@ -592,9 +592,6 @@ def solve(
                     q=full_q,
                     fk_residual=inner.fk_residual,
                     refinement_used=inner.refinement_used,
-                    refinement_iters=inner.refinement_iters,
-                    branch_id=sample_idx,
-                    solver_name=_SOLVER_NAME,
                 )
             )
         # Incremental dedup so we know how many *unique* solutions we

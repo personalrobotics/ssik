@@ -48,7 +48,6 @@ def _sol(q: list[float]) -> Solution:
     return Solution(
         q=np.asarray(q, dtype=np.float64),
         fk_residual=0.0,
-        solver_name="test",
     )
 
 
@@ -167,17 +166,11 @@ def test_wrap_to_limits_preserves_other_fields() -> None:
         q=np.array([4.0]),
         fk_residual=1.5e-9,
         refinement_used="lm",
-        refinement_iters=3,
-        branch_id=2,
-        solver_name="test_solver",
     )
     out = wrap_to_limits([original], kb)
     wrapped = out[0]
     assert wrapped.fk_residual == 1.5e-9
     assert wrapped.refinement_used == "lm"
-    assert wrapped.refinement_iters == 3
-    assert wrapped.branch_id == 2
-    assert wrapped.solver_name == "test_solver"
 
 
 def test_wrap_to_limits_prefers_smallest_k() -> None:

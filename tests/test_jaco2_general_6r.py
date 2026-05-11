@@ -94,7 +94,6 @@ def test_jaco2_general_6r_recovers_seed(jaco2_kb: KinBody, seed: int) -> None:
         # JACO 2's AE-3 leftvar avoids the singular pencil; algebraic FK
         # is exact and refinement should not fire by default.
         assert sol.refinement_used == "none", sol
-        assert sol.solver_name == "ikgeo.general_6r"
 
     def _wrap_max(q: NDArray[np.float64]) -> float:
         return float(

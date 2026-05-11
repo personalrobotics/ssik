@@ -240,5 +240,3 @@ def test_solutions_all_marked_lm() -> None:
     T_target = _fk(kb, q_true)
     sols, _ = lm_multi_restart.solve(kb, T_target)
     assert all(s.refinement_used == "lm" for s in sols)
-    assert all(s.branch_id is not None for s in sols)
-    assert all(s.solver_name == "numerical.lm_multi_restart" for s in sols)

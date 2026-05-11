@@ -71,7 +71,6 @@ def test_general_6r_ur5_recovers_seed(ur5_kb: KinBody) -> None:
         )
         # Default-off refinement: pure-algebraic path on UR5.
         assert sol.refinement_used == "none", sol
-        assert sol.solver_name == "ikgeo.general_6r"
 
     def _wrap_max(q: NDArray[np.float64]) -> float:
         return float(

@@ -106,7 +106,7 @@ def test_locked_7r_fk_closure(arm_name: str, lock_idx: int) -> None:
     # but are still valid).
     for s in sols:
         assert s.fk_residual < 1e-8, (
-            f"{arm_name} lock={lock_idx} branch={s.branch_id}: FK residual "
+            f"{arm_name} lock={lock_idx}: FK residual "
             f"{s.fk_residual:.3e} > 1e-8 — likely a spurious algebraic seed "
             f"that LM didn't reject"
         )

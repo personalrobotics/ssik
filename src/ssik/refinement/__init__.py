@@ -792,7 +792,7 @@ def verify_candidates(
     fk_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
     t_target: NDArray[np.float64],
     fk_atol: float,
-    solver_name: str,
+    solver_name: str = "",  # accepted for back-compat; v1.0 drops it from Solution
     dedup_atol: float | None = None,
     allow_refinement: bool = False,
     refinement_max_iters: int = 15,
@@ -850,9 +850,6 @@ def verify_candidates(
                     q=q,
                     fk_residual=fk_resid,
                     refinement_used="none",
-                    refinement_iters=0,
-                    branch_id=branch_idx,
-                    solver_name=solver_name,
                 )
             )
             appended = True
@@ -866,15 +863,12 @@ def verify_candidates(
                 jacobian_fn=jacobian_fn,
             )
             if refined is not None:
-                q_ref, resid, iters = refined
+                q_ref, resid, _iters = refined
                 verified.append(
                     Solution(
                         q=q_ref,
                         fk_residual=resid,
                         refinement_used="lm",
-                        refinement_iters=iters,
-                        branch_id=branch_idx,
-                        solver_name=solver_name,
                     )
                 )
                 appended = True
