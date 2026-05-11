@@ -27,17 +27,17 @@ T_target = ...
 
 # max_solutions=1 + q_seed: solver searches the 1-parameter redundancy
 # sweep starting from the lock-sample closest to q_current and short-
-# circuits as soon as it finds an FK-closed branch. ~10-15x faster
-# than the full sweep on 7R arms.
+# circuits on the first valid in-limits branch (~5-6x faster than
+# the full sweep on 7R jointlock arms; sub-ms on 6R / SRS arms).
 sols = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
 q_command = sols[0].q if sols else q_current             # empty list = unreachable
 ```
 
-The same kwarg shape works on every prebuilt artifact (UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka, Rizon 4, Kassow). On 7R jointlock arms (Franka / Rizon / Kassow), `q_seed` + `max_solutions=1` short-circuits the internal lock-sweep for a ~10-15× speedup; on other arms the same kwargs are applied as a postprocess pass. By default `solve()` also runs `respect_limits=True` so out-of-URDF-limit branches are dropped (with a `q ± 2π` rescue pass first) — pass `respect_limits=False` for the raw geometric set.
+The same kwarg shape works on every prebuilt artifact (UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka, Rizon 4, Kassow). By default `solve()` runs **`respect_limits=True`**: out-of-URDF-limit branches are dropped (with a `q ± 2π` rescue pass first). On 7R jointlock arms (Franka / Rizon / Kassow) the limits filter runs *during* the lock-sweep so `max_solutions=1` short-circuits on the first in-limits candidate rather than wasting samples on branches the postprocess would discard. Pass `respect_limits=False` for the raw geometric set when you want to filter yourself.
 
 ## Returns all solutions, not one
 
-A single 6-DOF target pose admits up to **16 analytical IK branches** (8 typical for a Pieper-class arm: 4 shoulder × 2 elbow, with the wrist deterministic). For a 7R redundant arm the IK is a 1-parameter family; ssik discretises it into 32–256 branches per pose depending on the swivel-sample count. Every returned `Solution` carries `q`, the per-IK FK residual, and which solver branch produced it.
+A single 6-DOF target pose admits up to **16 analytical IK branches** (8 typical for a Pieper-class arm: 4 shoulder × 2 elbow, with the wrist deterministic). For a 7R redundant arm the IK is a 1-parameter family; ssik discretises it into 32–256 branches per pose depending on the swivel-sample count. Every returned `Solution` carries `q`, the per-IK FK residual, and whether the Newton polish path fired (`refinement_used`).
 
 Numerical IK libraries take a seed, run damped least-squares to a single converged configuration, and stop. Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
 
@@ -47,18 +47,18 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
-| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 4 sols | 549 ± 14 µs / FK 2e-9 / 4 sols |
-| Puma 560 (Pieper 6R, spherical wrist) | 6 ± 0 µs / FK 3e-14 / 8 sols | 233 ± 5 µs / FK 2e-14 / 8 sols |
-| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.04 ± 0.04 ms / FK 5e-6 / 8 sols |
-| iiwa14 (SRS 7R) | **refuses** ("only 1-6R robots are solvable") | 4.57 ± 0.03 ms / FK 4e-13 / 128 sols |
-| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.48 ± 1.18 ms / FK 1e-12 / 47 sols |
-| Franka Panda (anthropomorphic 7R) | **refuses** ("only 1-6R") | 28.42 ± 2.65 ms / FK 1e-6 / 64 sols |
-| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 33.18 ± 8.58 ms / FK 4e-9 / 42 sols |
-| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 27.03 ± 10.40 ms / FK 7e-8 / 24 sols |
+| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 4 sols | 556 ± 12 µs / FK 2e-9 / 4 sols |
+| Puma 560 (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 3e-14 / 8 sols | 245 ± 3 µs / FK 2e-14 / 8 sols |
+| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.04 ms / FK 3e-6 / 2 sols |
+| iiwa14 (SRS 7R) | **refuses** ("only 1-6R robots are solvable") | 6.56 ± 0.49 ms / FK 4e-13 / 96 sols |
+| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 69.37 ± 4.32 ms / FK 1e-12 / 47 sols |
+| Franka Panda (anthropomorphic 7R) | **refuses** ("only 1-6R") | 28.03 ± 2.57 ms / FK 7e-13 / 9 sols |
+| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 30.88 ± 8.80 ms / FK 4e-9 / 35 sols |
+| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 28.06 ± 10.63 ms / FK 7e-8 / 24 sols |
 
 EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings are EAIK's actual error messages, captured verbatim by the bench harness. A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
 
-ssik FK residuals above are the algebraic candidates returned by `solve()` with default tolerance policy. Passing `allow_refinement=True` runs an opt-in Levenberg–Marquardt polish per candidate and tightens the residual to machine precision (~1e-14) at a few hundred microseconds per branch.
+ssik FK residuals above are the algebraic candidates returned by `solve()` with default tolerance policy and `respect_limits=True`. Branch counts on 7R arms (iiwa14: 96, Franka: 9, Rizon: 35) reflect URDF-joint-limit filtering; pass `respect_limits=False` to get the full geometric set. The `allow_refinement=True` opt-in runs Levenberg–Marquardt polish per algebraic candidate at a few hundred microseconds per branch — useful when an algebraic candidate lands just above `fk_atol` near a kinematic singularity; it does not always reach machine precision on tier-2 RR arms whose polish basin is narrow.
 
 The algorithmic ingredients are not novel — Raghavan–Roth (1990), Manocha–Canny (1994), Singh–Kreutz (1989), Husty–Pfurner (2007). What's new is making the textbook pipelines survive on real ill-conditioned arms (AE-3 leftvar selection on JACO 2 drops `cond(m_quad)` from 3.75 × 10^16 to 127), composing them with a uniform dispatch layer, and packaging the whole thing as a deployable artifact.
 
