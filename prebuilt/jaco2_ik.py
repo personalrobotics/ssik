@@ -861,7 +861,7 @@ def solve(
     max_solutions: int | None = None,
     q_seed=None,
     respect_limits: bool = True,
-    allow_refinement: bool = True,
+    allow_refinement: bool = False,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
 ):
@@ -879,11 +879,13 @@ def solve(
     :param respect_limits: when ``True`` (default), solutions
         outside URDF joint limits are dropped. Pass ``False`` for
         the raw geometric set (e.g. analysis / debugging).
-    :param allow_refinement: when ``True`` (default), Newton polish
-        fires on near-miss algebraic candidates that don't quite
-        meet ``fk_atol``. Tightens FK closure to machine precision
-        at ~100-300 us per polished branch. Set ``False`` for
-        pure algebraic results.
+    :param allow_refinement: opt into Newton polish for near-miss
+        algebraic candidates that don't quite meet ``fk_atol``.
+        Default ``False`` -- the algebraic path is already at
+        machine precision on tier-0 / SRS arms. On tier-2 RR
+        arms (JACO 2, Rizon 4, Kassow), polish can recover
+        edge-case candidates whose algebraic FK drifts above
+        ``fk_atol``, at ~100-300 us per polished branch.
     :param policy: tolerance policy (FK closure + dedup tolerance).
         Rarely customised.
     :param refinement_max_iters: cap on Newton iterations per

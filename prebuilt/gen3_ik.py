@@ -139,7 +139,7 @@ def solve(
     max_solutions=None,
     q_seed=None,
     respect_limits: bool = True,
-    allow_refinement: bool = True,
+    allow_refinement: bool = False,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
 ):

@@ -106,7 +106,7 @@ class _ArtifactArm:
     def fk(self, q):
         return self._fk(q)
 
-    def ik(self, T, **kwargs):
+    def solve(self, T, **kwargs):
         return self._module.solve(T, **kwargs)
 
 

@@ -482,7 +482,7 @@ def _render_specialised_solve_orchestrator() -> str:
             max_solutions: int | None = None,
             q_seed=None,
             respect_limits: bool = True,
-            allow_refinement: bool = True,
+            allow_refinement: bool = False,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
             refinement_max_iters: int = 15,
         ):
@@ -500,11 +500,13 @@ def _render_specialised_solve_orchestrator() -> str:
             :param respect_limits: when ``True`` (default), solutions
                 outside URDF joint limits are dropped. Pass ``False`` for
                 the raw geometric set (e.g. analysis / debugging).
-            :param allow_refinement: when ``True`` (default), Newton polish
-                fires on near-miss algebraic candidates that don't quite
-                meet ``fk_atol``. Tightens FK closure to machine precision
-                at ~100-300 us per polished branch. Set ``False`` for
-                pure algebraic results.
+            :param allow_refinement: opt into Newton polish for near-miss
+                algebraic candidates that don't quite meet ``fk_atol``.
+                Default ``False`` -- the algebraic path is already at
+                machine precision on tier-0 / SRS arms. On tier-2 RR
+                arms (JACO 2, Rizon 4, Kassow), polish can recover
+                edge-case candidates whose algebraic FK drifts above
+                ``fk_atol``, at ~100-300 us per polished branch.
             :param policy: tolerance policy (FK closure + dedup tolerance).
                 Rarely customised.
             :param refinement_max_iters: cap on Newton iterations per
@@ -807,7 +809,7 @@ def _render_specialised_solve_orchestrator_7r() -> str:
             max_solutions: int | None = None,
             q_seed=None,
             respect_limits: bool = True,
-            allow_refinement: bool = True,
+            allow_refinement: bool = False,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
             refinement_max_iters: int = 15,
         ):
@@ -846,15 +848,14 @@ def _render_specialised_solve_orchestrator_7r() -> str:
                 )
             """
             T = np.asarray(T_target, dtype=np.float64)
-            # When ``respect_limits=True``, don't short-circuit the
-            # lock-sweep on ``max_solutions``: the first-found valid IK
-            # might be out-of-limits and the postprocess pass would drop
-            # it, leaving zero results. Run the full sweep, then filter
-            # + trim. The user can recover the early-exit speed by
-            # passing ``respect_limits=False``.
-            sweep_max = None if respect_limits else max_solutions
+            # Lock-sweep filters limits in-flight (#238 review): the
+            # short-circuit fires on the first in-limits valid IK, not
+            # on a candidate that postprocess would drop. Preserves the
+            # max_solutions+q_seed early-exit fast path even with
+            # respect_limits=True.
             candidates = _solve_algebraic(
-                T, max_solutions=sweep_max, q_seed=q_seed
+                T, max_solutions=max_solutions, q_seed=q_seed,
+                respect_limits=respect_limits,
             )
 
             fk_atol = policy.subproblem_numerical
@@ -911,13 +912,10 @@ def _render_specialised_solve_orchestrator_7r() -> str:
                 )
                 for q, residual, ref_used, _ref_iters in deduped
             ]
-            # respect_limits before max_solutions trim, so the truncation
-            # picks from the in-limits set (not the raw set where the
-            # closest-to-seed branch might be out-of-limits and would
-            # silently disappear -- #238 review finding).
-            if respect_limits:
-                solutions = _ps_wrap_to_limits(solutions, _KB)
-                solutions = _ps_respect_limits(solutions, _KB)
+            # No orchestrator-level respect_limits pass: the inner
+            # ``_solve_algebraic`` already filtered in-flight when
+            # respect_limits=True, so candidates here are guaranteed
+            # in-limits. The cap on max_solutions also ran inside.
             if max_solutions is not None and len(solutions) > max_solutions:
                 solutions = solutions[:max_solutions]
             return solutions
@@ -1126,7 +1124,7 @@ def _render_solve_function(solver_short: str) -> str:
             max_solutions=None,
             q_seed=None,
             respect_limits: bool = True,
-            allow_refinement: bool = True,
+            allow_refinement: bool = False,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
             refinement_max_iters: int = 15,
         ):

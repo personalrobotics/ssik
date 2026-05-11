@@ -180,14 +180,17 @@ _DISPATCH_CACHE = (
 )
 
 
-def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
+def _solve_algebraic(
+    T_target, *, max_solutions=None, q_seed=None, respect_limits=False,
+):
     """7R IK candidates via joint-locking + inner 6R sweep.
 
     Routes to ssik.solvers.jointlock.seven_r.solve with the baked
     KinBody, lock_idx, lock-sample schedule, and dispatch cache.
-    ``max_solutions`` and ``q_seed`` are forwarded so the underlying
-    lock-sweep can short-circuit (#142). Returns ``list[list[float]]``
-    of length-7 q-vectors.
+    ``max_solutions``, ``q_seed``, and ``respect_limits`` are
+    forwarded so the lock-sweep can short-circuit on the first
+    in-limits valid IK (#238 review). Returns
+    ``list[list[float]]`` of length-7 q-vectors.
     """
     sub_solutions, _is_ls = _ssik_seven_r.solve(
         _KB, T_target,
@@ -195,6 +198,7 @@ def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
         lock_samples=_LOCK_SAMPLES,
         dispatch_cache=_DISPATCH_CACHE,
         max_solutions=max_solutions, q_seed=q_seed,
+        respect_limits=respect_limits,
     )
     return [list(s.q) for s in sub_solutions]
 
@@ -406,7 +410,7 @@ def solve(
     max_solutions: int | None = None,
     q_seed=None,
     respect_limits: bool = True,
-    allow_refinement: bool = True,
+    allow_refinement: bool = False,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
 ):
@@ -445,15 +449,14 @@ def solve(
         )
     """
     T = np.asarray(T_target, dtype=np.float64)
-    # When ``respect_limits=True``, don't short-circuit the
-    # lock-sweep on ``max_solutions``: the first-found valid IK
-    # might be out-of-limits and the postprocess pass would drop
-    # it, leaving zero results. Run the full sweep, then filter
-    # + trim. The user can recover the early-exit speed by
-    # passing ``respect_limits=False``.
-    sweep_max = None if respect_limits else max_solutions
+    # Lock-sweep filters limits in-flight (#238 review): the
+    # short-circuit fires on the first in-limits valid IK, not
+    # on a candidate that postprocess would drop. Preserves the
+    # max_solutions+q_seed early-exit fast path even with
+    # respect_limits=True.
     candidates = _solve_algebraic(
-        T, max_solutions=sweep_max, q_seed=q_seed
+        T, max_solutions=max_solutions, q_seed=q_seed,
+        respect_limits=respect_limits,
     )
 
     fk_atol = policy.subproblem_numerical
@@ -510,13 +513,10 @@ def solve(
         )
         for q, residual, ref_used, _ref_iters in deduped
     ]
-    # respect_limits before max_solutions trim, so the truncation
-    # picks from the in-limits set (not the raw set where the
-    # closest-to-seed branch might be out-of-limits and would
-    # silently disappear -- #238 review finding).
-    if respect_limits:
-        solutions = _ps_wrap_to_limits(solutions, _KB)
-        solutions = _ps_respect_limits(solutions, _KB)
+    # No orchestrator-level respect_limits pass: the inner
+    # ``_solve_algebraic`` already filtered in-flight when
+    # respect_limits=True, so candidates here are guaranteed
+    # in-limits. The cap on max_solutions also ran inside.
     if max_solutions is not None and len(solutions) > max_solutions:
         solutions = solutions[:max_solutions]
     return solutions

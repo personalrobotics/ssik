@@ -220,14 +220,17 @@ def compose(kb: KinBody) -> str:
         ){rr_prime_block}
 
 
-        def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
+        def _solve_algebraic(
+            T_target, *, max_solutions=None, q_seed=None, respect_limits=False,
+        ):
             \"\"\"7R IK candidates via joint-locking + inner 6R sweep.
 
             Routes to ssik.solvers.jointlock.seven_r.solve with the baked
             KinBody, lock_idx, lock-sample schedule, and dispatch cache.
-            ``max_solutions`` and ``q_seed`` are forwarded so the underlying
-            lock-sweep can short-circuit (#142). Returns ``list[list[float]]``
-            of length-7 q-vectors.
+            ``max_solutions``, ``q_seed``, and ``respect_limits`` are
+            forwarded so the lock-sweep can short-circuit on the first
+            in-limits valid IK (#238 review). Returns
+            ``list[list[float]]`` of length-7 q-vectors.
             \"\"\"
             sub_solutions, _is_ls = _ssik_seven_r.solve(
                 _KB, T_target,
@@ -235,6 +238,7 @@ def compose(kb: KinBody) -> str:
                 lock_samples=_LOCK_SAMPLES,
                 dispatch_cache=_DISPATCH_CACHE,
                 max_solutions=max_solutions, q_seed=q_seed,
+                respect_limits=respect_limits,
             )
             return [list(s.q) for s in sub_solutions]
         """

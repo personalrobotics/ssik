@@ -220,7 +220,7 @@ class Manipulator:
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
         respect_limits: bool = True,
-        allow_refinement: bool = True,
+        allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
         **solver_kwargs: Any,
@@ -240,9 +240,11 @@ class Manipulator:
         :param respect_limits: when ``True`` (default), solutions outside
             URDF joint limits are dropped. Pass ``False`` for the raw
             geometric set (analysis / debugging).
-        :param allow_refinement: when ``True`` (default), Newton polish
-            fires on near-miss algebraic candidates. Tightens FK closure
-            to machine precision at ~100-300 us per polished branch.
+        :param allow_refinement: opt into Newton polish for near-miss
+            algebraic candidates. Default ``False`` -- the algebraic
+            path is already at machine precision on tier-0 / SRS arms.
+            Set ``True`` on tier-2 RR arms to recover edge-case
+            candidates whose algebraic FK drifts above ``fk_atol``.
         :param policy: tolerance policy. Rarely customised. Defaults to
             :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
         :param refinement_max_iters: cap on Newton iterations per candidate
