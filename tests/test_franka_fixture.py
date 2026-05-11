@@ -221,8 +221,11 @@ def test_franka_artifact_max_solutions_short_circuit() -> None:
         q_true = rng.uniform(-1.5, 1.5, size=7)
         T_target = franka_panda_ik._fk(q_true)
 
-        sols_all = franka_panda_ik.solve(T_target)
-        sols_one = franka_panda_ik.solve(T_target, max_solutions=1)
+        # Test exercises analytical-branch enumeration; bypass limits
+        # filter so all 64 geometric branches are kept regardless of
+        # whether their q lands inside Franka's URDF limits.
+        sols_all = franka_panda_ik.solve(T_target, respect_limits=False)
+        sols_one = franka_panda_ik.solve(T_target, max_solutions=1, respect_limits=False)
 
         assert sols_all, "exhaustive search returned no IK"
         assert sols_one, "max_solutions=1 returned no IK"

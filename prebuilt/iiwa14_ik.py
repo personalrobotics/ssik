@@ -33,6 +33,11 @@ import numpy as np
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.postprocess import (
+    nearest_to_seed as _ps_nearest_to_seed,
+    respect_limits as _ps_respect_limits,
+    wrap_to_limits as _ps_wrap_to_limits,
+)
 from ssik.solvers.seven_r.srs import solve as _solver_solve
 
 SOLVER_NAME = "seven_r.srs"
@@ -131,31 +136,34 @@ _KB = _build_kb()
 def solve(
     T_target,
     *,
+    max_solutions=None,
+    q_seed=None,
+    respect_limits: bool = True,
+    allow_refinement: bool = True,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-    allow_refinement: bool = False,
     refinement_max_iters: int = 15,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
     :param T_target: 4x4 SE(3) target end-effector pose, np.float64.
-    :param policy: tolerance policy. Pass a custom
-        :class:`ssik.TolerancePolicy` to tighten or relax the
-        FK-closure threshold (``subproblem_numerical``), the
-        axis-parallel / axis-intersect predicates, etc. Defaults to
-        :data:`ssik.DEFAULT_TOLERANCE_POLICY`.
-    :param allow_refinement: opt into Newton-on-spatial-Jacobian
-        polish for near-miss algebraic candidates. Default ``False``;
-        turn on to recover candidates that don't quite meet
-        ``policy.subproblem_numerical`` on their own (e.g. near
-        kinematic singularities).
+    :param max_solutions: optional cap on returned IKs (post-dedup,
+        post-limits filter). ``None`` = full enumeration.
+    :param q_seed: optional joint config. When provided, solutions
+        are sorted by wrap-to-pi distance from ``q_seed`` (closest
+        first). Combine with ``max_solutions=1`` for the
+        trajectory-tracking idiom.
+    :param respect_limits: when ``True`` (default), solutions
+        outside URDF joint limits are dropped. ``False`` returns
+        the raw geometric set.
+    :param allow_refinement: when ``True`` (default), Newton polish
+        fires on near-miss algebraic candidates. Tightens FK
+        closure to machine precision.
+    :param policy: tolerance policy. Rarely customised.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
     :returns: list of :class:`Solution`, one per analytical IK
-        branch. Each ``solution.q`` is a joint vector matching
-        the source URDF's joint ordering; ``solution.fk_residual``
-        reports closure against ``T_target``. Empty list iff no
-        candidate met the FK tolerance -- check ``if not sols:``
-        for the "unreachable target" case.
+        branch. Empty list iff no candidate met the FK tolerance
+        -- check ``if not sols:`` for "unreachable target".
 
     Solver: srs.
     """
@@ -166,8 +174,21 @@ def solve(
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
     )
+    if respect_limits:
+        sols = _ps_wrap_to_limits(sols, _KB)
+        sols = _ps_respect_limits(sols, _KB)
+    if q_seed is not None:
+        sols = _ps_nearest_to_seed(sols, q_seed)
+    if max_solutions is not None and len(sols) > max_solutions:
+        sols = sols[:max_solutions]
     return sols
 
+from ssik.kinematics.poe_fk import poe_forward_kinematics as _poe_fk
+
+
+def fk(q):
+    """Forward kinematics: returns the 4x4 base->ee pose at ``q``."""
+    return _poe_fk(_KB, np.asarray(q, dtype=np.float64))
 
 __all__ = [
     "DISPATCH_REASON",
@@ -175,5 +196,6 @@ __all__ = [
     "FLOP_BUDGET",
     "SOLVER_NAME",
     "SOLVER_TIER",
+    "fk",
     "solve",
 ]

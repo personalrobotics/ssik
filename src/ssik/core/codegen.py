@@ -160,6 +160,11 @@ def _render_thin_wrapper(
     buf.write("from ssik._kinbody import Joint, KinBody, Link\n")
     buf.write("from ssik.core.solution import Solution\n")
     buf.write("from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy\n")
+    buf.write("from ssik.postprocess import (\n")
+    buf.write("    nearest_to_seed as _ps_nearest_to_seed,\n")
+    buf.write("    respect_limits as _ps_respect_limits,\n")
+    buf.write("    wrap_to_limits as _ps_wrap_to_limits,\n")
+    buf.write(")\n")
     buf.write(f"from {solver_module} import solve as _solver_solve\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -172,7 +177,7 @@ def _render_thin_wrapper(
     buf.write(_render_kinbody_builder())
     buf.write("\n")
     buf.write(_render_solve_function(solver_short))
-    buf.write("\n")
+    buf.write(_render_fk_function_from_kb())
     buf.write(_render_all_export())
     return buf.getvalue()
 
@@ -218,6 +223,11 @@ def _render_specialised(
     # only refinement primitive imported from runtime is the generic
     # Levenberg-Marquardt step.
     buf.write("from ssik.refinement import lm_refine as _lm_refine\n")
+    buf.write("from ssik.postprocess import (\n")
+    buf.write("    nearest_to_seed as _ps_nearest_to_seed,\n")
+    buf.write("    respect_limits as _ps_respect_limits,\n")
+    buf.write("    wrap_to_limits as _ps_wrap_to_limits,\n")
+    buf.write(")\n")
     buf.write("from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -241,7 +251,7 @@ def _render_specialised(
         buf.write(_render_specialised_solve_orchestrator_7r())
     else:
         buf.write(_render_specialised_solve_orchestrator())
-    buf.write("\n")
+    buf.write(_render_fk_alias())
     buf.write(_render_all_export())
     return buf.getvalue()
 
@@ -468,21 +478,39 @@ def _render_specialised_solve_orchestrator() -> str:
         def solve(
             T_target,
             *,
+            max_solutions: int | None = None,
+            q_seed=None,
+            respect_limits: bool = True,
+            allow_refinement: bool = True,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-            allow_refinement: bool = False,
             refinement_max_iters: int = 15,
         ):
             """Inverse kinematics. Returns ``list[Solution]``.
 
             :param T_target: 4x4 SE(3) target end-effector pose.
+            :param max_solutions: optional cap on returned IKs (post-dedup,
+                post-limits filter). ``None`` = full redundancy enumeration.
+                Combine with ``q_seed`` for the "give me the IK closest to
+                where I am now" trajectory-tracking idiom.
+            :param q_seed: optional joint configuration. When provided,
+                returned solutions are sorted by wrap-to-pi distance from
+                ``q_seed`` (closest first). Has no effect on which solutions
+                are returned, only their order.
+            :param respect_limits: when ``True`` (default), solutions
+                outside URDF joint limits are dropped. Pass ``False`` for
+                the raw geometric set (e.g. analysis / debugging).
+            :param allow_refinement: when ``True`` (default), Newton polish
+                fires on near-miss algebraic candidates that don't quite
+                meet ``fk_atol``. Tightens FK closure to machine precision
+                at ~100-300 us per polished branch. Set ``False`` for
+                pure algebraic results.
             :param policy: tolerance policy (FK closure + dedup tolerance).
-            :param allow_refinement: opt into Newton-on-spatial-Jacobian
-                polish for near-miss candidates (those whose algebraic q
-                doesn't quite meet ``fk_atol``). Default off.
+                Rarely customised.
             :param refinement_max_iters: cap on Newton iterations per
                 candidate when ``allow_refinement=True``.
             :returns: list of :class:`Solution`; empty list iff no IK
-                closed within ``policy.subproblem_numerical``.
+                closed within ``policy.subproblem_numerical`` (or all
+                IKs were filtered by ``respect_limits=True``).
             """
             T = np.asarray(T_target, dtype=np.float64)
             candidates = _solve_algebraic(T)
@@ -541,6 +569,20 @@ def _render_specialised_solve_orchestrator() -> str:
                 )
                 for q, residual, ref_used, _ref_iters in deduped
             ]
+
+            # Post-processing pass (#238 item 4). Order matters:
+            #   1. wrap_to_limits tries q +/- 2*pi per joint to bring
+            #      candidates into the URDF's limit range
+            #   2. respect_limits drops anything still outside
+            #   3. nearest_to_seed sorts by distance to q_seed (if given)
+            #   4. max_solutions truncates to the first k
+            if respect_limits:
+                solutions = _ps_wrap_to_limits(solutions, _KB)
+                solutions = _ps_respect_limits(solutions, _KB)
+            if q_seed is not None:
+                solutions = _ps_nearest_to_seed(solutions, q_seed)
+            if max_solutions is not None and len(solutions) > max_solutions:
+                solutions = solutions[:max_solutions]
             return solutions
         '''
     )
@@ -761,30 +803,33 @@ def _render_specialised_solve_orchestrator_7r() -> str:
         def solve(
             T_target,
             *,
-            policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-            allow_refinement: bool = False,
-            refinement_max_iters: int = 15,
             max_solutions: int | None = None,
             q_seed=None,
+            respect_limits: bool = True,
+            allow_refinement: bool = True,
+            policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+            refinement_max_iters: int = 15,
         ):
-            """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
+            """Inverse kinematics. Returns ``list[Solution]``.
 
             :param T_target: 4x4 SE(3) target end-effector pose.
-            :param policy: tolerance policy (FK closure + dedup tolerance).
-            :param allow_refinement: opt into Newton-on-spatial-Jacobian
-                polish for near-miss candidates (those whose algebraic q
-                doesn't quite meet ``fk_atol``). Default off.
-            :param refinement_max_iters: cap on Newton iterations per
-                candidate when ``allow_refinement=True``.
             :param max_solutions: optional early-exit cap on the
                 jointlock lock-sweep. ``None`` (default) = exhaustive
                 search. ``max_solutions=1`` short-circuits as soon as
-                one valid IK is found (~17x faster on Franka 7R).
+                one valid IK is found (~17x faster on this 7R).
             :param q_seed: optional length-7 seed configuration. When
                 provided, the lock-joint samples are visited in order
                 of wrap-to-pi distance to ``q_seed[lock_idx]`` --
                 combined with ``max_solutions=1`` this is the
-                trajectory-tracking fast path (~37x faster on Franka).
+                trajectory-tracking fast path.
+            :param respect_limits: when ``True`` (default), solutions
+                outside URDF joint limits are dropped. Pass ``False``
+                for the raw geometric set.
+            :param allow_refinement: when ``True`` (default), Newton
+                polish fires on near-miss algebraic candidates.
+            :param policy: tolerance policy. Rarely customised.
+            :param refinement_max_iters: cap on Newton iterations per
+                candidate when ``allow_refinement=True``.
 
             Common idioms::
 
@@ -865,6 +910,9 @@ def _render_specialised_solve_orchestrator_7r() -> str:
                 )
                 for q, residual, ref_used, _ref_iters in deduped
             ]
+            if respect_limits:
+                solutions = _ps_wrap_to_limits(solutions, _KB)
+                solutions = _ps_respect_limits(solutions, _KB)
             return solutions
         '''
     )
@@ -1068,31 +1116,34 @@ def _render_solve_function(solver_short: str) -> str:
         def solve(
             T_target,
             *,
+            max_solutions=None,
+            q_seed=None,
+            respect_limits: bool = True,
+            allow_refinement: bool = True,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-            allow_refinement: bool = False,
             refinement_max_iters: int = 15,
         ):
             \"\"\"Inverse kinematics. Returns ``list[Solution]``.
 
             :param T_target: 4x4 SE(3) target end-effector pose, np.float64.
-            :param policy: tolerance policy. Pass a custom
-                :class:`ssik.TolerancePolicy` to tighten or relax the
-                FK-closure threshold (``subproblem_numerical``), the
-                axis-parallel / axis-intersect predicates, etc. Defaults to
-                :data:`ssik.DEFAULT_TOLERANCE_POLICY`.
-            :param allow_refinement: opt into Newton-on-spatial-Jacobian
-                polish for near-miss algebraic candidates. Default ``False``;
-                turn on to recover candidates that don't quite meet
-                ``policy.subproblem_numerical`` on their own (e.g. near
-                kinematic singularities).
+            :param max_solutions: optional cap on returned IKs (post-dedup,
+                post-limits filter). ``None`` = full enumeration.
+            :param q_seed: optional joint config. When provided, solutions
+                are sorted by wrap-to-pi distance from ``q_seed`` (closest
+                first). Combine with ``max_solutions=1`` for the
+                trajectory-tracking idiom.
+            :param respect_limits: when ``True`` (default), solutions
+                outside URDF joint limits are dropped. ``False`` returns
+                the raw geometric set.
+            :param allow_refinement: when ``True`` (default), Newton polish
+                fires on near-miss algebraic candidates. Tightens FK
+                closure to machine precision.
+            :param policy: tolerance policy. Rarely customised.
             :param refinement_max_iters: cap on Newton iterations per
                 candidate when ``allow_refinement=True``.
             :returns: list of :class:`Solution`, one per analytical IK
-                branch. Each ``solution.q`` is a joint vector matching
-                the source URDF's joint ordering; ``solution.fk_residual``
-                reports closure against ``T_target``. Empty list iff no
-                candidate met the FK tolerance -- check ``if not sols:``
-                for the "unreachable target" case.
+                branch. Empty list iff no candidate met the FK tolerance
+                -- check ``if not sols:`` for "unreachable target".
 
             Solver: {solver_short}.
             \"\"\"
@@ -1103,6 +1154,13 @@ def _render_solve_function(solver_short: str) -> str:
                 allow_refinement=allow_refinement,
                 refinement_max_iters=refinement_max_iters,
             )
+            if respect_limits:
+                sols = _ps_wrap_to_limits(sols, _KB)
+                sols = _ps_respect_limits(sols, _KB)
+            if q_seed is not None:
+                sols = _ps_nearest_to_seed(sols, q_seed)
+            if max_solutions is not None and len(sols) > max_solutions:
+                sols = sols[:max_solutions]
             return sols
         """
     )
@@ -1116,6 +1174,31 @@ def _render_all_export() -> str:
         '\n    "FLOP_BUDGET",'
         '\n    "SOLVER_NAME",'
         '\n    "SOLVER_TIER",'
+        '\n    "fk",'
         '\n    "solve",'
         "\n]\n"
+    )
+
+
+def _render_fk_alias() -> str:
+    """Specialised templates already define ``_fk``; expose it publicly
+    so callers can do ``arm_ik.fk(q)`` instead of the private mangled
+    name."""
+    return "\nfk = _fk\n"
+
+
+def _render_fk_function_from_kb() -> str:
+    """For thin-wrapper templates that don't bake FK themselves
+    (``seven_r.srs``, ``seven_r.srs_polished``): build a public
+    ``fk(q)`` from the baked ``_KB`` using runtime POE FK."""
+    return textwrap.dedent(
+        """\
+
+        from ssik.kinematics.poe_fk import poe_forward_kinematics as _poe_fk
+
+
+        def fk(q):
+            \"\"\"Forward kinematics: returns the 4x4 base->ee pose at ``q``.\"\"\"
+            return _poe_fk(_KB, np.asarray(q, dtype=np.float64))
+        """
     )

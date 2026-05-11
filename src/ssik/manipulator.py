@@ -219,48 +219,51 @@ class Manipulator:
         *,
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
+        respect_limits: bool = True,
+        allow_refinement: bool = True,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-        allow_refinement: bool = False,
         refinement_max_iters: int = 15,
         **solver_kwargs: Any,
     ) -> list[Solution]:
         """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
 
         :param T_target: 4x4 SE(3) target pose.
-        :param max_solutions: optional cap on returned IKs. ``None`` = full
-            redundancy enumeration. ``1`` is the trajectory-tracking
-            "give me any IK" mode (typically 10-15x faster than full sweep
-            on 7R arms). The cap is honored at every layer of the dispatch
-            stack -- the inner solvers stop branch enumeration as soon as
-            ``max_solutions`` deduplicated IKs are found.
-        :param q_seed: optional length-:attr:`dof` seed configuration. When
-            supported by the dispatched solver (currently
-            :mod:`ssik.solvers.jointlock.seven_r`), ``q_seed`` reorders the
-            internal lock-sample sweep so the closest-to-seed sample fires
-            first; combined with ``max_solutions=1`` this is the canonical
-            trajectory-tracking idiom. Solvers that don't accept ``q_seed``
-            silently ignore it.
-        :param policy: tolerance policy. Defaults to
+        :param max_solutions: optional cap on returned IKs (post-dedup,
+            post-limits filter). ``None`` = full redundancy enumeration.
+            ``1`` combined with ``q_seed`` is the trajectory-tracking idiom.
+            On 7R jointlock arms the cap also short-circuits the lock-sweep
+            internally for a 10-15x speedup.
+        :param q_seed: optional length-:attr:`dof` seed. When provided,
+            returned solutions are sorted by wrap-to-pi distance from
+            ``q_seed`` (closest first). On jointlock-7R arms it also
+            reorders the internal lock-sample sweep.
+        :param respect_limits: when ``True`` (default), solutions outside
+            URDF joint limits are dropped. Pass ``False`` for the raw
+            geometric set (analysis / debugging).
+        :param allow_refinement: when ``True`` (default), Newton polish
+            fires on near-miss algebraic candidates. Tightens FK closure
+            to machine precision at ~100-300 us per polished branch.
+        :param policy: tolerance policy. Rarely customised. Defaults to
             :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
-        :param allow_refinement: opt into Newton-on-spatial-Jacobian polish
-            for candidates that don't FK-close algebraically. Default off;
-            the analytical path is exact for well-conditioned poses.
         :param refinement_max_iters: cap on Newton iterations per candidate
             when ``allow_refinement=True``.
-        :param solver_kwargs: forwarded verbatim to the dispatched solver's
-            ``solve()`` for power users who need solver-specific knobs
-            (``swivel_samples`` for SRS-class, ``linearity_joint`` for RR,
-            etc.). Unknown kwargs raise :class:`TypeError` from the
-            underlying solver.
+        :param solver_kwargs: forwarded verbatim to the dispatched solver
+            for power users (``swivel_samples`` for SRS-class,
+            ``linearity_joint`` for RR, etc.).
 
         :returns: list of :class:`Solution`, one per analytical IK branch.
             Empty list iff no candidate FK-closed within
-            ``policy.subproblem_numerical``. Check ``if not sols:`` for the
-            "unreachable target" case.
+            ``policy.subproblem_numerical`` (or all IKs were filtered by
+            ``respect_limits=True``). Check ``if not sols:`` for
+            "unreachable target".
 
         :raises ValueError: if ``T_target.shape != (4, 4)`` or
             ``len(q_seed) != dof`` when ``q_seed`` is given.
         """
+        from ssik.postprocess import nearest_to_seed as _ps_nearest_to_seed
+        from ssik.postprocess import respect_limits as _ps_respect_limits
+        from ssik.postprocess import wrap_to_limits as _ps_wrap_to_limits
+
         T = np.asarray(T_target, dtype=np.float64)
         if T.shape != (4, 4):
             raise ValueError(f"solve expected T_target of shape (4, 4), got {T.shape}")
@@ -295,4 +298,19 @@ class Manipulator:
         # tuple at the public-API boundary. `is_ls` is redundant with
         # `len(sols) == 0` in every shipped solver -- ssik #238 item 1.
         sols, _is_ls = self._solver_module.solve(self._kb, T, **kwargs)
+
+        # Cross-arm postprocess pass: solvers that didn't honour kwargs
+        # natively get them applied here so the public API is uniform.
+        # Order: wrap_to_limits first (try +/- 2pi shift to bring branches
+        # into the URDF range), THEN respect_limits (drop anything still
+        # outside). Without the shift, IKs returned in [-2pi, 0] would
+        # erroneously be filtered on arms with limits in [0, 2pi]
+        # (the JACO 2 case).
+        if respect_limits:
+            sols = _ps_wrap_to_limits(sols, self._kb)
+            sols = _ps_respect_limits(sols, self._kb)
+        if q_seed_arr is not None:
+            sols = _ps_nearest_to_seed(sols, q_seed_arr)
+        if max_solutions is not None and len(sols) > max_solutions:
+            sols = sols[:max_solutions]
         return sols

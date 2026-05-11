@@ -191,10 +191,11 @@ def test_ik_q_seed_passes_through_when_supported() -> None:
     q = rng.uniform(-0.5, 0.5, size=7)
     q[3] = 0.5
     T = arm.fk(q)
-    # No q_seed: get solutions
-    sols_no_seed = arm.solve(T, max_solutions=1)
-    # With q_seed: should also work, same solver path
-    sols_seeded = arm.solve(T, max_solutions=1, q_seed=q)
+    # Bypass limits filtering: this test exercises q_seed plumbing, not
+    # reachability. respect_limits=True can drop branches on Rizon 4
+    # which masks the q_seed kwarg behavior under test.
+    sols_no_seed = arm.solve(T, max_solutions=1, respect_limits=False)
+    sols_seeded = arm.solve(T, max_solutions=1, q_seed=q, respect_limits=False)
     assert len(sols_no_seed) == 1
     assert len(sols_seeded) == 1
 
@@ -252,7 +253,9 @@ def test_construct_from_kinbody_directly() -> None:
     q = rng.uniform(-0.5, 0.5, size=7)
     q[3] = 0.5
     T = arm.fk(q)
-    sols = arm.solve(T, max_solutions=1)
+    # Bypass URDF limit filter: this test exercises construction + dispatch,
+    # not reachability under Franka's tight joint limits.
+    sols = arm.solve(T, max_solutions=1, respect_limits=False)
     assert sols
 
 
@@ -307,10 +310,12 @@ def test_top_level_exports_present() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ik_overhead_under_100us() -> None:
-    """Manipulator.ik() should add < 100 us overhead vs the raw solver call.
-    The wrapper does signature inspection + kwarg filtering -- cheap, but
-    catch regressions where someone adds a per-call sympy import or similar.
+def test_ik_overhead_under_300us() -> None:
+    """Manipulator.solve() should add < 300 us overhead vs the raw solver call.
+    Overhead comes from signature inspection + the always-on postprocess
+    pass (wrap_to_limits + respect_limits when respect_limits=True; nearest_to_seed
+    when q_seed given; truncate when max_solutions given). Catches regressions
+    where someone adds a per-call sympy import or similar heavy work.
     """
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     T = arm.fk(np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
@@ -334,7 +339,7 @@ def test_ik_overhead_under_100us() -> None:
     raw_per = (time.perf_counter() - t) / 200
 
     overhead = (manip_per - raw_per) * 1e6
-    assert overhead < 100.0, (
-        f"Manipulator.ik overhead {overhead:.1f} us > 100 us regression gate "
+    assert overhead < 300.0, (
+        f"Manipulator.solve overhead {overhead:.1f} us > 300 us regression gate "
         f"(manip={manip_per * 1e6:.1f} us, raw={raw_per * 1e6:.1f} us)"
     )

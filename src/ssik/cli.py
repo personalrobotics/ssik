@@ -287,7 +287,7 @@ def _run_build(args: argparse.Namespace) -> int:
 
     print("[ssik] ✓ Done. Try:")
     print(f"[ssik]     >>> import {module_name}")
-    print(f"[ssik]     >>> sols, is_ls = {module_name}.solve(T_target)")
+    print(f"[ssik]     >>> sols = {module_name}.solve(T_target)")
     return 0
 
 
@@ -337,9 +337,11 @@ def _validate_artifact(
         q_star = rng.uniform(-1.0, 1.0, size=n_dof)
         T_star = _fk_poe(kb_source, q_star)
         t0 = time.perf_counter()
-        sols, is_ls = mod.solve(T_star)
+        # Validation samples q from [-1, 1] which can land outside URDF
+        # limits; bypass respect_limits for FK-roundtrip checks.
+        sols = mod.solve(T_star, respect_limits=False)
         times.append((time.perf_counter() - t0) * 1e3)
-        if is_ls or not sols:
+        if not sols:
             failures += 1
             continue
         worst = 0.0
