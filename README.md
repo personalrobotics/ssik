@@ -2,13 +2,47 @@
 
 Analytical inverse kinematics for 6R and 7R revolute robot arms. Returns **every IK branch** at machine-precision FK closure, dispatches the right solver automatically, and ships a per-arm build artifact that contains the full IK pipeline as a self-contained Python module.
 
-```python
-import ssik
+## Quickstart — use the build artifact
 
-arm = ssik.Manipulator.from_urdf("ur5.urdf", base="base_link", ee="ee_link")
-T = arm.fk([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
-sols, is_ls = arm.ik(T)                                   # all 8 IK branches
-sols, _    = arm.ik(T, max_solutions=1, q_seed=q_prev)    # closest branch only
+The intended deployment path is one `ssik build` per arm, then `import <arm>_ik` everywhere. The artifact is a single self-contained `.py` file with the per-arm KinBody constants, the dispatched solver, and any cached symbolic preprocessing already baked in — no URDF parsing, no `urchin`, no `sympy` on the import path.
+
+```python
+import franka_panda_ik           # prebuilt; see prebuilt/ for 8 ready-to-use arms
+import numpy as np
+
+T_target = np.eye(4); T_target[:3, 3] = [0.5, 0.1, 0.3]
+sols, is_ls = franka_panda_ik.solve(T_target)            # all 64 IK branches
+```
+
+### Trajectory tracking / IK-based teleop
+
+The canonical pattern for teleop and tracking is "give me the IK closest to where the robot is now":
+
+```python
+# Robot's current configuration (from joint sensors, last command, etc.).
+q_current = np.array([0.0, -0.5, 0.0, 0.7, 0.0, 1.2, 0.0])
+
+# Target pose updates every control tick (VR controller, planner, etc.).
+T_target = ...
+
+# max_solutions=1 + q_seed: solver searches the 1-parameter redundancy
+# sweep starting from the lock-sample closest to q_current and short-
+# circuits as soon as it finds an FK-closed branch. ~10-15x faster
+# than the full sweep on 7R arms.
+sols, is_ls = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
+q_command = sols[0].q if not is_ls else q_current        # fall back if unreachable
+```
+
+Native `q_seed` / `max_solutions` short-circuit support ships in the jointlock-7R artifacts (Franka, Rizon 4, Kassow KR810). For any other arm, the same pattern via the cross-arm `ssik.postprocess` helpers:
+
+```python
+import ur5_ik
+from ssik.postprocess import nearest_to_seed, max_solutions
+
+sols, _ = ur5_ik.solve(T_target)
+sols = nearest_to_seed(sols, q_current)
+sols = max_solutions(sols, k=1)
+q_command = sols[0].q
 ```
 
 ## Returns all solutions, not one
@@ -38,41 +72,24 @@ ssik FK residuals above are the algebraic candidates returned by `solve()` with 
 
 The algorithmic ingredients are not novel — Raghavan–Roth (1990), Manocha–Canny (1994), Singh–Kreutz (1989), Husty–Pfurner (2007). What's new is making the textbook pipelines survive on real ill-conditioned arms (AE-3 leftvar selection on JACO 2 drops `cond(m_quad)` from 3.75 × 10^16 to 127), composing them with a uniform dispatch layer, and packaging the whole thing as a deployable artifact.
 
-## The build artifact is the deployment story
-
-ssik supports two execution paths. They share the same public API but solve different problems.
-
-**Development / interactive** — `ssik.Manipulator.from_urdf(...)`:
-
-```python
-arm = ssik.Manipulator.from_urdf("my_arm.urdf", base="base_link", ee="ee_link")
-sols, _ = arm.ik(T)
-```
-
-The runtime parses the URDF, classifies the topology, dispatches a solver, and runs IK. First-call symbolic preprocessing (when the dispatch lands on the universal Raghavan-Roth fallback) is paid lazily — fine for tests and one-off use. Requires `urchin` for URDF parsing and `sympy` for any symbolic preprocessing on first call.
-
-**Production / embedded** — `ssik build` artifact:
+## Build an artifact for your own arm
 
 ```bash
 ssik build my_arm.urdf --base base_link --ee tool0
 # → my_arm_ik.py    (~1-5 min build, all symbolic preprocessing baked in)
 ```
 
-```python
-import my_arm_ik
-sols, is_ls = my_arm_ik.solve(T_target)         # same signature as Manipulator.ik()
-```
+The artifact is a single `.py` file containing:
 
-The artifact is a single `.py` file that contains:
 - the per-arm KinBody constants inlined as numpy literals,
 - the dispatch choice baked at build time (no runtime classification),
 - for non-Pieper sub-chains, the cached Raghavan–Roth symbolic derivations as base85-encoded zlib-compressed pickle blobs.
 
-Module-init takes ~5 seconds (deserialise + re-`lambdify` the cached blobs); every subsequent `solve()` call hits warm-cache speed. **No URDF parsing, no `urchin` dependency, no cold-cache symbolic preprocessing at runtime, no sympy on the import path of the deployed artifact.** A robot stack that imports `my_arm_ik.py` carries no algorithmic complexity beyond what the build pipeline already resolved.
+Module-init takes ~5 s (deserialise + re-`lambdify` the cached blobs); every subsequent `solve()` call hits warm-cache speed. **No URDF parsing, no `urchin` dependency, no cold-cache symbolic preprocessing at runtime, no sympy on the import path of the deployed artifact.** A robot stack that imports `my_arm_ik.py` carries no algorithmic complexity beyond what the build pipeline already resolved.
 
 This is the same idea OpenRAVE's IKFast had — generate per-arm specialised IK code at design time, run pure numeric at deployment — but without IKFast's brittleness on non-Pieper geometries.
 
-Cython hot loops cover the leaf primitives (Rodrigues rotations, POE forward kinematics, SP1–SP6 subproblems); the rest is pure Python so it stays inspectable. The speed numbers in the comparison table are post-artifact-load.
+Cython hot loops cover the leaf primitives (Rodrigues rotations, POE forward kinematics, SP1–SP6 subproblems); the rest is pure Python so it stays inspectable.
 
 ## Bulletproof discipline
 
@@ -81,8 +98,8 @@ Every solver lands with: N-way cross-solver agreement on shared fixtures, FK clo
 ## Install
 
 ```bash
-pip install ssik              # core + analytical solvers
-pip install ssik[urdf]        # adds URDF loader (urchin) for from_urdf
+pip install ssik              # core + analytical solvers (everything you need at deployment)
+pip install ssik[urdf]        # adds urchin + sympy for `ssik build` and the dev/exploration path
 ```
 
 Python 3.11+. Wheels for Linux x86_64 and macOS arm64.
@@ -96,6 +113,19 @@ uv run pytest tests/test_my_arm.py -v
 ```
 
 The generated test scaffold checks dispatcher routing and FK closure on hand-picked + Hypothesis-fuzzed reachable poses. Catches regressions before they land.
+
+## Development & exploration: `Manipulator.from_urdf`
+
+For one-off experiments, fuzzing during solver development, or running tests across many arms, the runtime classifier is also exposed as a Python class. It parses a URDF, dispatches a solver at construction time, and exposes the same `ik()` / `fk()` API. Every fresh process re-runs URDF parsing, topology classification, and (for non-Pieper sub-chains) first-call sympy preprocessing — so it is strictly slower than the build-artifact path in production and requires `urchin` + `sympy` on the runtime path. Useful for "what would the solver do here?" iteration without committing to a build:
+
+```python
+import ssik
+
+arm = ssik.Manipulator.from_urdf("my_arm.urdf", base="base_link", ee="tool0")
+sols, is_ls = arm.ik(T_target, max_solutions=1, q_seed=q_current)
+```
+
+Once the dispatch is settled, switch to `ssik build my_arm.urdf` and import the artifact.
 
 ## Documentation
 
