@@ -81,6 +81,48 @@ This is the same idea OpenRAVE's IKFast had — generate per-arm specialised IK 
 
 Cython hot loops cover the leaf primitives (Rodrigues rotations, POE forward kinematics, SP1–SP6 subproblems); the rest is pure Python so it stays inspectable.
 
+## Tuning knobs
+
+### `TolerancePolicy` — six thresholds, one object
+
+`solve()` accepts an optional `policy=` kwarg. The default `ssik.DEFAULT_TOLERANCE_POLICY` works for every shipped fixture; reach for a custom policy when a real arm's URDF has structural near-degeneracies (axes that *almost* but not exactly meet) or when you want tighter / looser FK closure than the defaults provide.
+
+```python
+from ssik import TolerancePolicy, DEFAULT_TOLERANCE_POLICY
+
+policy = TolerancePolicy(
+    axis_parallel=1e-8,         # ||a × b||: when two axes are "parallel"
+    axis_intersect=1e-8,        # perpendicular distance: when two lines "meet"
+    subproblem_feasibility=1e-9,# is_ls boundary inside SP1-SP6
+    subproblem_numerical=1e-5,  # FK-closure filter on algebraic candidates
+    subproblem_degeneracy=1e-12,# rank-drop threshold; below this, return []
+    subproblem_dedup=1e-3,      # angle-space tolerance for collapsing duplicates
+)
+sols = my_arm_ik.solve(T_target, policy=policy)
+```
+
+The fields are named for *why* they exist so log messages can say `"SP6 sign branch rejected: closure 1.2e-4 > subproblem_numerical 1e-5"` instead of citing magic numbers. Tighten `subproblem_numerical` when you want stricter FK closure (at the cost of dropping more borderline branches); loosen `axis_parallel` / `axis_intersect` when an Xacro-derived URDF has axes mis-aligned by a few microradians and the dispatcher refuses to classify it.
+
+### `ssik.postprocess` — composable filters
+
+`solve()` returns the geometric IK set. For application-specific filtering, four helpers in `ssik.postprocess` compose into the typical "robot-aware IK" pipeline:
+
+```python
+from ssik.postprocess import (
+    respect_limits, wrap_to_limits, nearest_to_seed, take_first,
+)
+
+sols = my_arm_ik.solve(T_target, respect_limits=False)  # raw geometric set
+sols = wrap_to_limits(sols, my_arm_ik._KB)              # try q ± 2π to bring in
+sols = respect_limits(sols, my_arm_ik._KB)              # drop anything still outside
+sols = nearest_to_seed(sols, q_current)                 # sort by wrap-to-pi distance
+sols = take_first(sols, k=4)                            # top-k after ranking
+```
+
+By default `solve()` already runs `wrap_to_limits` + `respect_limits` (see [Trajectory tracking](#trajectory-tracking--ik-based-teleop) above); the standalone helpers exist for callers who want a different order, a different metric, or to add their own filters (collision-aware filtering, dexterity scoring, custom seed metrics) between the layers.
+
+Out of scope: collision filtering (use FCL or similar at the application layer) and continuous-trajectory smoothness (typically a separate planner concern). The four shipped filters cover the standard "single-pose, robot-aware IK" case.
+
 ## Bulletproof discipline
 
 Every solver lands with: N-way cross-solver agreement on shared fixtures, FK closure ≤ 1e-10 on every retained IK, 500+ Hypothesis-fuzzed random poses per fixture, and an explicit speed bench that has to clear a regression gate. The current suite has **1300+ tests across 11 fixture arms**. Negative-result spikes (a Cython estimate that misses by 2-5×, a codegen-bake on a part that's 0.3% of runtime) are published as closed issues with profile data so the next contributor doesn't repeat the path.
