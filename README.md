@@ -11,7 +11,7 @@ import franka_panda_ik           # prebuilt; see prebuilt/ for 8 ready-to-use ar
 import numpy as np
 
 T_target = np.eye(4); T_target[:3, 3] = [0.5, 0.1, 0.3]
-sols, is_ls = franka_panda_ik.solve(T_target)            # all 64 IK branches
+sols = franka_panda_ik.solve(T_target)                   # all IK branches; empty list = unreachable
 ```
 
 ### Trajectory tracking / IK-based teleop
@@ -29,21 +29,11 @@ T_target = ...
 # sweep starting from the lock-sample closest to q_current and short-
 # circuits as soon as it finds an FK-closed branch. ~10-15x faster
 # than the full sweep on 7R arms.
-sols, is_ls = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
-q_command = sols[0].q if not is_ls else q_current        # fall back if unreachable
+sols = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
+q_command = sols[0].q if sols else q_current             # empty list = unreachable
 ```
 
-Native `q_seed` / `max_solutions` short-circuit support ships in the jointlock-7R artifacts (Franka, Rizon 4, Kassow KR810). For any other arm, the same pattern via the cross-arm `ssik.postprocess` helpers:
-
-```python
-import ur5_ik
-from ssik.postprocess import nearest_to_seed, max_solutions
-
-sols, _ = ur5_ik.solve(T_target)
-sols = nearest_to_seed(sols, q_current)
-sols = max_solutions(sols, k=1)
-q_command = sols[0].q
-```
+The same kwarg shape works on every prebuilt artifact (UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka, Rizon 4, Kassow). On 7R jointlock arms (Franka / Rizon / Kassow), `q_seed` + `max_solutions=1` short-circuits the internal lock-sweep for a ~10-15× speedup; on other arms the same kwargs are applied as a postprocess pass. By default `solve()` also runs `respect_limits=True` so out-of-URDF-limit branches are dropped (with a `q ± 2π` rescue pass first) — pass `respect_limits=False` for the raw geometric set.
 
 ## Returns all solutions, not one
 
@@ -93,7 +83,7 @@ Cython hot loops cover the leaf primitives (Rodrigues rotations, POE forward kin
 
 ## Bulletproof discipline
 
-Every solver lands with: N-way cross-solver agreement on shared fixtures, FK closure ≤ 1e-10 on every retained IK, 500+ Hypothesis-fuzzed random poses per fixture, and an explicit speed bench that has to clear a regression gate. The current suite has **1284 tests across 11 fixture arms**. Negative-result spikes (a Cython estimate that misses by 2-5×, a codegen-bake on a part that's 0.3% of runtime) are published as closed issues with profile data so the next contributor doesn't repeat the path.
+Every solver lands with: N-way cross-solver agreement on shared fixtures, FK closure ≤ 1e-10 on every retained IK, 500+ Hypothesis-fuzzed random poses per fixture, and an explicit speed bench that has to clear a regression gate. The current suite has **1300+ tests across 11 fixture arms**. Negative-result spikes (a Cython estimate that misses by 2-5×, a codegen-bake on a part that's 0.3% of runtime) are published as closed issues with profile data so the next contributor doesn't repeat the path.
 
 ## Install
 
@@ -104,28 +94,18 @@ pip install ssik[urdf]        # adds urchin + sympy for `ssik build` and the dev
 
 Python 3.11+. Wheels for Linux x86_64 and macOS arm64.
 
-## Onboarding a new arm
-
-```bash
-ssik add-arm my_arm.urdf --base base_link --ee flange --name my_arm
-# → tests/fixtures/my_arm.urdf and tests/test_my_arm.py with FK-closure assertions
-uv run pytest tests/test_my_arm.py -v
-```
-
-The generated test scaffold checks dispatcher routing and FK closure on hand-picked + Hypothesis-fuzzed reachable poses. Catches regressions before they land.
-
 ## Development & exploration: `Manipulator.from_urdf`
 
-For one-off experiments, fuzzing during solver development, or running tests across many arms, the runtime classifier is also exposed as a Python class. It parses a URDF, dispatches a solver at construction time, and exposes the same `ik()` / `fk()` API. Every fresh process re-runs URDF parsing, topology classification, and (for non-Pieper sub-chains) first-call sympy preprocessing — so it is strictly slower than the build-artifact path in production and requires `urchin` + `sympy` on the runtime path. Useful for "what would the solver do here?" iteration without committing to a build:
+For one-off experiments or fuzzing during solver development, the runtime classifier is also exposed as a Python class. It parses a URDF, dispatches a solver at construction time, and exposes the same `solve()` / `fk()` API as the artifact. Every fresh process re-runs URDF parsing, topology classification, and (for non-Pieper sub-chains) first-call sympy preprocessing — so it is strictly slower than the build-artifact path in production and requires `urchin` + `sympy` on the runtime path:
 
 ```python
 import ssik
 
 arm = ssik.Manipulator.from_urdf("my_arm.urdf", base="base_link", ee="tool0")
-sols, is_ls = arm.ik(T_target, max_solutions=1, q_seed=q_current)
+sols = arm.solve(T_target, max_solutions=1, q_seed=q_current)
 ```
 
-Once the dispatch is settled, switch to `ssik build my_arm.urdf` and import the artifact.
+Once the dispatch is settled, switch to `ssik build my_arm.urdf` and import the artifact. Contributors extending ssik's test suite (vs deploying for their own arm) use `ssik add-arm`; see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-arm-fixture).
 
 ## Documentation
 

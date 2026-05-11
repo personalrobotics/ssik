@@ -124,7 +124,9 @@ def _load_ssik_arm(fx: Fixture, *, prefer_artifact: bool = True):
     else:
         mod_name, specs_fn_name = fx.args
         mod = __import__(mod_name)
-        kb = ssik.build_kinbody(getattr(mod, specs_fn_name)())
+        from ssik.internals import build_kinbody
+
+        kb = build_kinbody(getattr(mod, specs_fn_name)())
         return ssik.Manipulator(kb)
 
 

@@ -46,7 +46,9 @@ def main() -> None:
     # JACO 2 lives as a Python builder (real MJCF transcription) rather
     # than a URDF, so we construct the KinBody and hand it to Manipulator
     # via the constructor escape hatch.
-    kb = ssik.build_kinbody(jaco2_specs())
+    from ssik.internals import build_kinbody
+
+    kb = build_kinbody(jaco2_specs())
     arm = ssik.Manipulator(kb)
     print(arm)
     print(f"  dof:    {arm.dof}")

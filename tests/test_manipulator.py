@@ -105,7 +105,9 @@ def test_dispatch_plan_has_useful_fields() -> None:
 def test_kinbody_property_exposes_internal() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     kb = arm.kinbody
-    assert isinstance(kb, ssik.KinBody)
+    from ssik.internals import KinBody
+
+    assert isinstance(kb, KinBody)
     assert len(kb.joints) == 6
 
 
@@ -283,26 +285,36 @@ def test_from_urdf_raises_on_bad_link_name() -> None:
 
 
 def test_top_level_exports_present() -> None:
-    """Every type a user needs is reachable from the top-level ``ssik`` namespace."""
+    """Top-level ``ssik`` namespace is the user-facing v1.0 surface."""
     expected = [
         "Manipulator",
         "Solution",
-        "KinBody",
-        "Joint",
-        "Link",
-        "JointSpec",
-        "build_kinbody",
         "TolerancePolicy",
         "DEFAULT_TOLERANCE_POLICY",
-        "DispatchPlan",
-        "TopologyReport",
-        "describe_topology",
-        "dispatch",
         "__version__",
     ]
     for name in expected:
         assert hasattr(ssik, name), f"ssik.{name} missing"
     assert set(ssik.__all__) >= set(expected) - {"__version__"}
+
+
+def test_contributor_surface_via_ssik_internals() -> None:
+    """Contributor / debugging surface lives under ``ssik.internals``."""
+    from ssik import internals
+
+    expected = [
+        "KinBody",
+        "Joint",
+        "Link",
+        "JointSpec",
+        "build_kinbody",
+        "DispatchPlan",
+        "TopologyReport",
+        "describe_topology",
+        "dispatch",
+    ]
+    for name in expected:
+        assert hasattr(internals, name), f"ssik.internals.{name} missing"
 
 
 # ---------------------------------------------------------------------------

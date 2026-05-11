@@ -17,20 +17,20 @@ The four shipping with v0.1 cover ~95% of real-world post-processing:
   * :func:`respect_limits` -- drop solutions outside any joint's range
   * :func:`wrap_to_limits` -- try ``q ± 2*pi`` per joint to bring solutions in
   * :func:`nearest_to_seed` -- sort by wrap-to-pi distance to a reference q
-  * :func:`max_solutions` -- truncate to the first ``k``
+  * :func:`take_first` -- truncate to the first ``k``
 
 Production pipeline pattern::
 
     from franka_panda_ik import _KB, solve
     from ssik.postprocess import (
-        respect_limits, wrap_to_limits, nearest_to_seed, max_solutions,
+        respect_limits, wrap_to_limits, nearest_to_seed, take_first,
     )
 
-    sols, _ = solve(T_target)
+    sols = solve(T_target, respect_limits=False)
     sols = wrap_to_limits(sols, _KB)
     sols = respect_limits(sols, _KB)
     sols = nearest_to_seed(sols, q_current)
-    sols = max_solutions(sols, k=4)
+    sols = take_first(sols, k=4)
 
 Out of scope for v0.1 (separate issues / future work):
 
@@ -54,9 +54,9 @@ from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 
 __all__ = [
-    "max_solutions",
     "nearest_to_seed",
     "respect_limits",
+    "take_first",
     "wrap_to_limits",
 ]
 
@@ -190,11 +190,16 @@ def nearest_to_seed(
     return sorted(sols, key=distance)
 
 
-def max_solutions(sols: list[Solution], k: int) -> list[Solution]:
+def take_first(sols: list[Solution], k: int) -> list[Solution]:
     """Truncate to the first ``k`` solutions.
 
     Use after :func:`nearest_to_seed` (or any other ranking) to keep only
     the top-``k`` matches. ``k <= 0`` returns an empty list.
+
+    Renamed from ``max_solutions`` in v1.0 to avoid name collision with
+    the ``max_solutions`` kwarg on ``Manipulator.solve`` / artifact
+    ``solve()`` -- they have different shapes (kwarg is an int passed in;
+    this function takes ``(sols, k)``).
 
     :param sols: candidate solutions, typically already sorted.
     :param k: maximum number of solutions to keep.

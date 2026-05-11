@@ -11,7 +11,7 @@ Each function is tested for its core contract plus edge cases:
   fields.
 * ``nearest_to_seed``: sorts by wrap-to-pi distance under ``wrap_l2``
   / ``wrap_linf``; stable on ties.
-* ``max_solutions``: truncates correctly including edge cases.
+* ``take_first``: truncates correctly including edge cases.
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ import pytest
 from ssik._kinbody import JointSpec, KinBody, build_kinbody
 from ssik.core.solution import Solution
 from ssik.postprocess import (
-    max_solutions,
     nearest_to_seed,
     respect_limits,
+    take_first,
     wrap_to_limits,
 )
 
@@ -236,32 +236,32 @@ def test_nearest_to_seed_unknown_metric_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
-# max_solutions
+# take_first
 # ---------------------------------------------------------------------------
 
 
-def test_max_solutions_truncates() -> None:
+def test_take_first_truncates() -> None:
     sols = [_sol([float(i)]) for i in range(5)]
-    out = max_solutions(sols, k=3)
+    out = take_first(sols, k=3)
     assert len(out) == 3
     assert [float(s.q[0]) for s in out] == [0.0, 1.0, 2.0]
 
 
-def test_max_solutions_k_larger_than_input() -> None:
+def test_take_first_k_larger_than_input() -> None:
     sols = [_sol([0.0]), _sol([1.0])]
-    out = max_solutions(sols, k=10)
+    out = take_first(sols, k=10)
     assert len(out) == 2
 
 
-def test_max_solutions_k_zero() -> None:
+def test_take_first_k_zero() -> None:
     sols = [_sol([0.0]), _sol([1.0])]
-    out = max_solutions(sols, k=0)
+    out = take_first(sols, k=0)
     assert out == []
 
 
-def test_max_solutions_k_negative() -> None:
+def test_take_first_k_negative() -> None:
     sols = [_sol([0.0]), _sol([1.0])]
-    out = max_solutions(sols, k=-3)
+    out = take_first(sols, k=-3)
     assert out == []
 
 
@@ -287,7 +287,7 @@ def test_pipeline_compose_franka_recipe() -> None:
     sols = wrap_to_limits(sols, kb)
     sols = respect_limits(sols, kb)
     sols = nearest_to_seed(sols, seed)
-    sols = max_solutions(sols, k=2)
+    sols = take_first(sols, k=2)
 
     assert len(sols) == 2
     # Closest to seed should come first.
@@ -361,5 +361,5 @@ def test_franka_pipeline_real_ik_output() -> None:
     )
 
     # Truncate to top-1.
-    sols = max_solutions(sols, k=1)
+    sols = take_first(sols, k=1)
     assert len(sols) == 1
