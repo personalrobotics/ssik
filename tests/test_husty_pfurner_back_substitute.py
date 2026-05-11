@@ -91,7 +91,7 @@ def test_solve_ik_returns_correct_shape() -> None:
     v = (0.3, -0.4, 0.6, 0.2, 0.5, -0.7)
     pre = precompute_rrr_chain(**dh)
     sigma_E = _sigma_for(dh, v)
-    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))
+    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))  # type: ignore[arg-type]
     assert sols.ndim == 2
     assert sols.shape[1] == 6
     assert sols.dtype == np.float64
@@ -104,7 +104,7 @@ def test_solve_ik_empty_when_unreachable() -> None:
     """
     pre = precompute_rrr_chain(**_DH_BASELINE)
     bogus_sigma = np.array([1.0, 0.5, 0.3, 0.7, 100.0, 200.0, 300.0, 400.0])
-    sols = solve_ik(pre, bogus_sigma, **_kwargs_for_solve(_DH_BASELINE))
+    sols = solve_ik(pre, bogus_sigma, **_kwargs_for_solve(_DH_BASELINE))  # type: ignore[arg-type]
     assert sols.shape == (0, 6) or sols.shape[0] == 0
 
 
@@ -121,7 +121,7 @@ def test_solve_ik_recovers_truth_and_fk_closes(
     dh, v_truth = dh_v
     pre = precompute_rrr_chain(**dh)
     sigma_E = _sigma_for(dh, v_truth)
-    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))
+    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))  # type: ignore[arg-type]
     assert sols.shape[0] >= 1, f"no IK solutions for DH={dh}, v={v_truth}"
 
     # FK closure: every returned solution must round-trip to sigma_E
@@ -269,7 +269,7 @@ def test_solve_ik_recovers_truth_hypothesis(
     )
     pre = precompute_rrr_chain(**dh_kwargs)
     sigma_E = _full_6r_chain(v=v, a=a, ls=ls, d=d)
-    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh_kwargs))
+    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh_kwargs))  # type: ignore[arg-type]
     if sols.shape[0] == 0:
         pytest.fail(f"no IK solutions for DH={dh_kwargs}, v={v}")
 
@@ -344,7 +344,7 @@ def test_tv4_dispatch_recovers_truth_and_fk_closes(
         f"Expected Tv4 dispatch for DH={dh}, got {pre.right_parametric_var}"
     )
     sigma_E = _sigma_for(dh, v_truth)
-    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))
+    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))  # type: ignore[arg-type]
     assert sols.shape[0] >= 1, f"no IK solutions for Tv4 DH={dh}, v={v_truth}"
 
     # FK closure: every returned sol must round-trip to sigma_E.
@@ -406,7 +406,7 @@ def test_tv4_dispatch_random_dh_recovers_truth(seed: int) -> None:
     pre = precompute_rrr_chain(**dh)
     assert pre.right_parametric_var == "v_4"
     sigma_E = _sigma_for(dh, v_truth)
-    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))
+    sols = solve_ik(pre, sigma_E, **_kwargs_for_solve(dh))  # type: ignore[arg-type]
     assert sols.shape[0] >= 1, f"seed={seed}: no IK solutions for Tv4 DH={dh}"
     nearest_err = min(_max_q_diff(sol, v_truth) for sol in sols)
     assert nearest_err < 1e-7, (

@@ -241,7 +241,9 @@ def test_rizon4_composer_prime_dh_matches_runtime_dh() -> None:
     preprocessing per unique DH; that's exercised in slow integration
     tests). This structural test just verifies the DH tuple match.
     """
-    from ssik.codegen._compose.seven_r import _RR_ELIGIBLE_INNER_SOLVERS as eligible
+    from ssik.codegen._compose.seven_r import (  # type: ignore[attr-defined]
+        _RR_ELIGIBLE_INNER_SOLVERS as eligible,
+    )
     from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
     from ssik.kinematics.reverse import reverse_kinematic_chain
     from ssik.solvers.jointlock.seven_r import (

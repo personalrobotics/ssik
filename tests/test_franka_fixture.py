@@ -214,7 +214,7 @@ def test_franka_artifact_max_solutions_short_circuit() -> None:
     validated via the byte-equal snapshot test). Calls into it use
     ``# type: ignore`` to silence the cross-boundary call warnings.
     """
-    import franka_panda_ik
+    import franka_panda_ik  # type: ignore[import-not-found]
 
     rng = np.random.default_rng(seed=0)
     for _ in range(5):
@@ -242,7 +242,7 @@ def test_franka_artifact_q_seed_returns_nearest() -> None:
     """``q_seed`` + ``max_solutions=1`` returns the IK whose lock-joint
     value is closest to the seed (the trajectory-tracking promise).
     """
-    import franka_panda_ik
+    import franka_panda_ik  # type: ignore[import-not-found]
 
     q_true = np.array([0.0, 0.5, 0.0, -1.5, 0.0, 1.5, 0.0])
     T_target = franka_panda_ik._fk(q_true)

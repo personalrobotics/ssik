@@ -88,7 +88,10 @@ def test_joint_limits_shape() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     limits = arm.joint_limits
     assert len(limits) == arm.dof
-    for lo, hi in limits:
+    for lim in limits:
+        if lim is None:  # continuous joint -- unconstrained
+            continue
+        lo, hi = lim
         assert lo < hi
 
 

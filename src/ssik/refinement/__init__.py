@@ -840,7 +840,7 @@ def verify_candidates(
     if max_solutions is not None and max_solutions < 1:
         raise ValueError(f"max_solutions must be >= 1 or None; got {max_solutions}")
     verified: list[Solution] = []
-    for branch_idx, q in enumerate(candidates):
+    for q in candidates:
         q = np.asarray(q, dtype=np.float64)
         fk_resid = float(np.linalg.norm(fk_fn(q) - t_target))
         appended = False

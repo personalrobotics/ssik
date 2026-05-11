@@ -151,11 +151,12 @@ class Manipulator:
         return len(self._kb.joints)
 
     @property
-    def joint_limits(self) -> list[tuple[float, float]]:
-        """Per-joint ``(lower, upper)`` limits.
+    def joint_limits(self) -> list[tuple[float, float] | None]:
+        """Per-joint ``(lower, upper)`` limits, or ``None`` for unconstrained.
 
         Units are radians for revolute joints, metres for prismatic. Joints
-        without explicit limits in the source URDF default to ``(-pi, +pi)``.
+        without explicit limits in the source URDF are ``None`` (typically
+        continuous revolute joints).
         """
         return [j.limits for j in self._kb.joints]
 
@@ -207,7 +208,8 @@ class Manipulator:
         q_arr = np.asarray(q, dtype=np.float64)
         if q_arr.shape != (self.dof,):
             raise ValueError(f"fk expected q of shape ({self.dof},), got {q_arr.shape}")
-        return poe_forward_kinematics(self._kb, q_arr)
+        result: NDArray[np.float64] = poe_forward_kinematics(self._kb, q_arr)
+        return result
 
     # ------------------------------------------------------------------
     # Inverse kinematics
@@ -320,4 +322,5 @@ class Manipulator:
             sols = _ps_nearest_to_seed(sols, q_seed_arr)
         if max_solutions is not None and len(sols) > max_solutions:
             sols = sols[:max_solutions]
-        return sols
+        result: list[Solution] = sols
+        return result

@@ -1702,7 +1702,7 @@ def solve_all_ik(
     q_pinv = np.linalg.pinv(q_mat).astype(np.float64)
 
     candidates: list[Solution] = []
-    for branch_idx, (x_lin_root, eigvec) in enumerate(zip(roots, eigvecs, strict=True)):
+    for x_lin_root, eigvec in zip(roots, eigvecs, strict=True):
         bs_result = _back_substitute_inner(
             x_lin_root,
             eigvec,

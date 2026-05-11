@@ -22,9 +22,9 @@ import numpy as np
 import pytest
 
 from ssik import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.internals import describe_topology
 from ssik._kinbody import Joint, KinBody, Link
 from ssik._urdf import load_urdf_kinbody_normalized
+from ssik.internals import describe_topology
 from ssik.kinematics import (
     axis_intersect,
     axis_parallel,
