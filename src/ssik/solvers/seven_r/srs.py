@@ -417,9 +417,6 @@ def solve(
                             q=q_full[i],
                             fk_residual=fk_residual,
                             refinement_used="none",
-                            refinement_iters=0,
-                            branch_id=branch_id,
-                            solver_name=_SOLVER_NAME,
                         )
                     )
                     branch_id += 1

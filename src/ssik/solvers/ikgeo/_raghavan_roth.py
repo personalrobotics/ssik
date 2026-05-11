@@ -1727,9 +1727,6 @@ def solve_all_ik(
                     q=q_cand,
                     fk_residual=fk_err_alg,
                     refinement_used="none",
-                    refinement_iters=0,
-                    branch_id=branch_idx,
-                    solver_name=solver_name,
                 )
             )
             appended = True
@@ -1744,15 +1741,12 @@ def solve_all_ik(
                 jacobian_fn=jacobian_fn,
             )
             if refined is not None:
-                q_refined, fk_resid, iters = refined
+                q_refined, fk_resid, _iters = refined
                 candidates.append(
                     Solution(
                         q=q_refined,
                         fk_residual=fk_resid,
                         refinement_used="lm",
-                        refinement_iters=iters,
-                        branch_id=branch_idx,
-                        solver_name=solver_name,
                     )
                 )
                 appended = True

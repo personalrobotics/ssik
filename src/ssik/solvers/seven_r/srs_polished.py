@@ -194,8 +194,6 @@ def solve(
             q=q_polished_arr[i],
             fk_residual=float(fk_residuals[i]),
             refinement_used="lm",
-            refinement_iters=int(iters_used[i]),
-            solver_name=_SOLVER_NAME,
         )
         for i, c in enumerate(raw)
         if fk_residuals[i] < polish_fk_atol

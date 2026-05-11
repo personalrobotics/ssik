@@ -156,15 +156,12 @@ def solve(
         )
         if result is None:
             continue
-        q_conv, fk_resid, iters = result
+        q_conv, fk_resid, _iters = result
         candidates.append(
             Solution(
                 q=q_conv,
                 fk_residual=fk_resid,
                 refinement_used="lm",
-                refinement_iters=iters,
-                branch_id=restart_idx,
-                solver_name=_SOLVER_NAME,
             )
         )
 

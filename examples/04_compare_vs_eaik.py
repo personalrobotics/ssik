@@ -106,7 +106,7 @@ class _ArtifactArm:
     def fk(self, q):
         return self._fk(q)
 
-    def ik(self, T, **kwargs):
+    def solve(self, T, **kwargs):
         return self._module.solve(T, **kwargs)
 
 
@@ -124,7 +124,9 @@ def _load_ssik_arm(fx: Fixture, *, prefer_artifact: bool = True):
     else:
         mod_name, specs_fn_name = fx.args
         mod = __import__(mod_name)
-        kb = ssik.build_kinbody(getattr(mod, specs_fn_name)())
+        from ssik.internals import build_kinbody
+
+        kb = build_kinbody(getattr(mod, specs_fn_name)())
         return ssik.Manipulator(kb)
 
 
@@ -175,16 +177,16 @@ def _gen_poses(arm, n: int, rng) -> list[np.ndarray]:
 def _bench_ssik(arm, poses: list[np.ndarray]) -> dict:
     # Warm.
     for T in poses[: min(10, len(poses))]:
-        arm.ik(T)
+        arm.solve(T)
 
     times = []
     fk_residuals = []
     sol_counts = []
     for T in poses:
         t = time.perf_counter()
-        sols, is_ls = arm.ik(T)
+        sols = arm.solve(T)
         times.append((time.perf_counter() - t) * 1000)
-        if not is_ls and sols:
+        if sols:
             fk_residuals.append(max(s.fk_residual for s in sols))
             sol_counts.append(len(sols))
 

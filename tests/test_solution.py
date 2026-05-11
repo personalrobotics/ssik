@@ -1,12 +1,11 @@
 """Smoke tests for :class:`ssik.core.solution.Solution`.
 
-The dataclass itself is trivial; these tests pin the contract that solver
-authors and downstream consumers rely on:
-
-- frozen / hashable assumptions match callers' expectations
-- defaults match the spec in GitHub #75 (``refinement_used="none"``,
-  ``refinement_iters=0``, ``branch_id=None``, ``solver_name=""``)
-- field order is what serializers/printing rely on
+v1.0 contract: Solution has just three public fields -- ``q``,
+``fk_residual``, and ``refinement_used``. ``branch_id``,
+``solver_name``, and ``refinement_iters`` were removed in #238 as
+debug noise (a per-arm fact lives on Manipulator.solver_name, not
+on every Solution; branch-index counters were never consistent
+across solvers).
 """
 
 from __future__ import annotations
@@ -22,9 +21,6 @@ from ssik.core.solution import Solution
 def test_defaults_match_spec() -> None:
     sol = Solution(q=np.zeros(6), fk_residual=1e-12)
     assert sol.refinement_used == "none"
-    assert sol.refinement_iters == 0
-    assert sol.branch_id is None
-    assert sol.solver_name == ""
 
 
 def test_frozen_rejects_mutation() -> None:
@@ -43,11 +39,4 @@ def test_q_is_array_not_copied_on_construction() -> None:
 
 def test_field_order() -> None:
     fields = [f.name for f in dataclasses.fields(Solution)]
-    assert fields == [
-        "q",
-        "fk_residual",
-        "refinement_used",
-        "refinement_iters",
-        "branch_id",
-        "solver_name",
-    ]
+    assert fields == ["q", "fk_residual", "refinement_used"]

@@ -221,11 +221,14 @@ def test_franka_artifact_max_solutions_short_circuit() -> None:
         q_true = rng.uniform(-1.5, 1.5, size=7)
         T_target = franka_panda_ik._fk(q_true)
 
-        sols_all, is_ls_all = franka_panda_ik.solve(T_target)
-        sols_one, is_ls_one = franka_panda_ik.solve(T_target, max_solutions=1)
+        # Test exercises analytical-branch enumeration; bypass limits
+        # filter so all 64 geometric branches are kept regardless of
+        # whether their q lands inside Franka's URDF limits.
+        sols_all = franka_panda_ik.solve(T_target, respect_limits=False)
+        sols_one = franka_panda_ik.solve(T_target, max_solutions=1, respect_limits=False)
 
-        assert not is_ls_all
-        assert not is_ls_one
+        assert sols_all, "exhaustive search returned no IK"
+        assert sols_one, "max_solutions=1 returned no IK"
         assert len(sols_one) == 1, f"max_solutions=1 returned {len(sols_one)}"
         assert len(sols_all) >= 8, "exhaustive search should produce many solutions"
 
@@ -247,7 +250,7 @@ def test_franka_artifact_q_seed_returns_nearest() -> None:
     # Seed exactly at q_true; the corresponding lock-joint sample is
     # nearest by definition, so the returned IK should match q_true at
     # the locked joint within a sweep-step.
-    sols, _ = franka_panda_ik.solve(T_target, q_seed=q_true, max_solutions=1)
+    sols = franka_panda_ik.solve(T_target, q_seed=q_true, max_solutions=1)
     assert len(sols) == 1
     lock_idx = 4  # baked _LOCK_IDX for Franka
     sweep_step = (2.8973 - (-2.8973)) / 16  # default 16 samples over the joint range

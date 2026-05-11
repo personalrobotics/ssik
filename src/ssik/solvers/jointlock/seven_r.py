@@ -69,6 +69,37 @@ __all__ = ["choose_lock_joint", "solve"]
 _DEFAULT_SAMPLES = 16
 _SOLVER_NAME = "jointlock.seven_r"
 _LOG = logging.getLogger(__name__)
+_TWO_PI = 2.0 * np.pi
+
+
+def _wrap_to_limits_inplace(q: NDArray[np.float64], kb: KinBody) -> NDArray[np.float64]:
+    """Try ``q ± k*2π`` per revolute joint to bring it into URDF limits.
+    Returns the (possibly modified) ``q``; mutates in place for speed.
+    Joints with ``limits=None`` or prismatic type are left alone.
+    """
+    for i, j in enumerate(kb.joints):
+        if j.limits is None or j.joint_type != "revolute":
+            continue
+        lo, hi = j.limits
+        qi = float(q[i])
+        if lo <= qi <= hi:
+            continue
+        for k in (1, -1, 2, -2):
+            cand = qi + _TWO_PI * k
+            if lo <= cand <= hi:
+                q[i] = cand
+                break
+    return q
+
+
+def _in_limits(q: NDArray[np.float64], kb: KinBody) -> bool:
+    """Check every joint's q against the KinBody's limits."""
+    for i, j in enumerate(kb.joints):
+        if j.limits is None:
+            continue
+        if not (j.limits[0] <= float(q[i]) <= j.limits[1]):
+            return False
+    return True
 
 
 def _lock_joint(kb: KinBody, lock_idx: int, q_lock: float) -> KinBody:
@@ -430,6 +461,7 @@ def solve(
     max_solutions: int | None = None,
     q_seed: NDArray[np.float64] | None = None,
     dispatch_cache: Sequence[str] | None = None,
+    respect_limits: bool = False,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for any 7R arm via joint-locking + inner 6R solver.
 
@@ -474,11 +506,11 @@ def solve(
         the codegen-time topology probe (#142 item 4); manual callers
         leave ``None``.
     :returns: ``(solutions, is_ls)``. Each :class:`Solution.q` is a
-        7-vector including the locked joint's value. ``branch_id``
-        encodes the lock-sample index in the order they were *evaluated*
-        (so under ``q_seed=...`` ordering, ``branch_id=0`` is the
-        sample closest to the seed). Solutions are deduplicated in
-        wrap-to-pi joint-angle distance.
+        7-vector including the locked joint's value. Solutions are
+        deduplicated in wrap-to-pi joint-angle distance. Solutions are
+        returned in the order their lock-samples were evaluated, so
+        under ``q_seed=...`` ordering the first solution is the one
+        with lock-sample closest to the seed.
 
     Common idioms::
 
@@ -587,14 +619,20 @@ def solve(
             full_q[:lock_idx] = sub_q[:lock_idx]
             full_q[lock_idx] = float(q_lock)
             full_q[lock_idx + 1 :] = sub_q[lock_idx:]
+            # In-sweep limits filter (#238 review). When respect_limits=True,
+            # try wrapping each joint into its limit range; drop branches
+            # that still violate. This lets the outer short-circuit fire
+            # on the first IN-LIMITS valid IK rather than waste samples on
+            # out-of-limits candidates that postprocess would drop anyway.
+            if respect_limits:
+                full_q = _wrap_to_limits_inplace(full_q, kb)
+                if not _in_limits(full_q, kb):
+                    continue
             candidates.append(
                 Solution(
                     q=full_q,
                     fk_residual=inner.fk_residual,
                     refinement_used=inner.refinement_used,
-                    refinement_iters=inner.refinement_iters,
-                    branch_id=sample_idx,
-                    solver_name=_SOLVER_NAME,
                 )
             )
         # Incremental dedup so we know how many *unique* solutions we

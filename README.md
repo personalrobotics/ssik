@@ -11,7 +11,7 @@ import franka_panda_ik           # prebuilt; see prebuilt/ for 8 ready-to-use ar
 import numpy as np
 
 T_target = np.eye(4); T_target[:3, 3] = [0.5, 0.1, 0.3]
-sols, is_ls = franka_panda_ik.solve(T_target)            # all 64 IK branches
+sols = franka_panda_ik.solve(T_target)                   # all IK branches; empty list = unreachable
 ```
 
 ### Trajectory tracking / IK-based teleop
@@ -27,27 +27,17 @@ T_target = ...
 
 # max_solutions=1 + q_seed: solver searches the 1-parameter redundancy
 # sweep starting from the lock-sample closest to q_current and short-
-# circuits as soon as it finds an FK-closed branch. ~10-15x faster
-# than the full sweep on 7R arms.
-sols, is_ls = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
-q_command = sols[0].q if not is_ls else q_current        # fall back if unreachable
+# circuits on the first valid in-limits branch (~5-6x faster than
+# the full sweep on 7R jointlock arms; sub-ms on 6R / SRS arms).
+sols = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
+q_command = sols[0].q if sols else q_current             # empty list = unreachable
 ```
 
-Native `q_seed` / `max_solutions` short-circuit support ships in the jointlock-7R artifacts (Franka, Rizon 4, Kassow KR810). For any other arm, the same pattern via the cross-arm `ssik.postprocess` helpers:
-
-```python
-import ur5_ik
-from ssik.postprocess import nearest_to_seed, max_solutions
-
-sols, _ = ur5_ik.solve(T_target)
-sols = nearest_to_seed(sols, q_current)
-sols = max_solutions(sols, k=1)
-q_command = sols[0].q
-```
+The same kwarg shape works on every prebuilt artifact (UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka, Rizon 4, Kassow). By default `solve()` runs **`respect_limits=True`**: out-of-URDF-limit branches are dropped (with a `q ± 2π` rescue pass first). On 7R jointlock arms (Franka / Rizon / Kassow) the limits filter runs *during* the lock-sweep so `max_solutions=1` short-circuits on the first in-limits candidate rather than wasting samples on branches the postprocess would discard. Pass `respect_limits=False` for the raw geometric set when you want to filter yourself.
 
 ## Returns all solutions, not one
 
-A single 6-DOF target pose admits up to **16 analytical IK branches** (8 typical for a Pieper-class arm: 4 shoulder × 2 elbow, with the wrist deterministic). For a 7R redundant arm the IK is a 1-parameter family; ssik discretises it into 32–256 branches per pose depending on the swivel-sample count. Every returned `Solution` carries `q`, the per-IK FK residual, and which solver branch produced it.
+A single 6-DOF target pose admits up to **16 analytical IK branches** (8 typical for a Pieper-class arm: 4 shoulder × 2 elbow, with the wrist deterministic). For a 7R redundant arm the IK is a 1-parameter family; ssik discretises it into 32–256 branches per pose depending on the swivel-sample count. Every returned `Solution` carries `q`, the per-IK FK residual, and whether the Newton polish path fired (`refinement_used`).
 
 Numerical IK libraries take a seed, run damped least-squares to a single converged configuration, and stop. Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
 
@@ -57,18 +47,18 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
-| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 4 sols | 549 ± 14 µs / FK 2e-9 / 4 sols |
-| Puma 560 (Pieper 6R, spherical wrist) | 6 ± 0 µs / FK 3e-14 / 8 sols | 233 ± 5 µs / FK 2e-14 / 8 sols |
-| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.04 ± 0.04 ms / FK 5e-6 / 8 sols |
-| iiwa14 (SRS 7R) | **refuses** ("only 1-6R robots are solvable") | 4.57 ± 0.03 ms / FK 4e-13 / 128 sols |
-| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.48 ± 1.18 ms / FK 1e-12 / 47 sols |
-| Franka Panda (anthropomorphic 7R) | **refuses** ("only 1-6R") | 28.42 ± 2.65 ms / FK 1e-6 / 64 sols |
-| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 33.18 ± 8.58 ms / FK 4e-9 / 42 sols |
-| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 27.03 ± 10.40 ms / FK 7e-8 / 24 sols |
+| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 4 sols | 556 ± 12 µs / FK 2e-9 / 4 sols |
+| Puma 560 (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 3e-14 / 8 sols | 245 ± 3 µs / FK 2e-14 / 8 sols |
+| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.04 ms / FK 3e-6 / 2 sols |
+| iiwa14 (SRS 7R) | **refuses** ("only 1-6R robots are solvable") | 6.56 ± 0.49 ms / FK 4e-13 / 96 sols |
+| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 69.37 ± 4.32 ms / FK 1e-12 / 47 sols |
+| Franka Panda (anthropomorphic 7R) | **refuses** ("only 1-6R") | 28.03 ± 2.57 ms / FK 7e-13 / 9 sols |
+| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 30.88 ± 8.80 ms / FK 4e-9 / 35 sols |
+| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 28.06 ± 10.63 ms / FK 7e-8 / 24 sols |
 
 EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings are EAIK's actual error messages, captured verbatim by the bench harness. A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
 
-ssik FK residuals above are the algebraic candidates returned by `solve()` with default tolerance policy. Passing `allow_refinement=True` runs an opt-in Levenberg–Marquardt polish per candidate and tightens the residual to machine precision (~1e-14) at a few hundred microseconds per branch.
+ssik FK residuals above are the algebraic candidates returned by `solve()` with default tolerance policy and `respect_limits=True`. Branch counts on 7R arms (iiwa14: 96, Franka: 9, Rizon: 35) reflect URDF-joint-limit filtering; pass `respect_limits=False` to get the full geometric set. The `allow_refinement=True` opt-in runs Levenberg–Marquardt polish per algebraic candidate at a few hundred microseconds per branch — useful when an algebraic candidate lands just above `fk_atol` near a kinematic singularity; it does not always reach machine precision on tier-2 RR arms whose polish basin is narrow.
 
 The algorithmic ingredients are not novel — Raghavan–Roth (1990), Manocha–Canny (1994), Singh–Kreutz (1989), Husty–Pfurner (2007). What's new is making the textbook pipelines survive on real ill-conditioned arms (AE-3 leftvar selection on JACO 2 drops `cond(m_quad)` from 3.75 × 10^16 to 127), composing them with a uniform dispatch layer, and packaging the whole thing as a deployable artifact.
 
@@ -93,7 +83,7 @@ Cython hot loops cover the leaf primitives (Rodrigues rotations, POE forward kin
 
 ## Bulletproof discipline
 
-Every solver lands with: N-way cross-solver agreement on shared fixtures, FK closure ≤ 1e-10 on every retained IK, 500+ Hypothesis-fuzzed random poses per fixture, and an explicit speed bench that has to clear a regression gate. The current suite has **1284 tests across 11 fixture arms**. Negative-result spikes (a Cython estimate that misses by 2-5×, a codegen-bake on a part that's 0.3% of runtime) are published as closed issues with profile data so the next contributor doesn't repeat the path.
+Every solver lands with: N-way cross-solver agreement on shared fixtures, FK closure ≤ 1e-10 on every retained IK, 500+ Hypothesis-fuzzed random poses per fixture, and an explicit speed bench that has to clear a regression gate. The current suite has **1300+ tests across 11 fixture arms**. Negative-result spikes (a Cython estimate that misses by 2-5×, a codegen-bake on a part that's 0.3% of runtime) are published as closed issues with profile data so the next contributor doesn't repeat the path.
 
 ## Install
 
@@ -104,28 +94,18 @@ pip install ssik[urdf]        # adds urchin + sympy for `ssik build` and the dev
 
 Python 3.11+. Wheels for Linux x86_64 and macOS arm64.
 
-## Onboarding a new arm
-
-```bash
-ssik add-arm my_arm.urdf --base base_link --ee flange --name my_arm
-# → tests/fixtures/my_arm.urdf and tests/test_my_arm.py with FK-closure assertions
-uv run pytest tests/test_my_arm.py -v
-```
-
-The generated test scaffold checks dispatcher routing and FK closure on hand-picked + Hypothesis-fuzzed reachable poses. Catches regressions before they land.
-
 ## Development & exploration: `Manipulator.from_urdf`
 
-For one-off experiments, fuzzing during solver development, or running tests across many arms, the runtime classifier is also exposed as a Python class. It parses a URDF, dispatches a solver at construction time, and exposes the same `ik()` / `fk()` API. Every fresh process re-runs URDF parsing, topology classification, and (for non-Pieper sub-chains) first-call sympy preprocessing — so it is strictly slower than the build-artifact path in production and requires `urchin` + `sympy` on the runtime path. Useful for "what would the solver do here?" iteration without committing to a build:
+For one-off experiments or fuzzing during solver development, the runtime classifier is also exposed as a Python class. It parses a URDF, dispatches a solver at construction time, and exposes the same `solve()` / `fk()` API as the artifact. Every fresh process re-runs URDF parsing, topology classification, and (for non-Pieper sub-chains) first-call sympy preprocessing — so it is strictly slower than the build-artifact path in production and requires `urchin` + `sympy` on the runtime path:
 
 ```python
 import ssik
 
 arm = ssik.Manipulator.from_urdf("my_arm.urdf", base="base_link", ee="tool0")
-sols, is_ls = arm.ik(T_target, max_solutions=1, q_seed=q_current)
+sols = arm.solve(T_target, max_solutions=1, q_seed=q_current)
 ```
 
-Once the dispatch is settled, switch to `ssik build my_arm.urdf` and import the artifact.
+Once the dispatch is settled, switch to `ssik build my_arm.urdf` and import the artifact. Contributors extending ssik's test suite (vs deploying for their own arm) use `ssik add-arm`; see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-arm-fixture).
 
 ## Documentation
 

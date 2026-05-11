@@ -54,9 +54,9 @@ def main() -> None:
     # Hand-picked pose well-inside the workspace.
     q_star = np.array([0.3, -0.4, 0.7, 0.5, 0.6, -0.5, 0.2])
     T = arm.fk(q_star)
-    sols, is_ls = arm.ik(T)
+    sols = arm.solve(T)
     print(f"Hand-picked q*={q_star.tolist()}:")
-    print(f"  IK returned {len(sols)} branches, is_ls={is_ls}")
+    print(f"  IK returned {len(sols)} branches")
     print(f"  max FK residual: {max(s.fk_residual for s in sols):.2e}")
     print("  (FK closure is against the ORIGINAL URDF, not a simplified DH.)")
     print()
@@ -71,16 +71,16 @@ def main() -> None:
     for _ in range(10):
         q = rng.uniform(-0.8, 0.8, size=7)
         q[3] = float(rng.uniform(0.2, 0.8))
-        arm.ik(arm.fk(q))
+        arm.solve(arm.fk(q))
 
     for _ in range(100):
         q = rng.uniform(-0.8, 0.8, size=7)
         q[3] = float(rng.uniform(0.2, 0.8))
         T = arm.fk(q)
         t = time.perf_counter()
-        sols, is_ls = arm.ik(T)
+        sols = arm.solve(T)
         times.append((time.perf_counter() - t) * 1000)
-        if not is_ls and sols:
+        if sols:
             fk_residuals.append(max(s.fk_residual for s in sols))
             sol_counts.append(len(sols))
 
@@ -97,7 +97,7 @@ def main() -> None:
     for _ in range(50):
         T = arm.fk(rng.uniform(-0.8, 0.8, size=7))
         t = time.perf_counter()
-        arm.ik(T, max_solutions=1, q_seed=q_prev)
+        arm.solve(T, max_solutions=1, q_seed=q_prev)
         times_track.append((time.perf_counter() - t) * 1000)
     print("Trajectory tracking (max_solutions=1, q_seed):")
     print(f"  median IK time:    {np.median(times_track):.2f} ms")

@@ -137,9 +137,8 @@ def test_emit_then_import_then_roundtrip(
     for trial in range(5):
         q_star = rng.uniform(-1.0, 1.0, size=6)
         T_star = _fk_poe(kb, q_star)
-        sols_artifact, is_ls_artifact = mod.solve(T_star)
-        sols_direct, is_ls_direct = direct_solver.solve(kb, T_star)  # type: ignore[attr-defined]
-        assert is_ls_artifact == is_ls_direct, f"trial {trial}: is_ls disagrees"
+        sols_artifact = mod.solve(T_star)
+        sols_direct, _is_ls_direct = direct_solver.solve(kb, T_star)  # type: ignore[attr-defined]
         assert len(sols_artifact) == len(sols_direct), f"trial {trial}: solution count disagrees"
         for sol in sols_artifact:
             T_check = _fk_poe(kb, sol.q)
@@ -175,20 +174,20 @@ def test_artifact_solve_accepts_policy_and_refinement_kwargs(tmp_path: Path) -> 
     T_star = _fk_poe(kb, q_star)
 
     # Default call: defaults match the underlying solver's defaults.
-    _sols_default, is_ls_default = mod.solve(T_star)
-    assert not is_ls_default
+    sols_default = mod.solve(T_star)
+    assert sols_default
 
     # Custom policy: tighter FK-closure threshold; result still closes.
     strict = TolerancePolicy(subproblem_numerical=1e-9)
-    sols_strict, is_ls_strict = mod.solve(T_star, policy=strict)
-    assert not is_ls_strict
+    sols_strict = mod.solve(T_star, policy=strict)
+    assert sols_strict
     for sol in sols_strict:
         T_check = _fk_poe(kb, sol.q)
         assert np.allclose(T_check, T_star, atol=1e-8), "strict-policy result fails FK"
 
     # Newton refinement: opt-in path with cap on iterations.
-    sols_refined, is_ls_refined = mod.solve(T_star, allow_refinement=True, refinement_max_iters=8)
-    assert not is_ls_refined
+    sols_refined = mod.solve(T_star, allow_refinement=True, refinement_max_iters=8)
+    assert sols_refined
     for sol in sols_refined:
         T_check = _fk_poe(kb, sol.q)
         assert np.allclose(T_check, T_star, atol=1e-9)

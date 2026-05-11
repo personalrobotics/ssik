@@ -46,7 +46,9 @@ def main() -> None:
     # JACO 2 lives as a Python builder (real MJCF transcription) rather
     # than a URDF, so we construct the KinBody and hand it to Manipulator
     # via the constructor escape hatch.
-    kb = ssik.build_kinbody(jaco2_specs())
+    from ssik.internals import build_kinbody
+
+    kb = build_kinbody(jaco2_specs())
     arm = ssik.Manipulator(kb)
     print(arm)
     print(f"  dof:    {arm.dof}")
@@ -58,9 +60,9 @@ def main() -> None:
     # Hand-picked pose from the issue tracker.
     q_star = np.array([0.4, -0.6, 0.8, 1.0, -0.4, 0.3])
     T = arm.fk(q_star)
-    sols, is_ls = arm.ik(T)
+    sols = arm.solve(T)
     print(f"Hand-picked q*={q_star.tolist()}:")
-    print(f"  IK returned {len(sols)} branches, is_ls={is_ls}")
+    print(f"  IK returned {len(sols)} branches")
     print(f"  max FK residual: {max(s.fk_residual for s in sols):.2e}")
     print(
         f"  q* recovered (any branch within 1e-6): "
@@ -75,15 +77,15 @@ def main() -> None:
     # Warm up.
     for _ in range(10):
         q = rng.uniform(-1, 1, size=6)
-        arm.ik(arm.fk(q))
+        arm.solve(arm.fk(q))
 
     for _ in range(100):
         q = rng.uniform(-1, 1, size=6)
         T = arm.fk(q)
         t = time.perf_counter()
-        sols, is_ls = arm.ik(T)
+        sols = arm.solve(T)
         times.append((time.perf_counter() - t) * 1000)
-        if not is_ls and sols:
+        if sols:
             fk_residuals.append(max(s.fk_residual for s in sols))
             sol_counts.append(len(sols))
 

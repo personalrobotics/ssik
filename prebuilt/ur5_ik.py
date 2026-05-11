@@ -17,13 +17,13 @@ Usage:
     import numpy as np
     T_target = np.eye(4)  # 4x4 SE(3) pose
     T_target[:3, 3] = [0.5, 0.1, 0.3]
-    solutions, is_ls = ur5_ik.solve(T_target)
+    solutions = ur5_ik.solve(T_target)
     for sol in solutions:
         print(sol.q, sol.fk_residual)
 
-``solve(T)`` returns ``(list[Solution], is_ls)``. ``is_ls=True``
-signals that no solution closed within the solver's FK tolerance,
-and the returned list is the best-LS approximation (or empty).
+``solve(T)`` returns ``list[Solution]``. Empty list iff no
+candidate closed within the solver's FK tolerance -- check
+``if not solutions:`` for the "unreachable" case.
 """
 
 from __future__ import annotations
@@ -41,6 +41,11 @@ from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
+from ssik.postprocess import (
+    nearest_to_seed as _ps_nearest_to_seed,
+    respect_limits as _ps_respect_limits,
+    wrap_to_limits as _ps_wrap_to_limits,
+)
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.three_parallel"
@@ -467,19 +472,41 @@ def _q_close_wrap(a, b, tol: float) -> bool:
 def solve(
     T_target,
     *,
-    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    max_solutions: int | None = None,
+    q_seed=None,
+    respect_limits: bool = True,
     allow_refinement: bool = False,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
 ):
-    """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
+    """Inverse kinematics. Returns ``list[Solution]``.
 
     :param T_target: 4x4 SE(3) target end-effector pose.
+    :param max_solutions: optional cap on returned IKs (post-dedup,
+        post-limits filter). ``None`` = full redundancy enumeration.
+        Combine with ``q_seed`` for the "give me the IK closest to
+        where I am now" trajectory-tracking idiom.
+    :param q_seed: optional joint configuration. When provided,
+        returned solutions are sorted by wrap-to-pi distance from
+        ``q_seed`` (closest first). Has no effect on which solutions
+        are returned, only their order.
+    :param respect_limits: when ``True`` (default), solutions
+        outside URDF joint limits are dropped. Pass ``False`` for
+        the raw geometric set (e.g. analysis / debugging).
+    :param allow_refinement: opt into Newton polish for near-miss
+        algebraic candidates that don't quite meet ``fk_atol``.
+        Default ``False`` -- the algebraic path is already at
+        machine precision on tier-0 / SRS arms. On tier-2 RR
+        arms (JACO 2, Rizon 4, Kassow), polish can recover
+        edge-case candidates whose algebraic FK drifts above
+        ``fk_atol``, at ~100-300 us per polished branch.
     :param policy: tolerance policy (FK closure + dedup tolerance).
-    :param allow_refinement: opt into Newton-on-spatial-Jacobian
-        polish for near-miss candidates (those whose algebraic q
-        doesn't quite meet ``fk_atol``). Default off.
+        Rarely customised.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
+    :returns: list of :class:`Solution`; empty list iff no IK
+        closed within ``policy.subproblem_numerical`` (or all
+        IKs were filtered by ``respect_limits=True``).
     """
     T = np.asarray(T_target, dtype=np.float64)
     candidates = _solve_algebraic(T)
@@ -535,14 +562,26 @@ def solve(
             q=q,
             fk_residual=residual,
             refinement_used=ref_used,
-            refinement_iters=ref_iters,
-            branch_id=i,
-            solver_name=SOLVER_NAME,
         )
-        for i, (q, residual, ref_used, ref_iters) in enumerate(deduped)
+        for q, residual, ref_used, _ref_iters in deduped
     ]
-    return solutions, len(solutions) == 0
 
+    # Post-processing pass (#238 item 4). Order matters:
+    #   1. wrap_to_limits tries q +/- 2*pi per joint to bring
+    #      candidates into the URDF's limit range
+    #   2. respect_limits drops anything still outside
+    #   3. nearest_to_seed sorts by distance to q_seed (if given)
+    #   4. max_solutions truncates to the first k
+    if respect_limits:
+        solutions = _ps_wrap_to_limits(solutions, _KB)
+        solutions = _ps_respect_limits(solutions, _KB)
+    if q_seed is not None:
+        solutions = _ps_nearest_to_seed(solutions, q_seed)
+    if max_solutions is not None and len(solutions) > max_solutions:
+        solutions = solutions[:max_solutions]
+    return solutions
+
+fk = _fk
 
 __all__ = [
     "DISPATCH_REASON",
@@ -550,5 +589,6 @@ __all__ = [
     "FLOP_BUDGET",
     "SOLVER_NAME",
     "SOLVER_TIER",
+    "fk",
     "solve",
 ]

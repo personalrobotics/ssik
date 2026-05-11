@@ -65,9 +65,8 @@ def test_fk_then_ik_roundtrip(urdf: str, base: str, ee: str, _solver: str) -> No
         # API contract under test).
         q_star[3] = float(rng.uniform(0.3, 0.7))
     T = arm.fk(q_star)
-    sols, is_ls = arm.ik(T)
-    assert not is_ls, f"{urdf}: ik returned is_ls=True on a reachable FK pose"
-    assert sols, f"{urdf}: ik returned no solutions"
+    sols = arm.solve(T)
+    assert sols, f"{urdf}: solve returned no solutions on a reachable FK pose"
     # At least one solution FK-closes.
     best = min(np.linalg.norm(arm.fk(s.q) - T) for s in sols)
     assert best < 1e-6, f"{urdf}: best FK residual {best:.2e}"
@@ -106,7 +105,9 @@ def test_dispatch_plan_has_useful_fields() -> None:
 def test_kinbody_property_exposes_internal() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     kb = arm.kinbody
-    assert isinstance(kb, ssik.KinBody)
+    from ssik.internals import KinBody
+
+    assert isinstance(kb, KinBody)
     assert len(kb.joints) == 6
 
 
@@ -165,20 +166,19 @@ def test_fk_rejects_wrong_shape() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ik_returns_solutions_and_is_ls() -> None:
+def test_solve_returns_list_of_solutions() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     T = arm.fk(np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
-    sols, is_ls = arm.ik(T)
+    sols = arm.solve(T)
     assert isinstance(sols, list)
-    assert isinstance(is_ls, bool)
     assert all(isinstance(s, ssik.Solution) for s in sols)
 
 
 def test_ik_max_solutions_caps_returned() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     T = arm.fk(np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
-    sols_full, _ = arm.ik(T)
-    sols_capped, _ = arm.ik(T, max_solutions=2)
+    sols_full = arm.solve(T)
+    sols_capped = arm.solve(T, max_solutions=2)
     assert len(sols_full) > 2
     assert len(sols_capped) <= 2
     # FK closure preserved on the capped set.
@@ -193,10 +193,11 @@ def test_ik_q_seed_passes_through_when_supported() -> None:
     q = rng.uniform(-0.5, 0.5, size=7)
     q[3] = 0.5
     T = arm.fk(q)
-    # No q_seed: get solutions
-    sols_no_seed, _ = arm.ik(T, max_solutions=1)
-    # With q_seed: should also work, same solver path
-    sols_seeded, _ = arm.ik(T, max_solutions=1, q_seed=q)
+    # Bypass limits filtering: this test exercises q_seed plumbing, not
+    # reachability. respect_limits=True can drop branches on Rizon 4
+    # which masks the q_seed kwarg behavior under test.
+    sols_no_seed = arm.solve(T, max_solutions=1, respect_limits=False)
+    sols_seeded = arm.solve(T, max_solutions=1, q_seed=q, respect_limits=False)
     assert len(sols_no_seed) == 1
     assert len(sols_seeded) == 1
 
@@ -208,34 +209,32 @@ def test_ik_q_seed_silently_ignored_when_unsupported() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     T = arm.fk(np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
     # Should not raise even though ikgeo.three_parallel.solve has no q_seed param.
-    sols, _ = arm.ik(T, q_seed=np.zeros(6))
+    sols = arm.solve(T, q_seed=np.zeros(6))
     assert sols
 
 
-def test_ik_rejects_wrong_T_shape() -> None:
+def test_solve_rejects_wrong_T_shape() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
-    with pytest.raises(ValueError, match="ik expected T_target"):
-        arm.ik(np.eye(3))
-    with pytest.raises(ValueError, match="ik expected T_target"):
-        arm.ik(np.zeros(16))
+    with pytest.raises(ValueError, match="solve expected T_target"):
+        arm.solve(np.eye(3))
+    with pytest.raises(ValueError, match="solve expected T_target"):
+        arm.solve(np.zeros(16))
 
 
 def test_ik_rejects_wrong_q_seed_shape() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "rizon4.urdf", base="base_link", ee="flange")
     T = arm.fk(np.zeros(7))
     with pytest.raises(ValueError, match="q_seed expected shape"):
-        arm.ik(T, q_seed=np.zeros(6))
+        arm.solve(T, q_seed=np.zeros(6))
 
 
-def test_ik_unreachable_target_returns_is_ls() -> None:
-    """A target way out of reach should set is_ls=True (no FK-closing IK)."""
+def test_solve_unreachable_target_returns_empty() -> None:
+    """A target way out of reach yields an empty solution list."""
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     T = np.eye(4)
     T[:3, 3] = [100.0, 100.0, 100.0]  # 100 metres away
-    sols, is_ls = arm.ik(T)
-    assert is_ls
-    # Returned list may be empty or a single best-LS approx; both are valid.
-    assert len(sols) <= 1
+    sols = arm.solve(T)
+    assert sols == []
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +255,9 @@ def test_construct_from_kinbody_directly() -> None:
     q = rng.uniform(-0.5, 0.5, size=7)
     q[3] = 0.5
     T = arm.fk(q)
-    sols, is_ls = arm.ik(T, max_solutions=1)
-    assert not is_ls
+    # Bypass URDF limit filter: this test exercises construction + dispatch,
+    # not reachability under Franka's tight joint limits.
+    sols = arm.solve(T, max_solutions=1, respect_limits=False)
     assert sols
 
 
@@ -285,21 +285,12 @@ def test_from_urdf_raises_on_bad_link_name() -> None:
 
 
 def test_top_level_exports_present() -> None:
-    """Every type a user needs is reachable from the top-level ``ssik`` namespace."""
+    """Top-level ``ssik`` namespace is the user-facing v1.0 surface."""
     expected = [
         "Manipulator",
         "Solution",
-        "KinBody",
-        "Joint",
-        "Link",
-        "JointSpec",
-        "build_kinbody",
         "TolerancePolicy",
         "DEFAULT_TOLERANCE_POLICY",
-        "DispatchPlan",
-        "TopologyReport",
-        "describe_topology",
-        "dispatch",
         "__version__",
     ]
     for name in expected:
@@ -307,27 +298,48 @@ def test_top_level_exports_present() -> None:
     assert set(ssik.__all__) >= set(expected) - {"__version__"}
 
 
+def test_contributor_surface_via_ssik_internals() -> None:
+    """Contributor / debugging surface lives under ``ssik.internals``."""
+    from ssik import internals
+
+    expected = [
+        "KinBody",
+        "Joint",
+        "Link",
+        "JointSpec",
+        "build_kinbody",
+        "DispatchPlan",
+        "TopologyReport",
+        "describe_topology",
+        "dispatch",
+    ]
+    for name in expected:
+        assert hasattr(internals, name), f"ssik.internals.{name} missing"
+
+
 # ---------------------------------------------------------------------------
 # Performance: Manipulator overhead must be small
 # ---------------------------------------------------------------------------
 
 
-def test_ik_overhead_under_100us() -> None:
-    """Manipulator.ik() should add < 100 us overhead vs the raw solver call.
-    The wrapper does signature inspection + kwarg filtering -- cheap, but
-    catch regressions where someone adds a per-call sympy import or similar.
+def test_ik_overhead_under_300us() -> None:
+    """Manipulator.solve() should add < 300 us overhead vs the raw solver call.
+    Overhead comes from signature inspection + the always-on postprocess
+    pass (wrap_to_limits + respect_limits when respect_limits=True; nearest_to_seed
+    when q_seed given; truncate when max_solutions given). Catches regressions
+    where someone adds a per-call sympy import or similar heavy work.
     """
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     T = arm.fk(np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
 
     # Warm
     for _ in range(20):
-        arm.ik(T)
+        arm.solve(T)
 
     # Manipulator path
     t = time.perf_counter()
     for _ in range(200):
-        arm.ik(T)
+        arm.solve(T)
     manip_per = (time.perf_counter() - t) / 200
 
     # Raw solver path
@@ -339,7 +351,7 @@ def test_ik_overhead_under_100us() -> None:
     raw_per = (time.perf_counter() - t) / 200
 
     overhead = (manip_per - raw_per) * 1e6
-    assert overhead < 100.0, (
-        f"Manipulator.ik overhead {overhead:.1f} us > 100 us regression gate "
+    assert overhead < 300.0, (
+        f"Manipulator.solve overhead {overhead:.1f} us > 300 us regression gate "
         f"(manip={manip_per * 1e6:.1f} us, raw={raw_per * 1e6:.1f} us)"
     )

@@ -1,4 +1,4 @@
-"""Generated IK module for rizon4_ik.
+"""Generated IK module for Flexiv Rizon 4.
 
 This file was emitted by ``ssik build`` and is the public artifact for
 running analytical inverse kinematics on this specific arm. The
@@ -17,13 +17,13 @@ Usage:
     import numpy as np
     T_target = np.eye(4)  # 4x4 SE(3) pose
     T_target[:3, 3] = [0.5, 0.1, 0.3]
-    solutions, is_ls = rizon4_ik.solve(T_target)
+    solutions = rizon4_ik.solve(T_target)
     for sol in solutions:
         print(sol.q, sol.fk_residual)
 
-``solve(T)`` returns ``(list[Solution], is_ls)``. ``is_ls=True``
-signals that no solution closed within the solver's FK tolerance,
-and the returned list is the best-LS approximation (or empty).
+``solve(T)`` returns ``list[Solution]``. Empty list iff no
+candidate closed within the solver's FK tolerance -- check
+``if not solutions:`` for the "unreachable" case.
 """
 
 from __future__ import annotations
@@ -39,6 +39,11 @@ from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
+from ssik.postprocess import (
+    nearest_to_seed as _ps_nearest_to_seed,
+    respect_limits as _ps_respect_limits,
+    wrap_to_limits as _ps_wrap_to_limits,
+)
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "jointlock.seven_r"
@@ -3862,14 +3867,17 @@ for _b85 in _RR_PRIME_BLOBS_B85:
 
 
 
-def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
+def _solve_algebraic(
+    T_target, *, max_solutions=None, q_seed=None, respect_limits=False,
+):
     """7R IK candidates via joint-locking + inner 6R sweep.
 
     Routes to ssik.solvers.jointlock.seven_r.solve with the baked
     KinBody, lock_idx, lock-sample schedule, and dispatch cache.
-    ``max_solutions`` and ``q_seed`` are forwarded so the underlying
-    lock-sweep can short-circuit (#142). Returns ``list[list[float]]``
-    of length-7 q-vectors.
+    ``max_solutions``, ``q_seed``, and ``respect_limits`` are
+    forwarded so the lock-sweep can short-circuit on the first
+    in-limits valid IK (#238 review). Returns
+    ``list[list[float]]`` of length-7 q-vectors.
     """
     sub_solutions, _is_ls = _ssik_seven_r.solve(
         _KB, T_target,
@@ -3877,6 +3885,7 @@ def _solve_algebraic(T_target, *, max_solutions=None, q_seed=None):
         lock_samples=_LOCK_SAMPLES,
         dispatch_cache=_DISPATCH_CACHE,
         max_solutions=max_solutions, q_seed=q_seed,
+        respect_limits=respect_limits,
     )
     return [list(s.q) for s in sub_solutions]
 
@@ -4085,47 +4094,56 @@ def _q_close_wrap(a, b, tol: float) -> bool:
 def solve(
     T_target,
     *,
-    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
-    allow_refinement: bool = False,
-    refinement_max_iters: int = 15,
     max_solutions: int | None = None,
     q_seed=None,
+    respect_limits: bool = True,
+    allow_refinement: bool = False,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    refinement_max_iters: int = 15,
 ):
-    """Inverse kinematics. Returns ``(list[Solution], is_ls)``.
+    """Inverse kinematics. Returns ``list[Solution]``.
 
     :param T_target: 4x4 SE(3) target end-effector pose.
-    :param policy: tolerance policy (FK closure + dedup tolerance).
-    :param allow_refinement: opt into Newton-on-spatial-Jacobian
-        polish for near-miss candidates (those whose algebraic q
-        doesn't quite meet ``fk_atol``). Default off.
-    :param refinement_max_iters: cap on Newton iterations per
-        candidate when ``allow_refinement=True``.
     :param max_solutions: optional early-exit cap on the
         jointlock lock-sweep. ``None`` (default) = exhaustive
         search. ``max_solutions=1`` short-circuits as soon as
-        one valid IK is found (~17x faster on Franka 7R).
+        one valid IK is found (~17x faster on this 7R).
     :param q_seed: optional length-7 seed configuration. When
         provided, the lock-joint samples are visited in order
         of wrap-to-pi distance to ``q_seed[lock_idx]`` --
         combined with ``max_solutions=1`` this is the
-        trajectory-tracking fast path (~37x faster on Franka).
+        trajectory-tracking fast path.
+    :param respect_limits: when ``True`` (default), solutions
+        outside URDF joint limits are dropped. Pass ``False``
+        for the raw geometric set.
+    :param allow_refinement: when ``True`` (default), Newton
+        polish fires on near-miss algebraic candidates.
+    :param policy: tolerance policy. Rarely customised.
+    :param refinement_max_iters: cap on Newton iterations per
+        candidate when ``allow_refinement=True``.
 
     Common idioms::
 
         # Exhaustive search (default).
-        solutions, _ = solve(T_target)
+        solutions = solve(T_target)
 
         # "Just give me one IK" -- ~17x faster.
-        solutions, _ = solve(T_target, max_solutions=1)
+        solutions = solve(T_target, max_solutions=1)
 
         # Track current config -- ~37x faster.
-        solutions, _ = solve(
+        solutions = solve(
             T_target, q_seed=q_current, max_solutions=1,
         )
     """
     T = np.asarray(T_target, dtype=np.float64)
+    # Lock-sweep filters limits in-flight (#238 review): the
+    # short-circuit fires on the first in-limits valid IK, not
+    # on a candidate that postprocess would drop. Preserves the
+    # max_solutions+q_seed early-exit fast path even with
+    # respect_limits=True.
     candidates = _solve_algebraic(
-        T, max_solutions=max_solutions, q_seed=q_seed
+        T, max_solutions=max_solutions, q_seed=q_seed,
+        respect_limits=respect_limits,
     )
 
     fk_atol = policy.subproblem_numerical
@@ -4174,26 +4192,23 @@ def solve(
         elif cand_res < deduped[dup_idx][1]:
             deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)
 
-    # Final trim: the underlying lock-sweep already capped at
-    # ``max_solutions`` (under #142), but verify+dedup may have
-    # collapsed near-duplicates so ``len(deduped)`` can also be
-    # smaller. Trimming here is the defensive belt-and-braces.
-    if max_solutions is not None and len(deduped) > max_solutions:
-        deduped = deduped[:max_solutions]
-
     solutions = [
         Solution(
             q=q,
             fk_residual=residual,
             refinement_used=ref_used,
-            refinement_iters=ref_iters,
-            branch_id=i,
-            solver_name=SOLVER_NAME,
         )
-        for i, (q, residual, ref_used, ref_iters) in enumerate(deduped)
+        for q, residual, ref_used, _ref_iters in deduped
     ]
-    return solutions, len(solutions) == 0
+    # No orchestrator-level respect_limits pass: the inner
+    # ``_solve_algebraic`` already filtered in-flight when
+    # respect_limits=True, so candidates here are guaranteed
+    # in-limits. The cap on max_solutions also ran inside.
+    if max_solutions is not None and len(solutions) > max_solutions:
+        solutions = solutions[:max_solutions]
+    return solutions
 
+fk = _fk
 
 __all__ = [
     "DISPATCH_REASON",
@@ -4201,5 +4216,6 @@ __all__ = [
     "FLOP_BUDGET",
     "SOLVER_NAME",
     "SOLVER_TIER",
+    "fk",
     "solve",
 ]

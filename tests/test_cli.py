@@ -87,10 +87,9 @@ def test_build_ur5_emits_and_validates(tmp_path: Path, capsys: pytest.CaptureFix
     spec.loader.exec_module(mod)
     T = np.eye(4)
     T[:3, 3] = [0.5, 0.1, 0.3]
-    sols, is_ls = mod.solve(T)
+    sols = mod.solve(T)
     # Random free pose may or may not have a solution; just assert callable.
     assert isinstance(sols, list)
-    assert isinstance(is_ls, bool)
 
 
 def test_build_no_validate(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

@@ -13,13 +13,13 @@ Example::
         "tests/fixtures/ur5.urdf", base="base_link", ee="ee_link"
     )
     T = arm.fk([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
-    sols, is_ls = arm.ik(T)
-    # sols is a list[Solution]; is_ls=True signals no candidate FK-closed
-    # within tolerance.
+    sols = arm.solve(T, max_solutions=1, q_seed=q_prev)
+    # sols is a list[Solution]; empty iff no IK closed within tolerance.
 
-The class is intentionally tiny: factory + fk + ik + a handful of properties.
-Power users who need solver-specific knobs pass them via ``solver_kwargs``;
-power users who need the underlying :class:`KinBody` can reach :attr:`kinbody`.
+The class is intentionally tiny: factory + fk + solve + a handful of
+properties. Power users who need solver-specific knobs pass them via
+``solver_kwargs``; power users who need the underlying :class:`KinBody`
+can reach :attr:`kinbody`.
 """
 
 from __future__ import annotations
@@ -213,56 +213,62 @@ class Manipulator:
     # Inverse kinematics
     # ------------------------------------------------------------------
 
-    def ik(
+    def solve(
         self,
         T_target: ArrayLike,
         *,
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
-        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+        respect_limits: bool = True,
         allow_refinement: bool = False,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
         **solver_kwargs: Any,
-    ) -> tuple[list[Solution], bool]:
-        """Inverse kinematics: find ``q`` such that ``fk(q) ≈ T_target``.
+    ) -> list[Solution]:
+        """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
 
         :param T_target: 4x4 SE(3) target pose.
-        :param max_solutions: optional cap on returned IKs. ``None`` = full
-            redundancy enumeration. ``1`` is the trajectory-tracking
-            "give me any IK" mode (typically 10-15x faster than full sweep
-            on 7R arms). The cap is honored at every layer of the dispatch
-            stack -- the inner solvers stop branch enumeration as soon as
-            ``max_solutions`` deduplicated IKs are found.
-        :param q_seed: optional length-:attr:`dof` seed configuration. When
-            supported by the dispatched solver (currently
-            :mod:`ssik.solvers.jointlock.seven_r`), ``q_seed`` reorders the
-            internal lock-sample sweep so the closest-to-seed sample fires
-            first; combined with ``max_solutions=1`` this is the canonical
-            trajectory-tracking idiom. Solvers that don't accept ``q_seed``
-            silently ignore it.
-        :param policy: tolerance policy. Defaults to
+        :param max_solutions: optional cap on returned IKs (post-dedup,
+            post-limits filter). ``None`` = full redundancy enumeration.
+            ``1`` combined with ``q_seed`` is the trajectory-tracking idiom.
+            On 7R jointlock arms the cap also short-circuits the lock-sweep
+            internally for a 10-15x speedup.
+        :param q_seed: optional length-:attr:`dof` seed. When provided,
+            returned solutions are sorted by wrap-to-pi distance from
+            ``q_seed`` (closest first). On jointlock-7R arms it also
+            reorders the internal lock-sample sweep.
+        :param respect_limits: when ``True`` (default), solutions outside
+            URDF joint limits are dropped. Pass ``False`` for the raw
+            geometric set (analysis / debugging).
+        :param allow_refinement: opt into Newton polish for near-miss
+            algebraic candidates. Default ``False`` -- the algebraic
+            path is already at machine precision on tier-0 / SRS arms.
+            Set ``True`` on tier-2 RR arms to recover edge-case
+            candidates whose algebraic FK drifts above ``fk_atol``.
+        :param policy: tolerance policy. Rarely customised. Defaults to
             :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
-        :param allow_refinement: opt into Newton-on-spatial-Jacobian polish
-            for candidates that don't FK-close algebraically. Default off;
-            the analytical path is exact for well-conditioned poses.
         :param refinement_max_iters: cap on Newton iterations per candidate
             when ``allow_refinement=True``.
-        :param solver_kwargs: forwarded verbatim to the dispatched solver's
-            ``solve()`` for power users who need solver-specific knobs
-            (``swivel_samples`` for SRS-class, ``linearity_joint`` for RR,
-            etc.). Unknown kwargs raise :class:`TypeError` from the
-            underlying solver.
+        :param solver_kwargs: forwarded verbatim to the dispatched solver
+            for power users (``swivel_samples`` for SRS-class,
+            ``linearity_joint`` for RR, etc.).
 
-        :returns: ``(solutions, is_ls)``. ``is_ls=True`` iff no candidate
-            FK-closed within ``policy.subproblem_numerical``; the returned
-            list is then either a single best-LS approximation or empty.
+        :returns: list of :class:`Solution`, one per analytical IK branch.
+            Empty list iff no candidate FK-closed within
+            ``policy.subproblem_numerical`` (or all IKs were filtered by
+            ``respect_limits=True``). Check ``if not sols:`` for
+            "unreachable target".
 
         :raises ValueError: if ``T_target.shape != (4, 4)`` or
             ``len(q_seed) != dof`` when ``q_seed`` is given.
         """
+        from ssik.postprocess import nearest_to_seed as _ps_nearest_to_seed
+        from ssik.postprocess import respect_limits as _ps_respect_limits
+        from ssik.postprocess import wrap_to_limits as _ps_wrap_to_limits
+
         T = np.asarray(T_target, dtype=np.float64)
         if T.shape != (4, 4):
-            raise ValueError(f"ik expected T_target of shape (4, 4), got {T.shape}")
+            raise ValueError(f"solve expected T_target of shape (4, 4), got {T.shape}")
         if q_seed is not None:
             q_seed_arr: NDArray[np.float64] | None = np.asarray(q_seed, dtype=np.float64)
             assert q_seed_arr is not None
@@ -283,12 +289,35 @@ class Manipulator:
             kwargs["allow_refinement"] = allow_refinement
         if "refinement_max_iters" in params:
             kwargs["refinement_max_iters"] = refinement_max_iters
+        # When respect_limits=True, don't short-circuit the inner solver's
+        # sweep on max_solutions: the closest-to-seed branch the solver
+        # picks first may be out-of-limits and the postprocess pass would
+        # drop it, leaving zero results. Force the full sweep, then
+        # filter + trim. The user opts out via respect_limits=False.
         if "max_solutions" in params:
-            kwargs["max_solutions"] = max_solutions
+            kwargs["max_solutions"] = None if respect_limits else max_solutions
         if q_seed_arr is not None and "q_seed" in params:
             kwargs["q_seed"] = q_seed_arr
         # Power-user kwargs override our defaults.
         kwargs.update(solver_kwargs)
 
-        result: tuple[list[Solution], bool] = self._solver_module.solve(self._kb, T, **kwargs)
-        return result
+        # Internal solver functions still return (sols, is_ls); unwrap the
+        # tuple at the public-API boundary. `is_ls` is redundant with
+        # `len(sols) == 0` in every shipped solver -- ssik #238 item 1.
+        sols, _is_ls = self._solver_module.solve(self._kb, T, **kwargs)
+
+        # Cross-arm postprocess pass: solvers that didn't honour kwargs
+        # natively get them applied here so the public API is uniform.
+        # Order: wrap_to_limits first (try +/- 2pi shift to bring branches
+        # into the URDF range), THEN respect_limits (drop anything still
+        # outside). Without the shift, IKs returned in [-2pi, 0] would
+        # erroneously be filtered on arms with limits in [0, 2pi]
+        # (the JACO 2 case).
+        if respect_limits:
+            sols = _ps_wrap_to_limits(sols, self._kb)
+            sols = _ps_respect_limits(sols, self._kb)
+        if q_seed_arr is not None:
+            sols = _ps_nearest_to_seed(sols, q_seed_arr)
+        if max_solutions is not None and len(sols) > max_solutions:
+            sols = sols[:max_solutions]
+        return sols

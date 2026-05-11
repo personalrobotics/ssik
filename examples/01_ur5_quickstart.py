@@ -9,7 +9,7 @@ This script demonstrates:
 
 1. Loading via ``Manipulator.from_urdf``.
 2. Forward kinematics (``arm.fk``).
-3. Inverse kinematics, full enumeration (``arm.ik``).
+3. Inverse kinematics, full enumeration (``arm.solve``).
 4. Trajectory-tracking with ``max_solutions=1`` and ``q_seed``.
 5. Inspecting the dispatch plan.
 
@@ -55,10 +55,9 @@ def main() -> None:
     # 3. Inverse kinematics — full redundancy enumeration.
     # ---------------------------------------------------------------------
     t = time.perf_counter()
-    sols, is_ls = arm.ik(T)
+    sols = arm.solve(T)
     elapsed_ms = (time.perf_counter() - t) * 1000
     print(f"IK (full enumeration): {len(sols)} solutions in {elapsed_ms:.2f} ms")
-    print(f"  is_ls:      {is_ls}")
     print(f"  max FK residual: {max(s.fk_residual for s in sols):.2e}")
     print("  branches:")
     for i, s in enumerate(sols):
@@ -70,7 +69,7 @@ def main() -> None:
     # ---------------------------------------------------------------------
     q_prev = q_star + 0.05 * np.random.default_rng(42).standard_normal(6)
     t = time.perf_counter()
-    sols, _ = arm.ik(T, max_solutions=1, q_seed=q_prev)
+    sols = arm.solve(T, max_solutions=1, q_seed=q_prev)
     elapsed_ms = (time.perf_counter() - t) * 1000
     print(f"IK (trajectory tracking, max_solutions=1): {elapsed_ms:.2f} ms")
     print(f"  q_prev:     {[round(x, 3) for x in q_prev]}")
