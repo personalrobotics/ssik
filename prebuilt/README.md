@@ -57,7 +57,7 @@ See [`examples/`](../examples/) for runnable scripts:
 - `01_ur5_quickstart.py` — basic API tour using `ur5_ik`
 - `02_jaco2_non_pieper.py` — non-Pieper 6R using `jaco2_ik`
 - `03_gen3_polished_srs.py` — approximate-SRS using `gen3_ik`
-- `04_compare_vs_eaik_mink.py` — apples-to-apples benchmark vs other libraries
+- `04_compare_vs_eaik.py` — measured benchmark vs EAIK over 100 random poses
 
 ## Regenerating
 
