@@ -445,8 +445,15 @@ def solve(
         )
     """
     T = np.asarray(T_target, dtype=np.float64)
+    # When ``respect_limits=True``, don't short-circuit the
+    # lock-sweep on ``max_solutions``: the first-found valid IK
+    # might be out-of-limits and the postprocess pass would drop
+    # it, leaving zero results. Run the full sweep, then filter
+    # + trim. The user can recover the early-exit speed by
+    # passing ``respect_limits=False``.
+    sweep_max = None if respect_limits else max_solutions
     candidates = _solve_algebraic(
-        T, max_solutions=max_solutions, q_seed=q_seed
+        T, max_solutions=sweep_max, q_seed=q_seed
     )
 
     fk_atol = policy.subproblem_numerical
@@ -495,13 +502,6 @@ def solve(
         elif cand_res < deduped[dup_idx][1]:
             deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)
 
-    # Final trim: the underlying lock-sweep already capped at
-    # ``max_solutions`` (under #142), but verify+dedup may have
-    # collapsed near-duplicates so ``len(deduped)`` can also be
-    # smaller. Trimming here is the defensive belt-and-braces.
-    if max_solutions is not None and len(deduped) > max_solutions:
-        deduped = deduped[:max_solutions]
-
     solutions = [
         Solution(
             q=q,
@@ -510,9 +510,15 @@ def solve(
         )
         for q, residual, ref_used, _ref_iters in deduped
     ]
+    # respect_limits before max_solutions trim, so the truncation
+    # picks from the in-limits set (not the raw set where the
+    # closest-to-seed branch might be out-of-limits and would
+    # silently disappear -- #238 review finding).
     if respect_limits:
         solutions = _ps_wrap_to_limits(solutions, _KB)
         solutions = _ps_respect_limits(solutions, _KB)
+    if max_solutions is not None and len(solutions) > max_solutions:
+        solutions = solutions[:max_solutions]
     return solutions
 
 fk = _fk

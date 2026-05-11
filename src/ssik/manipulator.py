@@ -13,13 +13,13 @@ Example::
         "tests/fixtures/ur5.urdf", base="base_link", ee="ee_link"
     )
     T = arm.fk([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
-    sols, is_ls = arm.ik(T)
-    # sols is a list[Solution]; is_ls=True signals no candidate FK-closed
-    # within tolerance.
+    sols = arm.solve(T, max_solutions=1, q_seed=q_prev)
+    # sols is a list[Solution]; empty iff no IK closed within tolerance.
 
-The class is intentionally tiny: factory + fk + ik + a handful of properties.
-Power users who need solver-specific knobs pass them via ``solver_kwargs``;
-power users who need the underlying :class:`KinBody` can reach :attr:`kinbody`.
+The class is intentionally tiny: factory + fk + solve + a handful of
+properties. Power users who need solver-specific knobs pass them via
+``solver_kwargs``; power users who need the underlying :class:`KinBody`
+can reach :attr:`kinbody`.
 """
 
 from __future__ import annotations
@@ -287,8 +287,13 @@ class Manipulator:
             kwargs["allow_refinement"] = allow_refinement
         if "refinement_max_iters" in params:
             kwargs["refinement_max_iters"] = refinement_max_iters
+        # When respect_limits=True, don't short-circuit the inner solver's
+        # sweep on max_solutions: the closest-to-seed branch the solver
+        # picks first may be out-of-limits and the postprocess pass would
+        # drop it, leaving zero results. Force the full sweep, then
+        # filter + trim. The user opts out via respect_limits=False.
         if "max_solutions" in params:
-            kwargs["max_solutions"] = max_solutions
+            kwargs["max_solutions"] = None if respect_limits else max_solutions
         if q_seed_arr is not None and "q_seed" in params:
             kwargs["q_seed"] = q_seed_arr
         # Power-user kwargs override our defaults.

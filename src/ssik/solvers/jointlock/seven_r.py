@@ -474,11 +474,11 @@ def solve(
         the codegen-time topology probe (#142 item 4); manual callers
         leave ``None``.
     :returns: ``(solutions, is_ls)``. Each :class:`Solution.q` is a
-        7-vector including the locked joint's value. ``branch_id``
-        encodes the lock-sample index in the order they were *evaluated*
-        (so under ``q_seed=...`` ordering, ``branch_id=0`` is the
-        sample closest to the seed). Solutions are deduplicated in
-        wrap-to-pi joint-angle distance.
+        7-vector including the locked joint's value. Solutions are
+        deduplicated in wrap-to-pi joint-angle distance. Solutions are
+        returned in the order their lock-samples were evaluated, so
+        under ``q_seed=...`` ordering the first solution is the one
+        with lock-sample closest to the seed.
 
     Common idioms::
 
