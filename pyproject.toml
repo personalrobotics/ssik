@@ -85,7 +85,7 @@ extend-exclude = [
     # Generated reference artifacts. Not subject to lint rules; their format
     # is dictated by ssik.core.codegen and validated via byte-equal snapshot
     # tests in test_artifact_snapshots.py.
-    "tests/artifacts",
+    "prebuilt",
 ]
 
 [tool.ruff.lint]
@@ -104,7 +104,18 @@ select = [
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
-exclude = ['^tests/artifacts/']
+exclude = ['^prebuilt/']
+
+# Test files: relax strict-mode rules that prevent local helpers and
+# fixture functions from being called without type annotations. Strict
+# typing in tests adds friction without catching user-facing bugs (the
+# product is ``src/ssik``; tests are checkpoints).
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_calls = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_unused_ignores = false
 
 # sympy ships no type stubs; used at module-import time for offline
 # per-arm symbolic preprocessing in ssik.solvers.ikgeo._raghavan_roth.
@@ -165,14 +176,14 @@ ignore_missing_imports = true
 module = "ur5"
 ignore_missing_imports = true
 
-# Generated per-arm artifacts under tests/artifacts/ are byte-stable
+# Generated per-arm artifacts under prebuilt/ are byte-stable
 # emitted code; their format is dictated by ``ssik.core.codegen`` and
 # validated via byte-equal snapshot tests. mypy excludes the directory
 # from checking, but tests that import from it (e.g. franka artifact
 # integration tests under #142) need this override so the imports
 # don't drag the strict-mode rules into the generated source.
 [[tool.mypy.overrides]]
-module = "tests.artifacts.*"
+module = "prebuilt.*"
 ignore_errors = true
 follow_imports = "silent"
 

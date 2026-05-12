@@ -171,13 +171,15 @@ def solve(
     # (factor=2.0, min_iters=2) inherited from #203 keeps dead-end seeds
     # from wasting iter budget.
     def fk_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        return poe_forward_kinematics(kb, q)
+        out: NDArray[np.float64] = poe_forward_kinematics(kb, q)
+        return out
 
     def jac_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        return kinbody_jacobian(kb, q)
+        out: NDArray[np.float64] = kinbody_jacobian(kb, q)
+        return out
 
     q_seeds = np.array([c.q for c in raw], dtype=np.float64)
-    q_polished_arr, fk_residuals, iters_used = lm_refine_batch(
+    q_polished_arr, fk_residuals, _iters_used = lm_refine_batch(
         q_seeds,
         fk_fn,
         jac_fn,

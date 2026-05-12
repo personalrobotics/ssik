@@ -145,7 +145,7 @@ def solve(
 
     fk_atol = policy.subproblem_numerical
     candidates: list[Solution] = []
-    for restart_idx, q0 in enumerate(starts):
+    for q0 in starts:
         result = lm_refine(
             q0,
             fk_fn,

@@ -67,7 +67,8 @@ def jaco2_kb() -> KinBody:
 
 
 def _seeded_target(kb: KinBody, q_seed: np.ndarray) -> np.ndarray:
-    return poe_forward_kinematics(kb, q_seed)
+    out: np.ndarray = poe_forward_kinematics(kb, q_seed)
+    return out
 
 
 # ---------------------------------------------------------------------------
