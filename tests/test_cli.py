@@ -75,7 +75,10 @@ def test_build_ur5_emits_and_validates(tmp_path: Path, capsys: pytest.CaptureFix
     assert artifact.exists()
     out = capsys.readouterr().out
     assert "Wrote" in out
-    assert "0 failures" in out
+    # New validator message format: "✓ N/N poses solved, median ... ms,
+    # max FK error ...". UR5 (three-parallel Pieper 6R) closes every
+    # sampled pose at machine precision; no near-singular drops expected.
+    assert "10/10 poses solved" in out
     assert "ikgeo.three_parallel" in out
 
     # Import + smoke-solve to confirm the artifact is functional from disk.
