@@ -50,8 +50,8 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 4 sols | 556 ± 12 µs / FK 2e-9 / 4 sols |
 | Puma 560 (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 3e-14 / 8 sols | 245 ± 3 µs / FK 2e-14 / 8 sols |
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.04 ms / FK 3e-6 / 2 sols |
-| iiwa14 (SRS 7R) | **refuses** ("only 1-6R robots are solvable") | 5.73 ± 0.03 ms / FK 4e-13 / 96 sols |
-| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 63.81 ± 1.63 ms / FK 1e-12 / 47 sols |
+| iiwa14 (SRS 7R) | **refuses** ("only 1-6R robots are solvable") | 4.89 ± 0.03 ms / FK 4e-13 / 96 sols |
+| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 40.32 ± 0.97 ms / FK 1e-12 / 47 sols |
 | Franka Panda (anthropomorphic 7R) | **refuses** ("only 1-6R") | 28.03 ± 2.57 ms / FK 7e-13 / 9 sols |
 | Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 30.88 ± 8.80 ms / FK 4e-9 / 35 sols |
 | Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 28.06 ± 10.63 ms / FK 7e-8 / 24 sols |

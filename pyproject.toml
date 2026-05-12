@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.27", "hatch-vcs>=0.4"]
+requires = ["hatchling>=1.27", "hatch-vcs>=0.4", "cython>=3.1", "setuptools>=70"]
 build-backend = "hatchling.build"
 
 [project]
@@ -76,6 +76,20 @@ version-file = "src/ssik/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ssik"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist]
+# Ship the annotated Python sources + the build hook so users on platforms
+# without a prebuilt wheel can compile the extensions from source.
+include = [
+    "src/ssik",
+    "hatch_build.py",
+    "LICENSE",
+    "README.md",
+    "pyproject.toml",
+]
 
 [tool.ruff]
 line-length = 100
