@@ -167,6 +167,38 @@ def _frame_at_joint_batch(
     return R, p
 
 
+def _verify_fk(
+    sols: list[Solution],
+    kb: KinBody,
+    t_target: NDArray[np.float64],
+    fk_threshold: float,
+) -> list[Solution]:
+    """Compute the FK residual for each candidate and drop anything past
+    ``fk_threshold``. Returns the surviving solutions with their
+    ``fk_residual`` field filled in.
+
+    Run after dedup so we evaluate FK on the surviving ~50 unique IKs
+    rather than the raw 128 candidates (#246). For strict-SRS arms the
+    algebra is exact, so the threshold check is defensive belt-and-braces;
+    for approximate-SRS callers (``reach_slack > 0``) it's load-bearing.
+    """
+    out: list[Solution] = []
+    for s in sols:
+        T_fk = poe_forward_kinematics(kb, s.q)
+        fk_residual = float(np.linalg.norm(T_fk - t_target))
+        if fk_residual <= fk_threshold:
+            # Direct construction beats dataclasses.replace (~10 us per
+            # call) on the warm-path post-dedup loop.
+            out.append(
+                Solution(
+                    q=s.q,
+                    fk_residual=fk_residual,
+                    refinement_used=s.refinement_used,
+                )
+            )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Public solve.
 # ---------------------------------------------------------------------------
@@ -405,30 +437,43 @@ def solve(
                     )
                     q_6[gimbal] = q_6_g
 
-                # Build q-array (N, 7) and FK-verify each row.
+                # Build q-array (N, 7). Singh-Kreutz on strict-SRS is exact
+                # closed-form -- intermediate clamps + atan2 introduce
+                # ≤ 1e-13 numerical drift, well below ``fk_threshold``. We
+                # defer FK verify to one post-dedup pass below so we skip it
+                # on the candidates dedup will eliminate (~10% on iiwa14;
+                # #246). Drop only non-finite q-vectors here as a safety net
+                # for the gimbal/singularity edge cases handled above.
                 q_full = np.column_stack([q_0, q_1, q_2, np.full(N, q_3_signed), q_4, q_5, q_6])
-                for i in range(N):
-                    T_fk = poe_forward_kinematics(kb, q_full[i])
-                    fk_residual = float(np.linalg.norm(T_fk - t_target))
-                    if fk_residual > fk_threshold:
-                        continue
+                finite = np.all(np.isfinite(q_full), axis=1)
+                for i in np.where(finite)[0]:
                     candidates.append(
                         Solution(
                             q=q_full[i],
-                            fk_residual=fk_residual,
+                            # Placeholder; filled in by the post-dedup FK pass.
+                            fk_residual=0.0,
                             refinement_used="none",
                         )
                     )
                     branch_id += 1
                     if max_solutions is not None and len(candidates) >= max_solutions:
+                        # Dedup + verify candidates so far. If the verified
+                        # set already meets the cap, short-circuit.
                         deduped = dedup_by_wrap_close(candidates, policy.subproblem_dedup)
-                        if len(deduped) >= max_solutions:
-                            return deduped[:max_solutions], False
+                        verified = _verify_fk(deduped, kb, t_target, fk_threshold)
+                        if len(verified) >= max_solutions:
+                            return verified[:max_solutions], False
 
     if not candidates:
         return [], True
 
     deduped = dedup_by_wrap_close(candidates, policy.subproblem_dedup)
+    # Final FK pass on dedup'd survivors: fills in fk_residual with the
+    # actual measured closure and drops any candidate that's drifted past
+    # ``fk_threshold``. This is the FK guarantee the public API promises.
+    verified = _verify_fk(deduped, kb, t_target, fk_threshold)
+    if not verified:
+        return [], True
     if max_solutions is not None:
-        deduped = deduped[:max_solutions]
-    return deduped, False
+        verified = verified[:max_solutions]
+    return verified, False
