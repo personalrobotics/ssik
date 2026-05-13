@@ -12,12 +12,12 @@ from typing import Any
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
-from hypothesis import strategies as st
+from hypothesis import HealthCheck, given, settings
 
 from ssik._kinbody import Joint, KinBody, Link
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.solvers.ikgeo import spherical_two_intersecting
+from tests._hypothesis_strategies import non_singular_q6r
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PUMA_URDF = FIXTURES / "puma560.urdf"
@@ -227,19 +227,7 @@ def test_synthetic_spherical_two_intersecting_fk_roundtrip(
 # ---------------------------------------------------------------------------
 
 
-_ANGLE = st.floats(min_value=-np.pi + 0.3, max_value=np.pi - 0.3, allow_nan=False, width=64)
-
-
-@st.composite
-def _random_q(draw: st.DrawFn) -> np.ndarray:
-    q = np.array([draw(_ANGLE) for _ in range(6)])
-    assume(abs(np.sin(q[1])) > 0.2)
-    assume(abs(np.sin(q[2])) > 0.2)
-    assume(abs(np.sin(q[4])) > 0.2)
-    return q
-
-
-@given(_random_q())
+@given(non_singular_q6r())
 @settings(
     max_examples=500,
     deadline=None,
