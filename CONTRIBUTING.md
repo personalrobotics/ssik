@@ -34,25 +34,48 @@ ssik/
 git clone https://github.com/personalrobotics/ssik.git
 cd ssik
 uv sync                                 # install dev deps
-uv run python scripts/build_cython.py   # one-time: build .so files for hot loops
+scripts/install-hooks.sh                # one-time: install pre-push check hook
 ```
 
 `uv` is the recommended package manager; `pip install -e .[urdf]` works too if you prefer pip.
 
-## Running tests
+## Pre-push gate (replaces most of CI)
+
+CI is intentionally minimal — a single Linux wheel-smoke job that catches packaging-class bugs (~5 min per PR). Everything else runs locally before you push:
 
 ```bash
-# Fast suite (default; ~4 minutes)
+scripts/check.sh                        # ruff + format + mypy + pytest (~5 min)
+scripts/check.sh --no-tests             # lint + types only (~30 sec)
+```
+
+After `scripts/install-hooks.sh`, `git push` runs `scripts/check.sh` automatically. Bypass for WIP pushes with `git push --no-verify`.
+
+If you forget to install the hook, the worst case is a CI failure post-merge that you revert.
+
+## Running tests / lint manually
+
+```bash
+# Fast suite (~4 minutes)
 uv run pytest
 
 # Slow suite (sympy preprocessing, ~5-10 minutes)
 uv run pytest -m slow
 
-# Lint, format, typecheck
+# Individual checks
 uv run ruff check
 uv run ruff format --check
-uv run mypy src tests
+uv run mypy
 ```
+
+## Pre-release gate
+
+Before tagging a `v*` release, run the local mirror of the cibuildwheel smoke gate:
+
+```bash
+scripts/release-precheck.sh             # ~2 min: wheel build + fresh-venv smoke
+```
+
+This catches packaging-class bugs (missing runtime deps, broken Cython compile, broken prebuilt imports) that the dev-tree `pytest` misses because dev deps pull everything transitively. Local-green here ≈ rc-tag green on CI.
 
 ## Benchmarks
 
