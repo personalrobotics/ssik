@@ -1,4 +1,4 @@
-"""Snapshot tests for committed reference artifacts under prebuilt/.
+"""Snapshot tests for committed reference artifacts under src/ssik/prebuilt/.
 
 Each fixture arm has a committed ``<arm>_ik.py`` artifact. This test re-emits
 each one in-memory and asserts byte-equal against the committed file.
@@ -9,9 +9,9 @@ this test fails until you regenerate:
 
     uv run python scripts/regen_artifacts.py
 
-Then commit the updated ``prebuilt/*.py`` files alongside your codegen
-change. The artifact diff is signal, not noise: it shows reviewers exactly
-what user-facing output the change produces.
+Then commit the updated ``src/ssik/prebuilt/*.py`` files alongside your
+codegen change. The artifact diff is signal, not noise: it shows reviewers
+exactly what user-facing output the change produces.
 
 Tier-0 artifacts (UR5, Puma 560) snapshot byte-identically on every platform
 because their composers don't run anything through ``sympy.cse`` -- they bake
@@ -41,7 +41,7 @@ from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
 
 FIXTURES = Path(__file__).parent / "fixtures"
-ARTIFACTS = Path(__file__).parent.parent / "prebuilt"
+ARTIFACTS = Path(__file__).parent.parent / "src" / "ssik" / "prebuilt"
 
 sys.path.insert(0, str(FIXTURES))
 from jaco2 import jaco2_specs  # noqa: E402
@@ -197,7 +197,7 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
             f"output. The codegen module produced different bytes -- this is "
             f"likely an intentional codegen change. Regenerate with:\n"
             f"    uv run python scripts/regen_artifacts.py\n"
-            f"and commit the updated prebuilt/*.py alongside your codegen "
+            f"and commit the updated src/ssik/prebuilt/*.py alongside your codegen "
             f"change so reviewers can see the user-facing impact.\n\n"
             f"Diff (committed -> regenerated):\n{diff}"
         )

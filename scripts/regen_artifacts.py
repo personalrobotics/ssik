@@ -1,4 +1,4 @@
-"""Regenerate the committed reference artifacts under ``prebuilt/``.
+"""Regenerate the committed reference artifacts under ``src/ssik/prebuilt/``.
 
 Run after any change to :mod:`ssik.core.codegen`, :mod:`ssik.core.dispatcher`,
 or any solver whose dispatch reasoning text might shift. The companion
@@ -6,10 +6,10 @@ snapshot test (``tests/test_artifact_snapshots.py``) re-emits and asserts
 byte-equal against the committed file -- if you forget to run this script
 the test fails the build and tells you which artifact drifted.
 
-The committed artifacts under ``prebuilt/`` serve three purposes:
+The committed artifacts under ``src/ssik/prebuilt/`` serve three purposes:
 
-1. **User-facing demos.** Alpha users can ``import prebuilt.ur5_ik`` and
-   immediately get a working IK solver without running ``ssik build``.
+1. **User-facing demos.** Users can ``from ssik.prebuilt import ur5_ik``
+   and immediately get a working IK solver without running ``ssik build``.
 2. **Documentation.** Reviewers see what ``ssik build`` produces without
    running the CLI.
 3. **Regression detection.** Any codegen-touching PR shows an artifact
@@ -33,7 +33,7 @@ from ssik.core.dispatcher import dispatch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
-ARTIFACTS = REPO_ROOT / "prebuilt"
+ARTIFACTS = REPO_ROOT / "src" / "ssik" / "prebuilt"
 
 
 def main() -> int:

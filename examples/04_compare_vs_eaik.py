@@ -38,9 +38,7 @@ import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
-PREBUILT_DIR = REPO_ROOT / "prebuilt"
 sys.path.insert(0, str(FIXTURES_DIR))
-sys.path.insert(0, str(PREBUILT_DIR))
 
 import ssik  # noqa: E402
 
@@ -68,7 +66,7 @@ class Fixture:
     dof: int
     kind: str  # "urdf" or "specs"
     args: Any  # (urdf, base, ee) or (module, specs_fn)
-    artifact: str | None = None  # module name under prebuilt/ if available
+    artifact: str | None = None  # module name under ssik.prebuilt if available
 
 
 FIXTURES = [
@@ -95,7 +93,9 @@ class _ArtifactArm:
     don't but bake ``_KB``, so build a Manipulator(kb) for FK."""
 
     def __init__(self, module_name: str, dof: int):
-        self._module = __import__(module_name)
+        import importlib
+
+        self._module = importlib.import_module(f"ssik.prebuilt.{module_name}")
         self.dof = dof
         if hasattr(self._module, "_fk"):
             self._fk = self._module._fk
@@ -113,10 +113,10 @@ class _ArtifactArm:
 def _load_ssik_arm(fx: Fixture, *, prefer_artifact: bool = True):
     """Load via prebuilt artifact if available (production path);
     fall back to Manipulator.from_urdf / build_kinbody (dev path)."""
-    if prefer_artifact and fx.artifact and (PREBUILT_DIR / f"{fx.artifact}.py").exists():
+    if prefer_artifact and fx.artifact:
         try:
             return _ArtifactArm(fx.artifact, fx.dof)
-        except Exception:
+        except ImportError:
             pass  # fall through to dev path
     if fx.kind == "urdf":
         urdf, base, ee = fx.args
