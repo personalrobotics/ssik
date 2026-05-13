@@ -25,11 +25,11 @@ from typing import Any
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, assume, given, settings
-from hypothesis import strategies as st
+from hypothesis import HealthCheck, given, settings
 
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.solvers.ikgeo import spherical
+from tests._hypothesis_strategies import non_singular_q6r
 
 
 def _rodrigues(k: np.ndarray, t: float) -> np.ndarray:
@@ -226,31 +226,11 @@ def test_second_synthetic_arm_fk_roundtrip(synth_b: KinBody, q_star: np.ndarray)
 # ---------------------------------------------------------------------------
 
 
-_ANGLE = st.floats(min_value=-np.pi + 0.3, max_value=np.pi - 0.3, allow_nan=False, width=64)
-
-
-@st.composite
-def _random_q(draw: st.DrawFn) -> np.ndarray:
-    q = np.array([draw(_ANGLE) for _ in range(6)])
-    assume(abs(np.sin(q[1])) > 0.2)
-    assume(abs(np.sin(q[2])) > 0.2)
-    assume(abs(np.sin(q[4])) > 0.2)
-    return q
-
-
-@given(_random_q())
+@given(non_singular_q6r())
 @settings(
     max_examples=500,
     deadline=None,
     suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.function_scoped_fixture],
-)
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Pre-existing Hypothesis flake (#101): the strategy occasionally "
-        "samples q_star at SP5 near-triple-root configurations where the "
-        "Bezout quartic loses precision."
-    ),
 )
 def test_random_q_roundtrip_fk(synth_a: KinBody, q_star: np.ndarray) -> None:
     """Bulletproof invariants:
