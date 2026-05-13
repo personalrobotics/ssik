@@ -1,9 +1,33 @@
 name: CI
 
+# PR CI runs full pytest on Linux only. macOS coverage is provided by:
+#   * Local dev on macOS (the primary dev machine)
+#   * Release workflow's cibuildwheel matrix on tag (full cross-platform)
+#
+# Local pre-push gate (scripts/check.sh, auto-installed via
+# scripts/install-hooks.sh) runs ruff + format + mypy + pytest locally
+# before push. CI then runs Linux pytest as the safety net for the one
+# class of bug local-only can't catch: Linux-specific behavior (LAPACK
+# backend, libc/manylinux quirks, #82-style variance).
+#
+# Cost per PR: ~17 min wall, free (public repo). Was ~26 min wall
+# pre-cleanup (Linux + macOS). Doc-only PRs skip CI entirely via
+# paths-ignore.
+
 on:
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -12,30 +36,18 @@ concurrency:
 permissions:
   contents: read
 
-# Slim matrix to conserve GitHub Actions minutes during the active Phase 5
-# (Husty-Pfurner) PR cascade. Pre-Phase-5 matrix was 4 jobs (ubuntu py3.11 +
-# py3.12 + py3.13 + macos py3.13); current matrix is 2 jobs (ubuntu py3.13 +
-# macos py3.13) -- 50% reduction. Keeps cross-platform validation (the
-# LAPACK backend differences between macOS Accelerate and Linux OpenBLAS
-# have caused real bugs, see #82). Drops Python-version sweep -- 3.11 and
-# 3.12 compatibility relies on local dev validation until a Phase-5
-# integration milestone re-expands the matrix.
 jobs:
-  checks:
-    name: ${{ matrix.os }} / py${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
+  test:
+    name: Linux py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: "3.13"
-          - os: macos-latest
-            python-version: "3.13"
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # hatch-vcs needs git history for version derivation
+          fetch-depth: 0  # hatch-vcs needs git history
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
@@ -56,4 +68,4 @@ jobs:
         run: uv run mypy
 
       - name: pytest
-        run: uv run pytest
+        run: uv run pytest -q
