@@ -1,18 +1,28 @@
 # ssik
 
+[![PyPI](https://img.shields.io/pypi/v/ssik.svg)](https://pypi.org/project/ssik/)
+[![Python](https://img.shields.io/pypi/pyversions/ssik.svg)](https://pypi.org/project/ssik/)
+[![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+
 Analytical inverse kinematics for 6R and 7R revolute robot arms. Returns **every IK branch** at machine-precision FK closure, dispatches the right solver automatically, and ships a per-arm build artifact that contains the full IK pipeline as a self-contained Python module.
 
-## Quickstart — use the build artifact
+```bash
+pip install ssik
+```
 
-The intended deployment path is one `ssik build` per arm, then `import <arm>_ik` everywhere. The artifact is a single self-contained `.py` file with the per-arm KinBody constants, the dispatched solver, and any cached symbolic preprocessing already baked in — no URDF parsing, no `urchin`, no `sympy` on the import path.
+## Quickstart — use a prebuilt artifact
+
+The wheel ships ready-to-use IK modules for 8 popular arms under `ssik.prebuilt`. Each is a self-contained `.py` with the per-arm KinBody constants, the dispatched solver, and any cached symbolic preprocessing already baked in — no URDF parsing, no `urchin` dependency, no `sympy` on the import path.
 
 ```python
-import franka_panda_ik           # prebuilt; see prebuilt/ for 8 ready-to-use arms
+from ssik.prebuilt import franka_panda_ik
 import numpy as np
 
 T_target = np.eye(4); T_target[:3, 3] = [0.5, 0.1, 0.3]
 sols = franka_panda_ik.solve(T_target)                   # all IK branches; empty list = unreachable
 ```
+
+The 8 prebuilts: `ur5_ik`, `puma560_ik`, `jaco2_ik`, `iiwa14_ik`, `gen3_ik`, `franka_panda_ik`, `rizon4_ik`, `kassow_kr810_ik`. For other arms, see "Build an artifact for your own arm" below.
 
 ### Trajectory tracking / IK-based teleop
 
@@ -33,7 +43,7 @@ sols = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
 q_command = sols[0].q if sols else q_current             # empty list = unreachable
 ```
 
-The same kwarg shape works on every prebuilt artifact (UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka, Rizon 4, Kassow). By default `solve()` runs **`respect_limits=True`**: out-of-URDF-limit branches are dropped (with a `q ± 2π` rescue pass first). On 7R jointlock arms (Franka / Rizon / Kassow) the limits filter runs *during* the lock-sweep so `max_solutions=1` short-circuits on the first in-limits candidate rather than wasting samples on branches the postprocess would discard. Pass `respect_limits=False` for the raw geometric set when you want to filter yourself.
+The same kwarg shape works on every prebuilt under `ssik.prebuilt`. By default `solve()` runs **`respect_limits=True`**: out-of-URDF-limit branches are dropped (with a `q ± 2π` rescue pass first). On 7R jointlock arms (Franka / Rizon / Kassow) the limits filter runs *during* the lock-sweep so `max_solutions=1` short-circuits on the first in-limits candidate rather than wasting samples on branches the postprocess would discard. Pass `respect_limits=False` for the raw geometric set when you want to filter yourself.
 
 ## Returns all solutions, not one
 

@@ -91,6 +91,27 @@ include = [
     "pyproject.toml",
 ]
 
+# Cross-platform wheel build for PyPI (#132). Each entry of the cibuildwheel
+# matrix invokes the hatchling build with our Cython hook -- the same path
+# as a local ``uv build --wheel`` -- so we keep one source of truth.
+[tool.cibuildwheel]
+build = "cp311-* cp312-* cp313-*"
+# Skip targets we don't ship in v1.0 (#132 "Deferred to v1.1+"): musllinux,
+# 32-bit Linux, 32-bit Windows, PyPy. Linux aarch64 is also deferred.
+skip = ["*-musllinux_*", "*-manylinux_i686", "*-win32", "pp*", "*linux_aarch64"]
+build-verbosity = 1
+test-requires = ["numpy>=2.0", "pytest>=8"]
+# Wheel smoke gate: import the namespaced prebuilt, FK-roundtrip, FK closure
+# within 1e-9. If the wheel is missing the prebuilt subpackage, or a
+# compiled extension is malformed, or a transitive import chokes, this
+# fires before the wheel ever reaches PyPI. Single quotes inside double
+# quotes to keep the whole command on one TOML line.
+test-command = 'python -c "from ssik.prebuilt import iiwa14_ik; import numpy as np; q = np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]); T = iiwa14_ik.fk(q); sols = iiwa14_ik.solve(T); assert sols and max(s.fk_residual for s in sols) < 1e-9, \"wheel smoke test failed\""'
+
+[tool.cibuildwheel.linux]
+# manylinux_2_28 ships GCC 14; sufficient for Cython 3.x.
+manylinux-x86_64-image = "manylinux_2_28"
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -99,7 +120,7 @@ extend-exclude = [
     # Generated reference artifacts. Not subject to lint rules; their format
     # is dictated by ssik.core.codegen and validated via byte-equal snapshot
     # tests in test_artifact_snapshots.py.
-    "prebuilt",
+    "src/ssik/prebuilt",
 ]
 
 [tool.ruff.lint]
@@ -118,7 +139,7 @@ select = [
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
-exclude = ['^prebuilt/']
+exclude = ['^src/ssik/prebuilt/']
 
 # Test files: relax strict-mode rules that prevent local helpers and
 # fixture functions from being called without type annotations. Strict
@@ -190,14 +211,14 @@ ignore_missing_imports = true
 module = "ur5"
 ignore_missing_imports = true
 
-# Generated per-arm artifacts under prebuilt/ are byte-stable
+# Generated per-arm artifacts under src/ssik/prebuilt/ are byte-stable
 # emitted code; their format is dictated by ``ssik.core.codegen`` and
 # validated via byte-equal snapshot tests. mypy excludes the directory
 # from checking, but tests that import from it (e.g. franka artifact
 # integration tests under #142) need this override so the imports
 # don't drag the strict-mode rules into the generated source.
 [[tool.mypy.overrides]]
-module = "prebuilt.*"
+module = "ssik.prebuilt.*"
 ignore_errors = true
 follow_imports = "silent"
 

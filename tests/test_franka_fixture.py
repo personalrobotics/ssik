@@ -29,7 +29,6 @@ from ssik.subproblems._rotation import rotation_matrix
 
 FIXTURES = Path(__file__).parent / "fixtures"
 sys.path.insert(0, str(FIXTURES))
-sys.path.insert(0, str(Path(__file__).parent.parent / "prebuilt"))
 
 from franka_panda import (  # noqa: E402
     FRANKA_PANDA_KEYFRAMES,
@@ -214,7 +213,7 @@ def test_franka_artifact_max_solutions_short_circuit() -> None:
     validated via the byte-equal snapshot test). Calls into it use
     ``# type: ignore`` to silence the cross-boundary call warnings.
     """
-    import franka_panda_ik  # type: ignore[import-not-found]
+    from ssik.prebuilt import franka_panda_ik
 
     rng = np.random.default_rng(seed=0)
     for _ in range(5):
@@ -242,7 +241,7 @@ def test_franka_artifact_q_seed_returns_nearest() -> None:
     """``q_seed`` + ``max_solutions=1`` returns the IK whose lock-joint
     value is closest to the seed (the trajectory-tracking promise).
     """
-    import franka_panda_ik  # type: ignore[import-not-found]
+    from ssik.prebuilt import franka_panda_ik
 
     q_true = np.array([0.0, 0.5, 0.0, -1.5, 0.0, 1.5, 0.0])
     T_target = franka_panda_ik._fk(q_true)
