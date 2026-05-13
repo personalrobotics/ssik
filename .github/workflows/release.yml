@@ -36,7 +36,12 @@ jobs:
           fetch-depth: 0  # hatch-vcs derives version from git tags
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.21
+        # v2.21 pinned ``packaging==24.1`` in its build-isolation constraints,
+        # which conflicts with ``hatchling>=1.27`` requiring ``packaging>=24.2``
+        # (broke macOS arm64 + Windows on v1.0.0rc1; Linux happened to resolve
+        # because the manylinux constraints file is slightly different).
+        # v3.x has updated pins.
+        uses: pypa/cibuildwheel@v3.4.1
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
