@@ -105,6 +105,11 @@ build = "cp311-* cp312-* cp313-*"
 # Skip targets we don't ship in v1.0 (#132 "Deferred to v1.1+"): musllinux,
 # 32-bit Linux, 32-bit Windows, PyPy. Linux aarch64 is also deferred.
 skip = ["*-musllinux_*", "*-manylinux_i686", "*-win32", "pp*", "*linux_aarch64"]
+# x86_64 wheels are cross-compiled from the arm64 macos-latest runner
+# (see [tool.cibuildwheel.macos]); cibuildwheel can build them but can't
+# run them on arm64 hardware, so skip the test-command for x86_64 only.
+# The arm64 wheel is fully built + smoke-tested in the same job.
+test-skip = "*-macosx_x86_64"
 build-verbosity = 1
 test-requires = ["numpy>=2.0"]
 # Wheel smoke gate. Runs in the cibuildwheel test venv against the BUILT
@@ -129,6 +134,16 @@ test-command = [
 [tool.cibuildwheel.linux]
 # manylinux_2_28 ships GCC 14; sufficient for Cython 3.x.
 manylinux-x86_64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.macos]
+# Build both arm64 (native) and x86_64 (cross-compiled) on the macos-latest
+# (M-class) runner. Dropping macos-13 from the release matrix because the
+# Intel runner queue has multi-hour latency as GitHub deprecates Intel hosts;
+# cibuildwheel's cross-compile path is well-trodden and the resulting wheel
+# is the same as what an Intel runner would produce (same compiler invocation,
+# same flags, just hosted on a different CPU). Test-skip above prevents
+# cibuildwheel from trying to RUN the x86_64 wheel on arm64.
+archs = ["arm64", "x86_64"]
 
 [tool.ruff]
 line-length = 100

@@ -26,10 +26,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux x86_64 (manylinux), macOS arm64 (M-runner), macOS x86_64
-        # (Intel runner), Windows x86_64. Python versions cp311/cp312/cp313
-        # are configured in pyproject.toml's [tool.cibuildwheel].
-        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+        # Linux x86_64 (manylinux), macOS arm64 + x86_64 (both from the
+        # M-class runner via cibuildwheel cross-compile -- see
+        # [tool.cibuildwheel.macos] in pyproject.toml), Windows x86_64.
+        # GitHub's Intel macOS runner pool (macos-13) has multi-hour
+        # queue latency as Intel hosts are deprecated; cross-compiling
+        # x86_64 from arm64 avoids the bottleneck without dropping
+        # Intel-Mac wheel coverage.
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
