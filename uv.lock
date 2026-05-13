@@ -1255,6 +1255,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cython" },
     { name = "numpy" },
+    { name = "scipy" },
     { name = "sympy" },
 ]
 
@@ -1282,6 +1283,7 @@ docs = [
 requires-dist = [
     { name = "cython", specifier = ">=3.1" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "scipy", specifier = ">=1.13" },
     { name = "sympy", specifier = ">=1.10" },
     { name = "urchin", marker = "extra == 'urdf'", specifier = ">=0.0.27" },
 ]

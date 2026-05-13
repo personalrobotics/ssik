@@ -22,6 +22,12 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=2.0",
+    # scipy.linalg / scipy.signal are imported at module top in
+    # ``ssik._pencil`` and ``ssik.solvers.husty_pfurner._eliminate``; HP backs
+    # every non-SRS 7R prebuilt (Franka, Rizon, Kassow). Without scipy a
+    # fresh ``pip install ssik`` followed by ``ssik --help`` (or importing
+    # any HP-backed prebuilt) crashes with ModuleNotFoundError. See #252.
+    "scipy>=1.13",
     "sympy>=1.10",
     # Required for ``import cython`` at module top in compiled-source modules
     # (``ssik.kinematics._scalar3``, ``ssik.subproblems._rotation``,
@@ -100,13 +106,25 @@ build = "cp311-* cp312-* cp313-*"
 # 32-bit Linux, 32-bit Windows, PyPy. Linux aarch64 is also deferred.
 skip = ["*-musllinux_*", "*-manylinux_i686", "*-win32", "pp*", "*linux_aarch64"]
 build-verbosity = 1
-test-requires = ["numpy>=2.0", "pytest>=8"]
-# Wheel smoke gate: import the namespaced prebuilt, FK-roundtrip, FK closure
-# within 1e-9. If the wheel is missing the prebuilt subpackage, or a
-# compiled extension is malformed, or a transitive import chokes, this
-# fires before the wheel ever reaches PyPI. Single quotes inside double
-# quotes to keep the whole command on one TOML line.
-test-command = 'python -c "from ssik.prebuilt import iiwa14_ik; import numpy as np; q = np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]); T = iiwa14_ik.fk(q); sols = iiwa14_ik.solve(T); assert sols and max(s.fk_residual for s in sols) < 1e-9, \"wheel smoke test failed\""'
+test-requires = ["numpy>=2.0"]
+# Wheel smoke gate. Runs in the cibuildwheel test venv against the BUILT
+# wheel (not the dev checkout) so any missing runtime dep, malformed .so,
+# or broken import chain fires before publish. Three checks:
+#
+#  1. iiwa14_ik (strict SRS, no HP/scipy in the chain) -- baseline import
+#     + FK roundtrip + FK closure < 1e-9.
+#  2. franka_panda_ik (HP-backed via jointlock) -- catches transitive
+#     scipy / HP-stack import issues that the strict-SRS path skips. This
+#     check would have caught #252 had it existed earlier.
+#  3. ``ssik --help`` -- exercises the CLI's full import chain (codegen,
+#     dispatcher, every solver composer). The CLI uses the broadest
+#     import surface in the package; if anything is import-broken, this
+#     fires.
+test-command = [
+    'python -c "from ssik.prebuilt import iiwa14_ik; import numpy as np; q = np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]); T = iiwa14_ik.fk(q); sols = iiwa14_ik.solve(T); assert sols and max(s.fk_residual for s in sols) < 1e-9, \"iiwa14_ik smoke failed\""',
+    'python -c "from ssik.prebuilt import franka_panda_ik; import numpy as np; T = franka_panda_ik.fk(np.array([0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5])); sols = franka_panda_ik.solve(T); assert sols, \"franka_panda_ik returned no IK\""',
+    "ssik --help",
+]
 
 [tool.cibuildwheel.linux]
 # manylinux_2_28 ships GCC 14; sufficient for Cython 3.x.
