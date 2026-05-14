@@ -6,7 +6,13 @@ per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
 Provenance: KinBody hash d7fe5076cb07 (sha256/12 of the input chain).
+``T_target`` is the pose of ``wrist_3_link`` (end-effector link) in
+``base_link`` (base link). If your URDF differs (calibrated
+geometry, custom tool past the flange, different link names),
+run ``ssik build <your.urdf> --base <yours> --ee <yours>`` to
+produce an artifact correct for your hardware.
 
+DOF: 6    BASE_LINK: "base_link"    EE_LINK: "wrist_3_link"
 Solver: ``ikgeo.spherical_two_parallel`` (tier 0)
 Expected median IK time: ~1.2 ms on commodity
 single-thread hardware. FLOP budget: 1,316 per solve.
@@ -15,7 +21,7 @@ Usage:
 
     import puma560_ik
     import numpy as np
-    T_target = np.eye(4)  # 4x4 SE(3) pose
+    T_target = np.eye(4)  # 4x4 SE(3) pose of wrist_3_link in base_link
     T_target[:3, 3] = [0.5, 0.1, 0.3]
     solutions = puma560_ik.solve(T_target)
     for sol in solutions:
@@ -24,6 +30,10 @@ Usage:
 ``solve(T)`` returns ``list[Solution]``. Empty list iff no
 candidate closed within the solver's FK tolerance -- check
 ``if not solutions:`` for the "unreachable" case.
+
+Sanity-check the baked geometry: ``puma560_ik.T_HOME`` is the
+4x4 home pose (FK at ``q = np.zeros(DOF)``). If it doesn't match
+your robot's home pose, the artifact is for a different URDF.
 """
 
 from __future__ import annotations
@@ -52,6 +62,13 @@ SOLVER_TIER = 0
 EXPECTED_MS_MEDIAN = 1.2
 FLOP_BUDGET = 1316
 DISPATCH_REASON = 'Spherical wrist at joints (3, 4, 5) AND axes[1] parallel to axes[2] AND ||p[1]|| ~= 0.\nBoth Pieper specialisations apply (e.g. Puma 560); the parallel-shoulder solver is preferred for slightly tighter elbow conditioning.'
+BASE_LINK = "base_link"
+EE_LINK = "wrist_3_link"
+DOF = 6
+# Home pose: FK at q = np.zeros(DOF). Sanity-check this against
+# your robot's documented home pose to verify the baked geometry
+# matches your URDF.
+T_HOME = np.array([[1.0, 0.0, 0.0, 0.4521], [0.0, 1.0, 0.0, -0.15005], [0.0, 0.0, 1.0, 0.4318], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 
 # --- baked KinBody constants ---
 
@@ -624,11 +641,15 @@ def solve(
 fk = _fk
 
 __all__ = [
+    "BASE_LINK",
     "DISPATCH_REASON",
+    "DOF",
+    "EE_LINK",
     "EXPECTED_MS_MEDIAN",
     "FLOP_BUDGET",
     "SOLVER_NAME",
     "SOLVER_TIER",
+    "T_HOME",
     "fk",
     "solve",
 ]

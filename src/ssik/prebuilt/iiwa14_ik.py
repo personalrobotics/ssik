@@ -6,7 +6,13 @@ per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
 Provenance: KinBody hash fd5922ca3dcc (sha256/12 of the input chain).
+``T_target`` is the pose of ``ee_link`` (end-effector link) in
+``base_link`` (base link). If your URDF differs (calibrated
+geometry, custom tool past the flange, different link names),
+run ``ssik build <your.urdf> --base <yours> --ee <yours>`` to
+produce an artifact correct for your hardware.
 
+DOF: 7    BASE_LINK: "base_link"    EE_LINK: "ee_link"
 Solver: ``seven_r.srs`` (tier 0)
 Expected median IK time: ~8.5 ms on commodity
 single-thread hardware. FLOP budget: 1,900 per solve.
@@ -15,7 +21,7 @@ Usage:
 
     import iiwa14_ik
     import numpy as np
-    T_target = np.eye(4)  # 4x4 SE(3) pose
+    T_target = np.eye(4)  # 4x4 SE(3) pose of ee_link in base_link
     T_target[:3, 3] = [0.5, 0.1, 0.3]
     solutions = iiwa14_ik.solve(T_target)
     for sol in solutions:
@@ -24,6 +30,10 @@ Usage:
 ``solve(T)`` returns ``list[Solution]``. Empty list iff no
 candidate closed within the solver's FK tolerance -- check
 ``if not solutions:`` for the "unreachable" case.
+
+Sanity-check the baked geometry: ``iiwa14_ik.T_HOME`` is the
+4x4 home pose (FK at ``q = np.zeros(DOF)``). If it doesn't match
+your robot's home pose, the artifact is for a different URDF.
 """
 
 from __future__ import annotations
@@ -45,6 +55,13 @@ SOLVER_TIER = 0
 EXPECTED_MS_MEDIAN = 8.5
 FLOP_BUDGET = 1900
 DISPATCH_REASON = 'SRS-class 7R: shoulder axes (joints 0, 1, 2) meet at\none point + wrist axes (joints 4, 5, 6) meet at one\npoint + joint 3 is the elbow. Closed-form Singh-Kreutz\n1989 algorithm, parameterised by elbow swivel angle.\nCovers KUKA iiwa LBR (canonical strict-SRS).'
+BASE_LINK = "base_link"
+EE_LINK = "ee_link"
+DOF = 7
+# Home pose: FK at q = np.zeros(DOF). Sanity-check this against
+# your robot's documented home pose to verify the baked geometry
+# matches your URDF.
+T_HOME = np.array([[0.9999999999999982, 0.0, 0.0, 0.0], [0.0, 0.9999999999999987, 4.4408920985006217e-16, 3.976818874207309e-16], [0.0, 4.440892098500621e-16, 0.9999999999999987, 1.3059999999999994], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 
 # --- baked KinBody constants ---
 
@@ -191,11 +208,15 @@ def fk(q):
     return _poe_fk(_KB, np.asarray(q, dtype=np.float64))
 
 __all__ = [
+    "BASE_LINK",
     "DISPATCH_REASON",
+    "DOF",
+    "EE_LINK",
     "EXPECTED_MS_MEDIAN",
     "FLOP_BUDGET",
     "SOLVER_NAME",
     "SOLVER_TIER",
+    "T_HOME",
     "fk",
     "solve",
 ]

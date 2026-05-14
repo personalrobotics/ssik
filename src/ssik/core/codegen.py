@@ -30,6 +30,8 @@ from dataclasses import dataclass
 from io import StringIO
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 if TYPE_CHECKING:  # pragma: no cover -- typing only
     from ssik._kinbody import KinBody
     from ssik.core.dispatcher import DispatchPlan
@@ -172,6 +174,7 @@ def _render_thin_wrapper(
     buf.write(f"EXPECTED_MS_MEDIAN = {plan.expected_ms_median!r}\n")
     buf.write(f"FLOP_BUDGET = {plan.flop_budget}\n")
     buf.write(_render_dispatch_reason(plan.reason))
+    buf.write(_render_introspection_constants(kb))
     buf.write("\n")
     buf.write(_render_kinbody_constants(kb))
     buf.write("\n")
@@ -235,6 +238,7 @@ def _render_specialised(
     buf.write(f"EXPECTED_MS_MEDIAN = {plan.expected_ms_median!r}\n")
     buf.write(f"FLOP_BUDGET = {plan.flop_budget}\n")
     buf.write(_render_dispatch_reason(plan.reason))
+    buf.write(_render_introspection_constants(kb))
     buf.write("\n")
     buf.write(_render_kinbody_constants(kb))
     buf.write("\n")
@@ -1012,8 +1016,20 @@ def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: Kin
     which drifts between local checkouts and CI -- not actually stable.
     The artifact's ssik provenance lives in the parent repo's git history
     (e.g. ``git log -- tests/artifacts/ur5_ik.py``).
+
+    The docstring includes base / end-effector link names + DOF + home FK
+    so a downstream user can immediately see which kinematic frame their
+    ``T_target`` is expressed in (and whether the baked chain matches
+    their own URDF). ``T_target`` is the pose of ``EE_LINK`` in
+    ``BASE_LINK``; if the user's URDF disagrees on link selection
+    (calibrated geometry, custom tool past the flange, different
+    naming), they should run ``ssik build <their.urdf> --base X --ee Y``
+    rather than rely on this artifact.
     """
     digest_str = _kb_digest(kb)
+    base_link = kb.links[0].name
+    ee_link = kb.links[-1].name
+    dof = len(kb.joints)
     return textwrap.dedent(
         f'''\
         """Generated IK module for {arm_label}.
@@ -1024,7 +1040,13 @@ def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: Kin
         load a URDF or MJCF at runtime.
 
         Provenance: KinBody hash {digest_str} (sha256/12 of the input chain).
+        ``T_target`` is the pose of ``{ee_link}`` (end-effector link) in
+        ``{base_link}`` (base link). If your URDF differs (calibrated
+        geometry, custom tool past the flange, different link names),
+        run ``ssik build <your.urdf> --base <yours> --ee <yours>`` to
+        produce an artifact correct for your hardware.
 
+        DOF: {dof}    BASE_LINK: "{base_link}"    EE_LINK: "{ee_link}"
         Solver: ``{plan.solver_name}`` (tier {plan.tier})
         Expected median IK time: ~{plan.expected_ms_median} ms on commodity
         single-thread hardware. FLOP budget: {plan.flop_budget:,} per solve.
@@ -1033,7 +1055,7 @@ def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: Kin
 
             import {module_name}
             import numpy as np
-            T_target = np.eye(4)  # 4x4 SE(3) pose
+            T_target = np.eye(4)  # 4x4 SE(3) pose of {ee_link} in {base_link}
             T_target[:3, 3] = [0.5, 0.1, 0.3]
             solutions = {module_name}.solve(T_target)
             for sol in solutions:
@@ -1042,6 +1064,10 @@ def _render_header(module_name: str, arm_label: str, plan: DispatchPlan, kb: Kin
         ``solve(T)`` returns ``list[Solution]``. Empty list iff no
         candidate closed within the solver's FK tolerance -- check
         ``if not solutions:`` for the "unreachable" case.
+
+        Sanity-check the baked geometry: ``{module_name}.T_HOME`` is the
+        4x4 home pose (FK at ``q = np.zeros(DOF)``). If it doesn't match
+        your robot's home pose, the artifact is for a different URDF.
         """'''
     )
 
@@ -1050,6 +1076,35 @@ def _render_dispatch_reason(reason: str) -> str:
     """Bake the dispatcher's explanatory diagnostic as a module-level constant."""
     # ``repr`` keeps newlines and quoting safe inside the rendered source.
     return f"DISPATCH_REASON = {reason!r}\n"
+
+
+def _render_introspection_constants(kb: KinBody) -> str:
+    """Emit BASE_LINK / EE_LINK / DOF / T_HOME as public module constants.
+
+    These give downstream callers a way to see -- programmatically -- which
+    kinematic frame the artifact's ``T_target`` is expressed in, without
+    reading the source. ``T_HOME`` is the forward kinematics at
+    ``q = np.zeros(DOF)``: a 4x4 SE(3) pose a user can compare against
+    their robot's documented home pose to verify the baked geometry
+    matches their hardware.
+    """
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+
+    base_link = kb.links[0].name
+    ee_link = kb.links[-1].name
+    dof = len(kb.joints)
+    t_home = poe_forward_kinematics(kb, np.zeros(dof, dtype=np.float64))
+    lines: list[str] = []
+    lines.append(f'BASE_LINK = "{base_link}"\n')
+    lines.append(f'EE_LINK = "{ee_link}"\n')
+    lines.append(f"DOF = {dof}\n")
+    lines.append(
+        "# Home pose: FK at q = np.zeros(DOF). Sanity-check this against\n"
+        "# your robot's documented home pose to verify the baked geometry\n"
+        "# matches your URDF.\n"
+    )
+    lines.append(f"T_HOME = np.array({t_home.tolist()!r}, dtype=np.float64)\n")
+    return "".join(lines)
 
 
 def _render_kinbody_constants(kb: KinBody) -> str:
@@ -1174,11 +1229,15 @@ def _render_solve_function(solver_short: str) -> str:
 def _render_all_export() -> str:
     return (
         "\n__all__ = ["
+        '\n    "BASE_LINK",'
         '\n    "DISPATCH_REASON",'
+        '\n    "DOF",'
+        '\n    "EE_LINK",'
         '\n    "EXPECTED_MS_MEDIAN",'
         '\n    "FLOP_BUDGET",'
         '\n    "SOLVER_NAME",'
         '\n    "SOLVER_TIER",'
+        '\n    "T_HOME",'
         '\n    "fk",'
         '\n    "solve",'
         "\n]\n"
