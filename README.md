@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/ssik.svg)](https://pypi.org/project/ssik/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
-Analytical inverse kinematics for 6R and 7R revolute robot arms. Each arm becomes a single self-contained Python module — `import franka_panda_ik; franka_panda_ik.solve(T)` — that returns **every IK branch** at machine-precision FK closure.
+Analytical inverse kinematics for 6R and 7R revolute robot arms. Each arm becomes a single self-contained Python module that returns **every IK branch** at machine-precision FK closure.
 
 ## Install
 
