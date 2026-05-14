@@ -36,23 +36,52 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships 8 ready-to-import artifacts:
+The wheel ships 8 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
-| Module | Arm | Class |
-|---|---|---|
-| `ur5_ik` | Universal Robots UR5 | three-parallel 6R |
-| `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) |
-| `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** |
-| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R |
-| `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** |
-| `franka_panda_ik` | Franka Panda | anthropomorphic 7R |
-| `rizon4_ik` | Flexiv Rizon 4 | **non-SRS 7R** |
-| `kassow_kr810_ik` | Kassow KR810 | **non-SRS 7R** |
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
+| `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
+| `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** | `base_link` | `ee_link` |
+| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `world` | `tool0` |
+| `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
+| `franka_panda_ik` | Franka Panda | anthropomorphic 7R | `base_link` | `ee_link` |
+| `rizon4_ik` | Flexiv Rizon 4 | **non-SRS 7R** | `base_link` | `flange` |
+| `kassow_kr810_ik` | Kassow KR810 | **non-SRS 7R** | `base` | `end_effector` |
 
 ```python
 from ssik.prebuilt import iiwa14_ik
 sols = iiwa14_ik.solve(T_target)
 ```
+
+Every prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, and `T_HOME` (the 4×4 home pose, FK at `q = np.zeros(DOF)`) as module constants. Use them to verify the baked geometry matches your robot:
+
+```python
+from ssik.prebuilt import franka_panda_ik
+print(franka_panda_ik.BASE_LINK, "→", franka_panda_ik.EE_LINK, "(", franka_panda_ik.DOF, "DOF)")
+# base_link → ee_link ( 7 DOF)
+print(franka_panda_ik.T_HOME[:3, 3])
+# array([0.088, 0., 0.926])     ← Franka home pose; matches the spec
+```
+
+### When a prebuilt is right vs when to `ssik build`
+
+The 8 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
+
+- You're using the same URDF source we built against (ros-industrial, manufacturer reference, etc.)
+- Your robot's calibration matches the nominal kinematic parameters
+- Your end-effector is the flange itself — no gripper, suction cup, or custom tool past it
+- Your URDF link names match what we baked (see the table above)
+
+If **any** of those is false — and especially if you're a 7R arm with anything attached past the flange — build your own:
+
+```bash
+pip install ssik[urdf]
+ssik build <your.urdf> --base <your_base_link> --ee <your_actual_tool_link>
+# → <your_arm>_ik.py
+```
+
+`ssik build` reads your exact URDF, picks the right solver via the same dispatcher we use, and emits a single-file artifact correct for your kinematic chain. That artifact's import / API / public constants are identical to the prebuilts'.
 
 For trajectory tracking and IK-based teleop, the canonical pattern is "give me the IK closest to where the robot is now":
 

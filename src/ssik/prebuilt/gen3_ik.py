@@ -6,7 +6,13 @@ per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
 Provenance: KinBody hash 9a29063ad96b (sha256/12 of the input chain).
+``T_target`` is the pose of ``end_effector_link`` (end-effector link) in
+``base_link`` (base link). If your URDF differs (calibrated
+geometry, custom tool past the flange, different link names),
+run ``ssik build <your.urdf> --base <yours> --ee <yours>`` to
+produce an artifact correct for your hardware.
 
+DOF: 7    BASE_LINK: "base_link"    EE_LINK: "end_effector_link"
 Solver: ``seven_r.srs_polished`` (tier 0)
 Expected median IK time: ~56.0 ms on commodity
 single-thread hardware. FLOP budget: 80,000 per solve.
@@ -15,7 +21,7 @@ Usage:
 
     import gen3_ik
     import numpy as np
-    T_target = np.eye(4)  # 4x4 SE(3) pose
+    T_target = np.eye(4)  # 4x4 SE(3) pose of end_effector_link in base_link
     T_target[:3, 3] = [0.5, 0.1, 0.3]
     solutions = gen3_ik.solve(T_target)
     for sol in solutions:
@@ -24,6 +30,10 @@ Usage:
 ``solve(T)`` returns ``list[Solution]``. Empty list iff no
 candidate closed within the solver's FK tolerance -- check
 ``if not solutions:`` for the "unreachable" case.
+
+Sanity-check the baked geometry: ``gen3_ik.T_HOME`` is the
+4x4 home pose (FK at ``q = np.zeros(DOF)``). If it doesn't match
+your robot's home pose, the artifact is for a different URDF.
 """
 
 from __future__ import annotations
@@ -45,6 +55,13 @@ SOLVER_TIER = 0
 EXPECTED_MS_MEDIAN = 56.0
 FLOP_BUDGET = 80000
 DISPATCH_REASON = 'Approximately-SRS 7R: shoulder axes meet within 11.8 mm, wrist axes meet within 0.4 mm.\nSingh-Kreutz on the relaxed pivots produces algebraic\ncandidates; LM polish recovers machine-precision FK\nagainst the original URDF. 16-30x faster than the\nuniversal jointlock+HP fallback on small-drift arms.\nCovers Kinova Gen3 (12 mm / 0.4 mm drift).'
+BASE_LINK = "base_link"
+EE_LINK = "end_effector_link"
+DOF = 7
+# Home pose: FK at q = np.zeros(DOF). Sanity-check this against
+# your robot's documented home pose to verify the baked geometry
+# matches your URDF.
+T_HOME = np.array([[1.0, -8.326720029981853e-15, -2.1017948830410524e-16, -1.925826838264291e-16], [8.326718485692419e-15, 0.9999999999730148, -7.346410203412496e-06, -0.024859601294873888], [2.102406597994228e-16, 7.346410203412494e-06, 0.9999999999730148, 1.1873847699190918], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 
 # --- baked KinBody constants ---
 
@@ -191,11 +208,15 @@ def fk(q):
     return _poe_fk(_KB, np.asarray(q, dtype=np.float64))
 
 __all__ = [
+    "BASE_LINK",
     "DISPATCH_REASON",
+    "DOF",
+    "EE_LINK",
     "EXPECTED_MS_MEDIAN",
     "FLOP_BUDGET",
     "SOLVER_NAME",
     "SOLVER_TIER",
+    "T_HOME",
     "fk",
     "solve",
 ]
