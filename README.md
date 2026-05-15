@@ -150,6 +150,29 @@ By default `solve()` runs **`respect_limits=True`**: out-of-URDF-limit branches 
 
 The `allow_refinement=True` opt-in runs LM polish per algebraic candidate at a few hundred microseconds per branch — useful when an algebraic candidate lands just above `fk_atol` near a kinematic singularity.
 
+### Diagnosing an empty result — `explain=True`
+
+If `solve()` returns `[]`, you can attribute the failure with `explain=True` instead of guessing:
+
+```python
+import ssik
+arm = ssik.Manipulator.from_urdf("my_arm.urdf", base="base_link", ee="tool0")
+sols, diag = arm.solve(T_target, explain=True)
+if not sols:
+    print(diag.summary())
+    # solver: ikgeo.three_parallel (tier 0)
+    # dispatch: Three consecutive parallel axes at joints (1, 2, 3) ...
+    #   -> 0 raw candidates: pose appears unreachable
+    #      (or outside this solver's analytical envelope)
+```
+
+The `Diagnostic` record distinguishes:
+- **Unreachable** (`raw_candidates == 0`) — pose is outside the solver's analytical envelope
+- **All-filtered** (`raw_candidates > 0`, `final_count == 0`) — try `respect_limits=False` for the raw geometric set
+- **Capped** (`dropped_by_max_solutions > 0`) — pass a larger `max_solutions`
+
+Available on `ssik.Manipulator.solve` today; per-prebuilt explain mode tracked in [#265](https://github.com/personalrobotics/ssik/issues/265).
+
 ## Tuning knobs
 
 ### `TolerancePolicy` — six thresholds, one object
