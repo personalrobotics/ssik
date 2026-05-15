@@ -40,6 +40,7 @@ diagnostics::
 import logging as _logging
 
 from ssik._version import __version__
+from ssik.core.diagnostic import Diagnostic
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.manipulator import Manipulator
@@ -51,6 +52,7 @@ _logging.getLogger(__name__).addHandler(_logging.NullHandler())
 
 __all__ = [
     "DEFAULT_TOLERANCE_POLICY",
+    "Diagnostic",
     "Manipulator",
     "Solution",
     "TolerancePolicy",

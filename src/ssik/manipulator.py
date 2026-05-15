@@ -27,12 +27,13 @@ from __future__ import annotations
 import importlib
 import inspect
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from ssik._kinbody import KinBody
+from ssik.core.diagnostic import Diagnostic
 from ssik.core.dispatcher import DispatchPlan, dispatch
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
@@ -215,10 +216,12 @@ class Manipulator:
     # Inverse kinematics
     # ------------------------------------------------------------------
 
+    @overload
     def solve(
         self,
         T_target: ArrayLike,
         *,
+        explain: Literal[False] = False,
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
         respect_limits: bool = True,
@@ -226,10 +229,43 @@ class Manipulator:
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
         **solver_kwargs: Any,
-    ) -> list[Solution]:
+    ) -> list[Solution]: ...
+
+    @overload
+    def solve(
+        self,
+        T_target: ArrayLike,
+        *,
+        explain: Literal[True],
+        max_solutions: int | None = None,
+        q_seed: ArrayLike | None = None,
+        respect_limits: bool = True,
+        allow_refinement: bool = False,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+        refinement_max_iters: int = 15,
+        **solver_kwargs: Any,
+    ) -> tuple[list[Solution], Diagnostic]: ...
+
+    def solve(
+        self,
+        T_target: ArrayLike,
+        *,
+        explain: bool = False,
+        max_solutions: int | None = None,
+        q_seed: ArrayLike | None = None,
+        respect_limits: bool = True,
+        allow_refinement: bool = False,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+        refinement_max_iters: int = 15,
+        **solver_kwargs: Any,
+    ) -> list[Solution] | tuple[list[Solution], Diagnostic]:
         """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
 
         :param T_target: 4x4 SE(3) target pose.
+        :param explain: when ``True``, returns ``(sols, Diagnostic)``
+            instead of just ``sols``. The diagnostic carries dispatch +
+            filter attribution for triaging empty-list failures. Default
+            ``False`` preserves the v1.0 return signature.
         :param max_solutions: optional cap on returned IKs (post-dedup,
             post-limits filter). ``None`` = full redundancy enumeration.
             ``1`` combined with ``q_seed`` is the trajectory-tracking idiom.
@@ -259,7 +295,9 @@ class Manipulator:
             Empty list iff no candidate FK-closed within
             ``policy.subproblem_numerical`` (or all IKs were filtered by
             ``respect_limits=True``). Check ``if not sols:`` for
-            "unreachable target".
+            "unreachable target". When ``explain=True``, returns
+            ``(sols, Diagnostic)`` -- inspect ``Diagnostic.summary()``
+            to attribute empty-list failures.
 
         :raises ValueError: if ``T_target.shape != (4, 4)`` or
             ``len(q_seed) != dof`` when ``q_seed`` is given.
@@ -307,6 +345,7 @@ class Manipulator:
         # tuple at the public-API boundary. `is_ls` is redundant with
         # `len(sols) == 0` in every shipped solver -- ssik #238 item 1.
         sols, _is_ls = self._solver_module.solve(self._kb, T, **kwargs)
+        raw_candidate_count = len(sols)
 
         # Cross-arm postprocess pass: solvers that didn't honour kwargs
         # natively get them applied here so the public API is uniform.
@@ -317,10 +356,34 @@ class Manipulator:
         # (the JACO 2 case).
         if respect_limits:
             sols = _ps_wrap_to_limits(sols, self._kb)
+            pre_limit_count = len(sols)
             sols = _ps_respect_limits(sols, self._kb)
+            dropped_by_limits = pre_limit_count - len(sols)
+        else:
+            dropped_by_limits = 0
         if q_seed_arr is not None:
             sols = _ps_nearest_to_seed(sols, q_seed_arr)
         if max_solutions is not None and len(sols) > max_solutions:
+            dropped_by_max_solutions = len(sols) - max_solutions
             sols = sols[:max_solutions]
+        else:
+            dropped_by_max_solutions = 0
         result: list[Solution] = sols
-        return result
+        if not explain:
+            return result
+
+        refinement_engaged = sum(1 for s in result if s.refinement_used == "lm")
+        max_fk = max((s.fk_residual for s in result), default=float("nan"))
+        diag = Diagnostic(
+            solver_name=self._plan.solver_name,
+            solver_tier=self._plan.tier,
+            dispatch_reason=self._plan.reason,
+            raw_candidates=raw_candidate_count,
+            dropped_by_limits=dropped_by_limits,
+            dropped_by_max_solutions=dropped_by_max_solutions,
+            final_count=len(result),
+            max_fk_residual=max_fk,
+            refinement_engaged=refinement_engaged,
+            fk_atol=policy.subproblem_numerical,
+        )
+        return result, diag
