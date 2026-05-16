@@ -62,6 +62,23 @@ For non-Pieper inner sub-chains (Rizon 4, Kassow KR810), `ssik build` bakes the 
 
 > **Mean vs median:** both 30 ms and ~17 ms are honest measurements of the same prebuilt — the canonical bench reports mean ± 95% CI, an earlier per-pose measurement reported median. Verified 2026-05-13 on Rizon 4 with the canonical pose distribution: mean 28.7 ms / **median 19 ms** / p95 62 ms / min 16.4 ms. The cached-RR fast path is firing on most poses; mean is dragged up by occasional near-singular configurations where the lock-sweep can't short-circuit.
 
+## Worst-case FK floor under adversarial fuzz
+
+The README's EAIK comparison table reports **averaged** max FK across 100 canonical reachable poses. Under 500-pose Hypothesis fuzz (`tests/test_prebuilt_uniform_fuzz.py`), worst-case residuals are sometimes materially worse — especially on 7R arms going through jointlock. Documented honestly so users with adversarial workloads (e.g. RL, sample-based motion planning) can plan around the floor.
+
+| Arm | Solver path | README averaged max | Fuzz worst-case |
+|-----|---|:---:|:---:|
+| UR5 | `ikgeo.three_parallel` | 2e-9 | ~2e-8 |
+| Puma 560 | `ikgeo.spherical_two_parallel` | 2e-14 | ~1e-13 |
+| JACO 2 | `ikgeo.general_6r` (RR + AE-3) | 3e-6 | ~1e-5 |
+| iiwa14 | `seven_r.srs` | 4e-13 | ~3e-12 |
+| Gen3 | `seven_r.srs_polished` | 1e-12 | ~1e-10 |
+| **Franka Panda** | `jointlock + reversed:spherical_two_parallel` | 7e-13 | **~5e-6** |
+| **Rizon 4** | `jointlock + cached-RR` | 4e-9 | **~9e-6** |
+| **Kassow KR810** | `jointlock + cached-RR` | 7e-8 | **~6e-6** |
+
+The three bolded 7R arms hit a ~1e-5 floor under adversarial fuzz that's 2-4 orders worse than the averaged claim. **Functionally still small** (~0.01 mm position error on a Franka-scale arm — well within typical robot repeatability of ~0.1 mm) but the gap is a real honesty correction over the headline number. Investigation tracked in [#271](https://github.com/personalrobotics/ssik/issues/271) — likely closes alongside [#178](https://github.com/personalrobotics/ssik/issues/178) (HP Sylvester pencil robustness work).
+
 ## Trajectory-tracking speed (`max_solutions=1`)
 
 For real-time control where you only need one IK per waypoint, `max_solutions=1` + `q_seed` short-circuits the lock-sweep on the first in-limits branch closest to seed. Speedup is roughly proportional to lock-sample count (16 by default on 7R jointlock arms): ~5–10× on 7R, sub-ms on 6R and SRS arms. See the README quickstart for the canonical pattern; per-arm trajectory-tracking benches will land alongside the [#236](https://github.com/personalrobotics/ssik/issues/236) MINK / TracIK comparison.

@@ -57,3 +57,27 @@ def non_singular_q6r(draw: st.DrawFn) -> np.ndarray:
     assume(abs(np.sin(q[3])) > 0.2)
     assume(abs(np.sin(q[4])) > 0.2)
     return q
+
+
+@st.composite
+def non_singular_q7r(draw: st.DrawFn) -> np.ndarray:
+    """7R q-vector with the five singularity-prone middle axes
+    (q[1] through q[5]) at least ``arcsin(0.2) ≈ 11.5°`` away from 0
+    and π. q[0] (base yaw) and q[6] (flange roll) are left free --
+    rotation about the base axis doesn't change reach, and the flange
+    roll is a wrist-axis 7R singularity only when *also* aligned with
+    the previous joint, which the other filters prevent.
+
+    Applies uniformly to SRS-class (iiwa14, Gen3) and non-SRS 7R
+    (Franka, Rizon, Kassow, xArm7). The dominant singularity classes
+    -- elbow alignment (q[3] = 0) for SRS, wrist gimbal (q[4]/q[5] = 0)
+    for spherical-wrist -- are filtered. Per-arm specialisation can
+    compose additional ``assume(...)`` filters on top.
+    """
+    q = np.array([draw(_ANGLE) for _ in range(7)])
+    assume(abs(np.sin(q[1])) > 0.2)
+    assume(abs(np.sin(q[2])) > 0.2)
+    assume(abs(np.sin(q[3])) > 0.2)
+    assume(abs(np.sin(q[4])) > 0.2)
+    assume(abs(np.sin(q[5])) > 0.2)
+    return q
