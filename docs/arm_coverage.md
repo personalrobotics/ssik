@@ -64,20 +64,38 @@ For non-Pieper inner sub-chains (Rizon 4, Kassow KR810), `ssik build` bakes the 
 
 ## Worst-case FK floor under adversarial fuzz
 
-The README's EAIK comparison table reports **averaged** max FK across 100 canonical reachable poses. Under 500-pose Hypothesis fuzz (`tests/test_prebuilt_uniform_fuzz.py`), worst-case residuals are sometimes materially worse — especially on 7R arms going through jointlock. Documented honestly so users with adversarial workloads (e.g. RL, sample-based motion planning) can plan around the floor.
+The README's EAIK comparison table reports **averaged** max FK across 100 canonical reachable poses. Under 500-pose Hypothesis fuzz (`tests/test_prebuilt_uniform_fuzz.py`), worst-case residuals on jointlock 7R arms are materially worse — but only at the **default tolerance policy**. Investigation (#271) confirmed the floor is set by `subproblem_numerical = 1e-5`, not a solver bug; opt-in to tight policy + LM polish recovers machine precision.
 
-| Arm | Solver path | README averaged max | Fuzz worst-case |
+| Arm | Solver path | Default-policy worst | Tight + `allow_refinement` worst |
 |-----|---|:---:|:---:|
-| UR5 | `ikgeo.three_parallel` | 2e-9 | ~2e-8 |
-| Puma 560 | `ikgeo.spherical_two_parallel` | 2e-14 | ~1e-13 |
-| JACO 2 | `ikgeo.general_6r` (RR + AE-3) | 3e-6 | ~1e-5 |
-| iiwa14 | `seven_r.srs` | 4e-13 | ~3e-12 |
-| Gen3 | `seven_r.srs_polished` | 1e-12 | ~1e-10 |
-| **Franka Panda** | `jointlock + reversed:spherical_two_parallel` | 7e-13 | **~5e-6** |
-| **Rizon 4** | `jointlock + cached-RR` | 4e-9 | **~9e-6** |
-| **Kassow KR810** | `jointlock + cached-RR` | 7e-8 | **~6e-6** |
+| UR5 | `ikgeo.three_parallel` | ~2e-8 | (already machine precision) |
+| Puma 560 | `ikgeo.spherical_two_parallel` | ~1e-13 | — |
+| JACO 2 | `ikgeo.general_6r` (RR + AE-3) | ~1e-5 | ~1e-10 (LM polish) |
+| iiwa14 | `seven_r.srs` | ~3e-12 | — |
+| Gen3 | `seven_r.srs_polished` | ~1e-10 | — |
+| Franka Panda | `jointlock + reversed:spherical_two_parallel` | ~5e-6 | **~3e-10** |
+| Rizon 4 | `jointlock + cached-RR` | ~9e-6 | **~3e-10** |
+| Kassow KR810 | `jointlock + cached-RR` | ~6e-6 | **~3e-10** |
 
-The three bolded 7R arms hit a ~1e-5 floor under adversarial fuzz that's 2-4 orders worse than the averaged claim. **Functionally still small** (~0.01 mm position error on a Franka-scale arm — well within typical robot repeatability of ~0.1 mm) but the gap is a real honesty correction over the headline number. Investigation tracked in [#271](https://github.com/personalrobotics/ssik/issues/271) — likely closes alongside [#178](https://github.com/personalrobotics/ssik/issues/178) (HP Sylvester pencil robustness work).
+### Getting machine precision from a jointlock 7R prebuilt
+
+```python
+from ssik import TolerancePolicy
+from ssik.prebuilt import franka_panda_ik
+
+tight = TolerancePolicy(
+    axis_parallel=1e-8,
+    axis_intersect=1e-8,
+    subproblem_feasibility=1e-9,
+    subproblem_numerical=1e-9,         # ← 4 orders tighter than default
+    subproblem_degeneracy=1e-12,
+    subproblem_dedup=1e-3,
+)
+sols = franka_panda_ik.solve(T_target, policy=tight, allow_refinement=True)
+# every returned IK FK-closes ~1e-10 (machine-precision)
+```
+
+The default policy is deliberately loose (1e-5) for throughput — most users don't need 1e-10. Adversarial workloads (RL, sample-based motion planning, learning from demonstration) should opt in.
 
 ## Trajectory-tracking speed (`max_solutions=1`)
 
