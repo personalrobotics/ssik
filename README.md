@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/ssik.svg?v=1)](https://pypi.org/project/ssik/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
-Analytical inverse kinematics for 6R and 7R revolute robot arms. Each arm becomes a single self-contained Python module that returns **every IK branch** at machine-precision FK closure.
+Analytical inverse kinematics for 6R and 7R revolute robot arms. Each arm becomes a single self-contained Python module that returns **every IK branch** with FK closure well below typical robot repeatability — and tightenable to machine precision when needed.
 
 ## Install
 
@@ -195,6 +195,42 @@ sols = my_arm_ik.solve(T_target, policy=policy)
 
 The fields are named for *why* they exist so log messages can say `"SP6 sign branch rejected: closure 1.2e-4 > subproblem_numerical 1e-5"` instead of citing magic numbers.
 
+#### How to read `fk_residual` — and how to tighten it
+
+`fk_residual` is `‖FK(q) − T_target‖_F` — a Frobenius norm of a 4×4 SE(3) matrix mixing rotation (radians, dimensionless when small) and translation (meters). For a typical 1 m-reach arm:
+
+| `fk_residual` | Position-error scale | Note |
+|---|---|---|
+| 1e-3 | 1 mm | visible to the naked eye |
+| 1e-4 | 0.1 mm | typical robot **repeatability** (manufacturer spec) |
+| **1e-5 (default)** | **10 µm** | sub-repeatability; fine for control |
+| 1e-9 | 1 nm | math / analysis territory |
+| 1e-13 | 0.1 pm | float64 epsilon |
+
+The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all 8 prebuilts hit it without LM polish. Most control / planning users want exactly this default.
+
+**To get machine precision** (RL training, differentiable IK, sample-based planning, math validation), opt in:
+
+```python
+from ssik import TolerancePolicy
+from ssik.prebuilt import franka_panda_ik
+
+tight = TolerancePolicy(
+    axis_parallel=1e-8,
+    axis_intersect=1e-8,
+    subproblem_feasibility=1e-9,
+    subproblem_numerical=1e-9,         # ← 4 orders tighter
+    subproblem_degeneracy=1e-12,
+    subproblem_dedup=1e-3,
+)
+sols = franka_panda_ik.solve(T_target, policy=tight, allow_refinement=True)
+# every returned IK FK-closes ~3e-10 (~0.3 nm position error)
+```
+
+The `allow_refinement=True` flag engages Levenberg-Marquardt polish on candidates that don't meet `subproblem_numerical`. On the jointlock 7R arms (Franka, Rizon 4, Kassow KR810) this lifts worst-case FK from ~5×10⁻⁶ (default) to ~3×10⁻¹⁰ (tight + LM). Cost: a few hundred microseconds per polished candidate. Sub-repeatability arms (UR5, Puma 560, JACO 2, iiwa14, Gen3) already hit machine precision at the default policy and don't need the opt-in.
+
+Per-arm worst-case behaviour under both policies is documented in [`docs/arm_coverage.md`](docs/arm_coverage.md#worst-case-fk-floor-under-adversarial-fuzz).
+
 ### `ssik.postprocess` — composable filters
 
 `solve()` returns the geometric IK set. For application-specific filtering, four helpers in `ssik.postprocess` compose into the typical "robot-aware IK" pipeline:
@@ -217,7 +253,7 @@ Out of scope: collision filtering (use FCL or similar at the application layer) 
 
 ## How it compares
 
-Numerical-IK libraries take a seed, run damped least-squares to a **single** converged configuration, and stop. ssik returns **every analytical branch** at machine precision. Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
+Numerical-IK libraries take a seed, run damped least-squares to a **single** converged configuration, and stop. ssik returns **every analytical branch** — with FK closure well below typical robot repeatability by default, tightenable to machine precision (see [Tuning knobs](#tuning-knobs) below). Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
 
 EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-decomposition solvers. It's analytical on the kinematic families it recognises and refuses everything else. Numbers below from [`examples/04_compare_vs_eaik.py`](examples/04_compare_vs_eaik.py) over 100 random reachable poses per arm, Apple M3 single-thread, mean ± 95% CI via 1000-resample bootstrap. FK residual is the Frobenius norm `‖FK(q) − T‖` against the original URDF / spec FK.
 

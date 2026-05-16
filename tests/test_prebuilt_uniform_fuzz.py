@@ -172,3 +172,73 @@ def test_prebuilt_7r_random_q_roundtrip(
         f"{arm_name}: max FK residual {max_fk:.2e} > {fk_ceiling:.0e} ceiling at "
         f"q*={q_star.tolist()}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Tight-policy + refinement opt-in: machine-precision contract (#271).
+# ---------------------------------------------------------------------------
+
+
+# Investigation result on #271: the worst-case ~1e-5 FK floor on jointlock
+# 7R arms (Franka, Rizon 4, Kassow) is NOT a solver bug -- it's the result
+# of the default ``subproblem_numerical = 1e-5`` policy threshold. Inner
+# solvers honestly report full-arm FK residuals; with the default policy,
+# candidates as loose as ~5e-6 pass the threshold. Users who want machine
+# precision can opt in via ``policy=tight + allow_refinement=True``;
+# LM polish closes the gap to ~1e-10 across the affected arms.
+#
+# This test pins that contract: with tight policy + allow_refinement,
+# every returned IK FK-closes to 1e-7 or tighter on the affected arms.
+
+
+@pytest.mark.parametrize(
+    "arm_name", [a[0] for a in PREBUILT_ARMS_7R if a[0] not in ("iiwa14_ik", "gen3_ik")]
+)
+@given(q_star=non_singular_q7r())
+@settings(
+    max_examples=100,  # tighter than the default-policy sweep; LM polish adds latency
+    deadline=None,
+    suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.function_scoped_fixture],
+)
+def test_prebuilt_7r_tight_policy_machine_precision(arm_name: str, q_star: np.ndarray) -> None:
+    """7R jointlock arms (Franka, Rizon 4, Kassow KR810) reach machine
+    precision under the ``tight policy + allow_refinement=True`` opt-in.
+
+    Without the opt-in, the default ``subproblem_numerical = 1e-5``
+    accepts candidates as loose as ~5e-6 (see ``test_prebuilt_7r_random_
+    q_roundtrip`` above). With the opt-in, LM polish brings every
+    candidate to <=1e-7 -- typically much tighter (~1e-10).
+
+    Verifies the user-facing contract: 'if you want machine-precision IK
+    on a 7R jointlock arm, here's the policy that gets you there.'
+
+    iiwa14 and Gen3 are excluded -- their default policy already produces
+    machine-precision FK (closed-form SRS / SRS-polished). The opt-in is
+    only meaningful on the three jointlock-with-inner-LS arms.
+    """
+    from ssik import TolerancePolicy
+
+    mod = _load(arm_name)
+    T_target = mod.fk(q_star)
+    tight_policy = TolerancePolicy(
+        axis_parallel=1e-8,
+        axis_intersect=1e-8,
+        subproblem_feasibility=1e-9,
+        subproblem_numerical=1e-9,
+        subproblem_degeneracy=1e-12,
+        subproblem_dedup=1e-3,
+    )
+    sols = mod.solve(
+        T_target,
+        respect_limits=False,
+        policy=tight_policy,
+        allow_refinement=True,
+    )
+    assert sols, f"{arm_name}: reachable pose under tight policy returned no IK"
+    max_fk = max(s.fk_residual for s in sols)
+    # 1e-7 ceiling: comfortable margin above LM's typical converged residual
+    # (~1e-10) without being so tight we fail on edge-case poses where polish
+    # converges to a local minimum a few orders worse.
+    assert max_fk < 1e-7, (
+        f"{arm_name}: tight-policy max FK {max_fk:.2e} > 1e-7 at q*={q_star.tolist()}"
+    )
