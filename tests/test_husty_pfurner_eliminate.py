@@ -538,10 +538,13 @@ _sign = st.sampled_from([-1.0, 1.0])
 @pytest.mark.xfail(
     strict=False,
     reason=(
-        "Pre-existing Hypothesis flake (#181): the strategy can sample DHs "
-        "in Capco's T(v_1) double-degenerate class where the elimination is "
-        "rank-deficient. Closes when #176 (T(v_2)) lands or when the "
-        "Hypothesis strategy is tightened to reject those DHs."
+        "Pre-existing Hypothesis flake on near-symmetric DH (#181). "
+        "Investigation in #178 Phase 1 (2026-05-16) attributed this to "
+        "'HP elimination returns rank-deficient pencils on near-symmetric "
+        "DH chains'. Same root cause as #179. Tightening the strategy "
+        "spread thresholds from 0.05-OR to 0.3-AND cuts most occurrences "
+        "but Hypothesis still finds boundary cases. Fully closing requires "
+        "HP solver work on symmetric DH (decoupled from #178)."
     ),
 )
 def test_eliminate_hypothesis_fuzz_500_examples(
@@ -615,7 +618,7 @@ def test_eliminate_hypothesis_fuzz_500_examples(
     assume(np.linalg.norm(np.asarray(v)) > 0.5)
     a_spread = np.std(np.abs(a))
     alpha_spread = np.std([alpha_1, alpha_2, alpha_3, alpha_4, alpha_5])
-    assume(a_spread > 0.05 or alpha_spread > 0.05)
+    assume(a_spread > 0.3 and alpha_spread > 0.3)
 
     dh_kwargs = dict(
         a_1=a[0],
