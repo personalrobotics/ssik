@@ -1,0 +1,62 @@
+name: Docs
+
+# Build + deploy mkdocs-material site to GitHub Pages on push to main.
+# The site lives at https://personalrobotics.github.io/ssik/.
+#
+# Pre-#266 docs were the in-repo docs/*.md only. The mkdocs site adds:
+#   - auto-generated API reference from docstrings via mkdocstrings[python]
+#   - getting-started + setting-up-your-robot narrative pages
+#   - long-form solver specs from docs/specs/
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mkdocs.yml"
+      - "docs/**"
+      - "src/ssik/**"          # API reference is auto-generated from docstrings
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install docs dependency group
+        run: uv sync --group docs
+
+      - name: Build mkdocs site
+        run: uv run mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,8 +1,8 @@
 # Arm coverage
 
-Per-arm tested fixture tables, dispatched solver, and measured speed. Numbers come from [`examples/04_compare_vs_eaik.py`](../examples/04_compare_vs_eaik.py) — 100 random reachable poses per arm, Apple M3 single-thread, mean ± 95% CI via 1000-resample bootstrap. The README's EAIK comparison table reports the same measurements; this doc breaks them down by kinematic class and points at where each arm's prebuilt lives.
+Per-arm tested fixture tables, dispatched solver, and measured speed. Numbers come from [`examples/04_compare_vs_eaik.py`](https://github.com/personalrobotics/ssik/blob/main/examples/04_compare_vs_eaik.py) — 100 random reachable poses per arm, Apple M3 single-thread, mean ± 95% CI via 1000-resample bootstrap. The README's EAIK comparison table reports the same measurements; this doc breaks them down by kinematic class and points at where each arm's prebuilt lives.
 
-**Status legend**: ✅ shipped in [`ssik.prebuilt`](../src/ssik/prebuilt/) and exercised by the test suite — 🔗 external URDF, fixture import pending — 📐 synthetic-only (no canonical commercial arm with this exact topology).
+**Status legend**: ✅ shipped in [`ssik.prebuilt`](https://github.com/personalrobotics/ssik/tree/main/src/ssik/prebuilt) and exercised by the test suite — 🔗 external URDF, fixture import pending — 📐 synthetic-only (no canonical commercial arm with this exact topology).
 
 ## 6R industrial arms (Pieper-class)
 

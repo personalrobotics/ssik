@@ -280,8 +280,14 @@ Cython hot loops cover the leaf primitives (POE forward kinematics, the Levenber
 
 ## Documentation
 
-- [docs/arm_coverage.md](docs/arm_coverage.md) — per-arm fixture tables, tested speeds, source URDFs
-- [docs/architecture.md](docs/architecture.md) — solver tier catalog, dispatch flow, build artifact internals, algorithmic lineage
+Full docs site: **<https://personalrobotics.github.io/ssik/>**
+
+- [Quickstart](https://personalrobotics.github.io/ssik/quickstart/) — install, prebuilts, trajectory tracking, explain mode
+- [Setting up your robot](https://personalrobotics.github.io/ssik/setting_up_your_robot/) — URDF readiness, `--base`/`--ee` selection, tool baking, verification
+- [Arm coverage](https://personalrobotics.github.io/ssik/arm_coverage/) — per-arm fixtures, speeds, FK floors
+- [Architecture](https://personalrobotics.github.io/ssik/architecture/) — solver tier catalog, dispatch flow, algorithmic lineage
+- [API reference](https://personalrobotics.github.io/ssik/api/) — `Manipulator`, `Solution`, `Diagnostic`, `TolerancePolicy`
+- [Semver policy](https://personalrobotics.github.io/ssik/semver_policy/) — what's public, what counts as breaking
 - [CONTRIBUTING.md](CONTRIBUTING.md) — repo layout, dev setup, testing discipline
 
 ## Related libraries
