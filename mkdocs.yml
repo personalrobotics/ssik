@@ -1,0 +1,92 @@
+site_name: ssik
+site_description: Analytical inverse kinematics for 6R and 7R revolute robot arms
+site_url: https://personalrobotics.github.io/ssik/
+repo_url: https://github.com/personalrobotics/ssik
+repo_name: personalrobotics/ssik
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: sphinx
+            show_root_heading: true
+            show_source: true
+            members_order: source
+            heading_level: 2
+            separate_signature: true
+            show_signature_annotations: true
+            line_length: 88
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quickstart: quickstart.md
+      - Setting up your robot: setting_up_your_robot.md
+  - Reference:
+      - Architecture: architecture.md
+      - Arm coverage: arm_coverage.md
+      - API reference: api.md
+      - Solver specs:
+          - SRS 7R (Singh-Kreutz): specs/srs_7r_singh_kreutz.md
+          - IK-Geo general 6R: specs/ikgeo_general_6r.md
+          - HP robustness notes: specs/hp_robustness_investigation.md
+  - Project:
+      - Semver policy: semver_policy.md
