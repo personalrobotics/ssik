@@ -307,6 +307,8 @@ ssik does not compete with these on the arms they cover. Pick the right tool for
 
 ## Citation
 
+If you use ssik in academic work, please cite it. Machine-readable metadata is in [`CITATION.cff`](CITATION.cff); GitHub renders that as a "Cite this repository" button on the repo sidebar.
+
 ```bibtex
 @software{ssik,
   author = {Srinivasa, Siddhartha},

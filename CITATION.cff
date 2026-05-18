@@ -1,0 +1,102 @@
+# YAML 1.2 — Citation File Format 1.2.0
+# https://citation-file-format.github.io
+cff-version: 1.2.0
+title: "ssik: Analytical inverse kinematics for 6R and 7R revolute arms"
+message: "If you use ssik in academic work, please cite it via this metadata."
+type: software
+authors:
+  - given-names: Siddhartha
+    family-names: Srinivasa
+    email: siddhartha.srinivasa@gmail.com
+    orcid: "https://orcid.org/0000-0002-5091-106X"
+repository-code: "https://github.com/personalrobotics/ssik"
+url: "https://personalrobotics.github.io/ssik/"
+license: BSD-3-Clause
+version: 1.1.0
+date-released: 2026-05-15
+keywords:
+  - robotics
+  - inverse-kinematics
+  - analytical-ik
+  - 6R-manipulator
+  - 7R-manipulator
+  - manipulation
+abstract: >
+  ssik is a Python library that produces every analytical inverse-kinematics
+  branch for 6R and 7R revolute manipulators. It ships eight prebuilt arms
+  (UR5, Puma 560, JACO 2, KUKA iiwa14, Kinova Gen3, Franka Panda, Flexiv
+  Rizon 4, Kassow KR810) and a "ssik build" CLI that emits a self-contained
+  per-arm artifact from a URDF. ssik covers kinematic classes that the
+  standard subproblem-decomposition libraries do not — non-Pieper 6R
+  (JACO 2's 55° twists), non-SRS 7R (Rizon 4, Kassow KR810), and
+  approximate-SRS 7R (Kinova Gen3) — via a tier-based dispatcher backed by
+  IK-Geo subproblems and a Husty-Pfurner Study-quaternion universal fallback.
+references:
+  - type: article
+    authors:
+      - family-names: Elias
+        given-names: Alexander J.
+      - family-names: Wen
+        given-names: John T.
+    title: "IK-Geo: Unified robot inverse kinematics using subproblem decomposition"
+    journal: "Mechanism and Machine Theory"
+    volume: 209
+    start: 105971
+    year: 2025
+    publisher:
+      name: "Elsevier"
+  - type: article
+    authors:
+      - family-names: Husty
+        given-names: Manfred L.
+      - family-names: Pfurner
+        given-names: Martin
+      - family-names: Schröcker
+        given-names: Hans-Peter
+    title: "A new and efficient algorithm for the inverse kinematics of a general serial 6R manipulator"
+    journal: "Mechanism and Machine Theory"
+    volume: 42
+    issue: 1
+    year: 2007
+    doi: 10.1016/j.mechmachtheory.2006.02.001
+  - type: article
+    authors:
+      - family-names: Raghavan
+        given-names: Madhusudan
+      - family-names: Roth
+        given-names: Bernard
+    title: "Inverse Kinematics of the General 6R Manipulator and Related Linkages"
+    journal: "Journal of Mechanical Design"
+    volume: 115
+    issue: 3
+    start: 502
+    end: 508
+    month: 9
+    year: 1993
+    issn: "1050-0472"
+    doi: 10.1115/1.2919218
+  - type: article
+    authors:
+      - family-names: Ostermeier
+        given-names: Daniel
+      - family-names: Külz
+        given-names: Jonathan
+      - family-names: Althoff
+        given-names: Matthias
+    title: "Automatic Geometric Decomposition for Analytical Inverse Kinematics"
+    journal: "IEEE Robotics and Automation Letters"
+    volume: 10
+    issue: 10
+    start: 9964
+    end: 9971
+    year: 2025
+    doi: 10.1109/LRA.2025.3597897
+  - type: thesis
+    authors:
+      - family-names: Diankov
+        given-names: Rosen
+    title: "Automated Construction of Robotic Manipulation Programs"
+    institution:
+      name: "Carnegie Mellon University, Robotics Institute"
+    thesis-type: "PhD thesis"
+    year: 2010
