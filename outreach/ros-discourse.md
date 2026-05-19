@@ -76,6 +76,7 @@ The 8 prebuilts are built against nominal manufacturer geometry. For UR's `.cali
 - **Repo:** https://github.com/personalrobotics/ssik
 - **Docs:** https://personalrobotics.github.io/ssik/
 - **PyPI:** https://pypi.org/project/ssik/
+- **DOI:** https://doi.org/10.5281/zenodo.20278005
 - **License:** BSD-3-Clause
 
 Issues / questions welcome on the repo or in this thread.

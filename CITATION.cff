@@ -4,6 +4,10 @@ cff-version: 1.2.0
 title: "ssik: Analytical inverse kinematics for 6R and 7R revolute arms"
 message: "If you use ssik in academic work, please cite it via this metadata."
 type: software
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.20278005"
+    description: "Concept DOI — always resolves to the latest released version."
 authors:
   - given-names: Siddhartha
     family-names: Srinivasa

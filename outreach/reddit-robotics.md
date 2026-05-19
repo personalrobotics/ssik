@@ -39,6 +39,7 @@ Each `Solution` carries the joint vector, the FK residual against the target, an
 
 **Repo:** https://github.com/personalrobotics/ssik
 **Docs:** https://personalrobotics.github.io/ssik/
+**DOI:** https://doi.org/10.5281/zenodo.20278005
 **License:** BSD-3-Clause. Clean-room reimplementations from the academic literature; lineage documented per-module.
 
 Happy to answer questions about the algorithmic side or how it compares to whatever you're using.

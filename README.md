@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/ssik.svg?v=1)](https://pypi.org/project/ssik/)
 [![Python](https://img.shields.io/pypi/pyversions/ssik.svg?v=1)](https://pypi.org/project/ssik/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20278005.svg)](https://doi.org/10.5281/zenodo.20278005)
 
 Analytical inverse kinematics for 6R and 7R revolute robot arms. Each arm becomes a single self-contained Python module that returns **every IK branch** with FK closure well below typical robot repeatability — and tightenable to machine precision when needed.
 
@@ -311,9 +312,11 @@ If you use ssik in academic work, please cite it. Machine-readable metadata is i
 
 ```bibtex
 @software{ssik,
-  author = {Srinivasa, Siddhartha},
-  title  = {ssik: analytical inverse kinematics for 6R and 7R revolute arms},
-  url    = {https://github.com/personalrobotics/ssik},
-  year   = {2026},
+  author    = {Srinivasa, Siddhartha},
+  title     = {ssik: analytical inverse kinematics for 6R and 7R revolute arms},
+  url       = {https://github.com/personalrobotics/ssik},
+  doi       = {10.5281/zenodo.20278005},
+  year      = {2026},
+  publisher = {Zenodo},
 }
 ```

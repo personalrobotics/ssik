@@ -18,6 +18,7 @@ I'd like to announce **ssik**, an open-source Python library for analytical inve
   Repository:  https://github.com/personalrobotics/ssik
   Docs:        https://personalrobotics.github.io/ssik/
   Install:     pip install ssik
+  DOI:         https://doi.org/10.5281/zenodo.20278005
   License:     BSD-3-Clause
 
 ssik returns every analytical IK branch for a target end-effector pose. Eight commercial arms ship as prebuilt artifacts in the wheel (UR5, Puma 560, Kinova JACO 2, KUKA iiwa LBR 14, Kinova Gen3, Franka Panda, Flexiv Rizon 4, Kassow KR810); any other arm is supported via "ssik build my_arm.urdf", which emits a single-file Python artifact specialised to the URDF.
