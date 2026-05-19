@@ -118,3 +118,31 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  create_github_release:
+    name: Create GitHub Release
+    needs: publish_pypi
+    runs-on: ubuntu-latest
+    # Only on stable releases (non-RC). The GitHub Release is what fires
+    # the Zenodo GitHub-integration webhook, which mints a new version DOI
+    # (concept DOI stays constant). Without this step, tags exist but
+    # Zenodo never archives them.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'rc')
+    permissions:
+      contents: write   # required to create the Release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for auto-generated release notes
+
+      - name: Create Release
+        # action-gh-release is idempotent: if a Release already exists for
+        # this tag (e.g. created manually before the workflow finished),
+        # it updates rather than failing.
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ssik ${{ github.ref_name }}
+          generate_release_notes: true   # GitHub auto-generates from merged PRs since previous tag
+          draft: false
+          prerelease: false
