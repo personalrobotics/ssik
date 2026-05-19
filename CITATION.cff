@@ -1,5 +1,11 @@
 # YAML 1.2 — Citation File Format 1.2.0
 # https://citation-file-format.github.io
+#
+# Per-release version metadata (which version, when released) lives in the
+# Zenodo deposit, not here. Zenodo derives both fields from the Git tag at
+# archive time; the concept DOI below always resolves to the latest version.
+# We deliberately omit ``version:`` and ``date-released:`` so this file
+# does not need to be hand-bumped on every release.
 cff-version: 1.2.0
 title: "ssik: Analytical inverse kinematics for 6R and 7R revolute arms"
 message: "If you use ssik in academic work, please cite it via this metadata."
@@ -16,8 +22,6 @@ authors:
 repository-code: "https://github.com/personalrobotics/ssik"
 url: "https://personalrobotics.github.io/ssik/"
 license: BSD-3-Clause
-version: 1.1.0
-date-released: 2026-05-15
 keywords:
   - robotics
   - inverse-kinematics
