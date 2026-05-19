@@ -40,7 +40,7 @@ q_command = sols[0].q if sols else q_current
 
 ### Arms supported
 
-Eight prebuilt arms ship with the wheel:
+Nine prebuilt arms ship with the wheel:
 
 | Arm | Class |
 |---|---|
@@ -52,6 +52,7 @@ Eight prebuilt arms ship with the wheel:
 | Franka Panda | anthropomorphic 7R |
 | Flexiv Rizon 4 | non-SRS 7R |
 | Kassow KR810 | non-SRS 7R |
+| UFactory xArm7 | 7R Pieper-wedge |
 
 For any other arm: `ssik build my_arm.urdf --base base_link --ee tool0` emits a single-file Python artifact that imports just like the prebuilts.
 

@@ -103,6 +103,23 @@ def _emit_iiwa14() -> str:
     return result.source
 
 
+def _emit_xarm7() -> str:
+    from xarm7 import xarm7_specs
+
+    kb = build_kinbody(
+        xarm7_specs(), base_link_name="link_base", ee_link_name="link7"
+    )
+    plan = dispatch(kb)
+    result = emit_artifact(
+        kb=kb,
+        plan=plan,
+        module_name="xarm7_ik",
+        output_path=None,
+        arm_label="UFactory xArm7",
+    )
+    return result.source
+
+
 @pytest.mark.parametrize(
     ("module_name", "emit_fn"),
     [
@@ -123,6 +140,7 @@ def _emit_iiwa14() -> str:
         ("jaco2_ik", _emit_jaco2),
         ("franka_panda_ik", _emit_franka_panda),
         ("iiwa14_ik", _emit_iiwa14),
+        ("xarm7_ik", _emit_xarm7),
         (
             "gen3_ik",
             lambda: _emit_urdf(

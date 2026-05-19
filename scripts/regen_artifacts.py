@@ -73,6 +73,7 @@ def main() -> int:
     )
     _emit_jaco2_artifact()
     _emit_franka_panda_artifact()
+    _emit_xarm7_artifact()
 
     if args.include_slow:
         # Slow non-SRS 7R artifacts: cached-RR symbolic derivations baked
@@ -160,6 +161,36 @@ def _emit_jaco2_artifact() -> None:
         module_name="jaco2_ik",
         output_path=str(out),
         arm_label="Kinova JACO 2 (j2n6s200)",
+    )
+    elapsed = time.perf_counter() - t
+    size_kb = out.stat().st_size / 1024
+    print(
+        f"  {out.relative_to(REPO_ROOT)}: {plan.solver_name} "
+        f"(tier {plan.tier}, {size_kb:.1f} KB, {elapsed:.1f}s)"
+    )
+
+
+def _emit_xarm7_artifact() -> None:
+    """UFactory xArm7 fixture: MJCF transcription, 7-DOF. Routes through
+    ``jointlock.seven_r`` which auto-picks lock_idx and dispatches to a
+    ``reversed:spherical`` Pieper-class wedge (verified in
+    ``scripts/profile_7r_arms.py``)."""
+    sys.path.insert(0, str(FIXTURES))
+    from xarm7 import xarm7_specs
+
+    t = time.perf_counter()
+    # Match the upstream xArm7 MJCF body / ROS URDF link names
+    # (mujoco_menagerie/ufactory_xarm7, xarm_ros2): ``link_base`` is the
+    # fixed base, ``link7`` is the post-joint-7 frame (the bare flange).
+    kb = build_kinbody(xarm7_specs(), base_link_name="link_base", ee_link_name="link7")
+    plan = dispatch(kb)
+    out = ARTIFACTS / "xarm7_ik.py"
+    emit_artifact(
+        kb=kb,
+        plan=plan,
+        module_name="xarm7_ik",
+        output_path=str(out),
+        arm_label="UFactory xArm7",
     )
     elapsed = time.perf_counter() - t
     size_kb = out.stat().st_size / 1024

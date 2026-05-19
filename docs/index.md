@@ -21,7 +21,7 @@ T_target[:3, 3] = [0.5, 0.1, 0.3]
 sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 ```
 
-8 prebuilt arms ship with the wheel: UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka Panda, Rizon 4, Kassow KR810. For other arms, run `ssik build <your.urdf>` once and import the emitted module.
+9 prebuilt arms ship with the wheel: UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka Panda, Rizon 4, Kassow KR810, UFactory xArm7. For other arms, run `ssik build <your.urdf>` once and import the emitted module.
 
 ## Where to go next
 

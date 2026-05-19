@@ -79,6 +79,7 @@ PREBUILT_ARMS_7R: list[tuple[str, float]] = [
     ("franka_panda_ik", 1e-4),
     ("rizon4_ik", 1e-4),
     ("kassow_kr810_ik", 1e-4),
+    ("xarm7_ik", 1e-4),
 ]
 
 

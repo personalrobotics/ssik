@@ -37,7 +37,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships 8 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships 9 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -49,6 +49,7 @@ The wheel ships 8 ready-to-import artifacts. Each was built against a specific U
 | `franka_panda_ik` | Franka Panda | anthropomorphic 7R | `base_link` | `ee_link` |
 | `rizon4_ik` | Flexiv Rizon 4 | **non-SRS 7R** | `base_link` | `flange` |
 | `kassow_kr810_ik` | Kassow KR810 | **non-SRS 7R** | `base` | `end_effector` |
+| `xarm7_ik` | UFactory xArm7 | 7R Pieper-wedge (jointlock → `reversed:spherical`) | `link_base` | `link7` |
 
 ```python
 from ssik.prebuilt import iiwa14_ik
@@ -67,7 +68,7 @@ print(franka_panda_ik.T_HOME[:3, 3])
 
 ### When a prebuilt is right vs when to `ssik build`
 
-The 8 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
+The 9 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
 
 - You're using the same URDF source we built against (ros-industrial, manufacturer reference, etc.)
 - Your robot's calibration matches the nominal kinematic parameters
@@ -208,7 +209,7 @@ The fields are named for *why* they exist so log messages can say `"SP6 sign bra
 | 1e-9 | 1 nm | math / analysis territory |
 | 1e-13 | 0.1 pm | float64 epsilon |
 
-The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all 8 prebuilts hit it without LM polish. Most control / planning users want exactly this default.
+The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all 9 prebuilts hit it without LM polish. Most control / planning users want exactly this default.
 
 **To get machine precision** (RL training, differentiable IK, sample-based planning, math validation), opt in:
 

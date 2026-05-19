@@ -28,7 +28,7 @@ sols = franka_panda_ik.solve(T)    # every IK branch
 
 Each `Solution` carries the joint vector, the FK residual against the target, and which polish path fired. Empty list = pose is unreachable.
 
-**Arms shipped:** UR5, Puma 560, Kinova JACO 2, KUKA iiwa14, Kinova Gen3, Franka Panda, Flexiv Rizon 4, Kassow KR810. For anything else: `ssik build my_arm.urdf` emits a single-file Python artifact for your URDF.
+**Arms shipped:** UR5, Puma 560, Kinova JACO 2, KUKA iiwa14, Kinova Gen3, Franka Panda, Flexiv Rizon 4, Kassow KR810, UFactory xArm7. For anything else: `ssik build my_arm.urdf` emits a single-file Python artifact for your URDF.
 
 **What's different from existing tools:**
 - vs **numerical IK** (TracIK, MINK, KDL): those run damped least-squares to *one* converged config and stop. ssik enumerates every analytical branch — important for motion planning (try every branch, pick best clearance), dexterity analysis (per-branch manipulability), trajectory continuation across singularities.

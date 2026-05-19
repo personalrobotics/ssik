@@ -55,7 +55,7 @@ For non-Pieper inner sub-chains (Rizon 4, Kassow KR810), `ssik build` bakes the 
 | Arm | Drift (shoulder / wrist) | Inner | Speed (full sweep) | Status |
 |-----|---|---|:-----:|:-----:|
 | **Franka Emika Panda** | non-SRS by design | tier-0 inner (`reversed:spherical_two_parallel`) | 28.03 ± 2.57 ms / 9 sols / FK 7e-13 | ✅ `ssik.prebuilt.franka_panda_ik` |
-| uFactory xArm7 | non-SRS by design | tier-0 inner | expected ~30-45 ms | ✅ tests/fixtures (artifact pending) |
+| **uFactory xArm7** | non-SRS by design | tier-0 inner (`reversed:spherical`) | expected ~30-45 ms | ✅ `ssik.prebuilt.xarm7_ik` |
 | **Flexiv Rizon 4** | 65 mm / 151 mm | cached-RR (HP otherwise) | 30.88 ± 8.80 ms / 35 sols / FK 4e-9 | ✅ `ssik.prebuilt.rizon4_ik` |
 | **Kassow KR810** | 86 mm / 111 mm | cached-RR (HP otherwise) | 28.06 ± 10.63 ms / 24 sols / FK 7e-8 | ✅ `ssik.prebuilt.kassow_kr810_ik` |
 | Sawyer / Baxter (Rethink) | likely non-SRS | TBD | expected ~30-50 ms | 🔗 |
