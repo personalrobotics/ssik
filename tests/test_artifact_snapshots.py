@@ -198,7 +198,7 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
             'BASE_LINK = "link_base"',
             'EE_LINK = "link7"',
             "DOF = 7",
-            "def fk(q):",
+            "def solve(",
         ],
     }
     if module_name in _PLATFORM_DRIFT_ARTIFACTS and sys.platform != "darwin":
