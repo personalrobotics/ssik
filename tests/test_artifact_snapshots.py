@@ -106,9 +106,7 @@ def _emit_iiwa14() -> str:
 def _emit_xarm7() -> str:
     from xarm7 import xarm7_specs
 
-    kb = build_kinbody(
-        xarm7_specs(), base_link_name="link_base", ee_link_name="link7"
-    )
+    kb = build_kinbody(xarm7_specs(), base_link_name="link_base", ee_link_name="link7")
     plan = dispatch(kb)
     result = emit_artifact(
         kb=kb,
