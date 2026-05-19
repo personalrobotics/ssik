@@ -84,6 +84,7 @@ FIXTURES = [
         ("kassow_kr810.urdf", "base", "end_effector"),
         "kassow_kr810_ik",
     ),
+    Fixture("xArm7", 7, "specs", ("xarm7", "xarm7_specs"), "xarm7_ik"),
 ]
 
 

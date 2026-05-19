@@ -186,6 +186,20 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
             'SOLVER_NAME = "seven_r.srs_polished"',
             "def fk(q):",
         ],
+        # xArm7: same class of drift as gen3 -- the xarm7 fixture's
+        # quaternion-to-rotation conversion (np.sqrt + division) produces
+        # last-bit-different float64 values on macOS Accelerate vs Linux
+        # OpenBLAS, which propagates through poe-normalisation into the
+        # baked T_HOME / T_left arrays. Functionally equivalent (FK
+        # round-trips at 1e-13 on both platforms); only the float repr
+        # differs by one trailing digit.
+        "xarm7_ik": [
+            'SOLVER_NAME = "jointlock.seven_r"',
+            'BASE_LINK = "link_base"',
+            'EE_LINK = "link7"',
+            "DOF = 7",
+            "def fk(q):",
+        ],
     }
     if module_name in _PLATFORM_DRIFT_ARTIFACTS and sys.platform != "darwin":
         for marker in _PLATFORM_DRIFT_ARTIFACTS[module_name]:

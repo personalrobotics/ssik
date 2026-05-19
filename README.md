@@ -264,13 +264,14 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 4 sols | 556 ± 12 µs / FK 2e-9 / 4 sols |
 | Puma 560 (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 3e-14 / 8 sols | 245 ± 3 µs / FK 2e-14 / 8 sols |
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.04 ms / FK 3e-6 / 2 sols |
-| iiwa14 (SRS 7R) | **refuses** ("only 1-6R robots are solvable") | 5.10 ± 0.07 ms / FK 4e-13 / 96 sols |
+| iiwa14 (SRS 7R) | **refuses** (no 7R DH path in bench harness) | 4.99 ± 0.03 ms / FK 3e-13 / 96 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.83 ± 1.15 ms / FK 1e-12 / 47 sols |
-| Franka Panda (anthropomorphic 7R) | **refuses** ("only 1-6R") | 28.03 ± 2.57 ms / FK 7e-13 / 9 sols |
+| Franka Panda (anthropomorphic 7R) | **refuses** (no 7R DH path in bench harness) | 29.34 ± 2.59 ms / FK 8e-12 / 8 sols |
+| xArm7 (**non-SRS 7R**) | **refuses** (no 7R DH path in bench harness) | 35.41 ± 1.11 ms / FK 1e-11 / 20 sols |
 | Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 30.88 ± 8.80 ms / FK 4e-9 / 35 sols |
 | Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 28.06 ± 10.63 ms / FK 7e-8 / 24 sols |
 
-EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings are EAIK's actual error messages, captured verbatim by the bench harness. A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
+EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
 
 ## Under the hood
 
