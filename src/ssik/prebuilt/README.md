@@ -46,6 +46,7 @@ preprocessing) and cleaner to ship in production stacks.
 | `z1_ik` | `ikgeo.three_parallel` | <1 s | ~23 KB |
 | `piper_ik` | `ikgeo.general_6r` (RR + AE-3) | ~25 s | ~88 KB |
 | `rizon4_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~270 KB |
+| `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~331 KB |
 | `kassow_kr810_ik` | `jointlock.seven_r` + cached-RR | ~20 min | ~530 KB |
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached

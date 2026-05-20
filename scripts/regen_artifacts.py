@@ -15,7 +15,7 @@ The committed artifacts under ``src/ssik/prebuilt/`` serve three purposes:
 3. **Regression detection.** Any codegen-touching PR shows an artifact
    diff -- you can scan the diff to confirm the change is intentional.
 
-Slow arms (Rizon 4 ~7 min, Kassow KR810 ~20 min) are gated behind
+Slow arms (Rizon 4 ~7 min, Kassow KR810 ~20 min, Rizon 10 ~7 min) are gated behind
 ``--include-slow`` so the default regen is fast (<30 s for tier-0 / SRS).
 """
 
@@ -41,7 +41,7 @@ def main() -> int:
     parser.add_argument(
         "--include-slow",
         action="store_true",
-        help="Also rebuild Rizon 4 (~7 min) and Kassow KR810 (~20 min).",
+        help="Also rebuild Rizon 4 / Rizon 10 (~7 min each) and Kassow KR810 (~20 min).",
     )
     args = parser.parse_args()
 
@@ -121,6 +121,13 @@ def main() -> int:
             ee="end_effector",
             module_name="kassow_kr810_ik",
             arm_label="Kassow KR810",
+        )
+        _emit_urdf_artifact(
+            urdf=FIXTURES / "rizon10.urdf",
+            base="base_link",
+            ee="flange",
+            module_name="rizon10_ik",
+            arm_label="Flexiv Rizon 10",
         )
 
     print("done.")

@@ -21,7 +21,7 @@ I'd like to announce **ssik**, an open-source Python library for analytical inve
   DOI:         https://doi.org/10.5281/zenodo.20278005
   License:     BSD-3-Clause
 
-ssik returns every analytical IK branch for a target end-effector pose. Twelve commercial arms ship as prebuilt artifacts in the wheel (UR5, Puma 560, Kinova JACO 2, KUKA iiwa LBR 14, Kinova Gen3, Franka Panda, Flexiv Rizon 4, Kassow KR810, UFactory xArm7, UFactory xArm6, Unitree Z1, AgileX PiPER); any other arm is supported via "ssik build my_arm.urdf", which emits a single-file Python artifact specialised to the URDF.
+ssik returns every analytical IK branch for a target end-effector pose. Thirteen commercial arms ship as prebuilt artifacts in the wheel (UR5, Puma 560, Kinova JACO 2, KUKA iiwa LBR 14, Kinova Gen3, Franka Panda, Flexiv Rizon 4, Kassow KR810, UFactory xArm7, UFactory xArm6, Unitree Z1, AgileX PiPER, Flexiv Rizon 10); any other arm is supported via "ssik build my_arm.urdf", which emits a single-file Python artifact specialised to the URDF.
 
 The library is intended for tasks where branch enumeration matters: motion planning (search over branches for clearance / manipulability), dexterity analysis, trajectory continuation across kinematic singularities, and reinforcement-learning environments where IK ground truth is part of the reward / observation. Numerical IK libraries that converge to a single configuration are not substitutes for this use case.
 
