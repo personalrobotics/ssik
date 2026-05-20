@@ -35,7 +35,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 
 Numerical-IK libraries take a seed, run damped least-squares to a **single** converged configuration, and stop. ssik returns **every analytical branch** at near-machine precision. Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
 
-ssik covers the kinematic classes that the subproblem-decomposition libraries (EAIK, IK-Geo) refuse: **non-Pieper 6R** (JACO 2's 55° twists), **non-SRS 7R** (Flexiv Rizon 4, Kassow KR810), **approximate-SRS** (Kinova Gen3, 12 mm offset). See the [README comparison table](https://github.com/personalrobotics/ssik#measured-comparison-vs-eaik) for measured numbers.
+ssik covers the kinematic classes that the subproblem-decomposition libraries (EAIK, IK-Geo) refuse: **non-Pieper 6R** (Kinova JACO 2's 55° twists, UFactory xArm6's joint-6 y-offset, AgileX PiPER's tilted wrist axes), **non-SRS 7R** (Flexiv Rizon 4, Kassow KR810), **approximate-SRS** (Kinova Gen3, 12 mm offset). See the [README comparison table](https://github.com/personalrobotics/ssik#measured-comparison-vs-eaik) for measured numbers.
 
 ## License
 

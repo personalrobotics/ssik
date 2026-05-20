@@ -73,7 +73,7 @@ A MoveIt plugin that uses ssik as the backend is feasible but not yet built; if 
 
 ### Calibration / non-nominal URDFs
 
-The 8 prebuilts are built against nominal manufacturer geometry. For UR's `.calibrated_urdf` per-arm offsets, attached grippers / suction cups, or any non-nominal kinematic chain, run `ssik build` against your URDF — the emitted artifact bakes the exact geometry.
+The 12 prebuilts are built against nominal manufacturer geometry. For UR's `.calibrated_urdf` per-arm offsets, attached grippers / suction cups, or any non-nominal kinematic chain, run `ssik build` against your URDF — the emitted artifact bakes the exact geometry.
 
 ### Links
 

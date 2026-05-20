@@ -21,18 +21,22 @@ import importlib
 import numpy as np
 import pytest
 
-# The eight prebuilts shipped in the wheel. Each entry is (module_name,
+# The prebuilts shipped in the wheel. Each entry is (module_name,
 # dof, sample_q) where sample_q is a config chosen to land inside the
 # arm's reachable set so the round-trip will return at least one IK.
 PREBUILT_ARMS: list[tuple[str, int, list[float]]] = [
     ("ur5_ik", 6, [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]),
     ("puma560_ik", 6, [0.4, -0.6, 0.8, 1.0, -0.4, 0.3]),
     ("jaco2_ik", 6, [0.5, -0.8, 0.9, 1.1, -0.5, 0.4]),
+    ("xarm6_ik", 6, [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]),
+    ("z1_ik", 6, [0.3, 0.8, -0.5, 0.2, 0.4, -0.1]),
+    ("piper_ik", 6, [0.3, 0.7, -0.5, 0.2, 0.4, -0.1]),
     ("iiwa14_ik", 7, [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]),
     ("gen3_ik", 7, [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]),
     ("franka_panda_ik", 7, [0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5]),
     ("rizon4_ik", 7, [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]),
     ("kassow_kr810_ik", 7, [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]),
+    ("xarm7_ik", 7, [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]),
 ]
 
 
