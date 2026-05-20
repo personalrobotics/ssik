@@ -85,6 +85,7 @@ FIXTURES = [
         "kassow_kr810_ik",
     ),
     Fixture("xArm7", 7, "specs", ("xarm7", "xarm7_specs"), "xarm7_ik"),
+    Fixture("xArm6", 6, "urdf", ("xarm6.urdf", "link_base", "link_eef"), "xarm6_ik"),
 ]
 
 
@@ -199,6 +200,8 @@ def _bench_ssik(arm, poses: list[np.ndarray]) -> dict:
         "ci95_ms": half,
         "max_fk": float(max(fk_residuals)) if fk_residuals else float("nan"),
         "median_sols": int(np.median(sol_counts)) if sol_counts else 0,
+        "min_sols": int(min(sol_counts)) if sol_counts else 0,
+        "max_sols": int(max(sol_counts)) if sol_counts else 0,
         "n_solved": len(sol_counts),
         "n_total": len(poses),
     }
@@ -279,6 +282,8 @@ def _bench_eaik(fx: Fixture, poses: list[np.ndarray]) -> dict:
         "ci95_ms": half,
         "max_fk": float(max(fk_residuals)) if fk_residuals else float("nan"),
         "median_sols": int(np.median(sol_counts)) if sol_counts else 0,
+        "min_sols": int(min(sol_counts)) if sol_counts else 0,
+        "max_sols": int(max(sol_counts)) if sol_counts else 0,
         "n_solved": len(sol_counts),
         "n_total": len(poses),
     }
@@ -311,8 +316,11 @@ def _cell_fk(r: dict) -> str:
 def _cell_sols(r: dict) -> str:
     if not r.get("supported"):
         return "—"
-    n = r.get("median_sols", 0)
-    return f"{n}" if n else "—"
+    lo = r.get("min_sols", 0)
+    hi = r.get("max_sols", 0)
+    if hi == 0:
+        return "—"
+    return f"{lo}-{hi}" if hi > lo else f"{lo}"
 
 
 def _format_row(fx: Fixture, ssik_r: dict, eaik_r: dict) -> str:
