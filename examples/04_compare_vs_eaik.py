@@ -177,16 +177,25 @@ def _gen_poses(arm, n: int, rng) -> list[np.ndarray]:
 
 
 def _bench_ssik(arm, poses: list[np.ndarray]) -> dict:
+    # ``respect_limits=False`` so the branch count reflects the analytical
+    # solver's output, not the URDF-limit-aware postprocess. EAIK's bench
+    # path (eaik.IK_URDF.UrdfRobot.IK) does not apply URDF joint limits;
+    # using ssik's default ``respect_limits=True`` here makes the "/sols"
+    # cells apples-to-oranges. Arms with asymmetric joint limits (Unitree
+    # Z1: joint2 in [0, 2.97], joint3 in [-2.88, 0]) get filtered down to
+    # 1 branch under default settings, which exaggerates the gap. The
+    # "/time" measurement still includes the postprocess pass for
+    # production realism; only the branch count assertion changes.
     # Warm.
     for T in poses[: min(10, len(poses))]:
-        arm.solve(T)
+        arm.solve(T, respect_limits=False)
 
     times = []
     fk_residuals = []
     sol_counts = []
     for T in poses:
         t = time.perf_counter()
-        sols = arm.solve(T)
+        sols = arm.solve(T, respect_limits=False)
         times.append((time.perf_counter() - t) * 1000)
         if sols:
             fk_residuals.append(max(s.fk_residual for s in sols))
