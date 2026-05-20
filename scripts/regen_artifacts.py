@@ -93,6 +93,16 @@ def main() -> int:
         module_name="z1_ik",
         arm_label="Unitree Z1",
     )
+    # AgileX PiPER: non-Pieper 6R via tier-2 RR (~24s symbolic derivation per
+    # regen). Joints 4 and 6 share a tilted axis (~ 5 deg from world x); joint 5
+    # sits on world y between them, breaking the spherical-wrist condition.
+    _emit_urdf_artifact(
+        urdf=FIXTURES / "piper.urdf",
+        base="base_link",
+        ee="link6",
+        module_name="piper_ik",
+        arm_label="AgileX PiPER",
+    )
 
     if args.include_slow:
         # Slow non-SRS 7R artifacts: cached-RR symbolic derivations baked

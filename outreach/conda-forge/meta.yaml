@@ -57,9 +57,9 @@ about:
   summary: Analytical inverse kinematics for 6R and 7R revolute robot arms
   description: |
     ssik is a Python library that produces every analytical inverse-kinematics
-    branch for 6R and 7R revolute manipulators. Eleven prebuilt arms ship in
+    branch for 6R and 7R revolute manipulators. Twelve prebuilt arms ship in
     the wheel (UR5, Puma 560, Kinova JACO 2, KUKA iiwa14, Kinova Gen3, Franka
-    Panda, Flexiv Rizon 4, Kassow KR810, UFactory xArm7, UFactory xArm6, Unitree Z1); any other arm is supported via the
+    Panda, Flexiv Rizon 4, Kassow KR810, UFactory xArm7, UFactory xArm6, Unitree Z1, AgileX PiPER); any other arm is supported via the
     ``ssik build`` CLI, which reads a URDF and emits a single-file Python
     artifact specialised to the kinematic chain. ssik covers kinematic
     classes that the standard subproblem-decomposition libraries do not —

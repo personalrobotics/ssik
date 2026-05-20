@@ -28,7 +28,7 @@ The arms ssik exists for: deliberate non-orthogonal twists that violate Pieper's
 |-----|--------|:-----:|:-----:|
 | **Kinova JACO 2 (j2n6s200, 55° DH)** | `ikgeo.general_6r` (RR + AE-3) | 976 ± 39 µs / 2-12 sols | ✅ `ssik.prebuilt.jaco2_ik` |
 | **UFactory xArm6** (joint-6 y-offset breaks spherical wrist) | `ikgeo.general_6r` (RR + AE-3) | 1.06 ± 0.02 ms / 8-12 sols | ✅ `ssik.prebuilt.xarm6_ik` |
-| Agilex Piper | `ikgeo.general_6r` | expected ~1-5 ms | 🔗 [mujoco_menagerie/agilex_piper](https://github.com/google-deepmind/mujoco_menagerie/tree/main/agilex_piper) |
+| **AgileX PiPER** (joints 4 & 6 share a tilted axis) | `ikgeo.general_6r` (RR + AE-3) | 1.17 ± 0.03 ms / 1-8 sols | ✅ `ssik.prebuilt.piper_ik` |
 | Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~1-5 ms | use `ssik build` to compile a per-arm artifact |
 
 ## 7R redundant — pure SRS (`seven_r.srs`)
