@@ -74,6 +74,16 @@ def main() -> int:
     _emit_jaco2_artifact()
     _emit_franka_panda_artifact()
     _emit_xarm7_artifact()
+    # xArm6: non-Pieper 6R via tier-2 RR (~15s symbolic derivation per regen).
+    # Joint 6 has a 0.097 m y-offset that breaks the spherical-wrist condition,
+    # putting it in the same kinematic class as JACO 2.
+    _emit_urdf_artifact(
+        urdf=FIXTURES / "xarm6.urdf",
+        base="link_base",
+        ee="link_eef",
+        module_name="xarm6_ik",
+        arm_label="UFactory xArm6",
+    )
 
     if args.include_slow:
         # Slow non-SRS 7R artifacts: cached-RR symbolic derivations baked

@@ -65,6 +65,7 @@ PREBUILT_ARMS_6R: list[tuple[str, float]] = [
     ("ur5_ik", 1e-7),  # three-parallel: worst ~2e-8 under fuzz
     ("puma560_ik", 1e-12),  # spherical_two_parallel: worst ~1e-13
     ("jaco2_ik", 1e-4),  # non-Pieper RR: ~1e-5 conditioning floor
+    ("xarm6_ik", 1e-4),  # non-Pieper RR (joint 6 y-offset breaks spherical wrist)
 ]
 
 PREBUILT_ARMS_7R: list[tuple[str, float]] = [

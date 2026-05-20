@@ -149,6 +149,16 @@ def _emit_xarm7() -> str:
                 "Kinova Gen3 (7-DOF)",
             ),
         ),
+        (
+            "xarm6_ik",
+            lambda: _emit_urdf(
+                "xarm6.urdf",
+                "link_base",
+                "link_eef",
+                "xarm6_ik",
+                "UFactory xArm6",
+            ),
+        ),
     ],
 )
 def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: object) -> None:
@@ -199,6 +209,13 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
             'EE_LINK = "link7"',
             "DOF = 7",
             "def solve(",
+        ],
+        # xArm6: tier-2 RR same as jaco2 -- sympy.cse / sympy.pycode
+        # float-repr drift across macOS Accelerate vs Linux OpenBLAS.
+        "xarm6_ik": [
+            "_solve_algebraic",
+            "_build_pq_matrices",
+            'SOLVER_NAME = "ikgeo.general_6r"',
         ],
     }
     if module_name in _PLATFORM_DRIFT_ARTIFACTS and sys.platform != "darwin":

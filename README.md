@@ -37,7 +37,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships 9 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships 10 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -50,6 +50,7 @@ The wheel ships 9 ready-to-import artifacts. Each was built against a specific U
 | `rizon4_ik` | Flexiv Rizon 4 | **non-SRS 7R** | `base_link` | `flange` |
 | `kassow_kr810_ik` | Kassow KR810 | **non-SRS 7R** | `base` | `end_effector` |
 | `xarm7_ik` | UFactory xArm7 | 7R Pieper-wedge (jointlock → `reversed:spherical`) | `link_base` | `link7` |
+| `xarm6_ik` | UFactory xArm6 | **non-Pieper 6R** (joint 6 y-offset) | `link_base` | `link_eef` |
 
 ```python
 from ssik.prebuilt import iiwa14_ik
@@ -68,7 +69,7 @@ print(franka_panda_ik.T_HOME[:3, 3])
 
 ### When a prebuilt is right vs when to `ssik build`
 
-The 9 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
+The 10 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
 
 - You're using the same URDF source we built against (ros-industrial, manufacturer reference, etc.)
 - Your robot's calibration matches the nominal kinematic parameters
@@ -209,7 +210,7 @@ The fields are named for *why* they exist so log messages can say `"SP6 sign bra
 | 1e-9 | 1 nm | math / analysis territory |
 | 1e-13 | 0.1 pm | float64 epsilon |
 
-The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all 9 prebuilts hit it without LM polish. Most control / planning users want exactly this default.
+The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all 10 prebuilts hit it without LM polish. Most control / planning users want exactly this default.
 
 **To get machine precision** (RL training, differentiable IK, sample-based planning, math validation), opt in:
 
@@ -264,6 +265,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 4 sols | 556 ± 12 µs / FK 2e-9 / 4 sols |
 | Puma 560 (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 3e-14 / 8 sols | 245 ± 3 µs / FK 2e-14 / 8 sols |
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.04 ms / FK 3e-6 / 2 sols |
+| xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.13 ± 0.04 ms / FK 2e-9 / 2 sols |
 | iiwa14 (SRS 7R) | **refuses** (no 7R DH path in bench harness) | 4.99 ± 0.03 ms / FK 3e-13 / 96 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.83 ± 1.15 ms / FK 1e-12 / 47 sols |
 | Franka Panda (anthropomorphic 7R) | **refuses** (no 7R DH path in bench harness) | 29.34 ± 2.59 ms / FK 8e-12 / 8 sols |

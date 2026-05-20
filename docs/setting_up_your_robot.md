@@ -1,10 +1,10 @@
 # Setting up your robot
 
-Guide for getting your specific arm working with ssik — beyond the 9 prebuilts. Three real-world friction points: **URDF readiness**, **link selection** (base + EE + tool), and **verification** (does the baked geometry match your robot?).
+Guide for getting your specific arm working with ssik — beyond the 10 prebuilts. Three real-world friction points: **URDF readiness**, **link selection** (base + EE + tool), and **verification** (does the baked geometry match your robot?).
 
 ## When a prebuilt is enough vs when to `ssik build`
 
-The 9 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
+The 10 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
 
 - You're using the same URDF source we built against (ros-industrial, vendor reference, etc.)
 - Your robot's calibration matches the nominal kinematic parameters

@@ -15,7 +15,7 @@ Closed-form IK via subproblem decomposition (SP1–SP6).
 | ABB IRB120 / IRB4600 | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 [ros-industrial/abb](https://github.com/ros-industrial/abb) |
 | Fanuc LR Mate / CR | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 (vendor URDF) |
 | KUKA KR | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 [ros-industrial/kuka_experimental](https://github.com/ros-industrial/kuka_experimental) |
-| uFactory lite6 / xArm6 | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 [xArm-Developer/xarm_ros](https://github.com/xArm-Developer/xarm_ros) |
+| uFactory lite6 | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 [xArm-Developer/xarm_ros](https://github.com/xArm-Developer/xarm_ros) |
 
 EAIK is ~100× faster on Pieper-class 6R (5 µs vs ssik's ~250-550 µs); that's its native sweet spot and we don't try to compete. See README's comparison table.
 
@@ -26,6 +26,7 @@ The arms ssik exists for: deliberate non-orthogonal twists that violate Pieper's
 | Arm | Solver | Speed | Status |
 |-----|--------|:-----:|:-----:|
 | **Kinova JACO 2 (j2n6s200, 55° DH)** | `ikgeo.general_6r` (RR + AE-3) | 1.02 ± 0.04 ms / 2 sols | ✅ `ssik.prebuilt.jaco2_ik` |
+| **UFactory xArm6** (joint-6 y-offset breaks spherical wrist) | `ikgeo.general_6r` (RR + AE-3) | 1.13 ± 0.04 ms / 2 sols | ✅ `ssik.prebuilt.xarm6_ik` |
 | Agilex Piper | `ikgeo.general_6r` | expected ~1-5 ms | 🔗 [mujoco_menagerie/agilex_piper](https://github.com/google-deepmind/mujoco_menagerie/tree/main/agilex_piper) |
 | Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~1-5 ms | use `ssik build` to compile a per-arm artifact |
 
