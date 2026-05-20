@@ -44,7 +44,9 @@ def test_every_shipped_prebuilt_has_a_manifest_entry(manifest: dict[str, Arm]) -
     parametrisations, and the bench. A manifest entry without a
     corresponding artifact would attempt to load nothing.
     """
-    prebuilt_dir = Path(importlib.import_module("ssik.prebuilt").__file__).parent
+    pkg = importlib.import_module("ssik.prebuilt")
+    assert pkg.__file__ is not None
+    prebuilt_dir = Path(pkg.__file__).parent
     on_disk = {
         p.stem
         for p in prebuilt_dir.glob("*_ik.py")
