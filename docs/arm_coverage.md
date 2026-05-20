@@ -11,6 +11,7 @@ Closed-form IK via subproblem decomposition (SP1–SP6).
 | Arm | Solver | Speed | Status |
 |-----|--------|:-----:|:-----:|
 | **UR5** (also UR3 / UR10 / UR16) | `ikgeo.three_parallel` | 532 ± 10 µs / 2-8 sols | ✅ `ssik.prebuilt.ur5_ik` (UR5 in tests/fixtures); others 🔗 |
+| **Unitree Z1** | `ikgeo.three_parallel` | 487 ± 7 µs / 4-8 sols | ✅ `ssik.prebuilt.z1_ik` |
 | **Puma 560** | `ikgeo.spherical_two_parallel` | 220 ± 3 µs / 8 sols | ✅ `ssik.prebuilt.puma560_ik` |
 | ABB IRB120 / IRB4600 | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 [ros-industrial/abb](https://github.com/ros-industrial/abb) |
 | Fanuc LR Mate / CR | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 (vendor URDF) |

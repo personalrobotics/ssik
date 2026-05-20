@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-pip install ssik                  # core: library + 10 prebuilt arms + CLI
+pip install ssik                  # core: library + 11 prebuilt arms + CLI
 pip install ssik[urdf]            # adds urchin + sympy for ssik build / Manipulator.from_urdf
 ```
 
@@ -36,6 +36,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `kassow_kr810_ik` | Kassow KR810 | non-SRS 7R | `base` | `end_effector` |
 | `xarm7_ik` | UFactory xArm7 | 7R Pieper-wedge | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | non-Pieper 6R | `link_base` | `link_eef` |
+| `z1_ik` | Unitree Z1 | three-parallel 6R | `link00` | `link06` |
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:
 

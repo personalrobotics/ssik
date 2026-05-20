@@ -159,6 +159,16 @@ def _emit_xarm7() -> str:
                 "UFactory xArm6",
             ),
         ),
+        (
+            "z1_ik",
+            lambda: _emit_urdf(
+                "z1.urdf",
+                "link00",
+                "link06",
+                "z1_ik",
+                "Unitree Z1",
+            ),
+        ),
     ],
 )
 def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: object) -> None:

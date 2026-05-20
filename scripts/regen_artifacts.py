@@ -84,6 +84,15 @@ def main() -> int:
         module_name="xarm6_ik",
         arm_label="UFactory xArm6",
     )
+    # Unitree Z1: three-parallel 6R (UR-class). Joints 2/3/4 share the same
+    # local-y axis; dispatches to ``ikgeo.three_parallel`` tier-0 (~250 us IK).
+    _emit_urdf_artifact(
+        urdf=FIXTURES / "z1.urdf",
+        base="link00",
+        ee="link06",
+        module_name="z1_ik",
+        arm_label="Unitree Z1",
+    )
 
     if args.include_slow:
         # Slow non-SRS 7R artifacts: cached-RR symbolic derivations baked
