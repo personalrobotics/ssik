@@ -1,0 +1,428 @@
+# MANIFEST.toml — single source of truth for prebuilt arm metadata.
+#
+# Every arm shipped under ``ssik.prebuilt.*`` has an entry here. Doc
+# tables (README, docs/, outreach/, CITATION.cff), test parametrisations
+# (test_prebuilt_uniform_fuzz.py, test_prebuilt_sanity.py,
+# test_artifact_snapshots.py), bench fixtures
+# (examples/04_compare_vs_eaik.py), and the build orchestration
+# (scripts/regen_artifacts.py) all read from this file.
+#
+# Adding a new arm: prefer ``ssik add-arm <urdf> --name ... --base ... --ee ...``
+# (it benches + populates this entry + regenerates docs end-to-end).
+#
+# Editing an existing arm: bump the relevant fields here, then run
+# ``scripts/regen_docs.py`` to propagate. CI's drift-gate will fail any
+# PR whose manifest edits and doc tables are out of sync.
+#
+# Schema reference:
+#   display_name        Human-readable manufacturer + model
+#   short_name          Compact-prose form (table cells, abstract lists)
+#   fixture             Path under tests/fixtures/ (urdf file or .py module name)
+#   fixture_kind        "urdf" | "specs"
+#   specs_fn            Function name in tests/fixtures/<fixture>.py (specs kind only)
+#   base_link           Chain base link name (also baked into the artifact's BASE_LINK)
+#   ee_link             Chain end-effector link name (also baked into EE_LINK)
+#   dof                 6 | 7
+#   solver              ssik.solvers.* module path (matches artifact's SOLVER_NAME)
+#   tier                0 | 1 | 2
+#   kinematic_class     User-facing class string in README's prebuilt table
+#   short_class         Compact form for the README EAIK comparison table
+#   class_tags          Drives class-exemplar lists in commentary
+#   slow_build          true = gated behind ``regen_artifacts.py --include-slow``
+#   build_time_sec      Approximate per-regen wall-clock build time (informational)
+#   artifact_size_kb    Approximate emitted file size (informational)
+#   sample_q            6/7-element list; used by test_prebuilt_sanity.py round-trip
+#   fk_ceiling_fuzz     test_prebuilt_uniform_fuzz.py per-arm max FK assertion
+#   platform_drift      true = artifact bytes differ across platforms; structural
+#                              smoke check instead of byte-equality on non-macOS
+#   drift_markers       Required substrings in the artifact (platform_drift = true only)
+#   [bench]             Latest measurements from examples/04_compare_vs_eaik.py
+#   [known_gaps]        Optional xfail entries for the uniform fuzz test
+
+[arms.ur5_ik]
+display_name = "Universal Robots UR5"
+short_name = "UR5"
+fixture = "ur5.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "ee_link"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 26
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.ur5_ik.bench]
+ms_mean = 0.532
+ms_ci95 = 0.010
+max_fk = 2.0e-9
+sols_min = 2
+sols_max = 8
+
+[arms.puma560_ik]
+display_name = "KUKA Puma 560"
+short_name = "Puma 560"
+fixture = "puma560.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "wrist_3_link"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 27
+sample_q = [0.4, -0.6, 0.8, 1.0, -0.4, 0.3]
+fk_ceiling_fuzz = 1e-12
+platform_drift = false
+
+[arms.puma560_ik.bench]
+ms_mean = 0.220
+ms_ci95 = 0.003
+max_fk = 2.0e-14
+sols_min = 8
+sols_max = 8
+
+[arms.jaco2_ik]
+display_name = "Kinova JACO 2 (j2n6s200)"
+short_name = "JACO 2"
+fixture = "jaco2"
+fixture_kind = "specs"
+specs_fn = "jaco2_specs"
+base_link = "base_link"
+ee_link = "ee_link"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 25
+artifact_size_kb = 73
+sample_q = [0.5, -0.8, 0.9, 1.1, -0.5, 0.4]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.jaco2_ik.bench]
+ms_mean = 0.976
+ms_ci95 = 0.039
+max_fk = 5.0e-6
+sols_min = 2
+sols_max = 12
+
+[arms.iiwa14_ik]
+display_name = "KUKA iiwa LBR 14"
+short_name = "iiwa14"
+fixture = "kuka_iiwa14"
+fixture_kind = "specs"
+specs_fn = "kuka_iiwa14_specs"
+base_link = "base_link"
+ee_link = "ee_link"
+dof = 7
+solver = "seven_r.srs"
+tier = 0
+kinematic_class = "SRS 7R"
+short_class = "SRS 7R"
+class_tags = ["SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 9
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.iiwa14_ik.bench]
+ms_mean = 4.54
+ms_ci95 = 0.03
+max_fk = 4.0e-13
+sols_min = 128
+sols_max = 128
+
+[arms.gen3_ik]
+display_name = "Kinova Gen3 (7-DOF)"
+short_name = "Gen3"
+fixture = "gen3.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "end_effector_link"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R"
+short_class = "approximate-SRS 7R, 12 mm offset"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-9
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.gen3_ik.bench]
+ms_mean = 41.46
+ms_ci95 = 1.25
+max_fk = 1.0e-12
+sols_min = 10
+sols_max = 95
+
+[arms.franka_panda_ik]
+display_name = "Franka Emika Panda (no hand)"
+short_name = "Franka Panda"
+fixture = "franka_panda"
+fixture_kind = "specs"
+specs_fn = "franka_panda_specs"
+base_link = "base_link"
+ee_link = "ee_link"
+dof = 7
+solver = "jointlock.seven_r"
+tier = 1
+kinematic_class = "anthropomorphic 7R"
+short_class = "anthropomorphic 7R"
+class_tags = ["non-SRS", "anthropomorphic", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 22
+sample_q = [0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5]
+fk_ceiling_fuzz = 1e-4
+platform_drift = false
+
+[arms.franka_panda_ik.bench]
+ms_mean = 29.27
+ms_ci95 = 2.81
+max_fk = 1.0e-6
+sols_min = 8
+sols_max = 124
+
+[arms.xarm7_ik]
+display_name = "UFactory xArm7"
+short_name = "xArm7"
+fixture = "xarm7"
+fixture_kind = "specs"
+specs_fn = "xarm7_specs"
+base_link = "link_base"
+ee_link = "link7"
+dof = 7
+solver = "jointlock.seven_r"
+tier = 1
+kinematic_class = "7R Pieper-wedge (jointlock → `reversed:spherical`)"
+short_class = "non-SRS 7R"
+class_tags = ["non-SRS", "Pieper-wedge", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 22
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    'SOLVER_NAME = "jointlock.seven_r"',
+    'BASE_LINK = "link_base"',
+    'EE_LINK = "link7"',
+    "DOF = 7",
+    "def solve(",
+]
+
+[arms.xarm7_ik.bench]
+ms_mean = 37.10
+ms_ci95 = 0.49
+max_fk = 4.0e-11
+sols_min = 56
+sols_max = 64
+
+[arms.xarm6_ik]
+display_name = "UFactory xArm6"
+short_name = "xArm6"
+fixture = "xarm6.urdf"
+fixture_kind = "urdf"
+base_link = "link_base"
+ee_link = "link_eef"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (joint 6 y-offset)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 15
+artifact_size_kb = 70
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.xarm6_ik.bench]
+ms_mean = 1.06
+ms_ci95 = 0.02
+max_fk = 2.0e-7
+sols_min = 8
+sols_max = 12
+
+[arms.z1_ik]
+display_name = "Unitree Z1"
+short_name = "Z1"
+fixture = "z1.urdf"
+fixture_kind = "urdf"
+base_link = "link00"
+ee_link = "link06"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R (UR-class)"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 23
+sample_q = [0.3, 0.8, -0.5, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.z1_ik.bench]
+ms_mean = 0.487
+ms_ci95 = 0.007
+max_fk = 3.0e-15
+sols_min = 4
+sols_max = 8
+
+[arms.z1_ik.known_gaps]
+xfail_reason = "three_parallel SP6 conditioning gap at q[4]=π/2 (Z1-specific; UR5 OK on same fuzz). Filed as #288."
+
+[arms.piper_ik]
+display_name = "AgileX PiPER"
+short_name = "PiPER"
+fixture = "piper.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "link6"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (joints 4 & 6 tilted axis)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 25
+artifact_size_kb = 88
+sample_q = [0.3, 0.7, -0.5, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.piper_ik.bench]
+ms_mean = 1.17
+ms_ci95 = 0.03
+max_fk = 9.0e-6
+sols_min = 1
+sols_max = 8
+
+[arms.piper_ik.known_gaps]
+xfail_reason = "RR coverage gap on q*=[0, 2.75, 0.29, 2.5, 2.75, 0] (returns 0 sols; q* + 0.01 returns 4). Filed as #286."
+
+[arms.rizon4_ik]
+display_name = "Flexiv Rizon 4"
+short_name = "Rizon 4"
+fixture = "rizon4.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "flange"
+dof = 7
+solver = "jointlock.seven_r"
+tier = 1
+kinematic_class = "non-SRS 7R"
+short_class = "non-SRS 7R"
+class_tags = ["non-SRS", "7R"]
+slow_build = true
+build_time_sec = 420
+artifact_size_kb = 270
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-4
+platform_drift = false
+
+[arms.rizon4_ik.bench]
+ms_mean = 30.58
+ms_ci95 = 8.58
+max_fk = 4.0e-9
+sols_min = 10
+sols_max = 60
+
+[arms.kassow_kr810_ik]
+display_name = "Kassow KR810"
+short_name = "Kassow KR810"
+fixture = "kassow_kr810.urdf"
+fixture_kind = "urdf"
+base_link = "base"
+ee_link = "end_effector"
+dof = 7
+solver = "jointlock.seven_r"
+tier = 1
+kinematic_class = "non-SRS 7R"
+short_class = "non-SRS 7R"
+class_tags = ["non-SRS", "7R"]
+slow_build = true
+build_time_sec = 1200
+artifact_size_kb = 530
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-4
+platform_drift = false
+
+[arms.kassow_kr810_ik.bench]
+ms_mean = 27.52
+ms_ci95 = 10.71
+max_fk = 7.0e-8
+sols_min = 10
+sols_max = 38
+
+[arms.rizon10_ik]
+display_name = "Flexiv Rizon 10"
+short_name = "Rizon 10"
+fixture = "rizon10.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "flange"
+dof = 7
+solver = "jointlock.seven_r"
+tier = 1
+kinematic_class = "non-SRS 7R (~1.4 m reach)"
+short_class = "non-SRS 7R"
+class_tags = ["non-SRS", "7R"]
+slow_build = true
+build_time_sec = 420
+artifact_size_kb = 331
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-4
+platform_drift = false
+
+[arms.rizon10_ik.bench]
+ms_mean = 29.43
+ms_ci95 = 6.37
+max_fk = 6.1e-8
+sols_min = 10
+sols_max = 64
