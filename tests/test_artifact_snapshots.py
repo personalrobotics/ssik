@@ -169,6 +169,16 @@ def _emit_xarm7() -> str:
                 "Unitree Z1",
             ),
         ),
+        (
+            "piper_ik",
+            lambda: _emit_urdf(
+                "piper.urdf",
+                "base_link",
+                "link6",
+                "piper_ik",
+                "AgileX PiPER",
+            ),
+        ),
     ],
 )
 def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: object) -> None:
@@ -223,6 +233,12 @@ def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: obje
         # xArm6: tier-2 RR same as jaco2 -- sympy.cse / sympy.pycode
         # float-repr drift across macOS Accelerate vs Linux OpenBLAS.
         "xarm6_ik": [
+            "_solve_algebraic",
+            "_build_pq_matrices",
+            'SOLVER_NAME = "ikgeo.general_6r"',
+        ],
+        # PiPER: same tier-2 RR class as jaco2 / xarm6.
+        "piper_ik": [
             "_solve_algebraic",
             "_build_pq_matrices",
             'SOLVER_NAME = "ikgeo.general_6r"',
