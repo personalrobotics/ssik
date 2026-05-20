@@ -10,7 +10,7 @@ Closed-form IK via subproblem decomposition (SP1–SP6).
 
 | Arm | Solver | Speed | Status |
 |-----|--------|:-----:|:-----:|
-| **UR5** (also UR3 / UR10 / UR16) | `ikgeo.three_parallel` | 556 ± 12 µs / 4 sols | ✅ `ssik.prebuilt.ur5_ik` (UR5 in tests/fixtures); others 🔗 |
+| **UR5** (also UR3 / UR10 / UR16) | `ikgeo.three_parallel` | 551 ± 12 µs / 2-8 sols | ✅ `ssik.prebuilt.ur5_ik` (UR5 in tests/fixtures); others 🔗 |
 | **Puma 560** | `ikgeo.spherical_two_parallel` | 245 ± 3 µs / 8 sols | ✅ `ssik.prebuilt.puma560_ik` |
 | ABB IRB120 / IRB4600 | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 [ros-industrial/abb](https://github.com/ros-industrial/abb) |
 | Fanuc LR Mate / CR | `ikgeo.spherical_two_parallel` | expected ~1 ms | 🔗 (vendor URDF) |
@@ -25,8 +25,8 @@ The arms ssik exists for: deliberate non-orthogonal twists that violate Pieper's
 
 | Arm | Solver | Speed | Status |
 |-----|--------|:-----:|:-----:|
-| **Kinova JACO 2 (j2n6s200, 55° DH)** | `ikgeo.general_6r` (RR + AE-3) | 1.02 ± 0.04 ms / 2 sols | ✅ `ssik.prebuilt.jaco2_ik` |
-| **UFactory xArm6** (joint-6 y-offset breaks spherical wrist) | `ikgeo.general_6r` (RR + AE-3) | 1.13 ± 0.04 ms / 2 sols | ✅ `ssik.prebuilt.xarm6_ik` |
+| **Kinova JACO 2 (j2n6s200, 55° DH)** | `ikgeo.general_6r` (RR + AE-3) | 1.02 ± 0.04 ms / 1-4 sols | ✅ `ssik.prebuilt.jaco2_ik` |
+| **UFactory xArm6** (joint-6 y-offset breaks spherical wrist) | `ikgeo.general_6r` (RR + AE-3) | 1.16 ± 0.02 ms / 1-5 sols | ✅ `ssik.prebuilt.xarm6_ik` |
 | Agilex Piper | `ikgeo.general_6r` | expected ~1-5 ms | 🔗 [mujoco_menagerie/agilex_piper](https://github.com/google-deepmind/mujoco_menagerie/tree/main/agilex_piper) |
 | Custom non-Pieper 6R | `ikgeo.general_6r` | expected ~1-5 ms | use `ssik build` to compile a per-arm artifact |
 
@@ -36,7 +36,7 @@ Closed-form Singh-Kreutz 1989 algorithm. Predicate-driven dispatch via `is_srs_7
 
 | Arm | Speed | Status |
 |-----|:-----:|:-----:|
-| **KUKA iiwa LBR 14** | 5.10 ± 0.07 ms / 96 sols / FK 4e-13 | ✅ `ssik.prebuilt.iiwa14_ik` |
+| **KUKA iiwa LBR 14** | 5.00 ± 0.04 ms / 48-110 sols / FK 4e-13 | ✅ `ssik.prebuilt.iiwa14_ik` |
 | KUKA iiwa LBR 7 (R820 / R14) | expected ~5 ms | 🔗 [mujoco_menagerie/kuka_iiwa_14](https://github.com/google-deepmind/mujoco_menagerie/tree/main/kuka_iiwa_14) |
 
 ## 7R redundant — approximately-SRS with LM polish (`seven_r.srs_polished`)
@@ -45,7 +45,7 @@ For arms whose URDF axes only **nearly** meet at common shoulder/wrist points (K
 
 | Arm | Drift (shoulder / wrist) | Speed | Status |
 |-----|---|:-----:|:-----:|
-| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | 41.83 ± 1.15 ms / 47 sols / FK 1e-12 | ✅ `ssik.prebuilt.gen3_ik` |
+| **Kinova Gen3 (7-DOF)** | 12 mm / 0.4 mm | 40.92 ± 1.02 ms / 10-95 sols / FK 1e-12 | ✅ `ssik.prebuilt.gen3_ik` |
 
 ## 7R redundant — non-SRS (`jointlock.seven_r`)
 
@@ -55,10 +55,10 @@ For non-Pieper inner sub-chains (Rizon 4, Kassow KR810), `ssik build` bakes the 
 
 | Arm | Drift (shoulder / wrist) | Inner | Speed (full sweep) | Status |
 |-----|---|---|:-----:|:-----:|
-| **Franka Emika Panda** | non-SRS by design | tier-0 inner (`reversed:spherical_two_parallel`) | 28.03 ± 2.57 ms / 9 sols / FK 7e-13 | ✅ `ssik.prebuilt.franka_panda_ik` |
-| **uFactory xArm7** | non-SRS by design | tier-0 inner (`reversed:spherical`) | expected ~30-45 ms | ✅ `ssik.prebuilt.xarm7_ik` |
-| **Flexiv Rizon 4** | 65 mm / 151 mm | cached-RR (HP otherwise) | 30.88 ± 8.80 ms / 35 sols / FK 4e-9 | ✅ `ssik.prebuilt.rizon4_ik` |
-| **Kassow KR810** | 86 mm / 111 mm | cached-RR (HP otherwise) | 28.06 ± 10.63 ms / 24 sols / FK 7e-8 | ✅ `ssik.prebuilt.kassow_kr810_ik` |
+| **Franka Emika Panda** | non-SRS by design | tier-0 inner (`reversed:spherical_two_parallel`) | 27.19 ± 2.54 ms / 1-30 sols / FK 7e-13 | ✅ `ssik.prebuilt.franka_panda_ik` |
+| **uFactory xArm7** | non-SRS by design | tier-0 inner (`reversed:spherical`) | 35.10 ± 0.46 ms / 12-22 sols / FK 4e-11 | ✅ `ssik.prebuilt.xarm7_ik` |
+| **Flexiv Rizon 4** | 65 mm / 151 mm | cached-RR (HP otherwise) | 31.88 ± 8.92 ms / 9-59 sols / FK 4e-9 | ✅ `ssik.prebuilt.rizon4_ik` |
+| **Kassow KR810** | 86 mm / 111 mm | cached-RR (HP otherwise) | 29.83 ± 11.35 ms / 10-38 sols / FK 7e-8 | ✅ `ssik.prebuilt.kassow_kr810_ik` |
 | Sawyer / Baxter (Rethink) | likely non-SRS | TBD | expected ~30-50 ms | 🔗 |
 
 > **Mean vs median:** both 30 ms and ~17 ms are honest measurements of the same prebuilt — the canonical bench reports mean ± 95% CI, an earlier per-pose measurement reported median. Verified 2026-05-13 on Rizon 4 with the canonical pose distribution: mean 28.7 ms / **median 19 ms** / p95 62 ms / min 16.4 ms. The cached-RR fast path is firing on most poses; mean is dragged up by occasional near-singular configurations where the lock-sweep can't short-circuit.
