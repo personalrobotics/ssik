@@ -40,7 +40,7 @@ q_command = sols[0].q if sols else q_current
 
 ### Arms supported
 
-Twelve prebuilt arms ship with the wheel:
+Thirteen prebuilt arms ship with the wheel:
 
 | Arm | Class |
 |---|---|
@@ -56,6 +56,7 @@ Twelve prebuilt arms ship with the wheel:
 | UFactory xArm6 | non-Pieper 6R |
 | Unitree Z1 | three-parallel 6R |
 | AgileX PiPER | non-Pieper 6R |
+| Flexiv Rizon 10 | non-SRS 7R |
 
 For any other arm: `ssik build my_arm.urdf --base base_link --ee tool0` emits a single-file Python artifact that imports just like the prebuilts.
 
@@ -73,7 +74,7 @@ A MoveIt plugin that uses ssik as the backend is feasible but not yet built; if 
 
 ### Calibration / non-nominal URDFs
 
-The 12 prebuilts are built against nominal manufacturer geometry. For UR's `.calibrated_urdf` per-arm offsets, attached grippers / suction cups, or any non-nominal kinematic chain, run `ssik build` against your URDF — the emitted artifact bakes the exact geometry.
+The 13 prebuilts are built against nominal manufacturer geometry. For UR's `.calibrated_urdf` per-arm offsets, attached grippers / suction cups, or any non-nominal kinematic chain, run `ssik build` against your URDF — the emitted artifact bakes the exact geometry.
 
 ### Links
 

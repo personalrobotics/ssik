@@ -83,6 +83,7 @@ PREBUILT_ARMS_7R: list[tuple[str, float]] = [
     ("rizon4_ik", 1e-4),
     ("kassow_kr810_ik", 1e-4),
     ("xarm7_ik", 1e-4),
+    ("rizon10_ik", 1e-4),  # non-SRS 7R (cached-RR HP, same class as rizon4)
 ]
 
 
