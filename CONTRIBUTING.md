@@ -85,9 +85,25 @@ uv run python scripts/bench_real_jaco2.py         # JACO 2 (RR pipeline)
 uv run python scripts/bench_seven_r.py            # synthetic 7R
 ```
 
+## The prebuilt-arm manifest (`src/ssik/prebuilt/MANIFEST.toml`)
+
+`MANIFEST.toml` is the **single source of truth** for prebuilt-arm metadata. Every shipped arm has one entry; the schema is documented at the top of the file. Consumers that read from it (so you never hand-edit them per arm):
+
+- `tests/test_prebuilt_sanity.py`, `tests/test_prebuilt_uniform_fuzz.py`, `tests/test_artifact_snapshots.py` — per-arm parametrisation, FK ceilings, known-gap xfails, platform-drift markers
+- `scripts/regen_artifacts.py` — which arms to emit + their `--include-slow` gating
+- `scripts/regen_docs.py` — the AUTOGEN doc tables (README prebuilt + EAIK comparison, docs/quickstart, src/ssik/prebuilt/README)
+- `examples/04_compare_vs_eaik.py` — bench fixtures
+
+Doc tables wrapped in `<!-- AUTOGEN:name --> ... <!-- /AUTOGEN -->` are generated from the manifest. **Never edit inside those markers by hand** — CI's drift gate (`scripts/regen_docs.py --check`) will reject it. Edit `MANIFEST.toml`, then:
+
+```bash
+uv run python scripts/regen_docs.py        # rewrite the anchored tables
+uv run python scripts/regen_docs.py --check # verify in sync (CI runs this)
+```
+
 ## Pre-built reference artifacts
 
-The `prebuilt/` directory holds committed `.py` artifacts emitted by `ssik build` for popular arms (UR5, Puma 560, JACO 2, iiwa14, Gen3, Franka Panda, Rizon 4, Kassow KR810). They serve as:
+The `prebuilt/` directory holds committed `.py` artifacts emitted by `ssik build` for the arms in `MANIFEST.toml`. They serve as:
 
 1. **User-facing demos** — alpha users can `import prebuilt.ur5_ik` and immediately get a working IK solver.
 2. **Codegen-drift snapshot tests** — `tests/test_artifact_snapshots.py` re-emits each artifact and asserts byte-equal against the committed copy.
@@ -96,18 +112,52 @@ If you change `ssik.core.codegen` or any solver's dispatch reasoning, the snapsh
 
 ```bash
 uv run python scripts/regen_artifacts.py                  # fast arms (~30 s total)
-uv run python scripts/regen_artifacts.py --include-slow   # also Rizon 4 (~7 min) + Kassow (~20 min)
+uv run python scripts/regen_artifacts.py --include-slow   # also slow_build arms (Rizon 4 / 10 ~7 min, Kassow ~20 min)
 ```
 
 Then commit the updated `prebuilt/*.py` alongside the codegen change so reviewers see the user-facing diff.
 
-## Adding a new arm fixture
+## Adding a new prebuilt arm
+
+The metadata for a shipped arm lives in `MANIFEST.toml`; adding one is mostly a manifest edit plus two regen commands.
+
+1. **Source the URDF / MJCF** and place the fixture under `tests/fixtures/` (a plain `.urdf`, or a Python `*_specs()` builder for spec-transcribed arms). For Xacro-only sources, expand to a plain URDF first.
+
+2. **Add a `[arms.<name>_ik]` block to `MANIFEST.toml`.** Copy a same-class neighbour's entry and adjust. The fields the dispatcher determines for you (`solver`, `tier`, `slow_build`) can be read off a one-shot:
+
+   ```bash
+   uv run python -c "from ssik._urdf import load_urdf_kinbody_normalized as L; from ssik.core.dispatcher import dispatch; p = dispatch(L('tests/fixtures/<name>.urdf', '<base>', '<ee>')); print(p.solver_name, p.tier)"
+   ```
+
+3. **Emit the artifact + bench it:**
+
+   ```bash
+   uv run python scripts/regen_artifacts.py [--include-slow]   # emits src/ssik/prebuilt/<name>_ik.py
+   uv run python examples/04_compare_vs_eaik.py --n 100        # fill in the [bench] block from the output
+   ```
+
+   Add the arm to `examples/04_compare_vs_eaik.py`'s `FIXTURES` list so it benches.
+
+4. **Set `fk_ceiling_fuzz`** to ~10× the worst FK residual you observe in a 50-pose smoke test (`solve(fk(q), respect_limits=False)` over random non-singular `q`). If a specific pose returns no IK (a coverage gap), add a `[arms.<name>_ik.known_gaps]` block with an `xfail_reason` and file an issue.
+
+5. **Regenerate docs + run the gates:**
+
+   ```bash
+   uv run python scripts/regen_docs.py
+   scripts/check.sh        # ruff + format + mypy + regen_docs --check + pytest
+   ```
+
+`tests/test_manifest.py` cross-validates every manifest entry against the emitted artifact's baked constants (solver / base / ee / dof), so a typo surfaces immediately.
+
+> **Note:** A fully turnkey `ssik add-arm` that performs steps 2-5 in one command (auto-populating the manifest entry, benching, regenerating docs) is tracked in [#290](https://github.com/personalrobotics/ssik/issues/290). Today's `ssik add-arm` (below) handles the fixture + test-scaffold half.
+
+## Adding a new arm fixture (test scaffold only)
 
 ```bash
 ssik add-arm path/to/arm.urdf --base base_link --ee flange --name my_arm
 ```
 
-Generates `tests/fixtures/my_arm.urdf` and `tests/test_my_arm.py` with FK-closure assertions on hand-picked + Hypothesis-fuzzed reachable poses. The generated test asserts the dispatcher routing matches the expected solver and that every retained IK FK-closes ≤ 1e-10.
+Generates `tests/fixtures/my_arm.urdf` and `tests/test_my_arm.py` with FK-closure assertions on hand-picked + Hypothesis-fuzzed reachable poses. The generated test asserts the dispatcher routing matches the expected solver and that every retained IK FK-closes ≤ 1e-10. This does **not** yet ship the arm as a prebuilt — for that, follow "Adding a new prebuilt arm" above.
 
 ## Adding a new solver
 
