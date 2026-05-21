@@ -33,6 +33,9 @@ uv run ruff format --check
 echo "[check] mypy"
 uv run mypy
 
+echo "[check] regen_docs --check"
+uv run python scripts/regen_docs.py --check
+
 if [[ $run_tests -eq 1 ]]; then
     echo "[check] pytest"
     # Deselects: pre-existing stale xfails / known flakes that gate on
