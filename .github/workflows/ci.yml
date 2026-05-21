@@ -67,5 +67,13 @@ jobs:
       - name: mypy
         run: uv run mypy
 
+      - name: regen_docs --check
+        # Fail if MANIFEST.toml and the AUTOGEN doc-table regions are
+        # out of sync. The script regenerates anchored tables from
+        # the manifest; this gate enforces "edit MANIFEST.toml + run
+        # scripts/regen_docs.py" as the only correct workflow for
+        # arm metadata changes.
+        run: uv run python scripts/regen_docs.py --check
+
       - name: pytest
         run: uv run pytest -q
