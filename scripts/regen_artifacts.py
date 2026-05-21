@@ -15,8 +15,14 @@ The committed artifacts under ``src/ssik/prebuilt/`` serve three purposes:
 3. **Regression detection.** Any codegen-touching PR shows an artifact
    diff -- you can scan the diff to confirm the change is intentional.
 
-Slow arms (Rizon 4 ~7 min, Kassow KR810 ~20 min, Rizon 10 ~7 min) are gated behind
-``--include-slow`` so the default regen is fast (<30 s for tier-0 / SRS).
+The per-arm list is read from ``src/ssik/prebuilt/MANIFEST.toml`` via the
+loader at :mod:`ssik.prebuilt._manifest`. Adding a new arm therefore
+needs no edits in this script -- populate the manifest (manually or via
+``ssik add-arm``) and the regenerator picks it up automatically.
+
+Slow arms (``slow_build = true`` in the manifest: Rizon 4 ~7 min, Kassow
+KR810 ~20 min, Rizon 10 ~7 min) are gated behind ``--include-slow`` so
+the default regen is fast (<30 s for the fast-build set).
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ from ssik._kinbody import build_kinbody
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
+from ssik.prebuilt._manifest import Arm, load_manifest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "tests" / "fixtures"
@@ -41,219 +48,51 @@ def main() -> int:
     parser.add_argument(
         "--include-slow",
         action="store_true",
-        help="Also rebuild Rizon 4 / Rizon 10 (~7 min each) and Kassow KR810 (~20 min).",
+        help=(
+            "Also rebuild arms with ``slow_build = true`` in the manifest "
+            "(Rizon 4 / Rizon 10 ~7 min each, Kassow KR810 ~20 min)."
+        ),
     )
     args = parser.parse_args()
 
     ARTIFACTS.mkdir(exist_ok=True)
     print(f"writing reference artifacts to {ARTIFACTS}/")
 
-    # Fast tier-0 / tier-0-7R artifacts (<30s each).
-    _emit_urdf_artifact(
-        urdf=FIXTURES / "ur5.urdf",
-        base="base_link",
-        ee="ee_link",
-        module_name="ur5_ik",
-        arm_label="UR5",
-    )
-    _emit_urdf_artifact(
-        urdf=FIXTURES / "puma560.urdf",
-        base="base_link",
-        ee="wrist_3_link",
-        module_name="puma560_ik",
-        arm_label="Puma 560",
-    )
-    _emit_iiwa14_artifact()
-    _emit_urdf_artifact(
-        urdf=FIXTURES / "gen3.urdf",
-        base="base_link",
-        ee="end_effector_link",
-        module_name="gen3_ik",
-        arm_label="Kinova Gen3 (7-DOF)",
-    )
-    _emit_jaco2_artifact()
-    _emit_franka_panda_artifact()
-    _emit_xarm7_artifact()
-    # xArm6: non-Pieper 6R via tier-2 RR (~15s symbolic derivation per regen).
-    # Joint 6 has a 0.097 m y-offset that breaks the spherical-wrist condition,
-    # putting it in the same kinematic class as JACO 2.
-    _emit_urdf_artifact(
-        urdf=FIXTURES / "xarm6.urdf",
-        base="link_base",
-        ee="link_eef",
-        module_name="xarm6_ik",
-        arm_label="UFactory xArm6",
-    )
-    # Unitree Z1: three-parallel 6R (UR-class). Joints 2/3/4 share the same
-    # local-y axis; dispatches to ``ikgeo.three_parallel`` tier-0 (~250 us IK).
-    _emit_urdf_artifact(
-        urdf=FIXTURES / "z1.urdf",
-        base="link00",
-        ee="link06",
-        module_name="z1_ik",
-        arm_label="Unitree Z1",
-    )
-    # AgileX PiPER: non-Pieper 6R via tier-2 RR (~24s symbolic derivation per
-    # regen). Joints 4 and 6 share a tilted axis (~ 5 deg from world x); joint 5
-    # sits on world y between them, breaking the spherical-wrist condition.
-    _emit_urdf_artifact(
-        urdf=FIXTURES / "piper.urdf",
-        base="base_link",
-        ee="link6",
-        module_name="piper_ik",
-        arm_label="AgileX PiPER",
-    )
+    manifest = load_manifest()
+    sys.path.insert(0, str(FIXTURES))
 
-    if args.include_slow:
-        # Slow non-SRS 7R artifacts: cached-RR symbolic derivations baked
-        # into the artifact (#220). Build cost amortises across the
-        # deployment lifetime.
-        _emit_urdf_artifact(
-            urdf=FIXTURES / "rizon4.urdf",
-            base="base_link",
-            ee="flange",
-            module_name="rizon4_ik",
-            arm_label="Flexiv Rizon 4",
-        )
-        _emit_urdf_artifact(
-            urdf=FIXTURES / "kassow_kr810.urdf",
-            base="base",
-            ee="end_effector",
-            module_name="kassow_kr810_ik",
-            arm_label="Kassow KR810",
-        )
-        _emit_urdf_artifact(
-            urdf=FIXTURES / "rizon10.urdf",
-            base="base_link",
-            ee="flange",
-            module_name="rizon10_ik",
-            arm_label="Flexiv Rizon 10",
-        )
+    for arm in manifest.values():
+        if arm.slow_build and not args.include_slow:
+            continue
+        _emit_arm(arm)
 
     print("done.")
     return 0
 
 
-def _emit_urdf_artifact(
-    *, urdf: Path, base: str, ee: str, module_name: str, arm_label: str
-) -> None:
+def _emit_arm(arm: Arm) -> None:
+    """Build + emit one prebuilt artifact from its manifest entry."""
     t = time.perf_counter()
-    kb = load_urdf_kinbody_normalized(urdf, base, ee)
+    if arm.fixture_kind == "urdf":
+        kb = load_urdf_kinbody_normalized(FIXTURES / arm.fixture, arm.base_link, arm.ee_link)
+    else:
+        # specs: a Python builder module under tests/fixtures
+        mod = __import__(arm.fixture)
+        specs_fn_name = arm.specs_fn
+        assert specs_fn_name is not None  # invariant per manifest schema
+        kb = build_kinbody(
+            getattr(mod, specs_fn_name)(),
+            base_link_name=arm.base_link,
+            ee_link_name=arm.ee_link,
+        )
     plan = dispatch(kb)
-    out = ARTIFACTS / f"{module_name}.py"
+    out = ARTIFACTS / f"{arm.name}.py"
     emit_artifact(
         kb=kb,
         plan=plan,
-        module_name=module_name,
+        module_name=arm.name,
         output_path=str(out),
-        arm_label=arm_label,
-    )
-    elapsed = time.perf_counter() - t
-    size_kb = out.stat().st_size / 1024
-    print(
-        f"  {out.relative_to(REPO_ROOT)}: {plan.solver_name} "
-        f"(tier {plan.tier}, {size_kb:.1f} KB, {elapsed:.1f}s)"
-    )
-
-
-def _emit_iiwa14_artifact() -> None:
-    """KUKA iiwa LBR 14 fixture: SRS-class 7R, lives as a Python builder
-    (kuka_iiwa14.py) rather than a URDF file."""
-    sys.path.insert(0, str(FIXTURES))
-    from kuka_iiwa14 import kuka_iiwa14_specs
-
-    t = time.perf_counter()
-    kb = build_kinbody(kuka_iiwa14_specs())
-    plan = dispatch(kb)
-    out = ARTIFACTS / "iiwa14_ik.py"
-    emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="iiwa14_ik",
-        output_path=str(out),
-        arm_label="KUKA iiwa LBR 14",
-    )
-    elapsed = time.perf_counter() - t
-    size_kb = out.stat().st_size / 1024
-    print(
-        f"  {out.relative_to(REPO_ROOT)}: {plan.solver_name} "
-        f"(tier {plan.tier}, {size_kb:.1f} KB, {elapsed:.1f}s)"
-    )
-
-
-def _emit_jaco2_artifact() -> None:
-    """JACO 2 fixture: real MJCF transcription. Lives under tests/fixtures
-    as a Python builder (jaco2.py) rather than a URDF file."""
-    sys.path.insert(0, str(FIXTURES))
-    from jaco2 import jaco2_specs
-
-    t = time.perf_counter()
-    kb = build_kinbody(jaco2_specs())
-    plan = dispatch(kb)
-    out = ARTIFACTS / "jaco2_ik.py"
-    emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="jaco2_ik",
-        output_path=str(out),
-        arm_label="Kinova JACO 2 (j2n6s200)",
-    )
-    elapsed = time.perf_counter() - t
-    size_kb = out.stat().st_size / 1024
-    print(
-        f"  {out.relative_to(REPO_ROOT)}: {plan.solver_name} "
-        f"(tier {plan.tier}, {size_kb:.1f} KB, {elapsed:.1f}s)"
-    )
-
-
-def _emit_xarm7_artifact() -> None:
-    """UFactory xArm7 fixture: MJCF transcription, 7-DOF. Routes through
-    ``jointlock.seven_r`` which auto-picks lock_idx and dispatches to a
-    ``reversed:spherical`` Pieper-class wedge (verified in
-    ``scripts/profile_7r_arms.py``)."""
-    sys.path.insert(0, str(FIXTURES))
-    from xarm7 import xarm7_specs
-
-    t = time.perf_counter()
-    # Match the upstream xArm7 MJCF body / ROS URDF link names
-    # (mujoco_menagerie/ufactory_xarm7, xarm_ros2): ``link_base`` is the
-    # fixed base, ``link7`` is the post-joint-7 frame (the bare flange).
-    kb = build_kinbody(xarm7_specs(), base_link_name="link_base", ee_link_name="link7")
-    plan = dispatch(kb)
-    out = ARTIFACTS / "xarm7_ik.py"
-    emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="xarm7_ik",
-        output_path=str(out),
-        arm_label="UFactory xArm7",
-    )
-    elapsed = time.perf_counter() - t
-    size_kb = out.stat().st_size / 1024
-    print(
-        f"  {out.relative_to(REPO_ROOT)}: {plan.solver_name} "
-        f"(tier {plan.tier}, {size_kb:.1f} KB, {elapsed:.1f}s)"
-    )
-
-
-def _emit_franka_panda_artifact() -> None:
-    """Franka Panda fixture: real MJCF transcription, 7-DOF. The artifact
-    routes through ``jointlock.seven_r`` which auto-picks lock_idx=4
-    (matching EAIK) and dispatches to ``reversed:spherical_two_parallel``
-    via the chain-reversal pre-pass."""
-    sys.path.insert(0, str(FIXTURES))
-    from franka_panda import franka_panda_specs
-
-    t = time.perf_counter()
-    kb = build_kinbody(franka_panda_specs())
-    plan = dispatch(kb)
-    out = ARTIFACTS / "franka_panda_ik.py"
-    emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="franka_panda_ik",
-        output_path=str(out),
-        arm_label="Franka Emika Panda (no hand)",
+        arm_label=arm.display_name,
     )
     elapsed = time.perf_counter() - t
     size_kb = out.stat().st_size / 1024

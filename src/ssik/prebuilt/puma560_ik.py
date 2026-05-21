@@ -1,4 +1,4 @@
-"""Generated IK module for Puma 560.
+"""Generated IK module for KUKA Puma 560.
 
 This file was emitted by ``ssik build`` and is the public artifact for
 running analytical inverse kinematics on this specific arm. The

@@ -24,8 +24,18 @@ but ``sympy.Poly`` + ``sympy.cse`` + ``sympy.pycode`` together still produce
 last-digit-different float literals across platforms in the rendered output
 (the underlying float64 values diverge inside sympy's internal arithmetic,
 not just at the printing layer). Pinning sympy's bit-level determinism is
-deferred to a follow-up; for now the JACO 2 snapshot enforces byte equality
-only on macOS (the regen platform), with a structural smoke check on others.
+deferred to a follow-up; for now the platform-drift artifacts snapshot
+enforces byte equality only on macOS (the regen platform), with a structural
+smoke check on others.
+
+The parametrisation is driven by ``MANIFEST.toml`` via the loader at
+:mod:`ssik.prebuilt._manifest`. ``platform_drift`` and ``drift_markers``
+on the manifest entry drive the byte-vs-structural choice.
+
+Slow-build arms (Rizon 4 ~7 min, Kassow KR810 ~20 min, Rizon 10 ~7 min)
+are excluded from this snapshot test -- regenerating them in-memory per
+test would dominate CI time. They're validated via the uniform fuzz +
+sanity tests instead.
 """
 
 from __future__ import annotations
@@ -39,214 +49,77 @@ from ssik._kinbody import build_kinbody
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
+from ssik.prebuilt._manifest import Arm, load_manifest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ARTIFACTS = Path(__file__).parent.parent / "src" / "ssik" / "prebuilt"
 
 sys.path.insert(0, str(FIXTURES))
-from jaco2 import jaco2_specs  # noqa: E402
+
+_MANIFEST = load_manifest()
+# Slow-build arms are excluded from the snapshot test; their artifacts
+# take 7-20 minutes to regenerate which would dominate CI time.
+_SNAPSHOT_ARMS = [arm.name for arm in _MANIFEST.values() if not arm.slow_build]
 
 
-def _emit_urdf(urdf: str, base: str, ee: str, module_name: str, arm_label: str) -> str:
-    kb = load_urdf_kinbody_normalized(FIXTURES / urdf, base, ee)
+def _emit(arm: Arm) -> str:
+    """Re-emit the artifact for ``arm`` and return its source code."""
+    if arm.fixture_kind == "urdf":
+        kb = load_urdf_kinbody_normalized(FIXTURES / arm.fixture, arm.base_link, arm.ee_link)
+    else:
+        # specs: a Python builder module under tests/fixtures. Pass
+        # base_link_name + ee_link_name kwargs so the emitted artifact
+        # matches the manifest's declared link names. (Only meaningful
+        # when the manifest declares non-default names; harmless when
+        # they're the defaults.)
+        mod = __import__(arm.fixture)
+        specs_fn_name = arm.specs_fn
+        assert specs_fn_name is not None  # invariant per manifest schema
+        kb = build_kinbody(
+            getattr(mod, specs_fn_name)(),
+            base_link_name=arm.base_link,
+            ee_link_name=arm.ee_link,
+        )
     plan = dispatch(kb)
     result = emit_artifact(
         kb=kb,
         plan=plan,
-        module_name=module_name,
+        module_name=arm.name,
         output_path=None,
-        arm_label=arm_label,
-    )
-    return result.source
-
-
-def _emit_jaco2() -> str:
-    kb = build_kinbody(jaco2_specs())
-    plan = dispatch(kb)
-    result = emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="jaco2_ik",
-        output_path=None,
-        arm_label="Kinova JACO 2 (j2n6s200)",
-    )
-    return result.source
-
-
-def _emit_franka_panda() -> str:
-    from franka_panda import franka_panda_specs
-
-    kb = build_kinbody(franka_panda_specs())
-    plan = dispatch(kb)
-    result = emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="franka_panda_ik",
-        output_path=None,
-        arm_label="Franka Emika Panda (no hand)",
-    )
-    return result.source
-
-
-def _emit_iiwa14() -> str:
-    from kuka_iiwa14 import kuka_iiwa14_specs
-
-    kb = build_kinbody(kuka_iiwa14_specs())
-    plan = dispatch(kb)
-    result = emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="iiwa14_ik",
-        output_path=None,
-        arm_label="KUKA iiwa LBR 14",
-    )
-    return result.source
-
-
-def _emit_xarm7() -> str:
-    from xarm7 import xarm7_specs
-
-    kb = build_kinbody(xarm7_specs(), base_link_name="link_base", ee_link_name="link7")
-    plan = dispatch(kb)
-    result = emit_artifact(
-        kb=kb,
-        plan=plan,
-        module_name="xarm7_ik",
-        output_path=None,
-        arm_label="UFactory xArm7",
+        arm_label=arm.display_name,
     )
     return result.source
 
 
 @pytest.mark.parametrize(
-    ("module_name", "emit_fn"),
-    [
-        (
-            "ur5_ik",
-            lambda: _emit_urdf("ur5.urdf", "base_link", "ee_link", "ur5_ik", "UR5"),
-        ),
-        (
-            "puma560_ik",
-            lambda: _emit_urdf(
-                "puma560.urdf",
-                "base_link",
-                "wrist_3_link",
-                "puma560_ik",
-                "Puma 560",
-            ),
-        ),
-        ("jaco2_ik", _emit_jaco2),
-        ("franka_panda_ik", _emit_franka_panda),
-        ("iiwa14_ik", _emit_iiwa14),
-        ("xarm7_ik", _emit_xarm7),
-        (
-            "gen3_ik",
-            lambda: _emit_urdf(
-                "gen3.urdf",
-                "base_link",
-                "end_effector_link",
-                "gen3_ik",
-                "Kinova Gen3 (7-DOF)",
-            ),
-        ),
-        (
-            "xarm6_ik",
-            lambda: _emit_urdf(
-                "xarm6.urdf",
-                "link_base",
-                "link_eef",
-                "xarm6_ik",
-                "UFactory xArm6",
-            ),
-        ),
-        (
-            "z1_ik",
-            lambda: _emit_urdf(
-                "z1.urdf",
-                "link00",
-                "link06",
-                "z1_ik",
-                "Unitree Z1",
-            ),
-        ),
-        (
-            "piper_ik",
-            lambda: _emit_urdf(
-                "piper.urdf",
-                "base_link",
-                "link6",
-                "piper_ik",
-                "AgileX PiPER",
-            ),
-        ),
-    ],
+    "arm_name",
+    _SNAPSHOT_ARMS,
+    ids=_SNAPSHOT_ARMS,
 )
-def test_committed_artifact_matches_regeneration(module_name: str, emit_fn: object) -> None:
+def test_committed_artifact_matches_regeneration(arm_name: str) -> None:
     """Re-emit + byte-compare. Any drift fails the test with a unified-diff
     of the divergence and a pointer to the regen script.
 
-    JACO 2 byte-equality enforced only on macOS (the regen platform); on
-    other platforms a structural smoke check runs instead, because sympy's
-    internal arithmetic produces last-digit-different float literals
-    across platforms even with deterministic input DH params. See module
-    docstring; full sympy determinism is a follow-up.
+    Manifest entries with ``platform_drift = true`` (jaco2_ik, gen3_ik,
+    xarm7_ik, xarm6_ik, piper_ik) enforce byte-equality only on macOS
+    (the regen platform); on other platforms the test runs a structural
+    smoke check using the manifest's ``drift_markers``. See module
+    docstring; full sympy determinism is a follow-up (#124).
     """
-    rendered = emit_fn()  # type: ignore[operator]
-    committed_path = ARTIFACTS / f"{module_name}.py"
+    arm = _MANIFEST[arm_name]
+    rendered = _emit(arm)
+    committed_path = ARTIFACTS / f"{arm_name}.py"
     assert committed_path.exists(), (
         f"committed artifact {committed_path.relative_to(Path(__file__).parent.parent)} "
         f"is missing -- run `uv run python scripts/regen_artifacts.py` to create it."
     )
 
-    # Artifacts whose bytes drift across platforms by a last-digit float
-    # representation. JACO 2 (tier-2 RR): drift comes from sympy.cse /
-    # sympy.pycode internals. Gen3 (SRS-polished thin wrapper): drift
-    # comes from the URDF -> KinBody float arithmetic (urchin / numpy).
-    # Pinning full bit-determinism is deferred to a follow-up (#124).
-    # macOS is the regen platform; enforce byte-equality there, run a
-    # structural smoke check elsewhere.
-    _PLATFORM_DRIFT_ARTIFACTS = {
-        "jaco2_ik": [
-            "_solve_algebraic",
-            "_build_pq_matrices",
-            'SOLVER_NAME = "ikgeo.general_6r"',
-        ],
-        "gen3_ik": [
-            "_solver_solve",
-            'SOLVER_NAME = "seven_r.srs_polished"',
-            "def fk(q):",
-        ],
-        # xArm7: same class of drift as gen3 -- the xarm7 fixture's
-        # quaternion-to-rotation conversion (np.sqrt + division) produces
-        # last-bit-different float64 values on macOS Accelerate vs Linux
-        # OpenBLAS, which propagates through poe-normalisation into the
-        # baked T_HOME / T_left arrays. Functionally equivalent (FK
-        # round-trips at 1e-13 on both platforms); only the float repr
-        # differs by one trailing digit.
-        "xarm7_ik": [
-            'SOLVER_NAME = "jointlock.seven_r"',
-            'BASE_LINK = "link_base"',
-            'EE_LINK = "link7"',
-            "DOF = 7",
-            "def solve(",
-        ],
-        # xArm6: tier-2 RR same as jaco2 -- sympy.cse / sympy.pycode
-        # float-repr drift across macOS Accelerate vs Linux OpenBLAS.
-        "xarm6_ik": [
-            "_solve_algebraic",
-            "_build_pq_matrices",
-            'SOLVER_NAME = "ikgeo.general_6r"',
-        ],
-        # PiPER: same tier-2 RR class as jaco2 / xarm6.
-        "piper_ik": [
-            "_solve_algebraic",
-            "_build_pq_matrices",
-            'SOLVER_NAME = "ikgeo.general_6r"',
-        ],
-    }
-    if module_name in _PLATFORM_DRIFT_ARTIFACTS and sys.platform != "darwin":
-        for marker in _PLATFORM_DRIFT_ARTIFACTS[module_name]:
-            assert marker in rendered, f"{module_name}: missing structural marker {marker!r}"
+    if arm.platform_drift and sys.platform != "darwin":
+        # Structural smoke check on platforms whose float repr differs from
+        # macOS's. Each ``drift_marker`` must appear verbatim in the
+        # regenerated source.
+        for marker in arm.drift_markers:
+            assert marker in rendered, f"{arm_name}: missing structural marker {marker!r}"
         return
 
     committed = committed_path.read_text()

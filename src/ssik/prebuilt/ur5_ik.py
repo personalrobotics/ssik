@@ -1,4 +1,4 @@
-"""Generated IK module for UR5.
+"""Generated IK module for Universal Robots UR5.
 
 This file was emitted by ``ssik build`` and is the public artifact for
 running analytical inverse kinematics on this specific arm. The
