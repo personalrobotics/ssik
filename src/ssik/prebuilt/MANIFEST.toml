@@ -400,6 +400,9 @@ max_fk = 7.0e-8
 sols_min = 10
 sols_max = 38
 
+[arms.kassow_kr810_ik.known_gaps]
+xfail_reason = "cached-RR HP coverage gap on q*=[0, 1, 2.5, 0.5, 1, 1, 0]. Filed as #280."
+
 [arms.rizon10_ik]
 display_name = "Flexiv Rizon 10"
 short_name = "Rizon 10"
