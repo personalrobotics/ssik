@@ -33,21 +33,23 @@ preprocessing) and cleaner to ship in production stacks.
 
 ## What's included
 
+<!-- AUTOGEN:prebuilt_readme_table -->
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
-| `ur5_ik` | `ikgeo.three_parallel` | <1 s | ~25 KB |
-| `puma560_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
+| `ur5_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+| `puma560_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
+| `jaco2_ik` | `ikgeo.general_6r` | ~25 s | ~73 KB |
 | `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `gen3_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
-| `jaco2_ik` | `ikgeo.general_6r` (RR + AE-3) | ~25 s | ~72 KB |
-| `franka_panda_ik` | `jointlock.seven_r` (tier-0 inner) | <1 s | ~22 KB |
-| `xarm7_ik` | `jointlock.seven_r` (`reversed:spherical` inner) | <1 s | ~22 KB |
-| `xarm6_ik` | `ikgeo.general_6r` (RR + AE-3) | ~15 s | ~70 KB |
+| `franka_panda_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
+| `xarm7_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
+| `xarm6_ik` | `ikgeo.general_6r` | ~15 s | ~70 KB |
 | `z1_ik` | `ikgeo.three_parallel` | <1 s | ~23 KB |
-| `piper_ik` | `ikgeo.general_6r` (RR + AE-3) | ~25 s | ~88 KB |
+| `piper_ik` | `ikgeo.general_6r` | ~25 s | ~88 KB |
 | `rizon4_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~270 KB |
-| `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~331 KB |
 | `kassow_kr810_ik` | `jointlock.seven_r` + cached-RR | ~20 min | ~530 KB |
+| `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~331 KB |
+<!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached
 Raghavan-Roth symbolic derivations as base85-encoded zlib-compressed pickle

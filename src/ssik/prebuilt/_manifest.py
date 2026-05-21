@@ -52,6 +52,7 @@ class Arm:
     name: str  # e.g. "rizon10_ik"
     display_name: str
     short_name: str
+    table_name: str  # compact form for README / quickstart prebuilt tables
     fixture: str
     fixture_kind: Literal["urdf", "specs"]
     base_link: str
@@ -107,6 +108,11 @@ def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
         name=name,
         display_name=str(body["display_name"]),
         short_name=str(body["short_name"]),
+        # ``table_name`` defaults to display_name when omitted from the
+        # manifest entry. Override per-arm when display_name carries a
+        # parenthesised model variant (e.g. "Kinova JACO 2 (j2n6s200)")
+        # that doesn't read well in compact table cells.
+        table_name=str(body.get("table_name", body["display_name"])),
         fixture=str(body["fixture"]),
         fixture_kind=fixture_kind,  # type: ignore[arg-type]
         specs_fn=str(specs_fn) if specs_fn else None,

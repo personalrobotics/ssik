@@ -96,6 +96,7 @@ sols_max = 8
 [arms.jaco2_ik]
 display_name = "Kinova JACO 2 (j2n6s200)"
 short_name = "JACO 2"
+table_name = "Kinova JACO 2"
 fixture = "jaco2"
 fixture_kind = "specs"
 specs_fn = "jaco2_specs"
@@ -157,6 +158,7 @@ sols_max = 128
 [arms.gen3_ik]
 display_name = "Kinova Gen3 (7-DOF)"
 short_name = "Gen3"
+table_name = "Kinova Gen3 7-DOF"
 fixture = "gen3.urdf"
 fixture_kind = "urdf"
 base_link = "base_link"
@@ -189,6 +191,7 @@ sols_max = 95
 [arms.franka_panda_ik]
 display_name = "Franka Emika Panda (no hand)"
 short_name = "Franka Panda"
+table_name = "Franka Panda"
 fixture = "franka_panda"
 fixture_kind = "specs"
 specs_fn = "franka_panda_specs"

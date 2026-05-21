@@ -5,7 +5,7 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
-Provenance: KinBody hash b88b2e44baf7 (sha256/12 of the input chain).
+Provenance: KinBody hash 6f0d313e908e (sha256/12 of the input chain).
 ``T_target`` is the pose of ``link7`` (end-effector link) in
 ``link_base`` (base link). If your URDF differs (calibrated
 geometry, custom tool past the flange, different link names),
@@ -67,7 +67,7 @@ DOF = 7
 # Home pose: FK at q = np.zeros(DOF). Sanity-check this against
 # your robot's documented home pose to verify the baked geometry
 # matches your URDF.
-T_HOME = np.array([[1.0, 0.0, 0.0, 0.20600000000000002], [0.0, -0.9999999999999987, -4.4408920985006217e-16, -2.0572432646304143e-16], [0.0, 4.4408920985006217e-16, -0.9999999999999987, 0.12050000000000025], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+T_HOME = np.array([[1.0, 0.0, 0.0, 0.20600000000000002], [0.0, -0.9999999999999987, -4.4408920985006217e-16, -2.0572432646304143e-16], [0.0, 4.440892098500621e-16, -0.9999999999999987, 0.12050000000000025], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 
 # --- baked KinBody constants ---
 
@@ -110,7 +110,7 @@ _JOINT_T_RIGHTS = [
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, -0.9999999999999987, -4.4408920985006217e-16, 0.0], [0.0, 4.4408920985006217e-16, -0.9999999999999987, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, -0.9999999999999987, -4.4408920985006217e-16, 0.0], [0.0, 4.440892098500621e-16, -0.9999999999999987, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
 ]
 
 _JOINT_TYPES = [

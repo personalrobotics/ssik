@@ -39,21 +39,23 @@ There are two artifact paths:
 
 The wheel ships 13 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
+<!-- AUTOGEN:readme_prebuilt_table -->
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
 | `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
 | `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** | `base_link` | `ee_link` |
-| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `world` | `tool0` |
+| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base_link` | `ee_link` |
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
-| `franka_panda_ik` | Franka Panda | anthropomorphic 7R | `base_link` | `ee_link` |
-| `rizon4_ik` | Flexiv Rizon 4 | **non-SRS 7R** | `base_link` | `flange` |
-| `kassow_kr810_ik` | Kassow KR810 | **non-SRS 7R** | `base` | `end_effector` |
-| `xarm7_ik` | UFactory xArm7 | 7R Pieper-wedge (jointlock → `reversed:spherical`) | `link_base` | `link7` |
+| `franka_panda_ik` | Franka Panda | **anthropomorphic 7R** | `base_link` | `ee_link` |
+| `xarm7_ik` | UFactory xArm7 | **7R Pieper-wedge** (jointlock → `reversed:spherical`) | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | **non-Pieper 6R** (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
 | `piper_ik` | AgileX PiPER | **non-Pieper 6R** (joints 4 & 6 tilted axis) | `base_link` | `link6` |
+| `rizon4_ik` | Flexiv Rizon 4 | **non-SRS 7R** | `base_link` | `flange` |
+| `kassow_kr810_ik` | Kassow KR810 | **non-SRS 7R** | `base` | `end_effector` |
 | `rizon10_ik` | Flexiv Rizon 10 | **non-SRS 7R** (~1.4 m reach) | `base_link` | `flange` |
+<!-- /AUTOGEN -->
 
 ```python
 from ssik.prebuilt import iiwa14_ik
@@ -263,21 +265,23 @@ Numerical-IK libraries take a seed, run damped least-squares to a **single** con
 
 EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-decomposition solvers. It's analytical on the kinematic families it recognises and refuses everything else. Numbers below from [`examples/04_compare_vs_eaik.py`](examples/04_compare_vs_eaik.py) over 100 random reachable poses per arm, Apple M3 single-thread, mean ± 95% CI via 1000-resample bootstrap. FK residual is the Frobenius norm `‖FK(q) − T‖` against the original URDF / spec FK.
 
+<!-- AUTOGEN:readme_eaik_table -->
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 2-8 sols | 532 ± 10 µs / FK 2e-9 / 2-8 sols |
 | Puma 560 (Pieper 6R, spherical wrist) | 5 ± 0 µs / FK 3e-14 / 8 sols | 220 ± 3 µs / FK 2e-14 / 8 sols |
-| Z1 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 1e-15 / 4-8 sols | 487 ± 7 µs / FK 3e-15 / 4-8 sols |
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 976 ± 39 µs / FK 5e-6 / 2-12 sols |
-| xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 2e-7 / 8-12 sols |
-| PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.17 ± 0.03 ms / FK 9e-6 / 1-8 sols |
 | iiwa14 (SRS 7R) | **refuses** (no 7R DH path in bench harness) | 4.54 ± 0.03 ms / FK 4e-13 / 128 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.46 ± 1.25 ms / FK 1e-12 / 10-95 sols |
-| Franka Panda (anthropomorphic 7R) | **refuses** (no 7R DH path in bench harness) | 29.27 ± 2.81 ms / FK 1e-6 / 8-124 sols |
+| Franka Panda (**anthropomorphic 7R**) | **refuses** (no 7R DH path in bench harness) | 29.27 ± 2.81 ms / FK 1e-6 / 8-124 sols |
 | xArm7 (**non-SRS 7R**) | **refuses** (no 7R DH path in bench harness) | 37.10 ± 0.49 ms / FK 4e-11 / 56-64 sols |
+| xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 2e-7 / 8-12 sols |
+| Z1 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 1e-15 / 4-8 sols | 487 ± 7 µs / FK 3e-15 / 4-8 sols |
+| PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.17 ± 0.03 ms / FK 9e-6 / 1-8 sols |
 | Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 30.58 ± 8.58 ms / FK 4e-9 / 10-60 sols |
-| Rizon 10 (**non-SRS 7R**, ~1.4 m reach) | **refuses** ("only 1-6R") | 29.43 ± 6.37 ms / FK 6e-8 / 10-64 sols |
 | Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 27.52 ± 10.71 ms / FK 7e-8 / 10-38 sols |
+| Rizon 10 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 29.43 ± 6.37 ms / FK 6e-8 / 10-64 sols |
+<!-- /AUTOGEN -->
 
 The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
 

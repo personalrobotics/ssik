@@ -24,21 +24,23 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 
 ### Shipped prebuilts
 
+<!-- AUTOGEN:quickstart_prebuilt_table -->
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
-| `puma560_ik` | KUKA Puma 560 | Pieper 6R | `base_link` | `wrist_3_link` |
+| `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
 | `jaco2_ik` | Kinova JACO 2 | non-Pieper 6R | `base_link` | `ee_link` |
-| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `world` | `tool0` |
+| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base_link` | `ee_link` |
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
 | `franka_panda_ik` | Franka Panda | anthropomorphic 7R | `base_link` | `ee_link` |
+| `xarm7_ik` | UFactory xArm7 | 7R Pieper-wedge (jointlock → `reversed:spherical`) | `link_base` | `link7` |
+| `xarm6_ik` | UFactory xArm6 | non-Pieper 6R (joint 6 y-offset) | `link_base` | `link_eef` |
+| `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
+| `piper_ik` | AgileX PiPER | non-Pieper 6R (joints 4 & 6 tilted axis) | `base_link` | `link6` |
 | `rizon4_ik` | Flexiv Rizon 4 | non-SRS 7R | `base_link` | `flange` |
 | `kassow_kr810_ik` | Kassow KR810 | non-SRS 7R | `base` | `end_effector` |
-| `xarm7_ik` | UFactory xArm7 | 7R Pieper-wedge | `link_base` | `link7` |
-| `xarm6_ik` | UFactory xArm6 | non-Pieper 6R | `link_base` | `link_eef` |
-| `z1_ik` | Unitree Z1 | three-parallel 6R | `link00` | `link06` |
-| `piper_ik` | AgileX PiPER | non-Pieper 6R | `base_link` | `link6` |
-| `rizon10_ik` | Flexiv Rizon 10 | non-SRS 7R | `base_link` | `flange` |
+| `rizon10_ik` | Flexiv Rizon 10 | non-SRS 7R (~1.4 m reach) | `base_link` | `flange` |
+<!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:
 

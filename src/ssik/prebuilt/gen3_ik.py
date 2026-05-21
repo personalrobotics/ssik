@@ -5,7 +5,7 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
-Provenance: KinBody hash 9a29063ad96b (sha256/12 of the input chain).
+Provenance: KinBody hash e782ba121009 (sha256/12 of the input chain).
 ``T_target`` is the pose of ``end_effector_link`` (end-effector link) in
 ``base_link`` (base link). If your URDF differs (calibrated
 geometry, custom tool past the flange, different link names),
@@ -61,7 +61,7 @@ DOF = 7
 # Home pose: FK at q = np.zeros(DOF). Sanity-check this against
 # your robot's documented home pose to verify the baked geometry
 # matches your URDF.
-T_HOME = np.array([[1.0, -8.326720029981853e-15, -2.1017948830410524e-16, -1.925826838264291e-16], [8.326718485692419e-15, 0.9999999999730148, -7.346410203412496e-06, -0.024859601294873888], [2.102406597994228e-16, 7.346410203412494e-06, 0.9999999999730148, 1.1873847699190918], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+T_HOME = np.array([[1.0, -8.326720029981853e-15, -2.1017948830410524e-16, -1.925826838264291e-16], [8.326718485692419e-15, 0.9999999999730148, -7.346410203412496e-06, -0.024859601294873888], [2.102406597994228e-16, 7.3464102034124935e-06, 0.9999999999730148, 1.1873847699190918], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 
 # --- baked KinBody constants ---
 
@@ -104,7 +104,7 @@ _JOINT_T_RIGHTS = [
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, -8.326720029981853e-15, -2.1017948830410524e-16, -1.2931293017908443e-17], [8.326718485692419e-15, 0.9999999999730148, -7.346410203412496e-06, -4.5198788796441125e-07], [2.102406597994228e-16, 7.346410203412494e-06, 0.9999999999730148, 0.061524999998339824], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, -8.326720029981853e-15, -2.1017948830410524e-16, -1.2931293017908443e-17], [8.326718485692419e-15, 0.9999999999730148, -7.346410203412496e-06, -4.5198788796441125e-07], [2.102406597994228e-16, 7.3464102034124935e-06, 0.9999999999730148, 0.061524999998339824], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
 ]
 
 _JOINT_TYPES = [
