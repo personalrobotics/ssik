@@ -12,7 +12,7 @@
 
 ## Body
 
-Hi r/robotics — we've open-sourced **ssik**, a Python library that returns every analytical inverse-kinematics branch for 6R and 7R robot arms. Posting in case it's useful to anyone here; happy to help anyone get it working on their setup.
+Hi r/robotics — I've open-sourced **ssik**, a Python library that returns every analytical inverse-kinematics branch for 6R and 7R robot arms. Posting in case it's useful to anyone here; happy to help anyone get it working on their setup.
 
 ```bash
 pip install ssik
@@ -58,6 +58,11 @@ ssik is meant to complement, not replace, what's already out there.
 - **License:** BSD-3-Clause. Clean-room reimplementations from the academic literature; lineage documented per-module.
 
 Happy to answer questions about the algorithmic side, comparisons to whatever you're using, or how to get it working on a specific arm. Thanks to everyone here who's contributed to the open robotics-software ecosystem over the years — this project stands on a lot of shoulders.
+
+— Siddhartha Srinivasa
+Professor, Paul G. Allen School of Computer Science and Engineering
+Personal Robotics Laboratory, University of Washington
+https://goodrobot.ai
 
 ---
 
