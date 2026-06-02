@@ -188,6 +188,9 @@ max_fk = 1.0e-12
 sols_min = 10
 sols_max = 95
 
+[arms.gen3_ik.known_gaps]
+xfail_reason = "srs_polished coverage gap on q*=[0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875] (0 sols at q*, 5 sols at q* + 0.01 on q5, 1 sol at q* + 0.01 on q7). Same shape as #286 / #288 / #298. Filed as #299."
+
 [arms.franka_panda_ik]
 display_name = "Franka Emika Panda (no hand)"
 short_name = "Franka Panda"
@@ -432,3 +435,39 @@ ms_ci95 = 6.37
 max_fk = 6.1e-8
 sols_min = 10
 sols_max = 64
+
+[arms.fanuc_crx10ial_ik]
+display_name = "FANUC CRX-10iA/L"
+short_name = "CRX-10iA/L"
+fixture = "fanuc_crx10ial.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (non-spherical wrist, 150 mm y-offset)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 36
+artifact_size_kb = 76
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.fanuc_crx10ial_ik.bench]
+ms_mean = 0.991
+ms_ci95 = 0.014
+max_fk = 6.2e-7
+sols_min = 6
+sols_max = 12
+
+[arms.fanuc_crx10ial_ik.known_gaps]
+xfail_reason = "RR coverage gap on q*=[0, -0.21484375, -1.57884726, 0.25, -0.21484375, 0] (q3 ≈ -π/2 ridge; 0 sols at q*, 4 sols at q* ± 0.001 on q3; cond(m_quad) 1.3e6 vs 8e3). Same shape as #286 / #82. Filed as #298."
+
