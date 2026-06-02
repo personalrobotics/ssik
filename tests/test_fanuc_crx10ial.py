@@ -80,6 +80,7 @@ def test_fanuc_crx10ial_hand_picked_fk_closure(q_star: np.ndarray) -> None:
     kb = _fanuc_crx10ial_kinbody()
     T_target = poe_forward_kinematics(kb, q_star)
     from ssik.solvers.ikgeo import general_6r
+
     sols, _ = general_6r.solve(kb, T_target, allow_refinement=True)
     assert sols, f"no IK returned for reachable q*={q_star.tolist()}"
     best_fk = min(s.fk_residual for s in sols)
@@ -107,6 +108,7 @@ def test_fanuc_crx10ial_random_pose_fk_closure(seed: int) -> None:
     kb = _fanuc_crx10ial_kinbody()
     T_target = poe_forward_kinematics(kb, q_star)
     from ssik.solvers.ikgeo import general_6r
+
     sols, _ = general_6r.solve(kb, T_target, allow_refinement=True)
     assert sols, f"no IK returned for random q*={q_star.tolist()}"
     best_fk = min(s.fk_residual for s in sols)
