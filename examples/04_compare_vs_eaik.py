@@ -89,6 +89,13 @@ FIXTURES = [
     Fixture("Z1", 6, "urdf", ("z1.urdf", "link00", "link06"), "z1_ik"),
     Fixture("PiPER", 6, "urdf", ("piper.urdf", "base_link", "link6"), "piper_ik"),
     Fixture("Rizon 10", 7, "urdf", ("rizon10.urdf", "base_link", "flange"), "rizon10_ik"),
+    Fixture(
+        "CRX-10iA/L",
+        6,
+        "urdf",
+        ("fanuc_crx10ial.urdf", "base_link", "tool0"),
+        "fanuc_crx10ial_ik",
+    ),
 ]
 
 
