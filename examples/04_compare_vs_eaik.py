@@ -98,6 +98,7 @@ FIXTURES = [
     ),
     Fixture("YAM", 6, "urdf", ("yam.urdf", "base_link", "link_6"), "yam_ik"),
     Fixture("big_yam", 6, "urdf", ("big_yam.urdf", "base", "gripper"), "big_yam_ik"),
+    Fixture("FR3", 7, "urdf", ("fr3.urdf", "fr3_link0", "fr3_link8"), "fr3_ik"),
 ]
 
 

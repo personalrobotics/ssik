@@ -537,3 +537,30 @@ ms_ci95 = 0.02
 max_fk = 4.7e-6
 sols_min = 8
 sols_max = 8
+
+[arms.fr3_ik]
+display_name = "Franka Research 3"
+short_name = "FR3"
+fixture = "fr3.urdf"
+fixture_kind = "urdf"
+base_link = "fr3_link0"
+ee_link = "fr3_link8"
+dof = 7
+solver = "jointlock.seven_r"
+tier = 1
+kinematic_class = "anthropomorphic 7R (Panda successor)"
+short_class = "anthropomorphic 7R"
+class_tags = ["non-SRS", "anthropomorphic", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 22
+sample_q = [0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5]
+fk_ceiling_fuzz = 1e-4
+platform_drift = false
+
+[arms.fr3_ik.bench]
+ms_mean = 30.83
+ms_ci95 = 3.12
+max_fk = 6.0e-9
+sols_min = 8
+sols_max = 128
