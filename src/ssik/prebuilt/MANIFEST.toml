@@ -379,6 +379,9 @@ max_fk = 4.0e-9
 sols_min = 10
 sols_max = 60
 
+[arms.rizon4_ik.known_gaps]
+xfail_reason = "cached-RR HP coverage gap on q*=[0, 1, -2, 0.375, -2, 1, 0] (0 sols at q*, 2 sols at q* + 0.05 on q3 or q* + 0.10 on q2). Same shape as #280 / #286 / #288 / #298 / #299. Filed as #304."
+
 [arms.kassow_kr810_ik]
 display_name = "Kassow KR810"
 short_name = "Kassow KR810"
@@ -471,3 +474,66 @@ sols_max = 12
 [arms.fanuc_crx10ial_ik.known_gaps]
 xfail_reason = "RR coverage gap on q*=[0, -0.21484375, -1.57884726, 0.25, -0.21484375, 0] (q3 ≈ -π/2 ridge; 0 sols at q*, 4 sols at q* ± 0.001 on q3; cond(m_quad) 1.3e6 vs 8e3). Same shape as #286 / #82. Filed as #298."
 
+[arms.yam_ik]
+display_name = "I2RT YAM"
+short_name = "YAM"
+fixture = "yam.urdf"
+fixture_kind = "urdf"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 36
+artifact_size_kb = 106
+sample_q = [0.3, 1.0, 1.0, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.yam_ik.bench]
+ms_mean = 1.03
+ms_ci95 = 0.01
+max_fk = 5.4e-9
+sols_min = 8
+sols_max = 8
+
+[arms.big_yam_ik]
+display_name = "I2RT big_yam"
+short_name = "big_yam"
+fixture = "big_yam.urdf"
+fixture_kind = "urdf"
+base_link = "base"
+ee_link = "gripper"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 36
+artifact_size_kb = 106
+sample_q = [0.3, 1.0, 1.0, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.big_yam_ik.bench]
+ms_mean = 1.03
+ms_ci95 = 0.02
+max_fk = 4.7e-6
+sols_min = 8
+sols_max = 8

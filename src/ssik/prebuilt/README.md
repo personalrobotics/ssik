@@ -50,6 +50,8 @@ preprocessing) and cleaner to ship in production stacks.
 | `kassow_kr810_ik` | `jointlock.seven_r` + cached-RR | ~20 min | ~530 KB |
 | `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~331 KB |
 | `fanuc_crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
+| `yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
+| `big_yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached
