@@ -43,6 +43,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `fanuc_crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
 | `yam_ik` | I2RT YAM | non-Pieper 6R | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | non-Pieper 6R | `base` | `gripper` |
+| `fr3_ik` | Franka Research 3 | anthropomorphic 7R (Panda successor) | `fr3_link0` | `fr3_link8` |
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:

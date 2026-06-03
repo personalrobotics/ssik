@@ -52,6 +52,7 @@ preprocessing) and cleaner to ship in production stacks.
 | `fanuc_crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
 | `yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 | `big_yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
+| `fr3_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached
