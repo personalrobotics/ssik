@@ -41,6 +41,8 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `kassow_kr810_ik` | Kassow KR810 | non-SRS 7R | `base` | `end_effector` |
 | `rizon10_ik` | Flexiv Rizon 10 | non-SRS 7R (~1.4 m reach) | `base_link` | `flange` |
 | `fanuc_crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
+| `yam_ik` | I2RT YAM | non-Pieper 6R | `base_link` | `link_6` |
+| `big_yam_ik` | I2RT big_yam | non-Pieper 6R | `base` | `gripper` |
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:

@@ -96,6 +96,8 @@ FIXTURES = [
         ("fanuc_crx10ial.urdf", "base_link", "tool0"),
         "fanuc_crx10ial_ik",
     ),
+    Fixture("YAM", 6, "urdf", ("yam.urdf", "base_link", "link_6"), "yam_ik"),
+    Fixture("big_yam", 6, "urdf", ("big_yam.urdf", "base", "gripper"), "big_yam_ik"),
 ]
 
 
