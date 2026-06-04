@@ -59,8 +59,8 @@ The wheel ships 13 ready-to-import artifacts. Each was built against a specific 
 | `yam_ik` | I2RT YAM | **non-Pieper 6R** | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | **non-Pieper 6R** | `base` | `gripper` |
 | `fr3_ik` | Franka Research 3 | **anthropomorphic 7R** (Panda successor) | `fr3_link0` | `fr3_link8` |
-| `openarm_left_ik` | Enactic OpenArm v2.0 (left) | non-Z*Z 7R (axes concurrent but wrist not ZYZ Euler) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
-| `openarm_right_ik` | Enactic OpenArm v2.0 (right) | non-Z*Z 7R (axes concurrent but wrist not ZYZ Euler) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
+| `openarm_left_ik` | Enactic OpenArm v2.0 (left) | **non-SRS 7R** (axes concurrent, non-ZYZ wrist) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
+| `openarm_right_ik` | Enactic OpenArm v2.0 (right) | **non-SRS 7R** (axes concurrent, non-ZYZ wrist) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
 <!-- /AUTOGEN -->
 
 ```python
@@ -291,8 +291,8 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.01 ms / FK 5e-9 / 8 sols |
 | big_yam (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.02 ms / FK 5e-6 / 8 sols |
 | FR3 (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 30.83 ± 3.12 ms / FK 6e-9 / 8-128 sols |
-| OpenArm L (non-SRS 7R) | _(uncategorised)_ | 13.41 ± 1.56 ms / FK 2e-15 / 8-40 sols |
-| OpenArm R (non-SRS 7R) | _(uncategorised)_ | 11.07 ± 0.82 ms / FK 1e-15 / 8-40 sols |
+| OpenArm L (**non-SRS 7R**) | **refuses** ("only 1-6R") | 13.41 ± 1.56 ms / FK 2e-15 / 8-40 sols |
+| OpenArm R (**non-SRS 7R**) | **refuses** ("only 1-6R") | 11.07 ± 0.82 ms / FK 1e-15 / 8-40 sols |
 <!-- /AUTOGEN -->
 
 The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
