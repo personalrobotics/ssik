@@ -478,6 +478,16 @@ def is_approximately_srs_7r(
 
     Parallel-axis triples are still rejected (the SRS algorithm is
     ill-defined when axes are parallel, regardless of drift).
+
+    Z*Z structural requirement (#307): in addition to drift, the
+    approximate-SRS solver path also requires the same
+    Z*Z (parallel first/third axis) structure as :func:`is_srs_7r`,
+    because ``srs_polished`` internally uses the strict ``srs.solve``
+    to produce warm-start candidates and the LM polish needs those
+    seeds to be close to a real solution. On non-Z*Z arms (Enactic
+    OpenArm v2.0), the warm starts land 1-3 m off target and LM either
+    fails to converge or converges glacially -- ``jointlock.seven_r``
+    is 5x faster and reaches machine precision instead.
     """
     if len(kb.joints) != 7:
         return None
@@ -488,6 +498,15 @@ def is_approximately_srs_7r(
     if s_pivot is None or w_pivot is None:
         return None
     if s_drift > max_drift_m or w_drift > max_drift_m:
+        return None
+    # Z*Z gate (#307): mirror of the check in ``is_srs_7r`` -- the
+    # approximate-SRS solver path inherits the strict solver's hidden
+    # ZYZ Euler assumption via its warm-start dependency. Reject
+    # non-Z*Z chains here so the dispatcher falls through to
+    # ``jointlock.seven_r`` instead.
+    if not axis_parallel(kb.joints[shoulder[0]].axis, kb.joints[shoulder[2]].axis, policy):
+        return None
+    if not axis_parallel(kb.joints[wrist[0]].axis, kb.joints[wrist[2]].axis, policy):
         return None
     base = SrsClassification(
         shoulder_indices=shoulder,
