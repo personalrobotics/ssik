@@ -564,3 +564,67 @@ ms_ci95 = 3.12
 max_fk = 6.0e-9
 sols_min = 8
 sols_max = 128
+
+[arms.openarm_left_ik]
+display_name = "Enactic OpenArm v2.0 (left)"
+short_name = "OpenArm L"
+fixture = "openarm_left.urdf"
+fixture_kind = "urdf"
+base_link = "openarm_left_base_link"
+ee_link = "openarm_left_ee_base_link"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R (non-Z*Z wrist)"
+short_class = "approximate-SRS 7R"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 9
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.openarm_left_ik.bench]
+ms_mean = 57.69
+ms_ci95 = 0.92
+max_fk = 1.0e-12
+sols_min = 21
+sols_max = 67
+
+[arms.openarm_right_ik]
+display_name = "Enactic OpenArm v2.0 (right)"
+short_name = "OpenArm R"
+fixture = "openarm_right.urdf"
+fixture_kind = "urdf"
+base_link = "openarm_right_base_link"
+ee_link = "openarm_right_ee_base_link"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R (non-Z*Z wrist)"
+short_class = "approximate-SRS 7R"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 9
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.openarm_right_ik.bench]
+ms_mean = 56.70
+ms_ci95 = 0.67
+max_fk = 1.0e-12
+sols_min = 22
+sols_max = 59

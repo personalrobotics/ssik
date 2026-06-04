@@ -63,7 +63,7 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import (
     SrsClassification,
-    is_srs_7r,
+    _classify_srs_7r_geometric,
     joint_origins,
 )
 from ssik.refinement import dedup_by_wrap_close
@@ -247,7 +247,15 @@ def solve(
     """
     if len(kb.joints) != 7:
         raise ValueError(f"seven_r.srs requires a 7-DOF chain; got {len(kb.joints)}")
-    cls = is_srs_7r(kb, policy)
+    # Use the geometric-only helper here, not the strict ``is_srs_7r``:
+    # ``srs_polished`` (the approximate-SRS path used by Gen3 / OpenArm /
+    # other non-canonical-Euler arms) calls ``srs.solve`` with reach-slack
+    # to get warm-start candidates that its LM polish then rescues. Those
+    # arms fail the Z*Z check in the strict predicate but are still
+    # axis-concurrent SRS. The dispatcher's tier-0 gate is the strict
+    # ``is_srs_7r``; the public ``srs.solve`` entrypoint only refuses
+    # geometrically non-SRS chains.
+    cls = _classify_srs_7r_geometric(kb, policy)
     if cls is None:
         raise ValueError(
             "seven_r.srs requires SRS-class topology (shoulder axes 0,1,2 "

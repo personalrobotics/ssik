@@ -99,6 +99,24 @@ FIXTURES = [
     Fixture("YAM", 6, "urdf", ("yam.urdf", "base_link", "link_6"), "yam_ik"),
     Fixture("big_yam", 6, "urdf", ("big_yam.urdf", "base", "gripper"), "big_yam_ik"),
     Fixture("FR3", 7, "urdf", ("fr3.urdf", "fr3_link0", "fr3_link8"), "fr3_ik"),
+    Fixture(
+        "OpenArm L",
+        7,
+        "urdf",
+        ("openarm_left.urdf", "openarm_left_base_link", "openarm_left_ee_base_link"),
+        "openarm_left_ik",
+    ),
+    Fixture(
+        "OpenArm R",
+        7,
+        "urdf",
+        (
+            "openarm_right.urdf",
+            "openarm_right_base_link",
+            "openarm_right_ee_base_link",
+        ),
+        "openarm_right_ik",
+    ),
 ]
 
 
