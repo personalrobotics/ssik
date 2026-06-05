@@ -96,6 +96,20 @@ def _fmt_sols(sols_min: int, sols_max: int) -> str:
     return f"{sols_min}-{sols_max}"
 
 
+def _row_fixture_source(arm: Arm) -> str:
+    """One row of the README fixture-provenance table (#311).
+
+    Layout::
+
+      | `<name>` | <fixture_source> |
+
+    Surfaces the kinematic-chain provenance so a user picking up a
+    prebuilt can audit whether ssik solves the same chain their
+    manufacturer ships against their real hardware.
+    """
+    return f"| `{arm.name}` | {arm.fixture_source} |"
+
+
 def _row_readme_prebuilt(arm: Arm) -> str:
     """One row of the README prebuilt table.
 
@@ -285,6 +299,10 @@ def _render(arms: dict[str, Arm], anchor: str) -> str | None:
     if anchor == "prebuilt_readme_table":
         rows = [_row_prebuilt_readme(arm) for arm in arms.values()]
         header = "| Arm | Solver | Build time | Artifact size |\n|---|---|:---:|:---:|"
+        return header + "\n" + "\n".join(rows)
+    if anchor == "readme_fixture_source_table":
+        rows = [_row_fixture_source(arm) for arm in arms.values()]
+        header = "| Module | Fixture provenance |\n|---|---|"
         return header + "\n" + "\n".join(rows)
     return None
 

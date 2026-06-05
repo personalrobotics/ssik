@@ -223,30 +223,20 @@ def test_all_fixed_chain_raises(tmp_path: Path) -> None:
         load_urdf_kinbody(urdf, "base", "tip")
 
 
-def test_ur5_urdf_matches_hand_fixture() -> None:
-    """Integration: the ``ur5.urdf`` fixture, loaded via the adapter, produces
-    a chain whose FK equals our hand-built DH fixture's FK at a random q*.
+def test_ur5_urdf_loads_as_six_joint_chain() -> None:
+    """Smoke check that the UR5 URDF adapter produces a 6-joint POE chain.
 
-    This is the strongest proof that the adapter preserves kinematics
-    across the URDF→JointSpec conversion.
+    The original incarnation of this test compared adapter output against
+    a hand-built classical-DH UR5 in ``tests/fixtures/ur5.py``. Per #311,
+    ``tests/fixtures/ur5.urdf`` was replaced with the manufacturer URDF
+    (with the real ~135 mm physical shoulder offset), so a comparison
+    against textbook DH no longer makes sense -- the two describe
+    different physical chains. The end-to-end kinematic-correctness
+    claim is now locked in by
+    :mod:`tests.test_prebuilt_fixture_parity`, which asserts
+    ``module.fk(q) == upstream.fk(q)`` at machine precision against
+    ``robot_descriptions / ur5_description``.
     """
-    from tests.fixtures.ur5 import ur5_fk
-
     kb = load_urdf_kinbody(FIXTURES / "ur5.urdf", "base_link", "ee_link")
     assert len(kb.joints) == 6
     assert kb.GetDOF() == 6
-
-    # Independently compute FK via the URDF-sourced KinBody by applying
-    # T_left @ Rz(q) @ T_right per joint.
-    q_star = [0.3, -0.7, 0.9, 1.1, -0.5, 0.2]
-    T = np.eye(4)
-    for j, q in zip(kb.joints, q_star, strict=True):
-        c, s = np.cos(q), np.sin(q)
-        Rz = np.array([[c, -s, 0, 0], [s, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        T = T @ j.T_left @ Rz @ j.T_right
-
-    T_hand = ur5_fk(q_star)
-    assert np.allclose(T, T_hand, atol=1e-9), (
-        f"URDF-sourced KinBody FK diverges from hand-built fixture. "
-        f"max diff = {np.max(np.abs(T - T_hand))}"
-    )

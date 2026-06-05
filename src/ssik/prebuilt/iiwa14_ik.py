@@ -5,14 +5,14 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
-Provenance: KinBody hash fd5922ca3dcc (sha256/12 of the input chain).
-``T_target`` is the pose of ``ee_link`` (end-effector link) in
-``base_link`` (base link). If your URDF differs (calibrated
+Provenance: KinBody hash 23855e20b39c (sha256/12 of the input chain).
+``T_target`` is the pose of ``iiwa_link_ee_kuka`` (end-effector link) in
+``base`` (base link). If your URDF differs (calibrated
 geometry, custom tool past the flange, different link names),
 run ``ssik build <your.urdf> --base <yours> --ee <yours>`` to
 produce an artifact correct for your hardware.
 
-DOF: 7    BASE_LINK: "base_link"    EE_LINK: "ee_link"
+DOF: 7    BASE_LINK: "base"    EE_LINK: "iiwa_link_ee_kuka"
 Solver: ``seven_r.srs`` (tier 0)
 Expected median IK time: ~8.5 ms on commodity
 single-thread hardware. FLOP budget: 1,900 per solve.
@@ -21,7 +21,7 @@ Usage:
 
     import iiwa14_ik
     import numpy as np
-    T_target = np.eye(4)  # 4x4 SE(3) pose of ee_link in base_link
+    T_target = np.eye(4)  # 4x4 SE(3) pose of iiwa_link_ee_kuka in base
     T_target[:3, 3] = [0.5, 0.1, 0.3]
     solutions = iiwa14_ik.solve(T_target)
     for sol in solutions:
@@ -55,46 +55,46 @@ SOLVER_TIER = 0
 EXPECTED_MS_MEDIAN = 8.5
 FLOP_BUDGET = 1900
 DISPATCH_REASON = 'SRS-class 7R: shoulder axes (joints 0, 1, 2) meet at\none point + wrist axes (joints 4, 5, 6) meet at one\npoint + joint 3 is the elbow. Closed-form Singh-Kreutz\n1989 algorithm, parameterised by elbow swivel angle.\nCovers KUKA iiwa LBR (canonical strict-SRS).'
-BASE_LINK = "base_link"
-EE_LINK = "ee_link"
+BASE_LINK = "base"
+EE_LINK = "iiwa_link_ee_kuka"
 DOF = 7
 # Home pose: FK at q = np.zeros(DOF). Sanity-check this against
 # your robot's documented home pose to verify the baked geometry
 # matches your URDF.
-T_HOME = np.array([[0.9999999999999982, 0.0, 0.0, 0.0], [0.0, 0.9999999999999987, 4.4408920985006217e-16, 3.976818874207309e-16], [0.0, 4.440892098500621e-16, 0.9999999999999987, 1.3059999999999994], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+T_HOME = np.array([[1.0, 4.898587196589412e-16, 1.4791141972893971e-31, -5.449678256205724e-17], [-4.898587196589413e-16, 1.0, 1.224646799147353e-16, -1.5884013222165315e-16], [-7.395570986446986e-32, -1.224646799147353e-16, 1.0, 1.3059999999999998], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 
 # --- baked KinBody constants ---
 
-_LINK_NAMES = ['base_link', 'link_1', 'link_2', 'link_3', 'link_4', 'link_5', 'link_6', 'ee_link']
+_LINK_NAMES = ['base', '_poe_link_1', '_poe_link_2', '_poe_link_3', '_poe_link_4', '_poe_link_5', '_poe_link_6', 'iiwa_link_ee_kuka']
 
 _JOINT_NAMES = [
-    'iiwa_joint1',
-    'iiwa_joint2',
-    'iiwa_joint3',
-    'iiwa_joint4',
-    'iiwa_joint5',
-    'iiwa_joint6',
-    'iiwa_joint7',
+    'iiwa_joint_1',
+    'iiwa_joint_2',
+    'iiwa_joint_3',
+    'iiwa_joint_4',
+    'iiwa_joint_5',
+    'iiwa_joint_6',
+    'iiwa_joint_7',
 ]
 
 _JOINT_AXES = [
     np.array([0.0, 0.0, 1.0], dtype=np.float64),
-    np.array([0.0, 0.9999999999999998, 2.220446049250313e-16], dtype=np.float64),
-    np.array([0.0, 4.440892098500625e-16, 0.9999999999999996], dtype=np.float64),
-    np.array([0.0, -0.9999999999999993, -2.220446049250312e-16], dtype=np.float64),
-    np.array([0.0, 4.4408920985006237e-16, 0.9999999999999991], dtype=np.float64),
-    np.array([0.0, 0.9999999999999989, 2.220446049250311e-16], dtype=np.float64),
-    np.array([0.0, 4.4408920985006217e-16, 0.9999999999999987], dtype=np.float64),
+    np.array([1.2246467991473532e-16, 1.0, -3.8285686989269494e-16], dtype=np.float64),
+    np.array([-1.2246467991473532e-16, 0.0, 1.0], dtype=np.float64),
+    np.array([-1.2246467991473522e-16, -1.0, -3.8285686989269494e-16], dtype=np.float64),
+    np.array([-1.0864713024671694e-31, -6.661338147750939e-16, 1.0], dtype=np.float64),
+    np.array([2.4492935982947054e-16, 1.0, 2.83276944882399e-16], dtype=np.float64),
+    np.array([-1.2246467991473525e-16, 4.930380657631324e-32, 1.0], dtype=np.float64),
 ]
 
 _JOINT_T_LEFTS = [
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.1575], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.20249999999999999], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 4.54081217071689e-17], [0.0, 0.0, 1.0, 0.2044999999999999], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 9.570122472268846e-17], [0.0, 0.0, 1.0, 0.2154999999999999], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.2290168882600478e-16], [0.0, 0.0, 1.0, 0.1844999999999999], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 9.570122472268846e-17], [0.0, 0.0, 1.0, 0.2154999999999998], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 1.7985612998927527e-17], [0.0, 0.0, 1.0, 0.08099999999999996], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 9.588277803023819e-33], [0.0, 1.0, 0.0, 7.829422989305611e-17], [0.0, 0.0, 1.0, 0.20450000000000002], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, -2.6391138521625462e-17], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.21550000000000002], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, -2.2594733444268678e-17], [0.0, 1.0, 0.0, -7.063709249520222e-17], [0.0, 0.0, 1.0, 0.1845], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, -2.465190328815662e-32], [0.0, 1.0, 0.0, -1.435518370840327e-16], [0.0, 0.0, 1.0, 0.2154999999999999], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, -2.2945432535474328e-17], [0.0, 0.0, 1.0, 0.08099999999999996], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
 ]
 
 _JOINT_T_RIGHTS = [
@@ -104,7 +104,7 @@ _JOINT_T_RIGHTS = [
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[0.9999999999999982, 0.0, 0.0, 0.0], [0.0, 0.9999999999999987, 4.4408920985006217e-16, 1.9984014443252786e-17], [0.0, 4.440892098500621e-16, 0.9999999999999987, 0.04499999999999993], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 4.898587196589412e-16, 1.4791141972893971e-31, -5.5109105961630834e-18], [-4.898587196589413e-16, 1.0, 1.224646799147353e-16, 0.0], [-7.395570986446986e-32, -1.224646799147353e-16, 1.0, 0.04499999999999993], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
 ]
 
 _JOINT_TYPES = [
@@ -118,13 +118,13 @@ _JOINT_TYPES = [
 ]
 
 _JOINT_LIMITS = [
-    (-2.96706, 2.96706),
-    (-2.0944, 2.0944),
-    (-2.96706, 2.96706),
-    (-2.0944, 2.0944),
-    (-2.96706, 2.96706),
-    (-2.0944, 2.0944),
-    (-3.05433, 3.05433),
+    (-2.96705972839, 2.96705972839),
+    (-2.09439510239, 2.09439510239),
+    (-2.96705972839, 2.96705972839),
+    (-2.09439510239, 2.09439510239),
+    (-2.96705972839, 2.96705972839),
+    (-2.09439510239, 2.09439510239),
+    (-3.05432619099, 3.05432619099),
 ]
 
 
