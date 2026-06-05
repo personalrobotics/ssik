@@ -200,8 +200,12 @@ def _eaik_cell_for(arm: Arm) -> str:
     if "approximate-SRS" in tags:
         return '**refuses** ("only 1-6R")'
     if "SRS" in tags and arm.fixture_kind == "specs":
-        # iiwa14 etc. — EAIK doesn't accept 7-joint DH input via our adapter.
+        # 7-joint specs fixture; EAIK's DH adapter rejects on joint count.
         return "**refuses** (no 7R DH path in bench harness)"
+    if "SRS" in tags:
+        # SRS-class fixtures with URDF intake (#311: iiwa14): EAIK's URDF
+        # loader rejects 7R with the literal "only 1-6R" string.
+        return '**refuses** ("only 1-6R")'
     if "non-SRS" in tags and arm.fixture_kind == "specs":
         return "**refuses** (no 7R DH path in bench harness)"
     if "non-SRS" in tags:

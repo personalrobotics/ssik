@@ -305,7 +305,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 2-8 sols | 521 ± 12 µs / FK 6e-12 / 2-8 sols |
 | Puma 560 (Pieper 6R, spherical wrist) | 5 ± 0 µs / FK 3e-14 / 8 sols | 220 ± 3 µs / FK 2e-14 / 8 sols |
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 976 ± 39 µs / FK 5e-6 / 2-12 sols |
-| iiwa14 (SRS 7R) | _(uncategorised)_ | 4.83 ± 0.11 ms / FK 5e-13 / 128 sols |
+| iiwa14 (SRS 7R) | **refuses** ("only 1-6R") | 4.83 ± 0.11 ms / FK 5e-13 / 128 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.46 ± 1.25 ms / FK 1e-12 / 10-95 sols |
 | Franka Panda (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 29.57 ± 2.95 ms / FK 1e-6 / 8-124 sols |
 | xArm7 (**non-SRS 7R**) | **refuses** (no 7R DH path in bench harness) | 37.10 ± 0.49 ms / FK 4e-11 / 56-64 sols |
