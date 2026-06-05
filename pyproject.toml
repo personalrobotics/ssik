@@ -62,11 +62,14 @@ dev = [
     "pytest>=8",
     "ruff>=0.8",
     "mypy>=1.13",
-    "urchin>=0.0.27",  # exercised by the URDF-adapter tests
-    "hypothesis>=6.112",  # property-based fuzzing of the URDF loader
+    "urchin>=0.0.27", # exercised by the URDF-adapter tests
+    "hypothesis>=6.112", # property-based fuzzing of the URDF loader
     # cython itself is in runtime ``[project.dependencies]`` (#144); only the
     # build-side ``setuptools`` extension stays here.
-    "setuptools>=70",  # cythonize+setuptools build backend
+    "setuptools>=70", # cythonize+setuptools build backend
+    "robot-descriptions>=2.0.0",
+    "yourdfpy>=0.0.60",
+    "xacrodoc>=2.0.1",
 ]
 docs = [
     "mkdocs-material>=9.5",

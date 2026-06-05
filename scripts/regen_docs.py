@@ -96,6 +96,20 @@ def _fmt_sols(sols_min: int, sols_max: int) -> str:
     return f"{sols_min}-{sols_max}"
 
 
+def _row_fixture_source(arm: Arm) -> str:
+    """One row of the README fixture-provenance table (#311).
+
+    Layout::
+
+      | `<name>` | <fixture_source> |
+
+    Surfaces the kinematic-chain provenance so a user picking up a
+    prebuilt can audit whether ssik solves the same chain their
+    manufacturer ships against their real hardware.
+    """
+    return f"| `{arm.name}` | {arm.fixture_source} |"
+
+
 def _row_readme_prebuilt(arm: Arm) -> str:
     """One row of the README prebuilt table.
 
@@ -186,8 +200,12 @@ def _eaik_cell_for(arm: Arm) -> str:
     if "approximate-SRS" in tags:
         return '**refuses** ("only 1-6R")'
     if "SRS" in tags and arm.fixture_kind == "specs":
-        # iiwa14 etc. — EAIK doesn't accept 7-joint DH input via our adapter.
+        # 7-joint specs fixture; EAIK's DH adapter rejects on joint count.
         return "**refuses** (no 7R DH path in bench harness)"
+    if "SRS" in tags:
+        # SRS-class fixtures with URDF intake (#311: iiwa14): EAIK's URDF
+        # loader rejects 7R with the literal "only 1-6R" string.
+        return '**refuses** ("only 1-6R")'
     if "non-SRS" in tags and arm.fixture_kind == "specs":
         return "**refuses** (no 7R DH path in bench harness)"
     if "non-SRS" in tags:
@@ -285,6 +303,10 @@ def _render(arms: dict[str, Arm], anchor: str) -> str | None:
     if anchor == "prebuilt_readme_table":
         rows = [_row_prebuilt_readme(arm) for arm in arms.values()]
         header = "| Arm | Solver | Build time | Artifact size |\n|---|---|:---:|:---:|"
+        return header + "\n" + "\n".join(rows)
+    if anchor == "readme_fixture_source_table":
+        rows = [_row_fixture_source(arm) for arm in arms.values()]
+        header = "| Module | Fixture provenance |\n|---|---|"
         return header + "\n" + "\n".join(rows)
     return None
 

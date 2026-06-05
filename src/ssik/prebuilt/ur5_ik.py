@@ -5,7 +5,7 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
-Provenance: KinBody hash 18d616aad415 (sha256/12 of the input chain).
+Provenance: KinBody hash 280f2ff681a4 (sha256/12 of the input chain).
 ``T_target`` is the pose of ``ee_link`` (end-effector link) in
 ``base_link`` (base link). If your URDF differs (calibrated
 geometry, custom tool past the flange, different link names),
@@ -69,7 +69,7 @@ DOF = 6
 # Home pose: FK at q = np.zeros(DOF). Sanity-check this against
 # your robot's documented home pose to verify the baked geometry
 # matches your URDF.
-T_HOME = np.array([[1.0, 0.0, 0.0, -0.81725], [0.0, 6.123233995736766e-17, -1.0, -0.19145], [0.0, 1.0, 6.123233995736766e-17, -0.005490999999999996], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
+T_HOME = np.array([[-4.8965888601467475e-12, 1.0, 9.793177720293495e-12, 0.817250000000927], [1.0, 4.8965888601467475e-12, 0.0, 0.19145], [-4.795316493062645e-23, 9.793177720293495e-12, -1.0, -0.005490999995998266], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64)
 
 # --- baked KinBody constants ---
 
@@ -86,20 +86,20 @@ _JOINT_NAMES = [
 
 _JOINT_AXES = [
     np.array([0.0, 0.0, 1.0], dtype=np.float64),
-    np.array([0.0, -1.0, 6.123233995736766e-17], dtype=np.float64),
-    np.array([0.0, -1.0, 6.123233995736766e-17], dtype=np.float64),
-    np.array([0.0, -1.0, 6.123233995736766e-17], dtype=np.float64),
-    np.array([0.0, -1.2246467991473532e-16, -1.0], dtype=np.float64),
-    np.array([0.0, -1.0, 6.123233995736766e-17], dtype=np.float64),
+    np.array([0.0, 1.0, 0.0], dtype=np.float64),
+    np.array([0.0, 1.0, 0.0], dtype=np.float64),
+    np.array([0.0, 1.0, 0.0], dtype=np.float64),
+    np.array([9.793177720293495e-12, 0.0, -1.0], dtype=np.float64),
+    np.array([0.0, 1.0, 0.0], dtype=np.float64),
 ]
 
 _JOINT_T_LEFTS = [
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.089159], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, -0.425], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, -0.39225000000000004], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, -0.10915], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, -1.3877787807814457e-17], [0.0, 0.0, 1.0, -0.09465], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.13585], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 0.425], [0.0, 1.0, 0.0, -0.1197], [0.0, 0.0, 1.0, 2.081043670720817e-12], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 0.39225000000000004], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 1.920685832601521e-12], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.093], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[1.0, 0.0, 0.0, 9.269252032595432e-13], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, -0.09465], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
 ]
 
 _JOINT_T_RIGHTS = [
@@ -108,7 +108,7 @@ _JOINT_T_RIGHTS = [
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
     np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
-    np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 6.123233995736766e-17, -1.0, -0.0823], [0.0, 1.0, 6.123233995736766e-17, 5.204170427930421e-18], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
+    np.array([[-4.8965888601467475e-12, 1.0, 9.793177720293495e-12, 0.0], [1.0, 4.8965888601467475e-12, 0.0, 0.08230000000000001], [-4.795316493062645e-23, 9.793177720293495e-12, -1.0, 0.0], [0.0, 0.0, 0.0, 1.0]], dtype=np.float64),
 ]
 
 _JOINT_TYPES = [
@@ -121,12 +121,12 @@ _JOINT_TYPES = [
 ]
 
 _JOINT_LIMITS = [
-    (-6.28318530717959, 6.28318530717959),
-    (-6.28318530717959, 6.28318530717959),
-    (-3.14159265358979, 3.14159265358979),
-    (-6.28318530717959, 6.28318530717959),
-    (-6.28318530717959, 6.28318530717959),
-    (-6.28318530717959, 6.28318530717959),
+    (-6.28318530718, 6.28318530718),
+    (-6.28318530718, 6.28318530718),
+    (-3.14159265359, 3.14159265359),
+    (-6.28318530718, 6.28318530718),
+    (-6.28318530718, 6.28318530718),
+    (-6.28318530718, 6.28318530718),
 ]
 
 
@@ -171,17 +171,17 @@ def _solve_algebraic(T_target):
     candidates = []
 
     # T_target-derived SP6 inputs.
-    p_16_x = p_x - 1.64748849439063e-19*r_01 - 0.0823*r_02
-    p_16_y = p_y - 1.64748849439063e-19*r_11 - 0.0823*r_12
-    p_16_z = p_z - 1.64748849439063e-19*r_21 - 0.0823*r_22
-    r_06_axes5_x = 1.0*r_02
-    r_06_axes5_y = 1.0*r_12
-    r_06_axes5_z = 1.0*r_22
-    _H_SP_0 = np.array([0.0, -1.0, 6.123233995736766e-17])
+    p_16_x = p_x - 0.0823*r_00 - 4.02989263190077e-13*r_01
+    p_16_y = p_y - 0.0823*r_10 - 4.02989263190077e-13*r_11
+    p_16_z = p_z - 0.0823*r_20 - 4.02989263190077e-13*r_21 - 0.089159
+    r_06_axes5_x = 1.0*r_00 + 4.89658886014675e-12*r_01
+    r_06_axes5_y = 1.0*r_10 + 4.89658886014675e-12*r_11
+    r_06_axes5_z = 1.0*r_20 + 4.89658886014675e-12*r_21
+    _H_SP_0 = np.array([0.0, 1.0, 0.0])
     _K_SP_0 = np.array([-0.0, -0.0, -1.0])
-    _K_SP_1 = np.array([0.0, -1.2246467991473532e-16, -1.0])
-    _NEG_P_5 = np.array([-0.0, 1.3877787807814457e-17, 0.09465])
-    _NEG_AXES_5 = np.array([-0.0, 1.0, -6.123233995736766e-17])
+    _K_SP_1 = np.array([9.793177720293495e-12, 0.0, -1.0])
+    _NEG_P_5 = np.array([-9.269252032595432e-13, -0.0, 0.09465])
+    _NEG_AXES_5 = np.array([-0.0, -1.0, -0.0])
     # Build SP6 input arrays. h_sp / k_sp constant per arm; p_sp[0],
     # p_sp[2] depend on T_target via the inlined components above.
     p_16 = np.array([p_16_x, p_16_y, p_16_z])
@@ -198,63 +198,40 @@ def _solve_algebraic(T_target):
         c5 = math.cos(q5)
         # SP1 for theta14 = q1+q2+q3+q4 (sum of parallel-axis rotations).
         th14_x0 = math.sin(q5)
-        th14_x1 = 1.0*r_22
-        th14_x2 = math.sin(q1)
-        th14_x3 = 6.12323399573677e-17*r_01 - 1.0*r_02
-        th14_x4 = th14_x2*th14_x3
-        th14_x5 = 1.0*r_01 + 6.12323399573677e-17*r_02
-        th14_x6 = 6.12323399573677e-17*th14_x2*th14_x5
-        th14_x7 = math.cos(q1)
-        th14_x8 = 6.12323399573677e-17*r_11 - 1.0*r_12
-        th14_x9 = th14_x7*th14_x8
-        th14_x10 = 1.0*r_11 + 6.12323399573677e-17*r_12
-        th14_x11 = 6.12323399573677e-17*th14_x10*th14_x7
-        th14_x12 = th14_x11 + th14_x4 - th14_x6 - th14_x9
-        th14_x13 = math.cos(q5)
-        th14_x14 = 6.12323399573677e-17*th14_x10*th14_x2 - th14_x2*th14_x8 - th14_x3*th14_x7 + 6.12323399573677e-17*th14_x5*th14_x7
-        th14_x15 = 1.0*th14_x13
-        theta14 = math.atan2(-th14_x0*th14_x1 - 6.12323399573677e-17*th14_x0*th14_x12 + th14_x14*(6.12323399573677e-17 - 6.12323399573677e-17*th14_x13), -1.0*th14_x0*th14_x14 + th14_x1*(1.22464679914735e-16*th14_x13 - 6.12323399573677e-17) + th14_x12*(-th14_x15 - 7.49879891330929e-33) - (th14_x15 + 3.74939945665464e-33)*(6.12323399573677e-17*r_22 - th14_x11 - th14_x4 + th14_x6 + th14_x9))
+        th14_x1 = th14_x0*(1.0*r_20 + 4.89658886014675e-12*r_21)
+        th14_x2 = 1.0*(1.0*r_00 + 4.89658886014675e-12*r_01)*math.cos(q1) + 1.0*(1.0*r_10 + 4.89658886014675e-12*r_11)*math.sin(q1)
+        theta14 = math.atan2(9.79317772029349e-12*th14_x0*th14_x2 - 1.0*th14_x1, 1.0*th14_x0*th14_x2 + 9.79317772029349e-12*th14_x1)
         # SP1 for q6 (wrist roll-2): closed-form atan2.
-        q6_x0 = math.cos(q5)
-        q6_x1 = math.sin(q1)
-        q6_x2 = 1.0*q6_x1
-        q6_x3 = math.cos(q1)
-        q6_x4 = 1.0*q6_x3
-        q6_x5 = q6_x2*r_00 - q6_x4*r_10 + 6.12323399573677e-17*r_20
-        q6_x6 = math.sin(q5)
-        q6_x7 = 6.12323399573677e-17*r_22
-        q6_x8 = 6.12323399573677e-17*r_01 - 1.0*r_02
-        q6_x9 = q6_x4*(6.12323399573677e-17*r_11 - 1.0*r_12)
-        q6_x10 = q6_x2*q6_x8 - q6_x7 - q6_x9 + 3.74939945665464e-33*r_21
-        q6_x11 = 1.0*r_01 + 6.12323399573677e-17*r_02
-        q6_x12 = 1.0*r_11 + 6.12323399573677e-17*r_12
-        q6_x13 = q6_x11*q6_x2 - q6_x12*q6_x4 + 6.12323399573677e-17*r_21 + 3.74939945665464e-33*r_22
-        q6_x14 = 1.0*q6_x6
-        q6_x15 = 1.0*q6_x0
-        q6 = math.atan2(-6.12323399573677e-17*q6_x10*q6_x6 - q6_x13*q6_x14 + q6_x5*(6.12323399573677e-17*q6_x0 - 6.12323399573677e-17), q6_x10*(-q6_x15 - 7.49879891330929e-33) + q6_x13*(1.22464679914735e-16*q6_x0 - 6.12323399573677e-17) + q6_x14*q6_x5 - (-q6_x15 - 3.74939945665464e-33)*(-6.12323399573677e-17*q6_x1*q6_x11 + 1.0*q6_x1*q6_x8 + 6.12323399573677e-17*q6_x12*q6_x3 - q6_x7 - q6_x9))
+        q6_x0 = 1.0*math.sin(q1)
+        q6_x1 = math.cos(q1)
+        q6_x2 = math.sin(q5)
+        q6_x3 = q6_x2*(-q6_x0*(-4.89658886014675e-12*r_00 + 1.0*r_01 + 9.79317772029349e-12*r_02) + 1.0*q6_x1*(-4.89658886014675e-12*r_10 + 1.0*r_11 + 9.79317772029349e-12*r_12))
+        q6_x4 = q6_x2*(-q6_x0*(-4.79531649306264e-23*r_00 + 9.79317772029349e-12*r_01 - 1.0*r_02) + 1.0*q6_x1*(-4.79531649306264e-23*r_10 + 9.79317772029349e-12*r_11 - 1.0*r_12))
+        q6_x5 = q6_x0*(1.0*r_00 + 4.89658886014675e-12*r_01) - 1.0*q6_x1*(1.0*r_10 + 4.89658886014675e-12*r_11)
+        q6_x6 = 1.0*math.cos(q5)
+        q6 = math.atan2(9.79317772029349e-12*q6_x3 - 1.0*q6_x4, -1.0*q6_x3 - 9.79317772029349e-12*q6_x4)
         s14 = math.sin(theta14)
         c14 = math.cos(theta14)
         # d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
         dinr_x0 = math.sin(theta14)
-        dinr_x1 = math.sin(q5)
-        dinr_x2 = math.cos(theta14)
-        dinr_x3 = math.cos(q5)
-        dinr_x4 = 1.22464679914735e-16 - 1.22464679914735e-16*dinr_x3
-        dinr_x5 = 1.0*dinr_x3 + 1.49975978266186e-32
-        dinr_x6 = math.sin(q1)
-        dinr_x7 = p_y - 1.64748849439063e-19*r_11 - 0.0823*r_12
-        dinr_x8 = math.cos(q1)
-        dinr_x9 = p_x - 1.64748849439063e-19*r_01 - 0.0823*r_02
-        dinr_x10 = 6.12323399573677e-17*dinr_x2 - 6.12323399573677e-17
-        dinr_x11 = 1.38777878078145e-17*dinr_x4
-        d_inner_x = -1.96734287847793e-17*dinr_x0*dinr_x4 - 8.49769420904307e-34*dinr_x0*dinr_x5 - 0.09465*dinr_x0 + 2.28650585388476e-18*dinr_x1*dinr_x2 + 1.0*dinr_x6*dinr_x7 + dinr_x8*dinr_x9
-        d_inner_y = 1.40008103759583e-34*dinr_x0*dinr_x1 + dinr_x10*dinr_x11 + 5.79564097696485e-18*dinr_x2 + 2.28650585388476e-18*dinr_x3 - 1.0*dinr_x6*dinr_x9 + dinr_x7*dinr_x8 + 0.10915
-        d_inner_z = 2.28650585388476e-18*dinr_x0*dinr_x1 + 0.09465*dinr_x10*dinr_x4 + 1.38777878078145e-17*dinr_x10*dinr_x5 + dinr_x11*(1.0*dinr_x2 + 3.74939945665464e-33) + 0.09465*dinr_x2 + 1.0*p_z - 1.64748849439063e-19*r_21 - 0.0823*r_22 - 0.089159
+        dinr_x1 = 0.09465*dinr_x0
+        dinr_x2 = math.cos(q5)
+        dinr_x3 = 9.79317772029349e-12*dinr_x2 - 9.79317772029349e-12
+        dinr_x4 = 9.26925203259543e-13*dinr_x3
+        dinr_x5 = math.cos(theta14)
+        dinr_x6 = 1.0*dinr_x2 + 9.59063298612529e-23
+        dinr_x7 = math.cos(q1)
+        dinr_x8 = p_x - 0.0823*r_00 - 4.02989263190077e-13*r_01
+        dinr_x9 = p_y - 0.0823*r_10 - 4.02989263190077e-13*r_11
+        dinr_x10 = 1.0*math.sin(q1)
+        d_inner_x = -dinr_x0*dinr_x4 + dinr_x1 + dinr_x10*dinr_x9 + 0.09465*dinr_x3*dinr_x5 - 9.26925203259543e-13*dinr_x5*dinr_x6 + dinr_x7*dinr_x8
+        d_inner_y = -dinr_x10*dinr_x8 + dinr_x7*dinr_x9 + 9.32033763861495e-19*math.sin(q5) - 0.22885
+        d_inner_z = 9.26925203259543e-13*dinr_x0*dinr_x6 - dinr_x1*dinr_x3 - dinr_x4*dinr_x5 + 0.09465*dinr_x5 + 1.0*p_z - 0.0823*r_20 - 4.02989263190077e-13*r_21 - 0.089159
         d_elbow = math.sqrt(d_inner_x*d_inner_x + d_inner_y*d_inner_y + d_inner_z*d_inner_z)
         # SP3 for q3 (elbow): reduces to SP4 with d_elbow target.
         _q3_R_sq = 0.0277909737890625
-        _q3_rhs = 0.16724253125 - 1/2*d_elbow**2
-        _q3_phi = math.pi
+        _q3_rhs = 0.17440657625 - 1/2*d_elbow**2
+        _q3_phi = 1.25911020484674e-17 - math.pi
         if _q3_R_sq < _DEG_SQ:
             theta_q3_plus = 0.0
             theta_q3_minus = 0.0  # degenerate; verify-step drops
@@ -277,10 +254,10 @@ def _solve_algebraic(T_target):
             c3 = math.cos(q3)
             # SP1 for q2 (shoulder pitch): closed-form atan2.
             q2_x0 = math.sin(q3)
-            q2_x1 = 0.39225*q2_x0
-            q2_x2 = math.cos(q3)
-            q2_x3 = -0.39225*q2_x2 - 0.425
-            q2 = math.atan2(d_inner_x*q2_x1 + d_inner_y*(-2.40183853482775e-17*q2_x2 - 2.60237444818813e-17) + d_inner_z*q2_x3, d_inner_x*q2_x3 - 2.40183853482775e-17*d_inner_y*q2_x0 - d_inner_z*q2_x1)
+            q2_x1 = math.cos(q3)
+            q2_x2 = -0.39225*q2_x0 + 1.92068583260152e-12*q2_x1 + 2.08104367072082e-12
+            q2_x3 = 1.92068583260152e-12*q2_x0 + 0.39225*q2_x1 + 0.425
+            q2 = math.atan2(d_inner_x*q2_x2 - d_inner_z*q2_x3, d_inner_x*q2_x3 + d_inner_z*q2_x2)
             q4 = ((theta14 - q2 - q3 + math.pi) % (2.0 * math.pi)) - math.pi
             candidates.append([q1, q2, q3, q4, q5, q6])
     return candidates

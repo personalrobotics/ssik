@@ -71,6 +71,13 @@ class Arm:
     platform_drift: bool
     drift_markers: tuple[str, ...] = field(default=())
     specs_fn: str | None = None
+    # Provenance of the fixture URDF / specs. One short line documenting
+    # where the kinematic chain came from -- e.g. "robot_descriptions /
+    # ur5_description (the UR-published URDF)" -- so a user can audit
+    # whether ssik's IK matches the URDF the manufacturer ships against
+    # their real hardware. Surfaced in the README's prebuilt table.
+    # Required for every arm (#311); empty string forbidden.
+    fixture_source: str = ""
     bench: ArmBench | None = None
     known_gaps: ArmKnownGap | None = None
 
@@ -131,9 +138,24 @@ def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
         fk_ceiling_fuzz=float(body["fk_ceiling_fuzz"]),
         platform_drift=bool(body["platform_drift"]),
         drift_markers=tuple(str(m) for m in body.get("drift_markers", [])),  # type: ignore[arg-type]
+        fixture_source=_required_fixture_source(name, body),
         bench=bench,
         known_gaps=known_gaps,
     )
+
+
+def _required_fixture_source(name: str, body: dict[str, object]) -> str:
+    """Per #311: every arm must carry a non-empty ``fixture_source`` line
+    identifying where its kinematic chain comes from (manufacturer URDF,
+    classical DH, internal MJCF, etc.)."""
+    src = body.get("fixture_source")
+    if not isinstance(src, str) or not src.strip():
+        raise ValueError(
+            f"arm {name!r}: ``fixture_source`` is required (#311); "
+            "supply a short provenance line like "
+            '\'"robot_descriptions / ur5_description"\''
+        )
+    return src.strip()
 
 
 @lru_cache(maxsize=1)
