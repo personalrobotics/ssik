@@ -30,9 +30,9 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
 | `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
 | `jaco2_ik` | Kinova JACO 2 | non-Pieper 6R | `base_link` | `ee_link` |
-| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base_link` | `ee_link` |
+| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
-| `franka_panda_ik` | Franka Panda | anthropomorphic 7R | `base_link` | `ee_link` |
+| `franka_panda_ik` | Franka Panda | anthropomorphic 7R | `panda_link0` | `panda_link8` |
 | `xarm7_ik` | UFactory xArm7 | 7R Pieper-wedge (jointlock → `reversed:spherical`) | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | non-Pieper 6R (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |

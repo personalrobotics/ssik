@@ -45,9 +45,9 @@ The wheel ships 13 ready-to-import artifacts. Each was built against a specific 
 | `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
 | `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
 | `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** | `base_link` | `ee_link` |
-| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base_link` | `ee_link` |
+| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
-| `franka_panda_ik` | Franka Panda | **anthropomorphic 7R** | `base_link` | `ee_link` |
+| `franka_panda_ik` | Franka Panda | **anthropomorphic 7R** | `panda_link0` | `panda_link8` |
 | `xarm7_ik` | UFactory xArm7 | **7R Pieper-wedge** (jointlock → `reversed:spherical`) | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | **non-Pieper 6R** (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
@@ -67,6 +67,34 @@ The wheel ships 13 ready-to-import artifacts. Each was built against a specific 
 from ssik.prebuilt import iiwa14_ik
 sols = iiwa14_ik.solve(T_target)
 ```
+
+#### Where each fixture comes from
+
+Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, for legacy DH arms, the published parameter set). The IK promise — "the q-vector lands a real arm at the target" — only holds when ssik's chain matches the manufacturer's. We lock this in with [`tests/test_prebuilt_fixture_parity.py`](tests/test_prebuilt_fixture_parity.py): for every arm whose source is reachable via `robot_descriptions`, it asserts `module.fk(q) == upstream.fk(q)` to machine precision.
+
+<!-- AUTOGEN:readme_fixture_source_table -->
+| Module | Fixture provenance |
+|---|---|
+| `ur5_ik` | robot_descriptions / ur5_description |
+| `puma560_ik` | classical DH (Lee, Asada & Slotine 1986) |
+| `jaco2_ik` | Kinova j2n6s200 DH (kinova-ros / kinova_description) |
+| `iiwa14_ik` | robot_descriptions / iiwa14_description |
+| `gen3_ik` | Kinovarobotics / ros_kortex (kortex_description / gen3.xacro) |
+| `franka_panda_ik` | robot_descriptions / panda_description |
+| `xarm7_ik` | UFactory xArm7 DH (hand-encoded; #312 tracks the URDF flip) |
+| `xarm6_ik` | robot_descriptions / xarm6_description |
+| `z1_ik` | robot_descriptions / z1_description |
+| `piper_ik` | robot_descriptions / piper_description |
+| `rizon4_ik` | robot_descriptions / rizon4_description |
+| `kassow_kr810_ik` | Kassow KR810 URDF (vendor-supplied) |
+| `rizon10_ik` | Flexiv Rizon 10 URDF (vendor-supplied) |
+| `fanuc_crx10ial_ik` | ros-industrial / fanuc_crx10ia_support |
+| `yam_ik` | robot_descriptions / yam_description |
+| `big_yam_ik` | i2rt-robotics / i2rt |
+| `fr3_ik` | robot_descriptions / fr3_description |
+| `openarm_left_ik` | enactic / openarm_description |
+| `openarm_right_ik` | enactic / openarm_description |
+<!-- /AUTOGEN -->
 
 Every prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, and `T_HOME` (the 4×4 home pose, FK at `q = np.zeros(DOF)`) as module constants. Use them to verify the baked geometry matches your robot:
 
@@ -274,21 +302,21 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 <!-- AUTOGEN:readme_eaik_table -->
 | Arm (class) | EAIK | ssik |
 |---|---|---|
-| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 2-8 sols | 532 ± 10 µs / FK 2e-9 / 2-8 sols |
+| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 2-8 sols | 521 ± 12 µs / FK 6e-12 / 2-8 sols |
 | Puma 560 (Pieper 6R, spherical wrist) | 5 ± 0 µs / FK 3e-14 / 8 sols | 220 ± 3 µs / FK 2e-14 / 8 sols |
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 976 ± 39 µs / FK 5e-6 / 2-12 sols |
-| iiwa14 (SRS 7R) | **refuses** (no 7R DH path in bench harness) | 4.54 ± 0.03 ms / FK 4e-13 / 128 sols |
+| iiwa14 (SRS 7R) | **refuses** ("only 1-6R") | 4.83 ± 0.11 ms / FK 5e-13 / 128 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.46 ± 1.25 ms / FK 1e-12 / 10-95 sols |
-| Franka Panda (**anthropomorphic 7R**) | **refuses** (no 7R DH path in bench harness) | 29.27 ± 2.81 ms / FK 1e-6 / 8-124 sols |
+| Franka Panda (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 29.57 ± 2.95 ms / FK 1e-6 / 8-124 sols |
 | xArm7 (**non-SRS 7R**) | **refuses** (no 7R DH path in bench harness) | 37.10 ± 0.49 ms / FK 4e-11 / 56-64 sols |
 | xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 2e-7 / 8-12 sols |
 | Z1 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 1e-15 / 4-8 sols | 487 ± 7 µs / FK 3e-15 / 4-8 sols |
-| PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.17 ± 0.03 ms / FK 9e-6 / 1-8 sols |
+| PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.10 ± 0.03 ms / FK 1e-5 / 1-8 sols |
 | Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 30.58 ± 8.58 ms / FK 4e-9 / 10-60 sols |
 | Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 27.52 ± 10.71 ms / FK 7e-8 / 10-38 sols |
 | Rizon 10 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 29.43 ± 6.37 ms / FK 6e-8 / 10-64 sols |
 | CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 991 ± 14 µs / FK 6e-7 / 6-12 sols |
-| YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.01 ms / FK 5e-9 / 8 sols |
+| YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.08 ± 0.02 ms / FK 8e-9 / 8 sols |
 | big_yam (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.02 ms / FK 5e-6 / 8 sols |
 | FR3 (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 30.83 ± 3.12 ms / FK 6e-9 / 8-128 sols |
 | OpenArm L (**non-SRS 7R**) | **refuses** ("only 1-6R") | 13.41 ± 1.56 ms / FK 2e-15 / 8-40 sols |

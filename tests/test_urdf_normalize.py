@@ -78,19 +78,22 @@ def test_fk_equivalence_on_ur5() -> None:
 
 
 def test_ur5_normalized_exposes_parallel_axes() -> None:
-    """UR5's three inner parallel axes (joints 1, 2, 3 and also 5 in the
-    shoulder-lift-elbow-wrist-1 cluster) should all be aligned along the
-    base-frame ``-y`` axis after normalization. That's the structure
-    :func:`ssik.kinematics.predicates.three_consecutive_parallel` needs
-    to see for a Pieper-class solve.
+    """UR5's three inner parallel axes (joints 1, 2, 3 and also joint 5) should
+    all be co-aligned along the base-frame y-axis after normalization. That's
+    the structure :func:`ssik.kinematics.predicates.three_consecutive_parallel`
+    needs to see for a Pieper-class solve.
+
+    Sign convention follows the manufacturer URDF (per #311 the fixture is now
+    ``robot_descriptions / ur5_description``, not the v1.2 textbook-DH model
+    that had axes flipped to ``(0, -1, 0)``).
     """
     kb = load_urdf_kinbody_normalized(FIXTURES / "ur5.urdf", "base_link", "wrist_3_link")
 
-    # Joints 1, 2, 3, 5 should have axis ≈ (0, -1, 0).
+    # Joints 1, 2, 3, 5 should have axis ≈ (0, +1, 0).
     for idx in (1, 2, 3, 5):
         ax = kb.joints[idx].axis
-        assert np.allclose(ax, [0.0, -1.0, 0.0], atol=1e-10), (
-            f"joint {idx} axis in base frame = {ax.tolist()}, expected ≈ (0, -1, 0)"
+        assert np.allclose(ax, [0.0, 1.0, 0.0], atol=1e-10), (
+            f"joint {idx} axis in base frame = {ax.tolist()}, expected ≈ (0, 1, 0)"
         )
     # Joint 0 should be pure +z, joint 4 should be pure -z.
     assert np.allclose(kb.joints[0].axis, [0.0, 0.0, 1.0], atol=1e-10)

@@ -36,6 +36,10 @@
 #   platform_drift      true = artifact bytes differ across platforms; structural
 #                              smoke check instead of byte-equality on non-macOS
 #   drift_markers       Required substrings in the artifact (platform_drift = true only)
+#   fixture_source      Where the fixture URDF / specs comes from -- one short
+#                       provenance line so users can audit whether ssik's IK
+#                       solves the same chain the manufacturer ships. Required
+#                       per #311; loader rejects empty.
 #   [bench]             Latest measurements from examples/04_compare_vs_eaik.py
 #   [known_gaps]        Optional xfail entries for the uniform fuzz test
 
@@ -44,6 +48,7 @@ display_name = "Universal Robots UR5"
 short_name = "UR5"
 fixture = "ur5.urdf"
 fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur5_description"
 base_link = "base_link"
 ee_link = "ee_link"
 dof = 6
@@ -60,9 +65,9 @@ fk_ceiling_fuzz = 1e-7
 platform_drift = false
 
 [arms.ur5_ik.bench]
-ms_mean = 0.532
-ms_ci95 = 0.010
-max_fk = 2.0e-9
+ms_mean = 0.521
+ms_ci95 = 0.012
+max_fk = 6.3e-12
 sols_min = 2
 sols_max = 8
 
@@ -71,6 +76,7 @@ display_name = "KUKA Puma 560"
 short_name = "Puma 560"
 fixture = "puma560.urdf"
 fixture_kind = "urdf"
+fixture_source = "classical DH (Lee, Asada & Slotine 1986)"
 base_link = "base_link"
 ee_link = "wrist_3_link"
 dof = 6
@@ -100,6 +106,7 @@ table_name = "Kinova JACO 2"
 fixture = "jaco2"
 fixture_kind = "specs"
 specs_fn = "jaco2_specs"
+fixture_source = "Kinova j2n6s200 DH (kinova-ros / kinova_description)"
 base_link = "base_link"
 ee_link = "ee_link"
 dof = 6
@@ -130,11 +137,11 @@ sols_max = 12
 [arms.iiwa14_ik]
 display_name = "KUKA iiwa LBR 14"
 short_name = "iiwa14"
-fixture = "kuka_iiwa14"
-fixture_kind = "specs"
-specs_fn = "kuka_iiwa14_specs"
-base_link = "base_link"
-ee_link = "ee_link"
+fixture = "kuka_iiwa14.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / iiwa14_description"
+base_link = "base"
+ee_link = "iiwa_link_ee_kuka"
 dof = 7
 solver = "seven_r.srs"
 tier = 0
@@ -149,9 +156,9 @@ fk_ceiling_fuzz = 1e-10
 platform_drift = false
 
 [arms.iiwa14_ik.bench]
-ms_mean = 4.54
-ms_ci95 = 0.03
-max_fk = 4.0e-13
+ms_mean = 4.83
+ms_ci95 = 0.11
+max_fk = 5.1e-13
 sols_min = 128
 sols_max = 128
 
@@ -161,6 +168,7 @@ short_name = "Gen3"
 table_name = "Kinova Gen3 7-DOF"
 fixture = "gen3.urdf"
 fixture_kind = "urdf"
+fixture_source = "Kinovarobotics / ros_kortex (kortex_description / gen3.xacro)"
 base_link = "base_link"
 ee_link = "end_effector_link"
 dof = 7
@@ -195,11 +203,11 @@ xfail_reason = "srs_polished coverage gap on q*=[0.51171875, 0.51171875, 1.01953
 display_name = "Franka Emika Panda (no hand)"
 short_name = "Franka Panda"
 table_name = "Franka Panda"
-fixture = "franka_panda"
-fixture_kind = "specs"
-specs_fn = "franka_panda_specs"
-base_link = "base_link"
-ee_link = "ee_link"
+fixture = "franka_panda.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / panda_description"
+base_link = "panda_link0"
+ee_link = "panda_link8"
 dof = 7
 solver = "jointlock.seven_r"
 tier = 1
@@ -214,9 +222,9 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.franka_panda_ik.bench]
-ms_mean = 29.27
-ms_ci95 = 2.81
-max_fk = 1.0e-6
+ms_mean = 29.57
+ms_ci95 = 2.95
+max_fk = 1.2e-6
 sols_min = 8
 sols_max = 124
 
@@ -226,6 +234,7 @@ short_name = "xArm7"
 fixture = "xarm7"
 fixture_kind = "specs"
 specs_fn = "xarm7_specs"
+fixture_source = "UFactory xArm7 DH (hand-encoded; #312 tracks the URDF flip)"
 base_link = "link_base"
 ee_link = "link7"
 dof = 7
@@ -260,6 +269,7 @@ display_name = "UFactory xArm6"
 short_name = "xArm6"
 fixture = "xarm6.urdf"
 fixture_kind = "urdf"
+fixture_source = "robot_descriptions / xarm6_description"
 base_link = "link_base"
 ee_link = "link_eef"
 dof = 6
@@ -292,6 +302,7 @@ display_name = "Unitree Z1"
 short_name = "Z1"
 fixture = "z1.urdf"
 fixture_kind = "urdf"
+fixture_source = "robot_descriptions / z1_description"
 base_link = "link00"
 ee_link = "link06"
 dof = 6
@@ -322,6 +333,7 @@ display_name = "AgileX PiPER"
 short_name = "PiPER"
 fixture = "piper.urdf"
 fixture_kind = "urdf"
+fixture_source = "robot_descriptions / piper_description"
 base_link = "base_link"
 ee_link = "link6"
 dof = 6
@@ -343,9 +355,9 @@ drift_markers = [
 ]
 
 [arms.piper_ik.bench]
-ms_mean = 1.17
+ms_mean = 1.10
 ms_ci95 = 0.03
-max_fk = 9.0e-6
+max_fk = 9.7e-6
 sols_min = 1
 sols_max = 8
 
@@ -357,6 +369,7 @@ display_name = "Flexiv Rizon 4"
 short_name = "Rizon 4"
 fixture = "rizon4.urdf"
 fixture_kind = "urdf"
+fixture_source = "robot_descriptions / rizon4_description"
 base_link = "base_link"
 ee_link = "flange"
 dof = 7
@@ -387,6 +400,7 @@ display_name = "Kassow KR810"
 short_name = "Kassow KR810"
 fixture = "kassow_kr810.urdf"
 fixture_kind = "urdf"
+fixture_source = "Kassow KR810 URDF (vendor-supplied)"
 base_link = "base"
 ee_link = "end_effector"
 dof = 7
@@ -417,6 +431,7 @@ display_name = "Flexiv Rizon 10"
 short_name = "Rizon 10"
 fixture = "rizon10.urdf"
 fixture_kind = "urdf"
+fixture_source = "Flexiv Rizon 10 URDF (vendor-supplied)"
 base_link = "base_link"
 ee_link = "flange"
 dof = 7
@@ -444,6 +459,7 @@ display_name = "FANUC CRX-10iA/L"
 short_name = "CRX-10iA/L"
 fixture = "fanuc_crx10ial.urdf"
 fixture_kind = "urdf"
+fixture_source = "ros-industrial / fanuc_crx10ia_support"
 base_link = "base_link"
 ee_link = "tool0"
 dof = 6
@@ -479,6 +495,7 @@ display_name = "I2RT YAM"
 short_name = "YAM"
 fixture = "yam.urdf"
 fixture_kind = "urdf"
+fixture_source = "robot_descriptions / yam_description"
 base_link = "base_link"
 ee_link = "link_6"
 dof = 6
@@ -500,9 +517,9 @@ drift_markers = [
 ]
 
 [arms.yam_ik.bench]
-ms_mean = 1.03
-ms_ci95 = 0.01
-max_fk = 5.4e-9
+ms_mean = 1.08
+ms_ci95 = 0.02
+max_fk = 7.6e-9
 sols_min = 8
 sols_max = 8
 
@@ -511,6 +528,7 @@ display_name = "I2RT big_yam"
 short_name = "big_yam"
 fixture = "big_yam.urdf"
 fixture_kind = "urdf"
+fixture_source = "i2rt-robotics / i2rt"
 base_link = "base"
 ee_link = "gripper"
 dof = 6
@@ -543,6 +561,7 @@ display_name = "Franka Research 3"
 short_name = "FR3"
 fixture = "fr3.urdf"
 fixture_kind = "urdf"
+fixture_source = "robot_descriptions / fr3_description"
 base_link = "fr3_link0"
 ee_link = "fr3_link8"
 dof = 7
@@ -570,6 +589,7 @@ display_name = "Enactic OpenArm v2.0 (left)"
 short_name = "OpenArm L"
 fixture = "openarm_left.urdf"
 fixture_kind = "urdf"
+fixture_source = "enactic / openarm_description"
 base_link = "openarm_left_base_link"
 ee_link = "openarm_left_ee_base_link"
 dof = 7
@@ -597,6 +617,7 @@ display_name = "Enactic OpenArm v2.0 (right)"
 short_name = "OpenArm R"
 fixture = "openarm_right.urdf"
 fixture_kind = "urdf"
+fixture_source = "enactic / openarm_description"
 base_link = "openarm_right_base_link"
 ee_link = "openarm_right_ee_base_link"
 dof = 7
