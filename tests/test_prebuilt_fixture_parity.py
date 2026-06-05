@@ -107,7 +107,9 @@ def test_fixture_matches_upstream_urdf(arm_name, description, arm) -> None:
     URDF.
     """
     try:
-        from robot_descriptions.loaders.yourdfpy import load_robot_description
+        from robot_descriptions.loaders.yourdfpy import (  # type: ignore[import-untyped]
+            load_robot_description,
+        )
     except ImportError:
         pytest.skip("`robot_descriptions` not installed")
 
