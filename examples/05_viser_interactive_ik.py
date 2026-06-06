@@ -16,15 +16,17 @@ non-Pieper 6R, any 7R). The badge shows what EAIK does on each, so the
 wedge is visible side-by-side with what ssik returns.
 
 Visuals come from ``robot_descriptions`` where it has a match (full
-URDF meshes); arms without a description (Puma 560, JACO 2, Kassow,
-FANUC CRX, big_yam, OpenArm, Rizon 10) fall back to a colored
-joint-spheres-plus-capsules rendering driven by ssik's own POE FK,
-so every prebuilt is visible.
+URDF meshes); arms without an upstream description (Puma 560, JACO 2,
+Kassow, FANUC CRX, big_yam, OpenArm, Rizon 10) fall back to a colored
+joint-spheres-plus-capsules rendering driven by ssik's own POE FK, so
+every prebuilt is visible. A few arms can opportunistically load a
+local URDF for full meshes via ``ArmSpec.local_urdf_paths`` (e.g. JACO
+2 from a sibling ``ada_ros2/ada_description`` checkout) -- see #310.
 
 Run::
 
-    uv pip install viser yourdfpy matplotlib robot_descriptions xacrodoc trimesh
-    uv run python examples/05_viser_interactive_ik.py
+    pip install 'ssik[demo]'
+    python examples/05_viser_interactive_ik.py
 
 Open the printed URL.
 """
@@ -34,12 +36,12 @@ from __future__ import annotations
 import importlib
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
 import trimesh
 import viser
-from matplotlib import colormaps
 from viser.extras import ViserUrdf
 
 from ssik._urdf import load_urdf_kinbody_normalized
@@ -61,6 +63,12 @@ class ArmSpec:
     # ``robot_descriptions.loaders.yourdfpy.load_robot_description``;
     # ``None`` triggers the primitive fallback.
     rd_description: str | None = None
+    # Optional local URDF (with sibling mesh files) for arms not packaged
+    # in ``robot_descriptions``. ``~`` is expanded. First existing path
+    # wins; if none exist the renderer falls back to primitives. Use this
+    # for arms like JACO 2 whose meshes ship in personal-robotics-lab
+    # repos (``ada_ros2/ada_description``) but not upstream.
+    local_urdf_paths: tuple[str, ...] = ()
     # The link in the rendered URDF whose world transform we treat as the
     # arm's "end effector". Required for meshed arms; ignored otherwise.
     # Used to compute the fixed rigid offset between ssik's POE frame and
@@ -101,7 +109,6 @@ ARMS: list[ArmSpec] = [
         eaik_status='refuses ("no 7R DH path")',
         expected_max_branches=24,
         rd_description="iiwa14_description",
-        render_ee_link="iiwa_link_ee",
     ),
     ArmSpec(
         label="Unitree Z1 — three-parallel 6R (UR-class)",
@@ -179,7 +186,6 @@ ARMS: list[ArmSpec] = [
         eaik_status='refuses ("no 7R DH path")',
         expected_max_branches=32,
         rd_description="xarm7_description",
-        render_ee_link="link_eef",
     ),
     ArmSpec(
         label="AgileX PiPER — non-Pieper 6R",
@@ -217,7 +223,6 @@ ARMS: list[ArmSpec] = [
         eaik_status='refuses ("Currently, only 1-6R robots are sol")',
         expected_max_branches=32,
         rd_description="gen3_description",
-        render_ee_link="tool_frame",
         ssik_fixture="tests/fixtures/gen3.urdf",
         ssik_base_link="base_link",
         ssik_ee_link="end_effector_link",
@@ -237,7 +242,16 @@ ARMS: list[ArmSpec] = [
         module_name="jaco2_ik",
         eaik_status='refuses ("6R-Unknown Kinematic Class")',
         expected_max_branches=12,
-        # jaco2_ik is specs-based; no URDF. Primitive path uses module._KB.
+        # jaco2_ik is specs-based; no URDF in ssik. For meshed rendering,
+        # opportunistically load the j2n6s200 URDF from a local checkout
+        # of personal-robotics-lab's ada_ros2 (the IK chain matches at
+        # 1.5e-7 -- rigid base-offset). Falls back to primitives if the
+        # file isn't present.
+        local_urdf_paths=(
+            "~/code/robot-code/ada_ros2/ada_description/urdf/j2n6s200_clean.urdf",
+        ),
+        render_ee_link="j2n6s200_end_effector",
+        ik_joint_names=tuple(f"j2n6s200_joint_{i}" for i in range(1, 7)),
         ssik_fixture="",
         ssik_base_link="",
         ssik_ee_link="",
@@ -304,11 +318,14 @@ ARMS: list[ArmSpec] = [
 # ---------------------------------------------------------------------------
 
 
-def palette(n: int) -> np.ndarray:
-    """``n`` visually-distinct RGB triples in [0, 1] via matplotlib turbo."""
-    if n <= 1:
-        return np.array([[0.16, 0.48, 0.95]])
-    return colormaps["turbo"](np.linspace(0.08, 0.92, n))[:, :3]
+# Two visual roles, two colours -- the active branch reads first, the
+# ghosts read as supporting context. Tuned against viser's default
+# studio-grey backdrop for legibility on screenshots / GIFs.
+ACTIVE_COLOR_RGBA: tuple[float, float, float, float] = (0.86, 0.18, 0.18, 1.0)
+# Ghosts are identical to the active: every visible branch is a valid IK
+# solution, no privileged "preferred" coloring. Shadow casting is still
+# disabled per-ghost so they don't darken each other or the active.
+GHOST_COLOR_RGBA: tuple[float, float, float, float] = ACTIVE_COLOR_RGBA
 
 
 def wrap_distance(q_a: np.ndarray, q_b: np.ndarray) -> float:
@@ -409,6 +426,7 @@ class MeshArmRenderer:
         ik_joint_names: tuple[str, ...] | None,
         render_ee_link: str,
         ssik_fk: "callable[[np.ndarray], np.ndarray]",
+        cast_shadow: bool = True,
     ) -> None:
         self._urdf = urdf
         self._render_ee_link = render_ee_link
@@ -418,6 +436,15 @@ class MeshArmRenderer:
             root_node_name=root_name,
             mesh_color_override=color_rgba,
         )
+        # Ghosts (cast_shadow=False) must not darken the active arm. The
+        # public API doesn't expose this, but the per-link handles live
+        # on ``viz._meshes`` and each one carries a settable attribute.
+        if not cast_shadow:
+            for handle in getattr(self.viz, "_meshes", []):
+                try:
+                    handle.cast_shadow = False
+                except Exception:
+                    pass
         self._urdf_joint_names = list(self.viz.get_actuated_joint_names())
         self._dof = len(self._urdf_joint_names)
         if ik_joint_names is None:
@@ -453,6 +480,9 @@ class MeshArmRenderer:
             cfg[urdf_idx] = q[i]
         self.viz.update_cfg(cfg)
 
+    def set_visible(self, visible: bool) -> None:
+        self.viz.show_visual = visible
+
     def remove(self) -> None:
         self.viz.remove()
 
@@ -483,6 +513,7 @@ class PrimitiveArmRenderer:
         kb,  # ssik KinBody
         root_name: str,
         color_rgba: tuple[float, float, float, float],
+        cast_shadow: bool = True,
     ) -> None:
         self.server = server
         self.kb = kb
@@ -506,7 +537,8 @@ class PrimitiveArmRenderer:
         )
 
         # Pre-create N+1 joint spheres + N bones. Position/orientation
-        # filled in by set_q().
+        # filled in by set_q(). Ghosts pass ``cast_shadow=False`` so
+        # their shadows don't darken the active arm.
         self.joint_handles: list[viser.SceneNodeHandle] = []
         for i in range(self._n + 1):
             h = server.scene.add_icosphere(
@@ -514,6 +546,7 @@ class PrimitiveArmRenderer:
                 radius=self.JOINT_RADIUS,
                 color=self.color_rgb,
                 opacity=self.opacity,
+                cast_shadow=cast_shadow,
             )
             self.joint_handles.append(h)
         self.bone_handles: list[viser.SceneNodeHandle] = []
@@ -524,6 +557,7 @@ class PrimitiveArmRenderer:
                 faces=self._bone_tmpl_unit.faces,
                 color=self.color_rgb,
                 opacity=self.opacity,
+                cast_shadow=cast_shadow,
             )
             self.bone_handles.append(h)
 
@@ -568,6 +602,10 @@ class PrimitiveArmRenderer:
             h.scale = (1.0, 1.0, length)
             h.wxyz = _align_z_to(direction)
 
+    def set_visible(self, visible: bool) -> None:
+        for h in self.joint_handles + self.bone_handles:
+            h.visible = visible
+
     def remove(self) -> None:
         for h in self.joint_handles + self.bone_handles:
             try:
@@ -603,7 +641,6 @@ class ArmRuntime:
     ghosts: list[_Renderer]
     dof: int
     q_current: np.ndarray
-    preferred_branch_idx: int = 0
     last_sols_q: list[np.ndarray] = field(default_factory=list)
 
     def remove(self) -> None:
@@ -630,11 +667,43 @@ def _get_urdf(description: str):
     return cached
 
 
+def _get_local_urdf(path: Path):
+    """Load a local URDF (with sibling meshes). yourdfpy resolves relative
+    ``filename`` references against the URDF's own directory, so a
+    standard ROS-style ``../meshes/foo.dae`` Just Works."""
+    key = f"local:{path}"
+    cached = _URDF_CACHE.get(key)
+    if cached is not None:
+        return cached
+    import yourdfpy
+
+    cached = yourdfpy.URDF.load(str(path))
+    _URDF_CACHE[key] = cached
+    return cached
+
+
+def _resolve_local_urdf(spec: "ArmSpec") -> Path | None:
+    """Return the first existing path from ``spec.local_urdf_paths`` (with
+    ``~`` expansion), or ``None`` if no candidate file exists."""
+    for raw in spec.local_urdf_paths:
+        p = Path(raw).expanduser()
+        if p.exists():
+            return p
+    return None
+
+
 def preload_descriptions() -> None:
     """Warm the URDF cache for every meshed arm in the roster. Called
     from a background thread at startup so the first arm-switch isn't
     waiting on download + xacro for each one."""
     for spec in ARMS:
+        local = _resolve_local_urdf(spec)
+        if local is not None:
+            try:
+                _get_local_urdf(local)
+            except Exception as e:
+                print(f"  ! preload failed for {local}: {type(e).__name__}: {e}")
+            continue
         if spec.rd_description is None:
             continue
         try:
@@ -646,26 +715,64 @@ def preload_descriptions() -> None:
             )
 
 
+def _mesh_renderer_has_geometry(renderer: "MeshArmRenderer") -> bool:
+    """Return True iff the underlying yourdfpy URDF has at least one
+    resolvable visual mesh. Arms whose URDF references unresolvable
+    ``package://...`` paths (e.g. yam_description's gripper assets)
+    load as ViserUrdf with zero scene geometry -- the user sees nothing.
+    Detect that and fall back to primitives instead of shipping an
+    empty arm slot."""
+    geom = getattr(renderer._urdf, "scene", None)
+    if geom is None:
+        return False
+    return len(geom.geometry) > 0
+
+
 def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
     module = importlib.import_module(f"ssik.prebuilt.{spec.module_name}")
     dof = module.DOF
     n_ghosts = max(spec.expected_max_branches - 1, 0)
-    colors = palette(spec.expected_max_branches)
 
-    use_mesh = spec.rd_description is not None
+    # Two mesh sources: ``rd_description`` (upstream-packaged) or a
+    # ``local_urdf_paths`` candidate that exists on disk (e.g. JACO 2's
+    # meshes from ada_ros2/ada_description). Pick the first one
+    # available; fall back to primitives if neither resolves.
+    local_urdf = _resolve_local_urdf(spec)
+    use_mesh = spec.rd_description is not None or local_urdf is not None
+    # The rendered EE link MUST match the link the ssik artifact was built
+    # for -- otherwise the rigid base-offset model can't account for the
+    # tip-frame difference and the marker drifts as joints rotate. Default
+    # to the manifest's ``ee_link`` (one source of truth) and only honor
+    # ``spec.render_ee_link`` as an explicit override.
+    from ssik.prebuilt._manifest import load_manifest
 
-    def _build(root: str, rgba) -> _Renderer:
+    manifest_ee = load_manifest()[spec.module_name].ee_link
+    render_ee_link = spec.render_ee_link or manifest_ee
+
+    def _build(root: str, rgba, cast_shadow: bool) -> _Renderer:
         if use_mesh:
             try:
-                urdf = _get_urdf(spec.rd_description)  # type: ignore[arg-type]
-                return MeshArmRenderer(
+                urdf = (
+                    _get_local_urdf(local_urdf)
+                    if local_urdf is not None
+                    else _get_urdf(spec.rd_description)  # type: ignore[arg-type]
+                )
+                mesh = MeshArmRenderer(
                     server,
                     urdf,
                     root,
                     rgba,
                     spec.ik_joint_names,
-                    spec.render_ee_link,
+                    render_ee_link,
                     module.fk,
+                    cast_shadow=cast_shadow,
+                )
+                if _mesh_renderer_has_geometry(mesh):
+                    return mesh
+                mesh.remove()
+                print(
+                    f"  ! {spec.label}: rendered URDF has 0 visual meshes "
+                    "(unresolvable package:// paths) -- falling back to primitives"
                 )
             except Exception as e:
                 print(
@@ -673,21 +780,15 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
                     f"{type(e).__name__}: {e}  -- falling back to primitives"
                 )
         kb = _load_ssik_kb(spec, module)
-        return PrimitiveArmRenderer(server, kb, root, rgba)
-
-    active = _build(
-        "/arm/active",
-        (float(colors[0, 0]), float(colors[0, 1]), float(colors[0, 2]), 1.0),
-    )
-    ghosts: list[_Renderer] = []
-    for i in range(n_ghosts):
-        c = colors[i + 1]
-        ghosts.append(
-            _build(
-                f"/arm/ghost_{i:02d}",
-                (float(c[0]), float(c[1]), float(c[2]), 0.22),
-            )
+        return PrimitiveArmRenderer(
+            server, kb, root, rgba, cast_shadow=cast_shadow
         )
+
+    active = _build("/arm/active", ACTIVE_COLOR_RGBA, cast_shadow=True)
+    ghosts: list[_Renderer] = [
+        _build(f"/arm/ghost_{i:02d}", GHOST_COLOR_RGBA, cast_shadow=False)
+        for i in range(n_ghosts)
+    ]
 
     # Seed q at a mid-workspace non-singular config.
     q0 = np.full(dof, 0.4)
@@ -716,22 +817,30 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
 def main(host: str = "0.0.0.0", port: int = 8080) -> None:
     server = viser.ViserServer(host=host, port=port)
 
-    with server.gui.add_folder("Arm"):
-        arm_dropdown = server.gui.add_dropdown(
-            "Robot",
-            options=[a.label for a in ARMS],
-            initial_value=ARMS[0].label,
-        )
-        solver_badge = server.gui.add_markdown("")
-        eaik_badge = server.gui.add_markdown("")
-
-    with server.gui.add_folder("Branches"):
-        cycle_btn = server.gui.add_button("Cycle preferred branch")
-        reset_btn = server.gui.add_button("Reset marker → current EE")
-        show_ghosts_chk = server.gui.add_checkbox("Show ghost branches", True)
-
-    with server.gui.add_folder("Stats"):
-        stats_md = server.gui.add_markdown("waiting for first solve…")
+    # Top-level (no folder collapse) so the live stats / dispatch badges
+    # are visible without the user hunting through panels. Controls go
+    # inside folders below.
+    arm_dropdown = server.gui.add_dropdown(
+        "Robot",
+        options=[a.label for a in ARMS],
+        initial_value=ARMS[0].label,
+    )
+    solver_badge = server.gui.add_markdown("**ssik**: (loading…)")
+    eaik_badge = server.gui.add_markdown("**EAIK**: (loading…)")
+    stats_md = server.gui.add_markdown("**Stats**: waiting for first solve…")
+    # ``max_ghosts_slider`` is hot-rewired in ``select_arm`` to match the
+    # incoming arm's ``expected_max_branches``; the initial bounds are a
+    # placeholder for the first arm in the roster.
+    max_ghosts_slider = server.gui.add_slider(
+        "Ghost branches shown",
+        min=0,
+        max=max(ARMS[0].expected_max_branches - 1, 0),
+        step=1,
+        initial_value=max(ARMS[0].expected_max_branches - 1, 0),
+    )
+    show_ghosts_chk = server.gui.add_checkbox("Show ghost branches", True)
+    cycle_btn = server.gui.add_button("Cycle preferred branch")
+    reset_btn = server.gui.add_button("Reset marker → current EE")
 
     state: dict[str, object] = {"arm": None}
 
@@ -796,7 +905,7 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
 
         if not sols:
             stats_md.content = (
-                f"**Branches**: 0 (target out of reach)<br>"
+                "**Branches**: 0 (target out of reach)\n\n"
                 f"**Solve**: {elapsed_ms:.2f} ms"
             )
             return
@@ -804,34 +913,43 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         q_list = [np.asarray(s.q, dtype=float) for s in sols]
         rt.last_sols_q = q_list
 
-        if rt.preferred_branch_idx >= len(q_list):
-            rt.preferred_branch_idx = 0
-        if rt.preferred_branch_idx == 0:
-            dists = [wrap_distance(q, rt.q_current) for q in q_list]
-            active_idx = int(np.argmin(dists))
-        else:
-            active_idx = rt.preferred_branch_idx
+        # Always closest-track: pick the branch nearest to the previous
+        # active q. Cycle button advances ``q_current`` to the next branch
+        # before this re-solves, so closest-tracking lands on the cycled-to
+        # branch by construction -- no fixed-slot indexing (which would
+        # alias to different physical branches across solves, since the
+        # solver doesn't promise a stable enumeration order).
+        dists = [wrap_distance(q, rt.q_current) for q in q_list]
+        active_idx = int(np.argmin(dists))
 
         q_active = q_list[active_idx]
         rt.active.set_q(q_active)
         rt.q_current = q_active
 
+        # Ghost-arm rendering: respect both the show-ghosts toggle and the
+        # user-selected cap. Ghosts beyond the cap are HIDDEN, not parked
+        # at q_active -- parking stacks N transparent meshes on the active
+        # arm and washes its color out.
         show = show_ghosts_chk.value
+        max_ghosts = int(max_ghosts_slider.value) if show else 0
         ghost_idx = 0
         for i, q in enumerate(q_list):
             if i == active_idx:
                 continue
             if ghost_idx >= len(rt.ghosts):
                 break
-            rt.ghosts[ghost_idx].set_q(q if show else q_active)
+            visible = ghost_idx < max_ghosts
+            rt.ghosts[ghost_idx].set_visible(visible)
+            if visible:
+                rt.ghosts[ghost_idx].set_q(q)
             ghost_idx += 1
         for i in range(ghost_idx, len(rt.ghosts)):
-            rt.ghosts[i].set_q(q_active)
+            rt.ghosts[i].set_visible(False)
 
         fks = [float(s.fk_residual) for s in sols]
         stats_md.content = (
-            f"**Branches**: {len(sols)} (active = #{active_idx})<br>"
-            f"**FK closure**: min {min(fks):.2e}, max {max(fks):.2e}<br>"
+            f"**Branches**: {len(sols)} (active = #{active_idx})\n\n"
+            f"**FK closure**: min {min(fks):.2e}, max {max(fks):.2e}\n\n"
             f"**Solve**: {elapsed_ms:.2f} ms"
         )
 
@@ -842,13 +960,20 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         runtime = load_arm_runtime(server, spec)
         state["arm"] = runtime
         solver_name = getattr(runtime.module, "SOLVER_NAME", "?")
-        viz_kind = "URDF meshes" if spec.rd_description else "kinematic primitives"
+        has_mesh = spec.rd_description is not None or _resolve_local_urdf(spec) is not None
+        viz_kind = "URDF meshes" if has_mesh else "kinematic primitives"
         solver_badge.content = (
             f"**ssik**: `{solver_name}`  ·  {runtime.dof}-DOF  ·  "
-            f"`from ssik.prebuilt import {spec.module_name}`<br>"
+            f"`from ssik.prebuilt import {spec.module_name}`\n\n"
             f"**viz**: {viz_kind}"
         )
         eaik_badge.content = f"**EAIK**: {spec.eaik_status}"
+        # Rebind the slider bounds to this arm's branch budget. Default
+        # to "all ghosts on" -- the user can dial it down to remove
+        # visual clutter.
+        max_n = max(spec.expected_max_branches - 1, 0)
+        max_ghosts_slider.max = max_n
+        max_ghosts_slider.value = max_n
         # Initial marker: place at the *rendered* EE position so the
         # handle is co-located with the visible end-effector.
         T_ssik = runtime.module.fk(runtime.q_current)  # type: ignore[union-attr]
@@ -870,7 +995,15 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         if runtime is None or not runtime.last_sols_q:  # type: ignore[union-attr]
             return
         rt: ArmRuntime = runtime  # type: ignore[assignment]
-        rt.preferred_branch_idx = (rt.preferred_branch_idx + 1) % len(rt.last_sols_q)
+        # Find the current active in the last solve, advance to the next
+        # branch by q-identity (not by slot index). Update q_current so
+        # the upcoming closest-track solve locks onto the cycled-to
+        # branch even if the solver reorders its enumeration.
+        qs = rt.last_sols_q
+        cur_idx = int(np.argmin([wrap_distance(q, rt.q_current) for q in qs]))
+        next_idx = (cur_idx + 1) % len(qs)
+        rt.q_current = qs[next_idx]
+        _solve_and_render()
         _solve_and_render()
 
     @reset_btn.on_click
@@ -879,7 +1012,6 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         if runtime is None:
             return
         rt: ArmRuntime = runtime  # type: ignore[assignment]
-        rt.preferred_branch_idx = 0
         T_ssik = rt.module.fk(rt.q_current)  # type: ignore[union-attr]
         T_render = rt.active.base_offset @ T_ssik
         _move_marker(T_render)
@@ -889,15 +1021,27 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
     def _(_):
         _solve_and_render()
 
+    @max_ghosts_slider.on_update
+    def _(_):
+        _solve_and_render()
+
     # Warm the URDF cache for the rest of the meshed roster in the
     # background so the first switch through each arm doesn't pay the
-    # download + xacro cost interactively.
+    # download + xacro cost interactively. First-ever launch of an arm
+    # lazy ``git clone``s its upstream description repo into
+    # ``~/.cache/robot_descriptions/`` -- ~100s of MB total across the
+    # full roster. Subsequent launches reuse the cache and are instant.
     import threading
 
     threading.Thread(target=preload_descriptions, daemon=True).start()
 
     select_arm(ARMS[0].label)
-    print(f"\n  ssik interactive-IK demo:  http://localhost:{port}\n")
+    print(f"\n  ssik interactive-IK demo:  http://localhost:{port}", flush=True)
+    print(
+        "  (first launch: upstream URDFs lazy-fetch to "
+        "~/.cache/robot_descriptions/ in the background)\n",
+        flush=True,
+    )
 
     while True:
         time.sleep(1.0)
