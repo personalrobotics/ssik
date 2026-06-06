@@ -36,6 +36,42 @@ python examples/05_viser_interactive_ik.py
 
 Opens a browser viewer: drag a 3D handle and watch every analytical IK solution render as a live arm in real time. Cycle through the full prebuilt roster — including the non-Pieper 6R and 7R arms EAIK refuses.
 
+#### Eight arms, every analytical branch
+
+Each loop below is one arm's interactive demo running for ~3 seconds: the live red arm tracks the marker; the faded reds are the other analytical IK branches at the same instant. Captured from [`examples/05_viser_interactive_ik.py`](examples/05_viser_interactive_ik.py).
+
+**UR5** — three-parallel 6R (Pieper). EAIK supports this class.
+
+<img src="docs/assets/per_arm/ur5_ik.gif" alt="UR5 IK demo" width="480">
+
+**Unitree Z1** — three-parallel 6R (UR-class). EAIK supports this class.
+
+<img src="docs/assets/per_arm/z1_ik.gif" alt="Unitree Z1 IK demo" width="480">
+
+**Franka Panda** — anthropomorphic 7R. EAIK refuses ("only 1–6R").
+
+<img src="docs/assets/per_arm/franka_panda_ik.gif" alt="Franka Panda IK demo" width="480">
+
+**UFactory xArm6** — non-Pieper 6R. EAIK refuses ("6R-Unknown Kinematic Class").
+
+<img src="docs/assets/per_arm/xarm6_ik.gif" alt="UFactory xArm6 IK demo" width="480">
+
+**Kinova JACO 2** — non-Pieper 6R. EAIK refuses ("6R-Unknown Kinematic Class").
+
+<img src="docs/assets/per_arm/jaco2_ik.gif" alt="Kinova JACO 2 IK demo" width="480">
+
+**AgileX PiPER** — non-Pieper 6R. EAIK refuses ("6R-Unknown Kinematic Class").
+
+<img src="docs/assets/per_arm/piper_ik.gif" alt="AgileX PiPER IK demo" width="480">
+
+**KUKA iiwa14** — SRS 7R. EAIK refuses ("no 7R DH path").
+
+<img src="docs/assets/per_arm/iiwa14_ik.gif" alt="KUKA iiwa14 IK demo" width="480">
+
+**Flexiv Rizon 4** — non-SRS 7R. EAIK refuses ("only 1–6R").
+
+<img src="docs/assets/per_arm/rizon4_ik.gif" alt="Flexiv Rizon 4 IK demo" width="480">
+
 ## The artifact model
 
 ssik is built around **per-arm artifact modules**. Each artifact is a single `.py` file with the per-arm KinBody constants, the dispatched solver, and any cached symbolic preprocessing already baked in. **No URDF parsing, no `urchin`, no `sympy` on the runtime import path.** A robot stack that imports `<arm>_ik.py` carries no algorithmic complexity beyond what the build pipeline already resolved.

@@ -627,6 +627,13 @@ class ArmRuntime:
     dof: int
     q_current: np.ndarray
     last_sols_q: list[np.ndarray] = field(default_factory=list)
+    # Per-ghost-slot last-rendered q, for stable identity tracking across
+    # solves. None means "this slot hasn't been bound to a branch yet".
+    # See the render loop -- each frame we greedy-match each slot to the
+    # closest q in the new solve, so the solver's enumeration order
+    # changing across frames doesn't make ghost #5 flicker between two
+    # different physical branches.
+    ghost_qs: list[np.ndarray | None] = field(default_factory=list)
 
     def remove(self) -> None:
         self.active.remove()
@@ -785,6 +792,7 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
         ghosts=ghosts,
         dof=dof,
         q_current=q0,
+        ghost_qs=[None] * len(ghosts),
     )
 
 
@@ -793,7 +801,17 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
 # ---------------------------------------------------------------------------
 
 
-def main(host: str = "0.0.0.0", port: int = 8080) -> None:
+def main(
+    host: str = "0.0.0.0",
+    port: int = 8080,
+    tour: bool = False,
+    tour_delay_s: float = 4.0,
+    tour_per_arm_s: float = 3.0,
+    tour_exit: bool = False,
+    tour_max_ghosts: int = 7,
+    tour_record_dir: str = "",
+    tour_record_size: tuple[int, int] = (1280, 720),
+) -> None:
     server = viser.ViserServer(host=host, port=port)
 
     # Top-level (no folder collapse) so the live stats / dispatch badges
@@ -859,12 +877,26 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         )
         return T
 
-    def _solve_and_render() -> None:
+    def _solve_and_render() -> bool:
+        """Return True if the IK produced at least one solution and we
+        rendered it; False if the marker pose is unreachable (no sols).
+        Tour mode uses this signal to skip capturing dead frames where
+        the arm has frozen at its last reachable pose."""
         runtime = state["arm"]
         if runtime is None:
-            return
+            return False
         rt: ArmRuntime = runtime  # type: ignore[assignment]
 
+        # All scene updates inside this call are wrapped in ``server.atomic()``
+        # so the client receives one batched apply per frame. Without this,
+        # per-joint updates (ViserUrdf.update_cfg emits N separate messages)
+        # interleave between arms and the user sees brief intermediate poses
+        # where the EE is visibly off-marker -- the "flicker that isn't an
+        # IK solution" symptom.
+        with server.atomic():
+            return _solve_and_render_inner(rt)
+
+    def _solve_and_render_inner(rt: "ArmRuntime") -> bool:
         # Marker is in the rendered URDF's world frame; ssik solves in its
         # POE frame. ``base_offset`` is the constant rigid transform
         # between the two (computed at load time by the renderer). Apply
@@ -873,10 +905,19 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         T_marker = _marker_T()
         T_solve = _invert(rt.active.base_offset) @ T_marker
 
+        # Tie the solve budget to what we actually render: ``max_solutions``
+        # = active + visible ghosts. The slider already caps the rendered
+        # count; asking the solver for more would just burn CPU on
+        # branches we'd never paint. When the user dials the slider down,
+        # the solver speeds up correspondingly -- crucial for heavy 7Rs
+        # (Rizon 4 / Kassow) whose per-branch lock-sample work dominates.
+        show = show_ghosts_chk.value
+        max_ghosts = int(max_ghosts_slider.value) if show else 0
+        max_solutions = max_ghosts + 1
         t0 = time.perf_counter()
         sols = rt.module.solve(  # type: ignore[union-attr]
             T_solve,
-            max_solutions=rt.spec.expected_max_branches,
+            max_solutions=max_solutions,
             respect_limits=False,
             q_seed=rt.q_current,
         )
@@ -886,7 +927,7 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
             stats_md.content = (
                 f"**Branches**: 0 (target out of reach)\n\n**Solve**: {elapsed_ms:.2f} ms"
             )
-            return
+            return False
 
         q_list = [np.asarray(s.q, dtype=float) for s in sols]
         rt.last_sols_q = q_list
@@ -905,24 +946,37 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         rt.q_current = q_active
 
         # Ghost-arm rendering: respect both the show-ghosts toggle and the
-        # user-selected cap. Ghosts beyond the cap are HIDDEN, not parked
+        # user-selected cap. Ghosts beyond the cap are HIDDEN (not parked
         # at q_active -- parking stacks N transparent meshes on the active
-        # arm and washes its color out.
-        show = show_ghosts_chk.value
-        max_ghosts = int(max_ghosts_slider.value) if show else 0
-        ghost_idx = 0
-        for i, q in enumerate(q_list):
-            if i == active_idx:
-                continue
-            if ghost_idx >= len(rt.ghosts):
-                break
-            visible = ghost_idx < max_ghosts
-            rt.ghosts[ghost_idx].set_visible(visible)
-            if visible:
-                rt.ghosts[ghost_idx].set_q(q)
-            ghost_idx += 1
-        for i in range(ghost_idx, len(rt.ghosts)):
-            rt.ghosts[i].set_visible(False)
+        # and washes its color out).
+        #
+        # Stable identity via greedy matching: each ghost slot remembers
+        # its prior q; we assign it the closest remaining q in the new
+        # solve (excluding the active). The solver doesn't promise a
+        # stable enumeration order across solves, so a positional
+        # "ghosts[i] = q_list[i]" assignment makes ghost #5 visibly
+        # flicker between two unrelated branches as the solver shuffles.
+        # Greedy-match keeps each ghost on its continuation branch as
+        # long as that branch survives in the new solve. ``max_ghosts``
+        # comes from the slider above (already tied to ``max_solutions``).
+        available = [j for j in range(len(q_list)) if j != active_idx]
+        n_slots = min(max_ghosts, len(rt.ghosts), len(available))
+        # Slot ordering: bind first to slots that already have a prior
+        # q (so they stick to their continuation); fall through to fresh
+        # slots seeded against q_active.
+        seeded_slots = [s for s in range(n_slots) if rt.ghost_qs[s] is not None]
+        fresh_slots = [s for s in range(n_slots) if rt.ghost_qs[s] is None]
+        for slot in seeded_slots + fresh_slots:
+            ref_q = rt.ghost_qs[slot] if rt.ghost_qs[slot] is not None else q_active
+            best_j = min(available, key=lambda j: wrap_distance(q_list[j], ref_q))
+            available.remove(best_j)
+            q_pick = q_list[best_j]
+            rt.ghosts[slot].set_visible(True)
+            rt.ghosts[slot].set_q(q_pick)
+            rt.ghost_qs[slot] = q_pick
+        for slot in range(n_slots, len(rt.ghosts)):
+            rt.ghosts[slot].set_visible(False)
+            rt.ghost_qs[slot] = None
 
         fks = [float(s.fk_residual) for s in sols]
         stats_md.content = (
@@ -930,6 +984,7 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
             f"**FK closure**: min {min(fks):.2e}, max {max(fks):.2e}\n\n"
             f"**Solve**: {elapsed_ms:.2f} ms"
         )
+        return True
 
     def select_arm(label: str) -> None:
         if state["arm"] is not None:
@@ -1009,9 +1064,18 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
     # lazy ``git clone``s its upstream description repo into
     # ``~/.cache/robot_descriptions/`` -- ~100s of MB total across the
     # full roster. Subsequent launches reuse the cache and are instant.
-    import threading
+    #
+    # Tour mode runs the preload synchronously up front instead so the
+    # background thread isn't competing for CPU / disk / GIL while we're
+    # trying to drive frames at 30fps. The preload cost only matters
+    # for fresh checkouts; on a warm cache it's a no-op.
+    if tour:
+        print("  tour mode: pre-warming URDF cache (synchronous)", flush=True)
+        preload_descriptions()
+    else:
+        import threading
 
-    threading.Thread(target=preload_descriptions, daemon=True).start()
+        threading.Thread(target=preload_descriptions, daemon=True).start()
 
     select_arm(ARMS[0].label)
     print(f"\n  ssik interactive-IK demo:  http://localhost:{port}", flush=True)
@@ -1021,8 +1085,274 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
         flush=True,
     )
 
+    if tour:
+        # Tour mode: drive arm dropdown + marker programmatically through a
+        # narrative of arms. ``tour_record_dir`` opts into per-frame PNG
+        # capture via the connected client's server-driven ``get_render``;
+        # ffmpeg later composes them into the final MP4 / GIF. With no
+        # record dir we just animate live.
+        print(f"  tour mode: starting in {tour_delay_s:.1f}s, "
+              f"{tour_per_arm_s:.1f}s motion per arm", flush=True)
+        record_dir = Path(tour_record_dir).expanduser().resolve() if tour_record_dir else None
+        if record_dir is not None:
+            record_dir.mkdir(parents=True, exist_ok=True)
+            # Refuse to start until at least one client connects -- the
+            # render comes from the client's three.js view, not the server.
+            print(f"  tour record: open http://localhost:{port} in a browser "
+                  "to act as the render client; tour waits for connection",
+                  flush=True)
+            while not server.get_clients():
+                time.sleep(0.5)
+            print(f"  tour record: client connected; capturing PNGs to "
+                  f"{record_dir} at {tour_record_size[0]}x{tour_record_size[1]}",
+                  flush=True)
+        time.sleep(tour_delay_s)
+        _run_tour(
+            select_arm=select_arm,
+            arm_dropdown=arm_dropdown,
+            max_ghosts_slider=max_ghosts_slider,
+            move_marker=_move_marker,
+            solve_and_render=_solve_and_render,
+            state=state,
+            per_arm_s=tour_per_arm_s,
+            max_ghosts=tour_max_ghosts,
+            server=server,
+            record_dir=record_dir,
+            record_size=tour_record_size,
+        )
+        print("  tour: complete", flush=True)
+        if tour_exit:
+            return
     while True:
         time.sleep(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Tour mode (programmatic walk for video capture).
+# ---------------------------------------------------------------------------
+
+
+# Narrative order: easy (EAIK supports) → 6R wedge (EAIK refuses) → 7R
+# climax (EAIK refuses entirely). Mesh-rendered arms only -- the primitive
+# skeleton fallback (FANUC CRX, Kassow, OpenArm without an opportunistic
+# local URDF) doesn't look cinematic enough for the README hero. JACO 2
+# is included because ``local_urdf_paths`` opportunistically loads its
+# DAE meshes from ada_ros2 when present.
+_TOUR_ORDER: tuple[str, ...] = (
+    # Act 1 — easy: EAIK has these.
+    "UR5 — three-parallel 6R (Pieper)",
+    "Unitree Z1 — three-parallel 6R (UR-class)",
+    "Franka Panda — anthropomorphic 7R",
+    # Act 2 — wedge: non-Pieper 6R, EAIK refuses.
+    "UFactory xArm6 — non-Pieper 6R",
+    "Kinova JACO 2 — non-Pieper 6R",
+    "AgileX PiPER — non-Pieper 6R",
+    # Act 3 — climax: 7R territory, EAIK refuses entirely.
+    "KUKA iiwa14 — SRS 7R",
+    "Flexiv Rizon 4 — non-SRS 7R",
+)
+
+
+def _lissajous_marker_T(
+    T0: np.ndarray,
+    t: float,
+    duration: float,
+    pos_scale: float = 1.0,
+) -> np.ndarray:
+    """Smooth Lissajous-style oscillation around an anchor pose.
+
+    Returns a 4x4 transform that traces a small ellipsoidal loop in
+    position while gently rocking the orientation. Amplitudes are tuned
+    so the motion exercises distinct IK branches without ever leaving
+    the arm's typical workspace. ``pos_scale`` shrinks the translation
+    amplitudes for small arms (e.g. PiPER at ~0.45 m reach) so the
+    marker stays in a high-manipulability region rather than skirting
+    the workspace boundary.
+    """
+    phase = 2 * np.pi * t / max(duration, 1e-3)
+    # Translation: ellipse in xy + small bob in z. Smaller than before --
+    # 10 cm was too much for small arms (PiPER, JACO 2) and visually
+    # pushed the marker out of the "obviously reachable" region; 5 cm
+    # keeps the active EE comfortably inside the manipulable workspace
+    # for every arm in the tour.
+    dx = pos_scale * 0.05 * np.sin(phase)
+    dy = pos_scale * 0.04 * np.sin(2 * phase + 0.3)
+    dz = pos_scale * 0.03 * np.cos(phase) - pos_scale * 0.03
+    T = T0.copy()
+    T[:3, 3] = T0[:3, 3] + np.array([dx, dy, dz])
+    # Rotation: tilt around the marker's local X and Y by small angles
+    # over the loop. Keeps wrist branches visibly different per pose.
+    ax = 0.35 * np.sin(phase + 0.5)
+    ay = 0.25 * np.cos(phase * 0.8)
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(ax), -np.sin(ax)],
+        [0, np.sin(ax), np.cos(ax)],
+    ])
+    Ry = np.array([
+        [np.cos(ay), 0, np.sin(ay)],
+        [0, 1, 0],
+        [-np.sin(ay), 0, np.cos(ay)],
+    ])
+    T[:3, :3] = T0[:3, :3] @ Rx @ Ry
+    return T
+
+
+def _run_tour(
+    *,
+    select_arm,
+    arm_dropdown,
+    max_ghosts_slider,
+    move_marker,
+    solve_and_render,
+    state,
+    per_arm_s: float,
+    max_ghosts: int,
+    server=None,
+    record_dir: Path | None = None,
+    record_size: tuple[int, int] = (1280, 720),
+    settle_after_load_s: float = 0.8,
+) -> None:
+    """Drive the GUI through ``_TOUR_ORDER``: switch arm, hold the home
+    pose briefly for the mesh upload + viewer settle, then oscillate
+    the marker for ``per_arm_s`` seconds at ~30 fps.
+
+    ``marker.on_update`` only fires on client→server traffic, so the
+    tour explicitly calls ``solve_and_render`` after every marker pose
+    update -- otherwise the arm would freeze at its home pose while the
+    marker animates silently.
+    """
+    fps = 30
+    arm_labels = {spec.label for spec in ARMS}
+
+    def _capture(frame_idx: int) -> int:
+        """Pull a server-rendered frame from the first connected client and
+        write it as a zero-padded PNG. Returns the next frame index."""
+        if record_dir is None or server is None:
+            return frame_idx
+        clients = server.get_clients()
+        if not clients:
+            return frame_idx
+        client = next(iter(clients.values()))
+        try:
+            import imageio.v3 as iio  # type: ignore[import-not-found]
+
+            img = client.get_render(
+                height=record_size[1], width=record_size[0], transport_format="jpeg"
+            )
+            iio.imwrite(record_dir / f"frame_{frame_idx:05d}.png", img)
+        except Exception as e:  # noqa: BLE001
+            print(f"  tour record: capture failed at frame {frame_idx}: {e}", flush=True)
+        return frame_idx + 1
+
+    # Per-arm frame ranges, written to ``_manifest.json`` so a downstream
+    # ffmpeg pass can carve out each arm's GIF without re-running the tour.
+    frame_ranges: dict[str, dict[str, int | str]] = {}
+    frame_idx = 0
+    for label in _TOUR_ORDER:
+        if label not in arm_labels:
+            print(f"  tour: skipping unknown arm {label!r}", flush=True)
+            continue
+        t_select_0 = time.perf_counter()
+        arm_dropdown.value = label  # cosmetic; also fires the dropdown's on_update
+        select_arm(label)
+        arm_start_idx = frame_idx
+        # Cap the visible-ghost count: 32-branch arms otherwise spike to
+        # ~1s render frames on the heavy 7Rs (Rizon 4 / Kassow). The full
+        # branch count still appears in the stats badge; we just don't
+        # paint every ghost. The active arm is unaffected.
+        max_ghosts_slider.value = min(
+            max_ghosts, int(max_ghosts_slider.max)
+        )
+        t_select = time.perf_counter() - t_select_0
+        # Anchor pose: the rendered EE of the freshly-loaded arm at q0.
+        rt = state["arm"]
+        T_ssik = rt.module.fk(rt.q_current)  # type: ignore[union-attr]
+        T_anchor = rt.active.base_offset @ T_ssik  # type: ignore[union-attr]
+        # Per-arm position-amplitude scale: bigger reach → bigger Lissajous.
+        # ``reach`` here is the home-pose EE distance from the base, a
+        # rough proxy. Cap at 1.4 so PiPER (~0.45 m) gets a smaller loop
+        # than Rizon 4 (~1.0 m) without making the motion invisible.
+        reach = float(np.linalg.norm(T_anchor[:3, 3]))
+        pos_scale = max(0.6, min(1.4, reach / 0.6))
+        # Per-arm cinematic camera: orbit ~60° off-axis at ~25° elevation
+        # so we see the wrist branches splay out clearly. Distance scales
+        # with reach so the arm fills the frame. Look-at is the home EE
+        # so the marker stays roughly centered through the motion.
+        if server is not None and record_dir is not None:
+            clients = server.get_clients()
+            if clients:
+                cam = next(iter(clients.values())).camera
+                look_at = T_anchor[:3, 3].copy()
+                # Aim down toward the arm rather than at the EE -- frames
+                # the whole kinematic chain instead of only the wrist.
+                look_at[2] = max(0.0, look_at[2] - 0.15 * reach)
+                cam_distance = max(1.2, reach * 2.3)
+                az, el = np.radians(60), np.radians(20)
+                cam.position = look_at + cam_distance * np.array([
+                    np.cos(el) * np.cos(az),
+                    np.cos(el) * np.sin(az),
+                    np.sin(el),
+                ])
+                cam.look_at = look_at
+                cam.fov = np.radians(38)  # mild telephoto for "cinematic"
+        # Mesh upload over WebSocket can stretch to ~1s on big-mesh arms
+        # (Panda, iiwa, FANUC CRX). Hold the home pose for a beat so the
+        # viewer sees the arm settled before the marker starts moving --
+        # AND so the previous arm's ``remove()`` messages have time to
+        # drain on the client before the new mesh tree arrives. Without
+        # this gap the residual nodes-pending-deletion compound across
+        # arms and the browser-side scene grows unboundedly.
+        time.sleep(settle_after_load_s)
+        n_frames = max(int(per_arm_s * fps), 1)
+        t_motion_0 = time.perf_counter()
+        frame_times: list[float] = []
+        for k in range(n_frames):
+            t_frame_0 = time.perf_counter()
+            t = k / fps
+            T = _lissajous_marker_T(T_anchor, t, per_arm_s, pos_scale=pos_scale)
+            move_marker(T)
+            had_sols = solve_and_render()
+            # Only capture frames where the IK actually produced a
+            # solution. Otherwise the recording would freeze the arm at
+            # its last reachable pose while the marker keeps moving --
+            # visually identical to a stutter / dead frame.
+            if had_sols:
+                frame_idx = _capture(frame_idx)
+            frame_times.append(time.perf_counter() - t_frame_0)
+            # When NOT recording: pace to wall-clock so live playback
+            # honors the chosen per_arm_s budget. When recording: skip
+            # the sleep -- each captured PNG IS one output frame, the
+            # final 30fps video is built by ffmpeg from the PNG sequence
+            # regardless of how long each capture took.
+            if record_dir is None:
+                target = t_motion_0 + t
+                now = time.perf_counter()
+                if target > now:
+                    time.sleep(target - now)
+        median_ms = sorted(frame_times)[len(frame_times) // 2] * 1000
+        max_ms = max(frame_times) * 1000
+        print(
+            f"  tour: {label}  "
+            f"(select={t_select * 1000:.0f}ms  "
+            f"frame median={median_ms:.0f}ms  max={max_ms:.0f}ms)",
+            flush=True,
+        )
+        # Match the label back to its module_name (artifact module) so
+        # downstream encoders produce GIFs named after the ssik artifact.
+        spec = next((a for a in ARMS if a.label == label), None)
+        if spec is not None and record_dir is not None and frame_idx > arm_start_idx:
+            frame_ranges[spec.module_name] = {
+                "label": label,
+                "start": arm_start_idx,
+                "end_exclusive": frame_idx,
+            }
+    if record_dir is not None and frame_ranges:
+        import json
+
+        (record_dir / "_manifest.json").write_text(
+            json.dumps({"frame_ranges": frame_ranges, "fps": fps}, indent=2)
+        )
 
 
 if __name__ == "__main__":
@@ -1031,5 +1361,60 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", default=8080, type=int)
+    parser.add_argument(
+        "--tour",
+        action="store_true",
+        help="run a scripted tour through the arm roster (for video capture)",
+    )
+    parser.add_argument(
+        "--tour-delay",
+        type=float,
+        default=4.0,
+        help="seconds to wait after server start before the tour begins "
+        "(gives a screen recorder time to attach)",
+    )
+    parser.add_argument(
+        "--tour-per-arm",
+        type=float,
+        default=3.0,
+        help="seconds spent on each arm during the tour",
+    )
+    parser.add_argument(
+        "--tour-exit",
+        action="store_true",
+        help="exit cleanly after the tour completes (default: keep server running)",
+    )
+    parser.add_argument(
+        "--tour-max-ghosts",
+        type=int,
+        default=7,
+        help="cap how many ghost branches render per arm during the tour "
+        "(default 7 -- visually balanced + keeps heavy 7Rs within frame budget); "
+        "the stats badge still shows the full branch count",
+    )
+    parser.add_argument(
+        "--tour-record-dir",
+        default="",
+        help="if set, capture every tour frame as a PNG into this directory. "
+        "Requires a connected browser client (open the demo URL in any tab) "
+        "and ``imageio`` on the runtime path. Tour skips wall-clock pacing "
+        "while recording; ffmpeg later composes the PNGs into a 30fps MP4.",
+    )
+    parser.add_argument(
+        "--tour-record-size",
+        default="1280x720",
+        help="WxH of captured PNGs (default 1280x720). 1920x1080 also works.",
+    )
     args = parser.parse_args()
-    main(host=args.host, port=args.port)
+    w, h = (int(s) for s in args.tour_record_size.lower().split("x"))
+    main(
+        host=args.host,
+        port=args.port,
+        tour=args.tour,
+        tour_delay_s=args.tour_delay,
+        tour_per_arm_s=args.tour_per_arm,
+        tour_exit=args.tour_exit,
+        tour_max_ghosts=args.tour_max_ghosts,
+        tour_record_dir=args.tour_record_dir,
+        tour_record_size=(w, h),
+    )

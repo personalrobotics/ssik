@@ -1895,6 +1895,7 @@ dependencies = [
 
 [package.optional-dependencies]
 demo = [
+    { name = "imageio" },
     { name = "robot-descriptions" },
     { name = "viser" },
     { name = "yourdfpy" },
@@ -1924,6 +1925,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "cython", specifier = ">=3.1" },
+    { name = "imageio", marker = "extra == 'demo'", specifier = ">=2.34" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "robot-descriptions", marker = "extra == 'demo'", specifier = ">=2.0.0" },
     { name = "scipy", specifier = ">=1.13" },
