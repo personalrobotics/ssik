@@ -1211,7 +1211,7 @@ def _run_tour(
     server=None,
     record_dir: Path | None = None,
     record_size: tuple[int, int] = (1280, 720),
-    settle_after_load_s: float = 0.8,
+    settle_after_load_s: float = 2.5,
 ) -> None:
     """Drive the GUI through ``_TOUR_ORDER``: switch arm, hold the home
     pose briefly for the mesh upload + viewer settle, then oscillate
@@ -1296,6 +1296,25 @@ def _run_tour(
                 ])
                 cam.look_at = look_at
                 cam.fov = np.radians(38)  # mild telephoto for "cinematic"
+        # Force the client to fully process the arm-switch queue before we
+        # start the motion loop and capturing. ``flush`` pushes buffered
+        # messages; the sacrificial ``get_render`` is a real sync barrier
+        # -- it blocks until the client has rendered the new scene, which
+        # only happens after every queued mesh remove + new mesh add has
+        # been applied. Without this barrier the first ~N captured frames
+        # of the new arm can still show residual meshes from the previous
+        # arm (the "two arms in one GIF" symptom).
+        if server is not None and record_dir is not None:
+            clients = server.get_clients()
+            if clients:
+                client = next(iter(clients.values()))
+                client.flush()
+                try:
+                    _ = client.get_render(
+                        height=128, width=128, transport_format="jpeg"
+                    )
+                except Exception:
+                    pass
         # Mesh upload over WebSocket can stretch to ~1s on big-mesh arms
         # (Panda, iiwa, FANUC CRX). Hold the home pose for a beat so the
         # viewer sees the arm settled before the marker starts moving --

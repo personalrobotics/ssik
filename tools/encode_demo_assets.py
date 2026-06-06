@@ -34,7 +34,14 @@ MP4_OUT = REPO_ROOT / "docs" / "assets" / "demo_tour.mp4"
 GIF_DIR = REPO_ROOT / "docs" / "assets" / "per_arm"
 
 GIF_WIDTH = 480
-GIF_FPS = 15
+# GIF stays at the source capture rate (30 fps). Earlier versions reduced
+# to 15 fps via the ``fps`` filter, but ``-frames:v N`` is an OUTPUT-count
+# limit applied AFTER the filter -- so the 30→15 downsample made ffmpeg
+# consume 2N input PNGs to satisfy N output frames, slurping the next
+# arm's first N/2 frames into the GIF. The fix is to stay at 30 fps so
+# input and output counts match. GIFs are slightly larger but bounded by
+# the correct frame range.
+GIF_FPS = 30
 
 
 def _run(cmd: list[str]) -> None:
@@ -74,23 +81,25 @@ def encode_per_arm_gif(capture_dir: Path, module: str, start: int, end_exclusive
     n_frames = end_exclusive - start
     palette = capture_dir / f"_palette_{module}.png"
     # Pass 1: generate optimized palette from this arm's frame range.
+    # Note ``fps`` filter is intentionally absent -- see GIF_FPS comment.
     _run([
         "ffmpeg", "-y",
         "-start_number", str(start),
         "-i", str(capture_dir / "frame_%05d.png"),
         "-frames:v", str(n_frames),
-        "-vf", f"fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos,palettegen=stats_mode=diff",
+        "-vf", f"scale={GIF_WIDTH}:-1:flags=lanczos,palettegen=stats_mode=diff",
         str(palette),
     ])
     # Pass 2: render the GIF using that palette, dithered, looping.
     _run([
         "ffmpeg", "-y",
+        "-framerate", str(GIF_FPS),
         "-start_number", str(start),
         "-i", str(capture_dir / "frame_%05d.png"),
         "-i", str(palette),
         "-frames:v", str(n_frames),
         "-lavfi",
-        f"fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
+        f"scale={GIF_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
         "-loop", "0",
         str(out),
     ])
