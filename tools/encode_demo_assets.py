@@ -7,9 +7,9 @@ Reads a capture directory produced by::
 …which is a flat ``frame_NNNNN.png`` sequence plus a ``_manifest.json``
 giving the per-arm frame ranges. Emits:
 
-- ``docs/assets/demo_tour.mp4`` — full tour, H.264, 30 fps, 1280×720.
-- ``docs/assets/per_arm/<module>.gif`` — looping per-arm GIF, 480px wide,
-  15 fps. Sized for README / docs embedding.
+- ``docs/assets/demo_tour.mp4`` -- full tour, H.264, 30 fps, 1280x720.
+- ``docs/assets/per_arm/<module>.gif`` -- looping per-arm GIF, 480px wide,
+  30 fps. Sized for README / docs embedding.
 
 Both pipelines use ffmpeg's ``palettegen`` + ``paletteuse`` for the GIF
 encode so colors don't band, plus libx264 ``crf=22`` for the MP4. Both
@@ -55,16 +55,25 @@ def _run(cmd: list[str]) -> None:
 
 def encode_full_mp4(capture_dir: Path) -> None:
     MP4_OUT.parent.mkdir(parents=True, exist_ok=True)
-    _run([
-        "ffmpeg", "-y",
-        "-framerate", "30",
-        "-i", str(capture_dir / "frame_%05d.png"),
-        "-c:v", "libx264",
-        "-preset", "slow",
-        "-crf", "22",
-        "-pix_fmt", "yuv420p",
-        str(MP4_OUT),
-    ])
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-framerate",
+            "30",
+            "-i",
+            str(capture_dir / "frame_%05d.png"),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-crf",
+            "22",
+            "-pix_fmt",
+            "yuv420p",
+            str(MP4_OUT),
+        ]
+    )
     print(f"  mp4: {MP4_OUT.relative_to(REPO_ROOT)}  ({MP4_OUT.stat().st_size / 1e6:.2f} MB)")
 
 
@@ -82,27 +91,43 @@ def encode_per_arm_gif(capture_dir: Path, module: str, start: int, end_exclusive
     palette = capture_dir / f"_palette_{module}.png"
     # Pass 1: generate optimized palette from this arm's frame range.
     # Note ``fps`` filter is intentionally absent -- see GIF_FPS comment.
-    _run([
-        "ffmpeg", "-y",
-        "-start_number", str(start),
-        "-i", str(capture_dir / "frame_%05d.png"),
-        "-frames:v", str(n_frames),
-        "-vf", f"scale={GIF_WIDTH}:-1:flags=lanczos,palettegen=stats_mode=diff",
-        str(palette),
-    ])
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-start_number",
+            str(start),
+            "-i",
+            str(capture_dir / "frame_%05d.png"),
+            "-frames:v",
+            str(n_frames),
+            "-vf",
+            f"scale={GIF_WIDTH}:-1:flags=lanczos,palettegen=stats_mode=diff",
+            str(palette),
+        ]
+    )
     # Pass 2: render the GIF using that palette, dithered, looping.
-    _run([
-        "ffmpeg", "-y",
-        "-framerate", str(GIF_FPS),
-        "-start_number", str(start),
-        "-i", str(capture_dir / "frame_%05d.png"),
-        "-i", str(palette),
-        "-frames:v", str(n_frames),
-        "-lavfi",
-        f"scale={GIF_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
-        "-loop", "0",
-        str(out),
-    ])
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-framerate",
+            str(GIF_FPS),
+            "-start_number",
+            str(start),
+            "-i",
+            str(capture_dir / "frame_%05d.png"),
+            "-i",
+            str(palette),
+            "-frames:v",
+            str(n_frames),
+            "-lavfi",
+            f"scale={GIF_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
+            "-loop",
+            "0",
+            str(out),
+        ]
+    )
     palette.unlink(missing_ok=True)
     print(f"  gif: {out.relative_to(REPO_ROOT)}  ({out.stat().st_size / 1e6:.2f} MB)")
 

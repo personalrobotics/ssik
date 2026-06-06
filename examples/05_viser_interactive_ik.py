@@ -896,7 +896,7 @@ def main(
         with server.atomic():
             return _solve_and_render_inner(rt)
 
-    def _solve_and_render_inner(rt: "ArmRuntime") -> bool:
+    def _solve_and_render_inner(rt: ArmRuntime) -> bool:
         # Marker is in the rendered URDF's world frame; ssik solves in its
         # POE frame. ``base_offset`` is the constant rigid transform
         # between the two (computed at load time by the renderer). Apply
@@ -1091,21 +1091,27 @@ def main(
         # capture via the connected client's server-driven ``get_render``;
         # ffmpeg later composes them into the final MP4 / GIF. With no
         # record dir we just animate live.
-        print(f"  tour mode: starting in {tour_delay_s:.1f}s, "
-              f"{tour_per_arm_s:.1f}s motion per arm", flush=True)
+        print(
+            f"  tour mode: starting in {tour_delay_s:.1f}s, {tour_per_arm_s:.1f}s motion per arm",
+            flush=True,
+        )
         record_dir = Path(tour_record_dir).expanduser().resolve() if tour_record_dir else None
         if record_dir is not None:
             record_dir.mkdir(parents=True, exist_ok=True)
             # Refuse to start until at least one client connects -- the
             # render comes from the client's three.js view, not the server.
-            print(f"  tour record: open http://localhost:{port} in a browser "
-                  "to act as the render client; tour waits for connection",
-                  flush=True)
+            print(
+                f"  tour record: open http://localhost:{port} in a browser "
+                "to act as the render client; tour waits for connection",
+                flush=True,
+            )
             while not server.get_clients():
                 time.sleep(0.5)
-            print(f"  tour record: client connected; capturing PNGs to "
-                  f"{record_dir} at {tour_record_size[0]}x{tour_record_size[1]}",
-                  flush=True)
+            print(
+                f"  tour record: client connected; capturing PNGs to "
+                f"{record_dir} at {tour_record_size[0]}x{tour_record_size[1]}",
+                flush=True,
+            )
         time.sleep(tour_delay_s)
         _run_tour(
             select_arm=select_arm,
@@ -1184,16 +1190,20 @@ def _lissajous_marker_T(
     # over the loop. Keeps wrist branches visibly different per pose.
     ax = 0.35 * np.sin(phase + 0.5)
     ay = 0.25 * np.cos(phase * 0.8)
-    Rx = np.array([
-        [1, 0, 0],
-        [0, np.cos(ax), -np.sin(ax)],
-        [0, np.sin(ax), np.cos(ax)],
-    ])
-    Ry = np.array([
-        [np.cos(ay), 0, np.sin(ay)],
-        [0, 1, 0],
-        [-np.sin(ay), 0, np.cos(ay)],
-    ])
+    Rx = np.array(
+        [
+            [1, 0, 0],
+            [0, np.cos(ax), -np.sin(ax)],
+            [0, np.sin(ax), np.cos(ax)],
+        ]
+    )
+    Ry = np.array(
+        [
+            [np.cos(ay), 0, np.sin(ay)],
+            [0, 1, 0],
+            [-np.sin(ay), 0, np.cos(ay)],
+        ]
+    )
     T[:3, :3] = T0[:3, :3] @ Rx @ Ry
     return T
 
@@ -1241,7 +1251,7 @@ def _run_tour(
                 height=record_size[1], width=record_size[0], transport_format="jpeg"
             )
             iio.imwrite(record_dir / f"frame_{frame_idx:05d}.png", img)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"  tour record: capture failed at frame {frame_idx}: {e}", flush=True)
         return frame_idx + 1
 
@@ -1261,9 +1271,7 @@ def _run_tour(
         # ~1s render frames on the heavy 7Rs (Rizon 4 / Kassow). The full
         # branch count still appears in the stats badge; we just don't
         # paint every ghost. The active arm is unaffected.
-        max_ghosts_slider.value = min(
-            max_ghosts, int(max_ghosts_slider.max)
-        )
+        max_ghosts_slider.value = min(max_ghosts, int(max_ghosts_slider.max))
         t_select = time.perf_counter() - t_select_0
         # Anchor pose: the rendered EE of the freshly-loaded arm at q0.
         rt = state["arm"]
@@ -1289,11 +1297,13 @@ def _run_tour(
                 look_at[2] = max(0.0, look_at[2] - 0.15 * reach)
                 cam_distance = max(1.2, reach * 2.3)
                 az, el = np.radians(60), np.radians(20)
-                cam.position = look_at + cam_distance * np.array([
-                    np.cos(el) * np.cos(az),
-                    np.cos(el) * np.sin(az),
-                    np.sin(el),
-                ])
+                cam.position = look_at + cam_distance * np.array(
+                    [
+                        np.cos(el) * np.cos(az),
+                        np.cos(el) * np.sin(az),
+                        np.sin(el),
+                    ]
+                )
                 cam.look_at = look_at
                 cam.fov = np.radians(38)  # mild telephoto for "cinematic"
         # Force the client to fully process the arm-switch queue before we
@@ -1309,12 +1319,8 @@ def _run_tour(
             if clients:
                 client = next(iter(clients.values()))
                 client.flush()
-                try:
-                    _ = client.get_render(
-                        height=128, width=128, transport_format="jpeg"
-                    )
-                except Exception:
-                    pass
+                with contextlib.suppress(Exception):
+                    _ = client.get_render(height=128, width=128, transport_format="jpeg")
         # Mesh upload over WebSocket can stretch to ~1s on big-mesh arms
         # (Panda, iiwa, FANUC CRX). Hold the home pose for a beat so the
         # viewer sees the arm settled before the marker starts moving --
