@@ -32,6 +32,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MP4_OUT = REPO_ROOT / "docs" / "assets" / "demo_tour.mp4"
 GIF_DIR = REPO_ROOT / "docs" / "assets" / "per_arm"
+MONTAGE_OUT = REPO_ROOT / "docs" / "assets" / "demo_tour_montage.gif"
 
 GIF_WIDTH = 480
 # GIF stays at the source capture rate (30 fps). Earlier versions reduced
@@ -132,6 +133,67 @@ def encode_per_arm_gif(capture_dir: Path, module: str, start: int, end_exclusive
     print(f"  gif: {out.relative_to(REPO_ROOT)}  ({out.stat().st_size / 1e6:.2f} MB)")
 
 
+def encode_montage_gif(
+    capture_dir: Path,
+    manifest: dict,
+    frames_per_arm: int = 45,
+) -> None:
+    """Stitch ``frames_per_arm`` mid-range frames from each arm into one
+    looping GIF. Useful for a single-attachment social post that
+    showcases the whole roster without requiring 8 separate uploads.
+
+    Frames are drawn from the middle of each arm's range to skip the
+    just-settled home pose (visually static) and the late-motion frames
+    (more likely to hit unreachable poses and get skipped).
+    """
+    import shutil
+    import tempfile
+
+    MONTAGE_OUT.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ssik_montage_") as tmpdir:
+        staging = Path(tmpdir)
+        idx = 0
+        for rng in manifest["frame_ranges"].values():
+            start = int(rng["start"])
+            end = int(rng["end_exclusive"])
+            available = end - start
+            take = min(frames_per_arm, available)
+            offset = start + (available - take) // 2
+            for k in range(take):
+                src = capture_dir / f"frame_{offset + k:05d}.png"
+                dst = staging / f"frame_{idx:05d}.png"
+                shutil.copy(src, dst)
+                idx += 1
+        n_frames = idx
+        palette = staging / "_palette.png"
+        _run(
+            [
+                "ffmpeg", "-y",
+                "-i", str(staging / "frame_%05d.png"),
+                "-frames:v", str(n_frames),
+                "-vf", f"scale={GIF_WIDTH}:-1:flags=lanczos,palettegen=stats_mode=diff",
+                str(palette),
+            ]
+        )
+        _run(
+            [
+                "ffmpeg", "-y",
+                "-framerate", str(GIF_FPS),
+                "-i", str(staging / "frame_%05d.png"),
+                "-i", str(palette),
+                "-frames:v", str(n_frames),
+                "-lavfi",
+                f"scale={GIF_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
+                "-loop", "0",
+                str(MONTAGE_OUT),
+            ]
+        )
+    print(
+        f"  gif: {MONTAGE_OUT.relative_to(REPO_ROOT)}  "
+        f"({MONTAGE_OUT.stat().st_size / 1e6:.2f} MB, {n_frames} frames @ {GIF_FPS}fps)"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -148,6 +210,18 @@ def main() -> None:
         "--skip-gifs",
         action="store_true",
         help="Skip the per-arm GIF encode (only emit the MP4).",
+    )
+    parser.add_argument(
+        "--montage",
+        action="store_true",
+        help="Emit a single docs/assets/demo_tour_montage.gif stitching "
+        "~1.5s of each arm. Useful as a single-attachment social post.",
+    )
+    parser.add_argument(
+        "--montage-frames",
+        type=int,
+        default=45,
+        help="Frames per arm in the montage (default 45 = 1.5s @ 30fps).",
     )
     args = parser.parse_args()
 
@@ -177,6 +251,9 @@ def main() -> None:
                 int(rng["start"]),
                 int(rng["end_exclusive"]),
             )
+
+    if args.montage:
+        encode_montage_gif(capture_dir, manifest, frames_per_arm=args.montage_frames)
 
 
 if __name__ == "__main__":
