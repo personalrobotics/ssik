@@ -33,6 +33,7 @@ Open the printed URL.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import time
 from dataclasses import dataclass, field
@@ -45,8 +46,6 @@ import viser
 from viser.extras import ViserUrdf
 
 from ssik._urdf import load_urdf_kinbody_normalized
-from ssik.kinematics.poe_fk import poe_forward_kinematics
-
 
 # ---------------------------------------------------------------------------
 # Arm roster.
@@ -425,7 +424,7 @@ class MeshArmRenderer:
         color_rgba: tuple[float, float, float, float],
         ik_joint_names: tuple[str, ...] | None,
         render_ee_link: str,
-        ssik_fk: "callable[[np.ndarray], np.ndarray]",
+        ssik_fk: callable[[np.ndarray], np.ndarray],
         cast_shadow: bool = True,
     ) -> None:
         self._urdf = urdf
@@ -441,10 +440,8 @@ class MeshArmRenderer:
         # on ``viz._meshes`` and each one carries a settable attribute.
         if not cast_shadow:
             for handle in getattr(self.viz, "_meshes", []):
-                try:
+                with contextlib.suppress(Exception):
                     handle.cast_shadow = False
-                except Exception:
-                    pass
         self._urdf_joint_names = list(self.viz.get_actuated_joint_names())
         self._dof = len(self._urdf_joint_names)
         if ik_joint_names is None:
@@ -586,7 +583,7 @@ class PrimitiveArmRenderer:
             centers.append(T[:3, 3].copy())
 
         # Spheres at every joint center (and EE).
-        for h, p in zip(self.joint_handles, centers):
+        for h, p in zip(self.joint_handles, centers, strict=False):
             h.position = p
 
         # Bones between consecutive centers.
@@ -608,10 +605,8 @@ class PrimitiveArmRenderer:
 
     def remove(self) -> None:
         for h in self.joint_handles + self.bone_handles:
-            try:
+            with contextlib.suppress(Exception):
                 h.remove()
-            except Exception:
-                pass
 
 
 # ---------------------------------------------------------------------------
@@ -682,7 +677,7 @@ def _get_local_urdf(path: Path):
     return cached
 
 
-def _resolve_local_urdf(spec: "ArmSpec") -> Path | None:
+def _resolve_local_urdf(spec: ArmSpec) -> Path | None:
     """Return the first existing path from ``spec.local_urdf_paths`` (with
     ``~`` expansion), or ``None`` if no candidate file exists."""
     for raw in spec.local_urdf_paths:
@@ -715,7 +710,7 @@ def preload_descriptions() -> None:
             )
 
 
-def _mesh_renderer_has_geometry(renderer: "MeshArmRenderer") -> bool:
+def _mesh_renderer_has_geometry(renderer: MeshArmRenderer) -> bool:
     """Return True iff the underlying yourdfpy URDF has at least one
     resolvable visual mesh. Arms whose URDF references unresolvable
     ``package://...`` paths (e.g. yam_description's gripper assets)
