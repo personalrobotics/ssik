@@ -27,6 +27,15 @@ sols = franka_panda_ik.solve(T_target)      # every analytical IK branch
 
 `sols` is a `list[Solution]`. Each `Solution` carries `q` (the joint vector), `fk_residual` (‖FK(q) − T‖), and which polish path fired. Empty list = pose is unreachable.
 
+### See every branch at once
+
+```bash
+pip install 'ssik[demo]'
+python examples/05_viser_interactive_ik.py
+```
+
+Opens a browser viewer: drag a 3D handle and watch every analytical IK solution render as a live arm in real time. Cycle through the full prebuilt roster — including the non-Pieper 6R and 7R arms EAIK refuses.
+
 ## The artifact model
 
 ssik is built around **per-arm artifact modules**. Each artifact is a single `.py` file with the per-arm KinBody constants, the dispatched solver, and any cached symbolic preprocessing already baked in. **No URDF parsing, no `urchin`, no `sympy` on the runtime import path.** A robot stack that imports `<arm>_ik.py` carries no algorithmic complexity beyond what the build pipeline already resolved.
@@ -37,7 +46,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships 13 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships 19 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 | Module | Arm | Class | base_link | ee_link |
@@ -108,7 +117,7 @@ print(franka_panda_ik.T_HOME[:3, 3])
 
 ### When a prebuilt is right vs when to `ssik build`
 
-The 13 prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
+The prebuilts cover **nominal manufacturer geometry with a bare flange**. They work when:
 
 - You're using the same URDF source we built against (ros-industrial, manufacturer reference, etc.)
 - Your robot's calibration matches the nominal kinematic parameters
@@ -249,7 +258,7 @@ The fields are named for *why* they exist so log messages can say `"SP6 sign bra
 | 1e-9 | 1 nm | math / analysis territory |
 | 1e-13 | 0.1 pm | float64 epsilon |
 
-The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all 13 prebuilts hit it without LM polish. Most control / planning users want exactly this default.
+The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all prebuilts hit it without LM polish. Most control / planning users want exactly this default.
 
 **To get machine precision** (RL training, differentiable IK, sample-based planning, math validation), opt in:
 
