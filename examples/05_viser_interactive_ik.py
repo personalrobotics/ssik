@@ -246,9 +246,7 @@ ARMS: list[ArmSpec] = [
         # of personal-robotics-lab's ada_ros2 (the IK chain matches at
         # 1.5e-7 -- rigid base-offset). Falls back to primitives if the
         # file isn't present.
-        local_urdf_paths=(
-            "~/code/robot-code/ada_ros2/ada_description/urdf/j2n6s200_clean.urdf",
-        ),
+        local_urdf_paths=("~/code/robot-code/ada_ros2/ada_description/urdf/j2n6s200_clean.urdf",),
         render_ee_link="j2n6s200_end_effector",
         ik_joint_names=tuple(f"j2n6s200_joint_{i}" for i in range(1, 7)),
         ssik_fixture="",
@@ -448,9 +446,7 @@ class MeshArmRenderer:
             self._ik_to_urdf = list(range(self._dof))
             self._ik_dof = self._dof
         else:
-            self._ik_to_urdf = [
-                self._urdf_joint_names.index(n) for n in ik_joint_names
-            ]
+            self._ik_to_urdf = [self._urdf_joint_names.index(n) for n in ik_joint_names]
             self._ik_dof = len(ik_joint_names)
 
         # Compute base_offset: a rigid transform such that
@@ -526,12 +522,8 @@ class PrimitiveArmRenderer:
 
         # Build template meshes once. Bones are unit cylinders along z;
         # we stretch + rotate at update time.
-        self._sphere_tmpl = trimesh.creation.icosphere(
-            radius=self.JOINT_RADIUS, subdivisions=2
-        )
-        self._bone_tmpl_unit = trimesh.creation.cylinder(
-            radius=self.BONE_RADIUS, height=1.0
-        )
+        self._sphere_tmpl = trimesh.creation.icosphere(radius=self.JOINT_RADIUS, subdivisions=2)
+        self._bone_tmpl_unit = trimesh.creation.cylinder(radius=self.BONE_RADIUS, height=1.0)
 
         # Pre-create N+1 joint spheres + N bones. Position/orientation
         # filled in by set_q(). Ghosts pass ``cast_shadow=False`` so
@@ -595,7 +587,7 @@ class PrimitiveArmRenderer:
                 h.visible = False
                 continue
             h.visible = True
-            h.position = ((a + b) * 0.5)
+            h.position = (a + b) * 0.5
             h.scale = (1.0, 1.0, length)
             h.wxyz = _align_z_to(direction)
 
@@ -623,9 +615,7 @@ def _load_ssik_kb(spec: ArmSpec, module):
         return load_urdf_kinbody_normalized(
             spec.ssik_fixture, base_link=spec.ssik_base_link, ee_link=spec.ssik_ee_link
         )
-    raise RuntimeError(
-        f"{spec.module_name}: no _KB and no fixture URDF; cannot render"
-    )
+    raise RuntimeError(f"{spec.module_name}: no _KB and no fixture URDF; cannot render")
 
 
 @dataclass
@@ -704,10 +694,7 @@ def preload_descriptions() -> None:
         try:
             _get_urdf(spec.rd_description)
         except Exception as e:
-            print(
-                f"  ! preload failed for {spec.rd_description}: "
-                f"{type(e).__name__}: {e}"
-            )
+            print(f"  ! preload failed for {spec.rd_description}: {type(e).__name__}: {e}")
 
 
 def _mesh_renderer_has_geometry(renderer: MeshArmRenderer) -> bool:
@@ -775,14 +762,11 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
                     f"{type(e).__name__}: {e}  -- falling back to primitives"
                 )
         kb = _load_ssik_kb(spec, module)
-        return PrimitiveArmRenderer(
-            server, kb, root, rgba, cast_shadow=cast_shadow
-        )
+        return PrimitiveArmRenderer(server, kb, root, rgba, cast_shadow=cast_shadow)
 
     active = _build("/arm/active", ACTIVE_COLOR_RGBA, cast_shadow=True)
     ghosts: list[_Renderer] = [
-        _build(f"/arm/ghost_{i:02d}", GHOST_COLOR_RGBA, cast_shadow=False)
-        for i in range(n_ghosts)
+        _build(f"/arm/ghost_{i:02d}", GHOST_COLOR_RGBA, cast_shadow=False) for i in range(n_ghosts)
     ]
 
     # Seed q at a mid-workspace non-singular config.
@@ -900,8 +884,7 @@ def main(host: str = "0.0.0.0", port: int = 8080) -> None:
 
         if not sols:
             stats_md.content = (
-                "**Branches**: 0 (target out of reach)\n\n"
-                f"**Solve**: {elapsed_ms:.2f} ms"
+                f"**Branches**: 0 (target out of reach)\n\n**Solve**: {elapsed_ms:.2f} ms"
             )
             return
 
