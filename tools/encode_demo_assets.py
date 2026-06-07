@@ -168,23 +168,33 @@ def encode_montage_gif(
         palette = staging / "_palette.png"
         _run(
             [
-                "ffmpeg", "-y",
-                "-i", str(staging / "frame_%05d.png"),
-                "-frames:v", str(n_frames),
-                "-vf", f"scale={GIF_WIDTH}:-1:flags=lanczos,palettegen=stats_mode=diff",
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(staging / "frame_%05d.png"),
+                "-frames:v",
+                str(n_frames),
+                "-vf",
+                f"scale={GIF_WIDTH}:-1:flags=lanczos,palettegen=stats_mode=diff",
                 str(palette),
             ]
         )
         _run(
             [
-                "ffmpeg", "-y",
-                "-framerate", str(GIF_FPS),
-                "-i", str(staging / "frame_%05d.png"),
-                "-i", str(palette),
-                "-frames:v", str(n_frames),
+                "ffmpeg",
+                "-y",
+                "-framerate",
+                str(GIF_FPS),
+                "-i",
+                str(staging / "frame_%05d.png"),
+                "-i",
+                str(palette),
+                "-frames:v",
+                str(n_frames),
                 "-lavfi",
                 f"scale={GIF_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5",
-                "-loop", "0",
+                "-loop",
+                "0",
                 str(MONTAGE_OUT),
             ]
         )
