@@ -366,17 +366,50 @@ def _dispatch(
     return result
 
 
-# Inner solvers eligible for cached-RR fast path (#210). The set excludes:
-#   - Strict tier-0 specialisations (three_parallel, spherical_two_*): they
-#     already run 1-2 ms per call and beat RR's per-call cost.
-#   - rank-1 ``spherical`` (~7.5 ms): the prime cost (~14 s of cold RR
-#     derivation per sub-chain DH) is not worth the ~6.5 ms per-call savings
-#     for arms where this is the dominant inner solver (e.g. Franka's
-#     ``reversed:spherical`` samples). Including it would add ~210 s to
-#     module-import for ~100 ms warm-IK savings -- bad UX trade-off.
-# Only the truly expensive inner solvers (tier-1 search-based, tier-2 HP)
-# are eligible. Rizon 4 and Kassow KR810 -- whose dominant inner solvers
-# are HP and two_parallel -- get the full 12-25x post-warmup speedup.
+# Inner solvers eligible for cached-RR fast path. New arms get this
+# treatment automatically -- the codegen at
+# ``ssik.codegen._compose.seven_r`` collects every per-sample inner
+# solver name and emits AOT-baked RR derivations (#320) whenever the
+# name lands here.
+#
+# **Decision criterion (current):** include any inner solver where
+# (a) warm-call cost materially exceeds cached-RR's ~1 ms, AND (b) the
+# per-DH build cost is acceptable. The eligible set today is governed
+# by both criteria:
+#
+#   - Build cost: ``_cached_best_leftvar`` runs 3 symbolic derivations
+#     per DH (~30-100 s each) to pick the optimal AE-3 linearity, plus
+#     the final derivation. For an arm with 15 lock samples that's
+#     ~45 minutes of cold sympy work per arm. Acceptable for arms
+#     where the per-call benefit pays back; not free.
+#   - Import cost: post-#320 the artifact embeds lambdified Python
+#     source verbatim, so module-import is plain parse+exec (~80 ms
+#     total). Import lag is NOT a meaningful constraint anymore.
+#
+# What's excluded, and why:
+#
+#   - Strict tier-0 specialisations (three_parallel,
+#     spherical_two_parallel, spherical_two_intersecting): these
+#     already run 1-2 ms per call -- on par with or beating cached-RR.
+#     Priming them adds build time without measurable runtime gain.
+#
+#   - Rank-1 ``spherical`` (~7.5 ms per call): cached-RR would save
+#     ~6 ms per call, but the build cost is the highest in the roster
+#     -- ~45 min per arm for Franka Panda, FR3, xArm7, OpenArm L/R,
+#     iiwa-family arms. Estimated total build cost across the
+#     spherical-dispatched roster is ~3.75 hours of cold sympy work.
+#     Sized investigation pending in a follow-up: confirm the per-call
+#     runtime win is large enough to justify that build investment
+#     (the original "100 ms savings per IK" estimate doesn't match the
+#     measured xArm7 bench of 37 ms/IK; the actual win is likely
+#     smaller). See the follow-up issue tracking the measurement.
+#
+# What's included today:
+#
+#   - ``two_intersecting`` / ``two_parallel`` (rank 2, ~261 ms - 1.2
+#     s per call): cached-RR wins by 2-3 orders of magnitude.
+#   - ``husty_pfurner.general_6r`` (rank 3, ~13-35 ms per call):
+#     cached-RR wins by ~12-25x. Covers Rizon 4 / Kassow / Rizon 10.
 _RR_ELIGIBLE_INNER_SOLVERS: frozenset[str] = frozenset(
     {
         "two_intersecting",  # rank 2: tier-1 search, ~1.2 s

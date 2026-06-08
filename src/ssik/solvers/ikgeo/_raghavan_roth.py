@@ -518,6 +518,15 @@ def serialize_derivation(
     a_t = tuple(float(x) for x in a)
     d_t = tuple(float(x) for x in d)
     _, _, _, _, meta = _cached_derivation(alpha_t, a_t, d_t, int(linearity_joint), bool(apply_so3))
+    # If the cached entry came from the AOT prime path (#320), the
+    # build-time-only ``_sym_*`` matrices aren't present -- the AOT
+    # artifact ships the lambdified callables directly, not the
+    # symbolic forms. Run a fresh derivation in that case so the
+    # legacy blob serialiser still produces a valid payload.
+    if "_sym_p_sin" not in meta:
+        _, _, _, _, meta = _derive_pq_for_arm(
+            alpha_t, a_t, d_t, linearity_joint=int(linearity_joint), apply_so3=bool(apply_so3)
+        )
     payload = {
         "version": 1,
         "alpha": alpha_t,
