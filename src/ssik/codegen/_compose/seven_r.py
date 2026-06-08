@@ -42,10 +42,9 @@ recognises 7R and routes here automatically.
 
 from __future__ import annotations
 
-import base64
+import inspect
 import textwrap
 import time
-import zlib
 
 import numpy as np
 
@@ -54,7 +53,7 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
 from ssik.kinematics.poe_to_dh import poe_to_dh
 from ssik.solvers.ikgeo._raghavan_roth import (
     _cached_best_leftvar,
-    serialize_derivation,
+    _cached_derivation,
 )
 from ssik.solvers.jointlock.seven_r import (
     _DEFAULT_SAMPLES,
@@ -141,55 +140,81 @@ def compose(kb: KinBody) -> str:
     samples_repr = ", ".join(repr(float(s)) for s in samples)
     dispatch_repr = ",\n            ".join(repr(name) for name in dispatch)
     if rr_prime_dhs:
-        # #210 Phase 2: pre-compute the symbolic derivation for each (alpha,
-        # a, d, linearity) tuple at codegen time and serialise to bytes.
-        # The artifact embeds these as zlib-compressed base85 strings; at
-        # module-import time, ``prime_derivation_from_blob`` deserialises
-        # and re-lambdifies in ~0.25s per blob (vs ~7s cold sympy
-        # derivation). ~30x faster import for arms that hit non-tier-0
-        # inner solvers (Rizon 4, Kassow KR810, future #219 expansion).
+        # #320 (replaces #210 Phase 2 blob path): pre-compute the symbolic
+        # Raghavan-Roth derivation for each (alpha, a, d, linearity) tuple
+        # at codegen time, then emit the lambdified callable's Python
+        # source verbatim via ``inspect.getsource``. The artifact body
+        # becomes ordinary Python -- no sympy at import, no re-lambdify,
+        # no base85/zlib unpack. Measured on Kassow KR810: 4.5s blob-prime
+        # -> 80ms AOT-prime (~57x faster cold module-import), and the
+        # wheel-compressed artifact shrinks (text gzips better than the
+        # already-zlib-compressed blob).
         bake_start = time.perf_counter()
-        encoded_blobs: list[str] = []
-        for alpha, a, d, lin in rr_prime_dhs:
-            blob = serialize_derivation(alpha, a, d, linearity_joint=lin, apply_so3=False)
-            compressed = zlib.compress(blob, level=9)
-            encoded_blobs.append(base64.b85encode(compressed).decode("ascii"))
+        aot_func_sources: list[str] = []
+        aot_entries: list[str] = []
+        for slot_idx, (alpha, a, d, lin) in enumerate(rr_prime_dhs):
+            p_sin_fn, p_cos_fn, p_one_fn, q_fn, meta = _cached_derivation(
+                alpha, a, d, linearity_joint=int(lin), apply_so3=False
+            )
+            slot_names: list[str] = []
+            for kind, fn in (
+                ("p_sin", p_sin_fn),
+                ("p_cos", p_cos_fn),
+                ("p_one", p_one_fn),
+                ("q", q_fn),
+            ):
+                uname = f"_aot_dh{slot_idx}_{kind}"
+                src = inspect.getsource(fn).replace("_lambdifygenerated", uname, 1)
+                aot_func_sources.append(src)
+                slot_names.append(uname)
+            entry = (
+                f"            (\n"
+                f"                {alpha!r},\n"
+                f"                {a!r},\n"
+                f"                {d!r},\n"
+                f"                {int(lin)!r}, False,\n"
+                f"                {meta['left_bilinear']!r},\n"
+                f"                {meta['right_bilinear']!r},\n"
+                f"                {int(meta['drop_joint'])!r},\n"
+                f"                {', '.join(slot_names)},\n"
+                f"            ),"
+            )
+            aot_entries.append(entry)
         _LOG_TIME = time.perf_counter() - bake_start
-        # Wrap each base85 string at 76 columns and emit as a tuple of
-        # adjacent string literals (Python concatenates them at compile
-        # time).
-        chunked = []
-        for s in encoded_blobs:
-            lines = [s[i : i + 76] for i in range(0, len(s), 76)]
-            quoted = "\n".join(f'                "{line}"' for line in lines)
-            chunked.append(f"            (\n{quoted}\n            ),")
-        rr_blobs_repr = "\n".join(chunked)
+
+        # Each fn source emitted by sp.lambdify is a 2-line snippet:
+        #   def _aot_dh{slot}_{kind}(T_0, T_1, ...):
+        #       return array([...])
+        # Prefix every line with 8 spaces so the surrounding
+        # textwrap.dedent leaves us at module-level after stripping.
+        def _indent8(src: str) -> str:
+            return "\n".join("        " + line if line else line for line in src.splitlines())
+
+        aot_funcs_block = "\n\n".join(_indent8(s) for s in aot_func_sources)
+        aot_entries_block = "\n".join(aot_entries)
         rr_prime_block = (
-            "\n\n        import base64 as _ssik_b64\n"
-            "        import zlib as _ssik_zlib\n\n"
+            "\n\n        from numpy import array, cos, sin\n\n"
             "        from ssik.solvers.ikgeo._raghavan_roth import (\n"
-            "            prime_derivation_from_blob as _ssik_rr_prime_from_blob,\n"
+            "            _prime_aot as _ssik_rr_prime_aot,\n"
             "        )\n\n"
-            "        # Cached-RR priming blobs (#210 Phase 2). Each entry is a\n"
-            "        # base85-encoded zlib-compressed pickle of the pre-computed\n"
-            "        # Raghavan-Roth symbolic derivation for one (alpha, a, d, linearity)\n"
-            "        # sub-chain DH. Module-init re-lambdifies each blob in ~0.25s and\n"
-            "        # populates the per-arm derivation cache. Subsequent jointlock\n"
-            "        # dispatches use cached RR (~1 ms) instead of HP / two_parallel /\n"
-            "        # spherical (~7-260 ms) for matching sub-chains. The build pays\n"
-            "        # the ~7s cold sympy derivation cost once per blob; module-import\n"
-            "        # pays only the ~0.25s re-lambdify cost.\n"
-            "        _RR_PRIME_BLOBS_B85 = (\n" + rr_blobs_repr + "\n        )\n\n"
-            "        for _b85 in _RR_PRIME_BLOBS_B85:\n"
-            "            _ssik_rr_prime_from_blob(\n"
-            "                _ssik_zlib.decompress(_ssik_b64.b85decode(_b85))\n"
-            "            )\n"
+            "        # AOT-baked Raghavan-Roth derivations (#320). Each function below\n"
+            "        # is the verbatim numpy source that ``sp.lambdify`` emitted at build\n"
+            "        # time, extracted via inspect.getsource. Module-import only parses\n"
+            "        # the source (~80ms total on Kassow KR810) -- no sympy at runtime,\n"
+            "        # no re-lambdify. Numerical output is bit-identical to the previous\n"
+            "        # blob-prime path. Wheel-compressed artifact also shrinks vs the\n"
+            "        # blob path because text gzips better than already-zlib bytes.\n\n"
+            f"{aot_funcs_block}\n\n"
+            "        _AOT_PRIME_DATA = (\n"
+            f"{aot_entries_block}\n"
+            "        )\n\n"
+            "        for _aot_entry in _AOT_PRIME_DATA:\n"
+            "            _ssik_rr_prime_aot(*_aot_entry)\n"
         )
     else:
         # Arms whose dispatch cache is entirely tier-0 don't need priming
-        # (e.g. Franka -- all 16 samples route to ``reversed:spherical``).
-        # Skip the block entirely to keep artifacts byte-stable with
-        # pre-#210.
+        # (e.g. Franka pre-#320 -- all 16 samples route to ``reversed:spherical``).
+        # Skip the block entirely to keep artifacts byte-stable.
         rr_prime_block = ""
 
     return textwrap.dedent(
