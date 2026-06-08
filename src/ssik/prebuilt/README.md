@@ -46,9 +46,9 @@ preprocessing) and cleaner to ship in production stacks.
 | `xarm6_ik` | `ikgeo.general_6r` | ~15 s | ~70 KB |
 | `z1_ik` | `ikgeo.three_parallel` | <1 s | ~23 KB |
 | `piper_ik` | `ikgeo.general_6r` | ~25 s | ~88 KB |
-| `rizon4_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~270 KB |
-| `kassow_kr810_ik` | `jointlock.seven_r` + cached-RR | ~20 min | ~530 KB |
-| `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~7 min | ~331 KB |
+| `rizon4_ik` | `jointlock.seven_r` + cached-RR | ~8 min | ~1052 KB |
+| `kassow_kr810_ik` | `jointlock.seven_r` + cached-RR | ~4 min | ~729 KB |
+| `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~8 min | ~992 KB |
 | `fanuc_crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
 | `yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 | `big_yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
