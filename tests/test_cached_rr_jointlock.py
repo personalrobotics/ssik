@@ -105,7 +105,19 @@ def test_urdf_loaded_rizon_does_not_trigger_cached_rr() -> None:
     This is the test-suite-friendly behavior: no 80+ second cold-cache
     cost when running tests via ``load_urdf_kinbody_normalized``. The
     speedup is opt-in via the per-arm artifact.
+
+    Clears ``_DERIVATION_CACHE`` + ``_PRIMED_LINEARITY_MAP`` first so
+    earlier tests in the run that imported a prebuilt arm (which now
+    AOT-primes both maps at import time per #320) don't poison the
+    "no prime in test path" assertion.
     """
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        _DERIVATION_CACHE,
+        _PRIMED_LINEARITY_MAP,
+    )
+
+    _DERIVATION_CACHE.clear()
+    _PRIMED_LINEARITY_MAP.clear()
     from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
 
     kb = load_urdf_kinbody_normalized(
