@@ -45,6 +45,7 @@ from __future__ import annotations
 import inspect
 import textwrap
 import time
+from typing import cast
 
 import numpy as np
 
@@ -167,6 +168,10 @@ def compose(kb: KinBody) -> str:
                 src = inspect.getsource(fn).replace("_lambdifygenerated", uname, 1)
                 aot_func_sources.append(src)
                 slot_names.append(uname)
+            # meta is typed ``dict[str, object]``; cast the runtime-side
+            # fields we actually emit so mypy doesn't complain about the
+            # ``int(meta['drop_joint'])`` call.
+            drop_joint_val = cast(int, meta["drop_joint"])
             entry = (
                 f"            (\n"
                 f"                {alpha!r},\n"
@@ -175,7 +180,7 @@ def compose(kb: KinBody) -> str:
                 f"                {int(lin)!r}, False,\n"
                 f"                {meta['left_bilinear']!r},\n"
                 f"                {meta['right_bilinear']!r},\n"
-                f"                {int(meta['drop_joint'])!r},\n"
+                f"                {int(drop_joint_val)!r},\n"
                 f"                {', '.join(slot_names)},\n"
                 f"            ),"
             )
