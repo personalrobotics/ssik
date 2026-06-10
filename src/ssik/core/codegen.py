@@ -227,6 +227,15 @@ def _render_specialised(
     # only refinement primitive imported from runtime is the generic
     # Levenberg-Marquardt step.
     buf.write("from ssik.refinement import lm_refine as _lm_refine\n")
+    # Bulletproof rescue fallback (#319): when the analytical path returns no
+    # solutions at a reachable-but-degenerate ridge, ``solve()`` recovers via
+    # the T-perturbation rescue, gated on a reach-sphere so genuinely
+    # out-of-reach targets stay cheap.
+    buf.write("import functools as _functools\n")
+    buf.write(
+        "from ssik.refinement.rescue import "
+        "rescue_via_T_perturbation as _rescue_via_T_perturbation\n"
+    )
     buf.write("from ssik.postprocess import (\n")
     buf.write("    nearest_to_seed as _ps_nearest_to_seed,\n")
     buf.write("    respect_limits as _ps_respect_limits,\n")
@@ -487,6 +496,7 @@ def _render_specialised_solve_orchestrator() -> str:
             q_seed=None,
             respect_limits: bool = True,
             allow_refinement: bool = False,
+            allow_rescue: bool = True,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
             refinement_max_iters: int = 15,
         ):
@@ -511,6 +521,16 @@ def _render_specialised_solve_orchestrator() -> str:
                 arms (JACO 2, Rizon 4, Kassow), polish can recover
                 edge-case candidates whose algebraic FK drifts above
                 ``fk_atol``, at ~100-300 us per polished branch.
+            :param allow_rescue: when ``True`` (default), if the analytical
+                path returns no solutions for a target within the arm's
+                reach (a measure-zero rank-deficient RR ridge -- a
+                reachable pose the algebraic path can't extract),
+                ``solve()`` recovers the IK via the T-perturbation rescue
+                (#319), returning machine-precision solutions tagged
+                ``refinement_used="lm"``. Set ``False`` for a guaranteed
+                purely-analytical result (returns ``[]`` at such ridges).
+                Gated by a reach-sphere, so far-field unreachable targets
+                stay cheap.
             :param policy: tolerance policy (FK closure + dedup tolerance).
                 Rarely customised.
             :param refinement_max_iters: cap on Newton iterations per
@@ -576,6 +596,34 @@ def _render_specialised_solve_orchestrator() -> str:
                 )
                 for q, residual, ref_used, _ref_iters in deduped
             ]
+
+            # Bulletproof fallback (#319): the analytical path found nothing.
+            # If the target is within the arm's max reach it may be a
+            # measure-zero rank-deficient ridge (a reachable pose the algebraic
+            # path can't extract) rather than an unreachable target -- recover
+            # via the T-perturbation rescue. The reach-sphere (sum of link
+            # lengths; an exact upper bound by the triangle inequality, so it
+            # never rejects a reachable pose) is the gate: it is checked only
+            # here in the rare empty branch and keeps genuinely far-field
+            # targets cheap. (The RR real-root count is NOT used as a gate -- it
+            # is an unreliable reachability signal: some reachable ridges, e.g.
+            # Rizon 4's, yield only complex roots, so gating on it would
+            # silently drop real solutions.) The perturbed re-solves run with
+            # allow_rescue=False (recursion guard + analytical-only escape
+            # hatch). Rescued sols carry refinement_used="lm", FK-gated to
+            # machine precision.
+            if not solutions and allow_rescue:
+                _reach_radius = sum(
+                    float(np.linalg.norm(np.asarray(_t)[:3, 3]))
+                    for _t in (*_JOINT_T_LEFTS, *_JOINT_T_RIGHTS)
+                )
+                if float(np.linalg.norm(T[:3, 3])) <= _reach_radius:
+                    solutions = _rescue_via_T_perturbation(
+                        _fk,
+                        _functools.partial(solve, allow_rescue=False),
+                        T,
+                        jacobian_fn=_spatial_jacobian,
+                    )
 
             # Post-processing pass (#238 item 4). Order matters:
             #   1. wrap_to_limits tries q +/- 2*pi per joint to bring
@@ -814,6 +862,7 @@ def _render_specialised_solve_orchestrator_7r() -> str:
             q_seed=None,
             respect_limits: bool = True,
             allow_refinement: bool = False,
+            allow_rescue: bool = True,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
             refinement_max_iters: int = 15,
         ):
@@ -834,6 +883,15 @@ def _render_specialised_solve_orchestrator_7r() -> str:
                 for the raw geometric set.
             :param allow_refinement: when ``True`` (default), Newton
                 polish fires on near-miss algebraic candidates.
+            :param allow_rescue: when ``True`` (default), if the analytical
+                path returns no solutions for a target within the arm's
+                reach (a measure-zero rank-deficient RR ridge -- a
+                reachable pose the algebraic path can't extract),
+                ``solve()`` recovers the IK via the T-perturbation rescue
+                (#319), returning machine-precision solutions tagged
+                ``refinement_used="lm"``. Set ``False`` for a guaranteed
+                purely-analytical result. Gated by a reach-sphere, so
+                far-field unreachable targets stay cheap.
             :param policy: tolerance policy. Rarely customised.
             :param refinement_max_iters: cap on Newton iterations per
                 candidate when ``allow_refinement=True``.
@@ -916,9 +974,42 @@ def _render_specialised_solve_orchestrator_7r() -> str:
                 )
                 for q, residual, ref_used, _ref_iters in deduped
             ]
-            # No orchestrator-level respect_limits pass: the inner
-            # ``_solve_algebraic`` already filtered in-flight when
-            # respect_limits=True, so candidates here are guaranteed
+            # Bulletproof fallback (#319): the analytical lock-sweep found
+            # nothing. If the target is within the arm's max reach it may be a
+            # measure-zero rank-deficient ridge (a reachable pose the algebraic
+            # path can't extract) rather than an unreachable target -- recover
+            # via the T-perturbation rescue. The reach-sphere (sum of link
+            # lengths; an exact upper bound by the triangle inequality, so it
+            # never rejects a reachable pose) is the gate: it is checked only
+            # here in the rare empty branch and keeps far-field targets cheap.
+            # (The cached-RR real-root count is NOT used as a gate -- it is an
+            # unreliable reachability signal: some reachable ridges, e.g. Rizon
+            # 4's, yield only complex roots, so gating on it would silently drop
+            # real solutions.) Perturbed re-solves run with allow_rescue=False
+            # (recursion guard + analytical-only escape hatch). The rescue calls
+            # back with respect_limits=False, so its output gets the limit/seed
+            # postprocess here (the analytical path filtered limits in-flight).
+            if not solutions and allow_rescue:
+                _reach_radius = sum(
+                    float(np.linalg.norm(np.asarray(_t)[:3, 3]))
+                    for _t in (*_JOINT_T_LEFTS, *_JOINT_T_RIGHTS)
+                )
+                if float(np.linalg.norm(T[:3, 3])) <= _reach_radius:
+                    solutions = _rescue_via_T_perturbation(
+                        _fk,
+                        _functools.partial(solve, allow_rescue=False),
+                        T,
+                        jacobian_fn=_spatial_jacobian,
+                    )
+                    if respect_limits:
+                        solutions = _ps_wrap_to_limits(solutions, _KB)
+                        solutions = _ps_respect_limits(solutions, _KB)
+                    if q_seed is not None:
+                        solutions = _ps_nearest_to_seed(solutions, q_seed)
+
+            # No orchestrator-level respect_limits pass on the analytical
+            # result: the inner ``_solve_algebraic`` already filtered in-flight
+            # when respect_limits=True, so candidates here are guaranteed
             # in-limits. The cap on max_solutions also ran inside.
             if max_solutions is not None and len(solutions) > max_solutions:
                 solutions = solutions[:max_solutions]

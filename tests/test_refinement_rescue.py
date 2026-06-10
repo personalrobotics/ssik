@@ -8,14 +8,14 @@ rescue (see :mod:`ssik.refinement.rescue`) recovers them by perturbing
 the target, re-solving, and LM-refining each candidate back to the
 original ``T_target``.
 
-These tests pin the rescue's coverage on the falsifying examples that
-landed each of #298, #304, and #280 in the issue tracker. If the rescue
-ever stops recovering them, this file fires.
+These tests pin coverage on the falsifying examples that landed #298,
+#304, and #280 — at three levels: the analytical path still returns 0
+there (baseline), the standalone rescue recovers them, and bulletproof
+``solve()`` (allow_rescue=True, the default) recovers them with no
+explicit opt-in. If any layer regresses, this file fires.
 
-#286 PiPER and #309 OpenArm right are *not* tested here yet — #286's
-stored q* no longer reproduces (the Hypothesis sweep moved on to a
-different example), and #309's reproducer needs an independent
-verification pass.
+#309 OpenArm right is exercised via the uniform-fuzz sweep rather than
+here; #286 PiPER's stored q* no longer reproduces (the sweep moved on).
 """
 
 from __future__ import annotations
@@ -28,11 +28,11 @@ import pytest
 from ssik.refinement.rescue import rescue_via_T_perturbation
 
 # Group A reproducers from the issue tracker. Each entry: (arm_module,
-# q*, n_expected_min) — n_expected_min is the empirically observed
-# minimum recovered sols. The rescue should recover at least that many
-# on every run (the RNG is fixed-seeded in the rescue, so the count is
-# deterministic; using a lower-bound gate so future RNG / numerics
-# improvements that find more sols don't break the test).
+# q*, n_expected_min). n_expected_min is a conservative lower bound: the
+# escalating-scale schedule gives large cross-platform margin (measured
+# default-seed recovery: CRX 4 (structural), Kassow 24, Rizon 4 26), so
+# >=4 holds even under BLAS-backend numeric drift. A lower bound (not an
+# exact count) keeps the test stable across platforms and future numerics.
 GROUP_A = [
     pytest.param(
         "fanuc_crx10ial_ik",
@@ -65,7 +65,10 @@ def test_direct_solve_at_ridge_returns_zero(
     need to be updated to a still-failing q*."""
     mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
     T = mod.fk(q_star)
-    sols = mod.solve(T, respect_limits=False)
+    # allow_rescue=False isolates the purely-analytical path: bulletproof
+    # solve() now auto-recovers these ridges via the rescue (#319), so the
+    # "direct returns 0" baseline must opt out of that fallback.
+    sols = mod.solve(T, respect_limits=False, allow_rescue=False)
     assert len(sols) == 0, (
         f"{arm_name}: direct solve at the stored ridge q* now returns "
         f"{len(sols)} sols; the ridge is healed and this reproducer is "
@@ -104,6 +107,46 @@ def test_rescue_recovers_solutions_at_ridge(
             f"{arm_name}: rescued sol should be tagged refinement_used='lm', "
             f"got {sol.refinement_used!r}"
         )
+
+
+@pytest.mark.parametrize(("arm_name", "q_star", "n_expected_min"), GROUP_A)
+def test_bulletproof_solve_auto_recovers_ridge(
+    arm_name: str, q_star: np.ndarray, n_expected_min: int
+) -> None:
+    """Default ``solve()`` (allow_rescue=True) must itself recover the ridge.
+
+    This is the #319 bulletproof contract: callers don't invoke the rescue
+    explicitly -- ``solve()`` returns the IK at a reachable ridge directly,
+    tagged ``refinement_used="lm"`` and FK-closed to machine precision."""
+    mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
+    T = mod.fk(q_star)
+
+    sols = mod.solve(T, respect_limits=False)
+
+    assert len(sols) >= n_expected_min, (
+        f"{arm_name}: bulletproof solve() recovered {len(sols)} sols at the "
+        f"ridge q*; expected at least {n_expected_min}"
+    )
+    for sol in sols:
+        assert sol.refinement_used == "lm", (
+            f"{arm_name}: ridge sol should be tagged 'lm', got {sol.refinement_used!r}"
+        )
+        fk_err = float(np.linalg.norm(mod.fk(sol.q) - T))
+        assert fk_err < 1e-6, f"{arm_name}: ridge sol FK error {fk_err:.2e} above 1e-6 ceiling"
+
+
+def test_bulletproof_solve_skips_rescue_when_unreachable() -> None:
+    """A pose just beyond the workspace must return ``[]`` without the rescue
+    firing -- the reachability verdict / reach-sphere gate it out so an
+    unreachable target stays cheap and honest (no fabricated near-misses)."""
+    from ssik.prebuilt import fanuc_crx10ial_ik as crx
+
+    # A genuine arm pose pushed radially out past the CRX's ~1.675 m reach.
+    T = crx.fk(np.array([0.3, 0.5, 0.2, 0.4, 0.6, -0.3]))
+    T[:3, 3] *= 1.0 + 0.5 / float(np.linalg.norm(T[:3, 3]))
+
+    assert crx.solve(T, respect_limits=False) == []
+    assert crx.solve(T, respect_limits=False, allow_rescue=False) == []
 
 
 def test_rescue_returns_empty_when_T_is_truly_unreachable() -> None:

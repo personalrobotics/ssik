@@ -361,8 +361,6 @@ max_fk = 9.7e-6
 sols_min = 1
 sols_max = 8
 
-[arms.piper_ik.known_gaps]
-xfail_reason = "RR coverage gap on q*=[0, 2.75, 0.29, 2.5, 2.75, 0] (returns 0 sols; q* + 0.01 returns 4). Filed as #286."
 
 [arms.rizon4_ik]
 display_name = "Flexiv Rizon 4"
@@ -392,8 +390,6 @@ max_fk = 4.0e-9
 sols_min = 10
 sols_max = 60
 
-[arms.rizon4_ik.known_gaps]
-xfail_reason = "cached-RR HP coverage gap on q*=[0, 1, -2, 0.375, -2, 1, 0] (0 sols at q*, 2 sols at q* + 0.05 on q3 or q* + 0.10 on q2). Same shape as #280 / #286 / #288 / #298 / #299. Filed as #304."
 
 [arms.kassow_kr810_ik]
 display_name = "Kassow KR810"
@@ -423,8 +419,6 @@ max_fk = 7.0e-8
 sols_min = 10
 sols_max = 38
 
-[arms.kassow_kr810_ik.known_gaps]
-xfail_reason = "cached-RR HP coverage gap on q*=[0, 1, 2.5, 0.5, 1, 1, 0]. Filed as #280."
 
 [arms.rizon10_ik]
 display_name = "Flexiv Rizon 10"
@@ -487,8 +481,6 @@ max_fk = 6.2e-7
 sols_min = 6
 sols_max = 12
 
-[arms.fanuc_crx10ial_ik.known_gaps]
-xfail_reason = "RR coverage gap on q*=[0, -0.21484375, -1.57884726, 0.25, -0.21484375, 0] (q3 ≈ -π/2 ridge; 0 sols at q*, 4 sols at q* ± 0.001 on q3; cond(m_quad) 1.3e6 vs 8e3). Same shape as #286 / #82. Filed as #298."
 
 [arms.yam_ik]
 display_name = "I2RT YAM"
@@ -640,5 +632,3 @@ max_fk = 1.5e-15
 sols_min = 8
 sols_max = 40
 
-[arms.openarm_right_ik.known_gaps]
-xfail_reason = "jointlock.seven_r HP coverage gap on q*=[1.5, 0.25, 1.5, 0.25, 1, 1, 0] (0 sols at q*, 16 sols at q* + 0.05 on q3, 8 sols at q* + 0.05 on q0). Right-side-specific: openarm_left passes the same sweep clean (mirror-flipped axes shift the pencil-degenerate set). Same shape as #280 / #286 / #288 / #298 / #299 / #304. Filed as #309."

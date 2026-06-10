@@ -55,6 +55,8 @@ from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
+import functools as _functools
+from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.postprocess import (
     nearest_to_seed as _ps_nearest_to_seed,
     respect_limits as _ps_respect_limits,
@@ -878,6 +880,7 @@ def solve(
     q_seed=None,
     respect_limits: bool = True,
     allow_refinement: bool = False,
+    allow_rescue: bool = True,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
 ):
@@ -902,6 +905,16 @@ def solve(
         arms (JACO 2, Rizon 4, Kassow), polish can recover
         edge-case candidates whose algebraic FK drifts above
         ``fk_atol``, at ~100-300 us per polished branch.
+    :param allow_rescue: when ``True`` (default), if the analytical
+        path returns no solutions for a target within the arm's
+        reach (a measure-zero rank-deficient RR ridge -- a
+        reachable pose the algebraic path can't extract),
+        ``solve()`` recovers the IK via the T-perturbation rescue
+        (#319), returning machine-precision solutions tagged
+        ``refinement_used="lm"``. Set ``False`` for a guaranteed
+        purely-analytical result (returns ``[]`` at such ridges).
+        Gated by a reach-sphere, so far-field unreachable targets
+        stay cheap.
     :param policy: tolerance policy (FK closure + dedup tolerance).
         Rarely customised.
     :param refinement_max_iters: cap on Newton iterations per
@@ -967,6 +980,34 @@ def solve(
         )
         for q, residual, ref_used, _ref_iters in deduped
     ]
+
+    # Bulletproof fallback (#319): the analytical path found nothing.
+    # If the target is within the arm's max reach it may be a
+    # measure-zero rank-deficient ridge (a reachable pose the algebraic
+    # path can't extract) rather than an unreachable target -- recover
+    # via the T-perturbation rescue. The reach-sphere (sum of link
+    # lengths; an exact upper bound by the triangle inequality, so it
+    # never rejects a reachable pose) is the gate: it is checked only
+    # here in the rare empty branch and keeps genuinely far-field
+    # targets cheap. (The RR real-root count is NOT used as a gate -- it
+    # is an unreliable reachability signal: some reachable ridges, e.g.
+    # Rizon 4's, yield only complex roots, so gating on it would
+    # silently drop real solutions.) The perturbed re-solves run with
+    # allow_rescue=False (recursion guard + analytical-only escape
+    # hatch). Rescued sols carry refinement_used="lm", FK-gated to
+    # machine precision.
+    if not solutions and allow_rescue:
+        _reach_radius = sum(
+            float(np.linalg.norm(np.asarray(_t)[:3, 3]))
+            for _t in (*_JOINT_T_LEFTS, *_JOINT_T_RIGHTS)
+        )
+        if float(np.linalg.norm(T[:3, 3])) <= _reach_radius:
+            solutions = _rescue_via_T_perturbation(
+                _fk,
+                _functools.partial(solve, allow_rescue=False),
+                T,
+                jacobian_fn=_spatial_jacobian,
+            )
 
     # Post-processing pass (#238 item 4). Order matters:
     #   1. wrap_to_limits tries q +/- 2*pi per joint to bring

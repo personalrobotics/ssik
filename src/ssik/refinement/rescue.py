@@ -49,9 +49,10 @@ def rescue_via_T_perturbation(
     solve_fn: Callable[..., list[Solution]],
     T_target: NDArray[np.float64],
     *,
-    n_perturbations: int = 8,
+    n_perturbations: int = 16,
     perturbation_scale_m: float = 5e-3,
     perturbation_scale_rad: float = 5e-3,
+    scale_multipliers: tuple[float, ...] = (1.0, 2.0, 4.0, 10.0),
     fk_atol: float = 1e-8,
     refinement_max_iters: int = 20,
     dedup_atol: float = 1e-4,
@@ -81,12 +82,18 @@ def rescue_via_T_perturbation(
     :param T_target: 4x4 SE(3) target pose. The pose the rescued
         solutions must close at.
     :param n_perturbations: how many random T-perturbations to try.
-        Default 8 -- empirically ~50-100% per-trial success rate on
-        Group A reproducers, so 8 trials hits >99% combined recovery.
-    :param perturbation_scale_m: translation magnitude (each axis,
-        each trial). Default 5 mm.
-    :param perturbation_scale_rad: rotation magnitude (each axis,
-        each trial). Default 5 mrad.
+        Default 16 -- combined with the escalating ``scale_multipliers``
+        this gives robust cross-platform margin (measured default-seed
+        recovery: CRX 4 (structural), Kassow 24, Rizon 4 26).
+    :param perturbation_scale_m: base translation magnitude (each axis,
+        each trial), scaled by ``scale_multipliers``. Default 5 mm.
+    :param perturbation_scale_rad: base rotation magnitude (each axis,
+        each trial), scaled by ``scale_multipliers``. Default 5 mrad.
+    :param scale_multipliers: cycled per-perturbation multipliers applied
+        to the base scales. Default ``(1, 2, 4, 10)`` -> 5/10/20/50 mm +
+        mrad. The large multiples land firmly off the rank-deficient
+        ridge, so recovery does not depend on BLAS-backend-sensitive
+        near-ridge numerics.
     :param fk_atol: SE(3) log-residual threshold for accepted
         solutions (consumed by :func:`lm_refine` internally). Default
         1e-8 -- empirically achieved by all rescued candidates on the
@@ -114,15 +121,24 @@ def rescue_via_T_perturbation(
     refined: list[Solution] = []
     refined_qs: list[NDArray[np.float64]] = []
 
-    for _ in range(n_perturbations):
-        dx = rng.standard_normal(3) * perturbation_scale_m
+    for i in range(n_perturbations):
+        # Escalating scale schedule: cycle through ``scale_multipliers`` so
+        # successive perturbations span a range of magnitudes (default
+        # 5/10/20/50 mm + mrad). Small near-ridge perturbations are
+        # numerically marginal -- whether they clear the rank-deficient
+        # ridge is BLAS-backend-sensitive (the #319 CI flake: Accelerate
+        # recovered, OpenBLAS did not). The large multiples land firmly
+        # off-ridge in the well-conditioned regime and recover reliably on
+        # any backend, so the schedule gives robust cross-platform margin.
+        mult = scale_multipliers[i % len(scale_multipliers)] if scale_multipliers else 1.0
+        dx = rng.standard_normal(3) * perturbation_scale_m * mult
         # Small-angle so3 perturbation: vector w in R^3 with magnitude
         # |w| ~ perturbation_scale_rad becomes a rotation of angle |w|
         # about axis w / |w|. Using Rodrigues' formula on the small
         # vector keeps the perturbation well-conditioned at small
         # scales without the cos/sin breakdown of an explicit
         # axis-angle build.
-        w = rng.standard_normal(3) * perturbation_scale_rad
+        w = rng.standard_normal(3) * perturbation_scale_rad * mult
         angle = float(np.linalg.norm(w))
         if angle > 0:
             axis = w / angle
