@@ -37,7 +37,7 @@ def _restore_rr_global_caches():
     try:
         yield
     finally:
-        for key, value in deriv_before.items():
-            _rr_mod._DERIVATION_CACHE.setdefault(key, value)
-        for key, value in lin_before.items():
-            _rr_mod._PRIMED_LINEARITY_MAP.setdefault(key, value)
+        for dkey, dval in deriv_before.items():
+            _rr_mod._DERIVATION_CACHE.setdefault(dkey, dval)
+        for lkey, lval in lin_before.items():
+            _rr_mod._PRIMED_LINEARITY_MAP.setdefault(lkey, lval)
