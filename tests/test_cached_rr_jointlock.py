@@ -323,20 +323,62 @@ def test_rizon4_composer_prime_dh_matches_runtime_dh() -> None:
     )
 
 
-def test_primed_arm_skips_per_sample_hp_fallback() -> None:
-    """On the primed artifact path, a reachable pose is solved entirely by
-    cached-RR; the expensive Husty-Pfurner fallback must NOT run per lock
-    sample (it is deferred to a whole-sweep last resort).
+def test_dispatch_cached_rr_only_defers_hp_fallback() -> None:
+    """``_dispatch(cached_rr_only=True)`` on a primed sub-chain whose
+    cached-RR yields nothing must return ``([], True)`` WITHOUT invoking the
+    Husty-Pfurner fallback -- the lock-sweep defers HP to a whole-sweep last
+    resort (#326). With ``cached_rr_only=False`` the fallback DOES run.
 
-    Regression guard for the #319-followup engine fix. Before it, jointlock
-    ran HP on every cached-RR-zero lock sample (mostly configurationally
-    unreachable) -- pure overhead that cost 2-11x (Kassow 2.1x, Rizon4
-    2.8x, the non-SRS-7R IHMC Alex ~11x). HP recovered 0 extra solutions
-    across 105 poses x 7 arms, so the per-sample fallback was dead weight.
+    Gate-level + deterministic: an out-of-reach target makes cached-RR
+    return 0 on every BLAS backend, so this doesn't depend on the
+    platform-sensitive coverage of any particular reachable pose (the
+    earlier per-pose version was flaky: cached-RR's per-sample coverage
+    differs Accelerate vs OpenBLAS, which legitimately triggers the
+    whole-sweep last resort on some platforms).
+
+    Before the fix the per-sample fallback ran HP on every cached-RR-zero
+    sample -- pure overhead that cost 2-11x (Kassow 2.1x, Rizon4 2.8x, the
+    non-SRS-7R IHMC Alex ~11x) while recovering 0 extra solutions.
     """
     import ssik.solvers.husty_pfurner.general_6r as hp_mod
+    import ssik.solvers.jointlock.seven_r as seven
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as policy
+    from ssik.kinematics.reverse import reverse_kinematic_chain
 
-    mod = importlib.import_module("ssik.prebuilt.kassow_kr810_ik")
+    mod = importlib.import_module("ssik.prebuilt.kassow_kr810_ik")  # primes the cache
+    kb = mod._KB
+
+    # Find a baked lock sample whose locked 6R sub-chain dispatches to the
+    # Husty-Pfurner fallback AND is primed -- that's the slow symbolic path
+    # the fix defers, and patching ``hp_mod.solve`` observes it directly.
+    sub_kb = None
+    solver_name = ""
+    for q_lock in mod._LOCK_SAMPLES:
+        candidate = seven._lock_joint(kb, mod._LOCK_IDX, float(q_lock))
+        _, name = seven._topology_rank(candidate, policy)
+        bare = name[len("reversed:") :] if name.startswith("reversed:") else name
+        if bare != "husty_pfurner.general_6r":
+            continue
+        sub_for_dh = (
+            reverse_kinematic_chain(candidate) if name.startswith("reversed:") else candidate
+        )
+        dh = poe_to_dh(sub_for_dh)
+        if (
+            primed_linearity_for_dh(
+                tuple(float(x) for x in dh.alpha),
+                tuple(float(x) for x in dh.a),
+                tuple(float(x) for x in dh.d),
+            )
+            is not None
+        ):
+            sub_kb, solver_name = candidate, name
+            break
+    assert sub_kb is not None, "expected a primed Husty-Pfurner locked sub-chain for Kassow"
+
+    # Out-of-reach target: cached-RR finds no real roots on any backend.
+    t_far = np.eye(4)
+    t_far[:3, 3] = [10.0, 0.0, 1.0]
+
     hp_calls = {"n": 0}
     orig_hp = hp_mod.solve
 
@@ -344,17 +386,37 @@ def test_primed_arm_skips_per_sample_hp_fallback() -> None:
         hp_calls["n"] += 1
         return orig_hp(*args, **kwargs)
 
-    # jointlock builds its dispatch table fresh per call from this module's
-    # ``solve``, so patching it here is what the lock-sweep will see.
     hp_mod.solve = _counting_hp  # type: ignore[assignment]
     try:
-        rng = np.random.default_rng(0)
-        sols = mod.solve(mod.fk(rng.uniform(-1.0, 1.0, mod.DOF)), respect_limits=False)
+        res_primary = seven._dispatch(
+            solver_name,
+            sub_kb,
+            t_far,
+            policy,
+            allow_refinement=False,
+            refinement_max_iters=15,
+            cached_rr_only=True,
+        )
+        hp_after_primary = hp_calls["n"]
+        seven._dispatch(
+            solver_name,
+            sub_kb,
+            t_far,
+            policy,
+            allow_refinement=False,
+            refinement_max_iters=15,
+            cached_rr_only=False,
+        )
+        hp_after_fallback = hp_calls["n"]
     finally:
         hp_mod.solve = orig_hp  # type: ignore[assignment]
 
-    assert sols, "kassow: reachable pose should solve via cached-RR"
-    assert hp_calls["n"] == 0, (
-        f"Husty-Pfurner fallback ran {hp_calls['n']}x on a reachable pose; "
-        "cached-RR should cover it without the per-sample fallback"
+    assert res_primary == ([], True), (
+        f"cached_rr_only=True should short-circuit to ([], True); got {res_primary!r}"
+    )
+    assert hp_after_primary == 0, (
+        f"cached_rr_only=True invoked HP {hp_after_primary}x; it must defer the fallback"
+    )
+    assert hp_after_fallback > hp_after_primary, (
+        "cached_rr_only=False must invoke the HP fallback (the last-resort path)"
     )
