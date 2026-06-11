@@ -216,6 +216,7 @@ def test_jointlock_plumbs_max_solutions_through_dispatch(rizon4_kb: KinBody) -> 
         allow_refinement,
         refinement_max_iters,
         max_solutions=None,
+        cached_rr_only=False,
     ):
         observed.append(max_solutions)
         return real_dispatch(
@@ -226,6 +227,7 @@ def test_jointlock_plumbs_max_solutions_through_dispatch(rizon4_kb: KinBody) -> 
             allow_refinement=allow_refinement,
             refinement_max_iters=refinement_max_iters,
             max_solutions=max_solutions,
+            cached_rr_only=cached_rr_only,
         )
 
     jointlock_seven_r._dispatch = _spy_dispatch  # type: ignore[attr-defined]

@@ -25,7 +25,9 @@ Test contract:
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -318,4 +320,41 @@ def test_rizon4_composer_prime_dh_matches_runtime_dh() -> None:
     assert eligible_dhs == eligible_dhs_again
     assert len(eligible_dhs) >= 8, (
         f"Rizon 4 should produce 8+ non-tier-0 inner samples; got {len(eligible_dhs)}"
+    )
+
+
+def test_primed_arm_skips_per_sample_hp_fallback() -> None:
+    """On the primed artifact path, a reachable pose is solved entirely by
+    cached-RR; the expensive Husty-Pfurner fallback must NOT run per lock
+    sample (it is deferred to a whole-sweep last resort).
+
+    Regression guard for the #319-followup engine fix. Before it, jointlock
+    ran HP on every cached-RR-zero lock sample (mostly configurationally
+    unreachable) -- pure overhead that cost 2-11x (Kassow 2.1x, Rizon4
+    2.8x, the non-SRS-7R IHMC Alex ~11x). HP recovered 0 extra solutions
+    across 105 poses x 7 arms, so the per-sample fallback was dead weight.
+    """
+    import ssik.solvers.husty_pfurner.general_6r as hp_mod
+
+    mod = importlib.import_module("ssik.prebuilt.kassow_kr810_ik")
+    hp_calls = {"n": 0}
+    orig_hp = hp_mod.solve
+
+    def _counting_hp(*args: Any, **kwargs: Any) -> Any:
+        hp_calls["n"] += 1
+        return orig_hp(*args, **kwargs)
+
+    # jointlock builds its dispatch table fresh per call from this module's
+    # ``solve``, so patching it here is what the lock-sweep will see.
+    hp_mod.solve = _counting_hp  # type: ignore[assignment]
+    try:
+        rng = np.random.default_rng(0)
+        sols = mod.solve(mod.fk(rng.uniform(-1.0, 1.0, mod.DOF)), respect_limits=False)
+    finally:
+        hp_mod.solve = orig_hp  # type: ignore[assignment]
+
+    assert sols, "kassow: reachable pose should solve via cached-RR"
+    assert hp_calls["n"] == 0, (
+        f"Husty-Pfurner fallback ran {hp_calls['n']}x on a reachable pose; "
+        "cached-RR should cover it without the per-sample fallback"
     )

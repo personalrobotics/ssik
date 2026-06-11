@@ -56,3 +56,4 @@ src/ssik/**/*.html
 tests/artifacts/*.c
 tests/artifacts/*.html
 build/
+scratch/

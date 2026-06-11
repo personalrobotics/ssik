@@ -293,6 +293,7 @@ def _dispatch(
     allow_refinement: bool,
     refinement_max_iters: int,
     max_solutions: int | None = None,
+    cached_rr_only: bool = False,
 ) -> tuple[list[Solution], bool]:
     """Call the named ikgeo solver on ``sub_kb``. Returns ``(solutions, is_ls)``.
 
@@ -305,6 +306,22 @@ def _dispatch(
     ``max_solutions`` (#198) is plumbed through to the inner solver so a
     capped-IK request stops branch enumeration once the cap is reached
     inside the sub-chain, avoiding wasted Newton polish on extra seeds.
+
+    ``cached_rr_only`` (#319 follow-up) is the lock-sweep's primary-pass
+    flag: when the inner solver is cached-RR-eligible AND its derivation
+    is primed, but cached-RR yields nothing for this sample, skip the
+    expensive named-solver fallback (Husty-Pfurner / 1-D search) and
+    return empty. Most lock samples are configurationally unreachable
+    (the locked pose can't reach the 6-D target -- not catchable by a
+    reach check, since the target position is fixed across samples), so
+    running HP on each only to confirm 0 is pure overhead (measured: HP
+    recovered 0 extra solutions across 105 poses x 7 arms while costing
+    2-11x). The caller (:func:`solve`) re-runs the sweep with
+    ``cached_rr_only=False`` ONLY if the whole primary pass came up empty,
+    so the HP last-resort still fires for the rare reachable pose that
+    cached-RR misses on every sample. The cold (un-primed, URDF-loaded)
+    path is unaffected: with no prime there is no cached-RR primary, so
+    the named solver is the primary and always runs.
     """
     if solver_name.startswith("reversed:"):
         inner_name = solver_name[len("reversed:") :]
@@ -318,6 +335,7 @@ def _dispatch(
             allow_refinement=allow_refinement,
             refinement_max_iters=refinement_max_iters,
             max_solutions=max_solutions,
+            cached_rr_only=cached_rr_only,
         )
         # Map reversed-chain q's back to original-chain ordering.
         sub_sols_orig = [replace(sol, q=map_reversed_q(sol.q)) for sol in sub_sols_rev]
@@ -341,6 +359,25 @@ def _dispatch(
         )
         if rr_result is not None:
             return rr_result
+        if cached_rr_only:
+            # cached-RR was the primary path for this sample. If it is
+            # primed (the DH has a baked derivation), a None result means
+            # cached-RR ran and found nothing -- almost always because the
+            # locked pose is unreachable -- so skip the expensive
+            # named-solver fallback this pass (the caller's last-resort
+            # pass handles the rare genuine miss). If it is NOT primed
+            # (cold URDF path), fall through: the named solver is the only
+            # primary available.
+            dh = poe_to_dh(sub_kb)
+            if (
+                primed_linearity_for_dh(
+                    tuple(float(x) for x in dh.alpha),
+                    tuple(float(x) for x in dh.a),
+                    tuple(float(x) for x in dh.d),
+                )
+                is not None
+            ):
+                return [], True
 
     table = {
         "three_parallel": three_parallel.solve,
@@ -616,67 +653,92 @@ def solve(
             cache_arr = [cache_arr[i] for i in order]
 
     dedup_tol = policy.subproblem_dedup
-    candidates: list[Solution] = []
-    samples_evaluated = 0
 
-    for sample_idx, q_lock in enumerate(samples):
-        samples_evaluated = sample_idx + 1
-        sub_kb = _lock_joint(kb, lock_idx, float(q_lock))
-        if cache_arr is not None:
-            # Codegen-time topology probe (#142 item 4); skip the per-IK
-            # ``_topology_rank`` call (~70 us with chain-reversal).
-            solver_name = cache_arr[sample_idx]
-        else:
-            # Re-check topology per sample: rotating downstream axes by
-            # R_lock can switch which tier-0/1 specialization matches.
-            _, solver_name = _topology_rank(sub_kb, policy)
-        try:
-            sub_sols, is_ls = _dispatch(
-                solver_name,
-                sub_kb,
-                T_target,
-                policy,
-                allow_refinement=allow_refinement,
-                refinement_max_iters=refinement_max_iters,
-                max_solutions=max_solutions,
-            )
-        except ValueError:
-            # Topology may fail marginally on some lock values (e.g.
-            # near-parallel becoming exactly parallel). Skip.
-            continue
-        if is_ls or not sub_sols:
-            continue
-        for inner in sub_sols:
-            sub_q = inner.q
-            full_q = np.empty(7, dtype=np.float64)
-            full_q[:lock_idx] = sub_q[:lock_idx]
-            full_q[lock_idx] = float(q_lock)
-            full_q[lock_idx + 1 :] = sub_q[lock_idx:]
-            # In-sweep limits filter (#238 review). When respect_limits=True,
-            # try wrapping each joint into its limit range; drop branches
-            # that still violate. This lets the outer short-circuit fire
-            # on the first IN-LIMITS valid IK rather than waste samples on
-            # out-of-limits candidates that postprocess would drop anyway.
-            if respect_limits:
-                full_q = _wrap_to_limits_inplace(full_q, kb)
-                if not _in_limits(full_q, kb):
-                    continue
-            candidates.append(
-                Solution(
-                    q=full_q,
-                    fk_residual=inner.fk_residual,
-                    refinement_used=inner.refinement_used,
+    def _sweep(cached_rr_only: bool) -> tuple[list[Solution], int]:
+        """Run the lock-sweep once. With ``cached_rr_only`` (the primary
+        pass on the primed artifact path), only the cached-RR fast path is
+        tried per sample; the expensive named-solver fallback (HP / 1-D
+        search) is deferred to a whole-sweep last resort -- see
+        ``_dispatch(cached_rr_only=...)``."""
+        candidates: list[Solution] = []
+        samples_evaluated = 0
+        for sample_idx, q_lock in enumerate(samples):
+            samples_evaluated = sample_idx + 1
+            sub_kb = _lock_joint(kb, lock_idx, float(q_lock))
+            if cache_arr is not None:
+                # Codegen-time topology probe (#142 item 4); skip the per-IK
+                # ``_topology_rank`` call (~70 us with chain-reversal).
+                solver_name = cache_arr[sample_idx]
+            else:
+                # Re-check topology per sample: rotating downstream axes by
+                # R_lock can switch which tier-0/1 specialization matches.
+                _, solver_name = _topology_rank(sub_kb, policy)
+            try:
+                sub_sols, is_ls = _dispatch(
+                    solver_name,
+                    sub_kb,
+                    T_target,
+                    policy,
+                    allow_refinement=allow_refinement,
+                    refinement_max_iters=refinement_max_iters,
+                    max_solutions=max_solutions,
+                    cached_rr_only=cached_rr_only,
                 )
-            )
-        # Incremental dedup so we know how many *unique* solutions we
-        # actually have. Cheaper than waiting until the end and then
-        # discovering we already had enough; the dedup primitive's
-        # early-exit per-pair check (#141) keeps this affordable.
-        if (
-            max_solutions is not None
-            and len(dedup_by_wrap_close(candidates, dedup_tol)) >= max_solutions
-        ):
-            break
+            except ValueError:
+                # Topology may fail marginally on some lock values (e.g.
+                # near-parallel becoming exactly parallel). Skip.
+                continue
+            if is_ls or not sub_sols:
+                continue
+            for inner in sub_sols:
+                sub_q = inner.q
+                full_q = np.empty(7, dtype=np.float64)
+                full_q[:lock_idx] = sub_q[:lock_idx]
+                full_q[lock_idx] = float(q_lock)
+                full_q[lock_idx + 1 :] = sub_q[lock_idx:]
+                # In-sweep limits filter (#238 review). When respect_limits=True,
+                # try wrapping each joint into its limit range; drop branches
+                # that still violate. This lets the outer short-circuit fire
+                # on the first IN-LIMITS valid IK rather than waste samples on
+                # out-of-limits candidates that postprocess would drop anyway.
+                if respect_limits:
+                    full_q = _wrap_to_limits_inplace(full_q, kb)
+                    if not _in_limits(full_q, kb):
+                        continue
+                candidates.append(
+                    Solution(
+                        q=full_q,
+                        fk_residual=inner.fk_residual,
+                        refinement_used=inner.refinement_used,
+                    )
+                )
+            # Incremental dedup so we know how many *unique* solutions we
+            # actually have. Cheaper than waiting until the end and then
+            # discovering we already had enough; the dedup primitive's
+            # early-exit per-pair check (#141) keeps this affordable.
+            if (
+                max_solutions is not None
+                and len(dedup_by_wrap_close(candidates, dedup_tol)) >= max_solutions
+            ):
+                break
+        return candidates, samples_evaluated
+
+    # On the primed artifact path (dispatch_cache present => RR derivations
+    # baked), the primary pass uses cached-RR only and defers the expensive
+    # named-solver fallback to a whole-sweep last resort that fires ONLY if
+    # cached-RR found nothing on every lock sample. Most lock samples are
+    # configurationally unreachable, so running HP on each just to confirm 0
+    # is pure overhead (measured 2-11x; HP recovered 0 extra sols across
+    # 105 poses x 7 arms). The rare reachable pose that cached-RR misses on
+    # every sample still gets the HP last resort, and the top-level #319
+    # rescue backstops a still-empty result. The cold URDF path (no
+    # dispatch_cache => nothing primed) keeps the original single pass --
+    # ``cached_rr_only`` is a no-op without a prime, so a second pass would
+    # just repeat the same work.
+    primed_path = cache_arr is not None
+    candidates, samples_evaluated = _sweep(cached_rr_only=primed_path)
+    if primed_path and not candidates:
+        candidates, samples_evaluated = _sweep(cached_rr_only=False)
 
     solutions = dedup_by_wrap_close(candidates, dedup_tol)
     if max_solutions is not None and len(solutions) > max_solutions:
