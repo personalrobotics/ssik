@@ -54,13 +54,15 @@ For 7R arms whose topology doesn't match strict or approximate SRS, `jointlock.s
 
 For non-Pieper inner sub-chains (Rizon 4, Kassow KR810), `ssik build` bakes the per-(DH, linearity) Raghavan-Roth derivation into the artifact (cached-RR fast path, #210/#220). Module import primes the cache once (~5 seconds); subsequent calls amortise.
 
+The lock-sweep uses cached-RR as the per-sample primary and defers the symbolic Husty-Pfurner fallback to a whole-sweep last resort (fires only if cached-RR finds nothing on every sample). Most lock samples are configurationally unreachable, so this avoids paying the per-call sympy cost just to confirm a 0 — cutting full-sweep time 1.6–2.8× on cached-RR arms with no change to the solution set (#326).
+
 | Arm | Drift (shoulder / wrist) | Inner | Speed (full sweep) | Status |
 |-----|---|---|:-----:|:-----:|
 | **Franka Emika Panda** | non-SRS by design | tier-0 inner (`reversed:spherical_two_parallel`) | 29.27 ± 2.81 ms / 8-124 sols / FK 1e-6 | ✅ `ssik.prebuilt.franka_panda_ik` |
 | **uFactory xArm7** | non-SRS by design | tier-0 inner (`reversed:spherical`) | 37.10 ± 0.49 ms / 56-64 sols / FK 4e-11 | ✅ `ssik.prebuilt.xarm7_ik` |
-| **Flexiv Rizon 4** | 65 mm / 151 mm | cached-RR (HP otherwise) | 30.58 ± 8.58 ms / 10-60 sols / FK 4e-9 | ✅ `ssik.prebuilt.rizon4_ik` |
-| **Flexiv Rizon 10** (~1.4 m reach) | 65 mm / 151 mm | cached-RR (HP otherwise) | 29.43 ± 6.37 ms / 10-64 sols / FK 6e-8 | ✅ `ssik.prebuilt.rizon10_ik` |
-| **Kassow KR810** | 86 mm / 111 mm | cached-RR (HP otherwise) | 27.52 ± 10.71 ms / 10-38 sols / FK 7e-8 | ✅ `ssik.prebuilt.kassow_kr810_ik` |
+| **Flexiv Rizon 4** | 65 mm / 151 mm | cached-RR (HP otherwise) | 16.57 ± 0.30 ms / 10-60 sols / FK 4e-9 | ✅ `ssik.prebuilt.rizon4_ik` |
+| **Flexiv Rizon 10** (~1.4 m reach) | 65 mm / 151 mm | cached-RR (HP otherwise) | 16.26 ± 0.34 ms / 10-64 sols / FK 6e-8 | ✅ `ssik.prebuilt.rizon10_ik` |
+| **Kassow KR810** | 86 mm / 111 mm | cached-RR (HP otherwise) | 17.62 ± 0.29 ms / 10-38 sols / FK 7e-8 | ✅ `ssik.prebuilt.kassow_kr810_ik` |
 | Sawyer / Baxter (Rethink) | likely non-SRS | TBD | expected ~30-50 ms | 🔗 |
 
 > **Mean vs median:** both 30 ms and ~17 ms are honest measurements of the same prebuilt — the canonical bench reports mean ± 95% CI, an earlier per-pose measurement reported median. Verified 2026-05-13 on Rizon 4 with the canonical pose distribution: mean 28.7 ms / **median 19 ms** / p95 62 ms / min 16.4 ms. The cached-RR fast path is firing on most poses; mean is dragged up by occasional near-singular configurations where the lock-sweep can't short-circuit.

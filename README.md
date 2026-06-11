@@ -357,9 +357,9 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 2e-7 / 8-12 sols |
 | Z1 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 1e-15 / 4-8 sols | 487 ± 7 µs / FK 3e-15 / 4-8 sols |
 | PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.10 ± 0.03 ms / FK 1e-5 / 1-8 sols |
-| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 30.58 ± 8.58 ms / FK 4e-9 / 10-60 sols |
-| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 27.52 ± 10.71 ms / FK 7e-8 / 10-38 sols |
-| Rizon 10 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 29.43 ± 6.37 ms / FK 6e-8 / 10-64 sols |
+| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 16.57 ± 0.30 ms / FK 4e-9 / 10-60 sols |
+| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 17.62 ± 0.29 ms / FK 7e-8 / 10-38 sols |
+| Rizon 10 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 16.26 ± 0.34 ms / FK 6e-8 / 10-64 sols |
 | CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 991 ± 14 µs / FK 6e-7 / 6-12 sols |
 | YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.08 ± 0.02 ms / FK 8e-9 / 8 sols |
 | big_yam (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.02 ms / FK 5e-6 / 8 sols |

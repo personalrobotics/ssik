@@ -384,8 +384,8 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.rizon4_ik.bench]
-ms_mean = 30.58
-ms_ci95 = 8.58
+ms_mean = 16.57
+ms_ci95 = 0.30
 max_fk = 4.0e-9
 sols_min = 10
 sols_max = 60
@@ -413,8 +413,8 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.kassow_kr810_ik.bench]
-ms_mean = 27.52
-ms_ci95 = 10.71
+ms_mean = 17.62
+ms_ci95 = 0.29
 max_fk = 7.0e-8
 sols_min = 10
 sols_max = 38
@@ -442,8 +442,8 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.rizon10_ik.bench]
-ms_mean = 29.43
-ms_ci95 = 6.37
+ms_mean = 16.26
+ms_ci95 = 0.34
 max_fk = 6.1e-8
 sols_min = 10
 sols_max = 64
