@@ -159,6 +159,7 @@ def solve(
     allow_refinement: bool = False,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
+    seed_metric: str = "wrap_linf",
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -166,9 +167,13 @@ def solve(
     :param max_solutions: optional cap on returned IKs (post-dedup,
         post-limits filter). ``None`` = full enumeration.
     :param q_seed: optional joint config. When provided, solutions
-        are sorted by wrap-to-pi distance from ``q_seed`` (closest
-        first). Combine with ``max_solutions=1`` for the
+        are sorted by distance from ``q_seed`` (closest first, via
+        ``seed_metric``). Combine with ``max_solutions=1`` for the
         trajectory-tracking idiom.
+    :param seed_metric: distance used to rank against ``q_seed``.
+        ``"wrap_linf"`` (default, largest single-joint move) holds
+        the branch during tracking; ``"wrap_l2"`` uses the summed
+        move. Ignored when ``q_seed`` is ``None``.
     :param respect_limits: when ``True`` (default), solutions
         outside URDF joint limits are dropped. ``False`` returns
         the raw geometric set.
@@ -195,7 +200,7 @@ def solve(
         sols = _ps_wrap_to_limits(sols, _KB)
         sols = _ps_respect_limits(sols, _KB)
     if q_seed is not None:
-        sols = _ps_nearest_to_seed(sols, q_seed)
+        sols = _ps_nearest_to_seed(sols, q_seed, metric=seed_metric)
     if max_solutions is not None and len(sols) > max_solutions:
         sols = sols[:max_solutions]
     return sols

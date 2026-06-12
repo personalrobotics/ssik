@@ -806,6 +806,7 @@ def solve(
     allow_rescue: bool = True,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
+    seed_metric: str = "wrap_linf",
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -815,10 +816,18 @@ def solve(
         search. ``max_solutions=1`` short-circuits as soon as
         one valid IK is found (~17x faster on this 7R).
     :param q_seed: optional length-7 seed configuration. When
-        provided, the lock-joint samples are visited in order
-        of wrap-to-pi distance to ``q_seed[lock_idx]`` --
-        combined with ``max_solutions=1`` this is the
-        trajectory-tracking fast path.
+        provided, the lock-joint samples are visited outward from
+        ``q_seed[lock_idx]`` and the first yielding slice's full
+        branch set is L-infinity-ranked against the seed (see
+        ``seed_metric``); with ``max_solutions`` this returns the
+        nearest configs to the seed in ~1 sub-solve -- the
+        trajectory-tracking fast path (#331), branch-continuous and
+        ~20x faster than the exhaustive sweep.
+    :param seed_metric: distance used to rank against ``q_seed``.
+        ``"wrap_linf"`` (default) minimises the *largest* single-joint
+        wrap-to-pi move, holding the branch during tracking;
+        ``"wrap_l2"`` minimises the summed move. Ignored when
+        ``q_seed`` is ``None``.
     :param respect_limits: when ``True`` (default), solutions
         outside URDF joint limits are dropped. Pass ``False``
         for the raw geometric set.
@@ -946,12 +955,22 @@ def solve(
                 solutions = _ps_wrap_to_limits(solutions, _KB)
                 solutions = _ps_respect_limits(solutions, _KB)
             if q_seed is not None:
-                solutions = _ps_nearest_to_seed(solutions, q_seed)
+                solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
 
     # No orchestrator-level respect_limits pass on the analytical
     # result: the inner ``_solve_algebraic`` already filtered in-flight
     # when respect_limits=True, so candidates here are guaranteed
-    # in-limits. The cap on max_solutions also ran inside.
+    # in-limits.
+    #
+    # Seeded ranking (#331): the lock-sweep returns candidates from the
+    # window of lock samples nearest ``q_seed[lock_idx]`` (in seed
+    # order), but the genuinely-nearest config -- and the
+    # branch-continuous one for tracking -- needs an explicit rank by
+    # ``seed_metric`` (default L-infinity) over that window before the
+    # cap. Without this the cap would keep the nearest *lock samples*,
+    # not the nearest *configs*.
+    if q_seed is not None:
+        solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
     if max_solutions is not None and len(solutions) > max_solutions:
         solutions = solutions[:max_solutions]
     return solutions

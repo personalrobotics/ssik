@@ -638,11 +638,12 @@ def solve(
 
     if q_seed_arr is not None:
         # Reorder samples by wrap-to-pi distance to seed[lock_idx], nearest
-        # first. Combined with max_solutions=1, this is the trajectory-
-        # tracking fast path: usually one or two dispatches before the
-        # match emerges. The unstable sort + numerical tiebreak below keeps
-        # ordering deterministic even when two samples land at equal
-        # distance.
+        # first -- the "outward from the seed's redundancy value" walk that
+        # makes the trajectory-tracking fast path work (#331): the nearest IK
+        # lives in the first slice(s) to yield, so the seed-ordered early-exit
+        # stops after usually one or two dispatches. The unstable sort +
+        # numerical tiebreak below keeps ordering deterministic even when two
+        # samples land at equal distance.
         seed_lock = float(q_seed_arr[lock_idx])
         diffs = np.abs((samples - seed_lock + np.pi) % (2 * np.pi) - np.pi)
         order = np.lexsort((samples, diffs))
@@ -653,6 +654,18 @@ def solve(
             cache_arr = [cache_arr[i] for i in order]
 
     dedup_tol = policy.subproblem_dedup
+
+    # Seeded "lock-outward-from-seed" tracking (#331). The lock samples are
+    # already ordered outward from ``seed[lock_idx]`` (above), so the nearest IK
+    # lives in the first slice(s) that yield. To return the branch-continuous
+    # one we need that slice's *full* branch set, not a single capped branch --
+    # so per-slice we ask the inner solver for ALL branches (max_solutions=None)
+    # and let the seed-ordered early-exit stop after the first slice provides
+    # enough. The orchestrator then L-infinity-ranks those branches against the
+    # seed (postprocess) and takes ``max_solutions``. Net: ~1 sub-solve in the
+    # tracking case (fast) AND no elbow/wrist branch flips (smooth).
+    seeded = q_seed_arr is not None
+    inner_max_solutions = None if seeded else max_solutions
 
     def _sweep(cached_rr_only: bool) -> tuple[list[Solution], int]:
         """Run the lock-sweep once. With ``cached_rr_only`` (the primary
@@ -681,7 +694,7 @@ def solve(
                     policy,
                     allow_refinement=allow_refinement,
                     refinement_max_iters=refinement_max_iters,
-                    max_solutions=max_solutions,
+                    max_solutions=inner_max_solutions,
                     cached_rr_only=cached_rr_only,
                 )
             except ValueError:
@@ -741,13 +754,18 @@ def solve(
         candidates, samples_evaluated = _sweep(cached_rr_only=False)
 
     solutions = dedup_by_wrap_close(candidates, dedup_tol)
-    if max_solutions is not None and len(solutions) > max_solutions:
+    if not seeded and max_solutions is not None and len(solutions) > max_solutions:
         # Trim to exactly max_solutions. The incremental check above
         # exits the *outer* loop on the first sample that pushes the
         # deduped count past the cap, so the final dedup may yield
         # slightly more than the cap (the last sample contributed
-        # multiple new unique solutions). Trimming preserves the
-        # nearest-first order under q_seed.
+        # multiple new unique solutions).
+        #
+        # Skipped when seeded (#331): the candidates here are the first
+        # yielding lock slice's *full* branch set in branch order, NOT
+        # nearest-to-seed order. Trimming now would keep an arbitrary
+        # branch; the caller (orchestrator / Manipulator) L-infinity-ranks
+        # against the seed and *then* trims, so we hand back every branch.
         solutions = solutions[:max_solutions]
     _LOG.info(
         "%s: lock_idx=%d, %d/%d samples -> %d candidates -> %d unique solutions (is_ls=%s)",
