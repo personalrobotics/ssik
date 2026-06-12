@@ -228,6 +228,7 @@ class Manipulator:
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
+        seed_metric: str = "wrap_linf",
         **solver_kwargs: Any,
     ) -> list[Solution]: ...
 
@@ -243,6 +244,7 @@ class Manipulator:
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
+        seed_metric: str = "wrap_linf",
         **solver_kwargs: Any,
     ) -> tuple[list[Solution], Diagnostic]: ...
 
@@ -257,6 +259,7 @@ class Manipulator:
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
+        seed_metric: str = "wrap_linf",
         **solver_kwargs: Any,
     ) -> list[Solution] | tuple[list[Solution], Diagnostic]:
         """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
@@ -272,9 +275,14 @@ class Manipulator:
             On 7R jointlock arms the cap also short-circuits the lock-sweep
             internally for a 10-15x speedup.
         :param q_seed: optional length-:attr:`dof` seed. When provided,
-            returned solutions are sorted by wrap-to-pi distance from
-            ``q_seed`` (closest first). On jointlock-7R arms it also
-            reorders the internal lock-sample sweep.
+            returned solutions are sorted by distance from ``q_seed``
+            (closest first, via ``seed_metric``); with ``max_solutions``
+            this returns the nearest configs to the seed. On jointlock-7R
+            arms it also drives the lock-outward-from-seed fast path (#331).
+        :param seed_metric: distance used to rank against ``q_seed``.
+            ``"wrap_linf"`` (default) minimises the largest single-joint
+            wrap-to-pi move (holds the branch during tracking); ``"wrap_l2"``
+            minimises the summed move. Ignored when ``q_seed`` is ``None``.
         :param respect_limits: when ``True`` (default), solutions outside
             URDF joint limits are dropped. Pass ``False`` for the raw
             geometric set (analysis / debugging).
@@ -362,7 +370,7 @@ class Manipulator:
         else:
             dropped_by_limits = 0
         if q_seed_arr is not None:
-            sols = _ps_nearest_to_seed(sols, q_seed_arr)
+            sols = _ps_nearest_to_seed(sols, q_seed_arr, metric=seed_metric)
         if max_solutions is not None and len(sols) > max_solutions:
             dropped_by_max_solutions = len(sols) - max_solutions
             sols = sols[:max_solutions]

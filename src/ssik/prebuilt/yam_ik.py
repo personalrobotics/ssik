@@ -1015,6 +1015,7 @@ def solve(
     allow_rescue: bool = True,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
+    seed_metric: str = "wrap_linf",
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -1024,9 +1025,16 @@ def solve(
         Combine with ``q_seed`` for the "give me the IK closest to
         where I am now" trajectory-tracking idiom.
     :param q_seed: optional joint configuration. When provided,
-        returned solutions are sorted by wrap-to-pi distance from
-        ``q_seed`` (closest first). Has no effect on which solutions
-        are returned, only their order.
+        returned solutions are sorted by distance from ``q_seed``
+        (closest first, via ``seed_metric``); with ``max_solutions``
+        this returns the nearest ``max_solutions`` to the seed -- the
+        trajectory-tracking idiom.
+    :param seed_metric: distance used to rank against ``q_seed``.
+        ``"wrap_linf"`` (default) minimises the *largest* single-joint
+        wrap-to-pi move, which holds the branch during tracking;
+        ``"wrap_l2"`` minimises the summed move (can favour a flip
+        "paid for" by smaller moves elsewhere). Ignored when
+        ``q_seed`` is ``None``.
     :param respect_limits: when ``True`` (default), solutions
         outside URDF joint limits are dropped. Pass ``False`` for
         the raw geometric set (e.g. analysis / debugging).
@@ -1151,7 +1159,7 @@ def solve(
         solutions = _ps_wrap_to_limits(solutions, _KB)
         solutions = _ps_respect_limits(solutions, _KB)
     if q_seed is not None:
-        solutions = _ps_nearest_to_seed(solutions, q_seed)
+        solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
     if max_solutions is not None and len(solutions) > max_solutions:
         solutions = solutions[:max_solutions]
     return solutions

@@ -24,6 +24,7 @@ import pytest
 from numpy.typing import NDArray
 
 from ssik._kinbody import Joint, KinBody, Link
+from ssik.postprocess import nearest_to_seed
 from ssik.solvers.jointlock import seven_r
 
 
@@ -279,14 +280,17 @@ def test_max_solutions_subset_of_full_sweep(srs_kb: KinBody) -> None:
 
 
 def test_q_seed_returns_nearest_first(srs_kb: KinBody) -> None:
-    """With ``q_seed=q*`` and ``max_solutions=1``, the returned solution
-    should be the one closest to ``q*`` (in wrap-to-pi joint distance) --
-    that's the trajectory-tracking promise."""
+    """With ``q_seed=q*``, the nearest-ranked solution should be the one
+    closest to ``q*`` (in wrap-to-pi joint distance) -- the trajectory-tracking
+    promise. Since #331, jointlock hands back the first yielding lock slice's
+    *full* branch set when seeded (so the caller can rank by ``seed_metric``);
+    the caller's ``nearest_to_seed`` -- applied here as the orchestrator and
+    Manipulator do -- delivers the nearest config."""
     q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2, 0.4])
     T_star = _fk(srs_kb, q_star)
     sols_seeded, _ = seven_r.solve(srs_kb, T_star, q_seed=q_star, max_solutions=1)
-    assert len(sols_seeded) == 1
-    sol_seeded = sols_seeded[0]
+    assert len(sols_seeded) >= 1
+    sol_seeded = nearest_to_seed(sols_seeded, q_star, metric="wrap_linf")[0]
     # Compare against the full sweep to confirm we picked the nearest one
     # to the seed (or one of them, modulo 2pi wrap on non-locked joints).
     full, _ = seven_r.solve(srs_kb, T_star)
@@ -473,7 +477,10 @@ def test_dispatch_cache_with_q_seed_reordering(srs_kb: KinBody) -> None:
         q_seed=q_star,
         max_solutions=1,
     )
-    assert len(sols_seeded) == 1
-    # FK-closes at machine precision.
-    T_check = _fk(srs_kb, sols_seeded[0].q)
-    assert np.allclose(T_check, T_star, atol=1e-10)
+    # Seeded returns the first yielding slice's full branch set (#331); every
+    # branch must FK-close at machine precision -- a mis-permuted cache would
+    # dispatch the wrong inner solver and yield garbage / non-closing branches.
+    assert len(sols_seeded) >= 1
+    for sol in sols_seeded:
+        T_check = _fk(srs_kb, sol.q)
+        assert np.allclose(T_check, T_star, atol=1e-10)
