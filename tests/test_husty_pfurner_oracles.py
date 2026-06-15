@@ -1,18 +1,18 @@
 """Validation harness for the Husty-Pfurner solver (Phase 5a of #158).
 
 The harness encodes the seven correctness oracles from #158 / #162 as
-parametrised test functions. Until the HP solver is implemented (PRs in
-#162), every oracle is marked ``xfail(strict=True)`` -- the tests run,
-hit ``NotImplementedError`` from the skeleton, and report ``xfailed``.
-When the solver lands (Phase 5g), the ``xfail`` marks are removed and
-the same tests start passing.
+parametrised test functions. The HP solver has landed (#184 / #185), so
+these run as live checks; a couple remain ``xfail(strict=False)`` for
+documented coverage gaps (oracles 3/4/6, tracked in #82 / #176 / #183).
 
 Oracles (per #158):
 
 1. **FK closure** -- every returned ``q`` FK-closes the input pose at 1e-9.
-2. **EAIK cross-check** (skipped if EAIK not installed) -- same arm,
-   same poses, same solution sets within wrap-to-pi at 1e-6 on
-   Pieper-class arms.
+2. **Cross-solver agreement (UR5)** -- HP and Raghavan-Roth, two
+   independent universal-6R algebras, return the same solution set within
+   wrap-to-pi at 1e-8 on a clean spherical-wrist arm. (A direct EAIK
+   cross-check needs joint-convention reconciliation; the EAIK timing /
+   coverage comparison lives in ``examples/04_compare_vs_eaik.py``.)
 3. **Raghavan-Roth solution-count parity** -- HP must not return fewer
    solutions than RR on reachable poses (cross-checks two universal-6R
    algebras).
@@ -52,12 +52,6 @@ from ssik._kinbody import KinBody, build_kinbody
 from ssik.core.solution import Solution
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.solvers.husty_pfurner.general_6r import solve as hp_solve
-
-XFAIL_REASON = (
-    "Husty-Pfurner solver not yet implemented; tracked in "
-    "https://github.com/personalrobotics/ssik/issues/162"
-)
-XFAIL = pytest.mark.xfail(strict=True, reason=XFAIL_REASON, raises=NotImplementedError)
 
 # ----------------------------------------------------------------------------
 # Oracle helpers (the actual validation logic). Tests below wire these to
@@ -166,26 +160,41 @@ def test_oracle1_fk_closure_ur5() -> None:
 
 
 # ----------------------------------------------------------------------------
-# Oracle 2: EAIK cross-check (auto-skipped if EAIK not installed locally)
+# Oracle 2: cross-solver agreement on UR5 -- HP vs Raghavan-Roth, two
+# independent universal-6R algebras. UR5 is a clean spherical-wrist arm both
+# solve fully, so they must return the SAME solution set (unlike the JACO 2
+# oracles 3/4, where spurious-root filters legitimately disagree).
+#
+# (An EAIK cross-check was the original intent here, but EAIK's URDF/DH frame
+# and per-joint sign/offset conventions differ from ssik's POE, so a correct
+# comparison needs joint-convention reconciliation -- tracked separately. The
+# HP-vs-RR check below gives stronger, dependency-free cross-solver coverage;
+# the EAIK timing/coverage comparison lives in examples/04_compare_vs_eaik.py.)
 # ----------------------------------------------------------------------------
 
 
-@XFAIL
-def test_oracle2_eaik_cross_check_ur5() -> None:
-    """HP and EAIK agree on the UR5 q-set within 1e-6 wrap-to-pi.
+def _nearest_wrap(q: np.ndarray, pool: list[np.ndarray]) -> float:
+    """Smallest per-joint wrap-to-pi distance from ``q`` to any pose in ``pool``."""
+    return min(float(np.abs((q - p + np.pi) % (2 * np.pi) - np.pi).max()) for p in pool)
 
-    EAIK is not a hard dependency of ssik. When the package isn't installed
-    locally this test SKIPS rather than fails -- the oracle is still
-    encoded and runs in dev environments where EAIK is present.
-    """
-    pytest.importorskip("eaik")
-    # Implementation deferred until Phase 5g; the EAIK adapter and the
-    # solution-set comparison wire up at the same time as the xfail removal.
-    # For now the harness asserts NotImplementedError lands (via XFAIL).
+
+def test_oracle2_hp_rr_cross_check_ur5() -> None:
+    """HP and Raghavan-Roth return the same UR5 solution set (wrap-to-pi)."""
+    from ssik.solvers.ikgeo import general_6r as rr_general_6r
+
     kb = build_kinbody(ur5_specs())
     rng = np.random.default_rng(0)
-    q_star = rng.uniform(-1.0, 1.0, size=6)
-    _fk_closure_oracle(kb, q_star)
+    for _ in range(20):
+        q_star = rng.uniform(-1.0, 1.0, size=6)
+        T = poe_forward_kinematics(kb, q_star)
+        hp_q = [np.asarray(s.q) for s in hp_solve(kb, T, allow_refinement=True)[0]]
+        rr_q = [np.asarray(s.q) for s in rr_general_6r.solve(kb, T)[0]]
+        assert hp_q
+        assert len(hp_q) == len(rr_q), f"HP returned {len(hp_q)}, RR returned {len(rr_q)}"
+        for q in hp_q:
+            assert _nearest_wrap(q, rr_q) < 1e-8
+        for q in rr_q:
+            assert _nearest_wrap(q, hp_q) < 1e-8
 
 
 # ----------------------------------------------------------------------------
@@ -261,7 +270,6 @@ def test_oracle4_jaco2_rr_composer_cross_check() -> None:
 
 
 @pytest.mark.slow
-@XFAIL
 def test_oracle5_hypothesis_fuzz_random_6r_chains() -> None:
     """Generate random 6R chains, draw random reachable poses via FK,
     confirm HP returns at least one FK-closing candidate for each.
