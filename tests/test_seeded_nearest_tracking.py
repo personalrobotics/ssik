@@ -184,3 +184,89 @@ def test_jointlock_seeded_dispatches_fewer_than_exhaustive(franka_kb: KinBody) -
     assert seeded_dispatches < exhaustive_dispatches, (
         f"seeded {seeded_dispatches} not < exhaustive {exhaustive_dispatches}"
     )
+
+
+# ---------------------------------------------------------------------------
+# #333 -- seed_tolerance: hard per-joint deviation bound (postprocess filter).
+# ---------------------------------------------------------------------------
+
+_TRACK_SEED = np.array([0.3, -0.4, 0.2, -1.6, 0.1, 1.3, 0.5])
+
+
+def test_seed_tolerance_requires_q_seed() -> None:
+    from ssik.prebuilt import franka_panda_ik
+
+    T = franka_panda_ik.fk(np.zeros(7))
+    with pytest.raises(ValueError, match="seed_tolerance requires q_seed"):
+        franka_panda_ik.solve(T, seed_tolerance=0.1)
+
+
+def test_seed_tolerance_manipulator_requires_q_seed() -> None:
+    arm = ssik.Manipulator.from_urdf(
+        FIXTURES / "franka_panda.urdf", base="panda_link0", ee="panda_link8"
+    )
+    with pytest.raises(ValueError, match="seed_tolerance requires q_seed"):
+        arm.solve(arm.fk(np.zeros(7)), seed_tolerance=0.1)
+
+
+def test_seed_tolerance_returned_solutions_respect_bound() -> None:
+    """The guarantee: every returned solution is within the per-joint bound.
+
+    Seeding at an actual solution (deviation 0 from itself) keeps the set
+    non-empty, so the bound check is never vacuous.
+    """
+    from ssik.prebuilt import franka_panda_ik
+
+    rng = np.random.default_rng(0)
+    tol = np.deg2rad(6)
+    checked = 0
+    for _ in range(100):
+        q = rng.uniform(-1.5, 1.5, size=7)
+        T = franka_panda_ik.fk(q)
+        any_sols = franka_panda_ik.solve(T, respect_limits=False)
+        if not any_sols:
+            continue
+        seed = np.asarray(any_sols[0].q)
+        sols = franka_panda_ik.solve(T, q_seed=seed, seed_tolerance=tol, respect_limits=False)
+        assert sols, "seeding at an actual solution must keep at least itself"
+        for s in sols:
+            assert np.abs(_wrap(np.asarray(s.q) - seed)).max() <= tol + 1e-9
+            checked += 1
+    assert checked > 0
+
+
+def test_seed_tolerance_large_keeps_all_zero_keeps_none() -> None:
+    from ssik.prebuilt import franka_panda_ik
+
+    T = franka_panda_ik.fk(_TRACK_SEED)
+    base = franka_panda_ik.solve(T, q_seed=_TRACK_SEED, respect_limits=False)
+    huge = franka_panda_ik.solve(T, q_seed=_TRACK_SEED, seed_tolerance=10.0, respect_limits=False)
+    assert {tuple(np.round(s.q, 9)) for s in huge} == {tuple(np.round(s.q, 9)) for s in base}
+    # max wrap-to-pi deviation is always <= pi, so 10 rad keeps everything.
+    zero = franka_panda_ik.solve(T, q_seed=_TRACK_SEED, seed_tolerance=0.0, respect_limits=False)
+    assert zero == []
+
+
+def test_seed_tolerance_none_matches_no_tolerance() -> None:
+    from ssik.prebuilt import franka_panda_ik
+
+    T = franka_panda_ik.fk(_TRACK_SEED)
+    a = franka_panda_ik.solve(T, q_seed=_TRACK_SEED, max_solutions=1, respect_limits=False)
+    b = franka_panda_ik.solve(
+        T, q_seed=_TRACK_SEED, max_solutions=1, seed_tolerance=None, respect_limits=False
+    )
+    assert [tuple(np.round(s.q, 12)) for s in a] == [tuple(np.round(s.q, 12)) for s in b]
+
+
+def test_seed_tolerance_manipulator_honors_bound() -> None:
+    arm = ssik.Manipulator.from_urdf(
+        FIXTURES / "franka_panda.urdf", base="panda_link0", ee="panda_link8"
+    )
+    T = arm.fk(_TRACK_SEED)
+    any_sols = arm.solve(T, respect_limits=False)
+    seed = np.asarray(any_sols[0].q)
+    tol = np.deg2rad(6)
+    sols = arm.solve(T, q_seed=seed, seed_tolerance=tol, respect_limits=False)
+    assert sols
+    for s in sols:
+        assert np.abs(_wrap(np.asarray(s.q) - seed)).max() <= tol + 1e-9

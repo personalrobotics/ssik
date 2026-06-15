@@ -54,6 +54,7 @@ from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_pe
 from ssik.postprocess import (
     nearest_to_seed as _ps_nearest_to_seed,
     respect_limits as _ps_respect_limits,
+    within_seed_tolerance as _ps_within_seed_tolerance,
     wrap_to_limits as _ps_wrap_to_limits,
 )
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
@@ -434,6 +435,7 @@ def solve(
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
+    seed_tolerance: float | None = None,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -455,6 +457,12 @@ def solve(
         wrap-to-pi move, holding the branch during tracking;
         ``"wrap_l2"`` minimises the summed move. Ignored when
         ``q_seed`` is ``None``.
+    :param seed_tolerance: optional max per-joint deviation from
+        ``q_seed`` (radians, wrap-to-pi). When set, only solutions with
+        *every* joint within ``seed_tolerance`` are returned -- a hard
+        tracking guarantee that may return an empty list when no branch
+        qualifies. ``None`` (default) keeps the best-effort behaviour.
+        Requires ``q_seed``.
     :param respect_limits: when ``True`` (default), solutions
         outside URDF joint limits are dropped. Pass ``False``
         for the raw geometric set.
@@ -486,6 +494,8 @@ def solve(
             T_target, q_seed=q_current, max_solutions=1,
         )
     """
+    if seed_tolerance is not None and q_seed is None:
+        raise ValueError("seed_tolerance requires q_seed")
     T = np.asarray(T_target, dtype=np.float64)
     # Lock-sweep filters limits in-flight (#238 review): the
     # short-circuit fires on the first in-limits valid IK, not
@@ -582,6 +592,10 @@ def solve(
                 solutions = _ps_wrap_to_limits(solutions, _KB)
                 solutions = _ps_respect_limits(solutions, _KB)
             if q_seed is not None:
+                if seed_tolerance is not None:
+                    solutions = _ps_within_seed_tolerance(
+                        solutions, q_seed, seed_tolerance
+                    )
                 solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
 
     # No orchestrator-level respect_limits pass on the analytical
@@ -597,6 +611,8 @@ def solve(
     # cap. Without this the cap would keep the nearest *lock samples*,
     # not the nearest *configs*.
     if q_seed is not None:
+        if seed_tolerance is not None:
+            solutions = _ps_within_seed_tolerance(solutions, q_seed, seed_tolerance)
         solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
     if max_solutions is not None and len(solutions) > max_solutions:
         solutions = solutions[:max_solutions]

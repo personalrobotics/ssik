@@ -179,11 +179,24 @@ q_current = np.array([0.0, -0.5, 0.0, 0.7, 0.0, 1.2, 0.0])
 # Target pose updates every control tick (VR controller, planner, etc.).
 T_target = ...
 
-# max_solutions=1 + q_seed: solver visits lock-samples in nearest-to-seed
-# order and short-circuits on the first in-limits branch (~5-6× faster
-# than the full sweep on 7R jointlock arms; sub-ms on 6R / SRS arms).
+# max_solutions=1 + q_seed: returns the single solution nearest q_current.
+# On 7R jointlock arms the seed drives the lock-outward fast path (~20×
+# faster than the full sweep); sub-ms on 6R / SRS arms.
 sols = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
 q_command = sols[0].q if sols else q_current
+```
+
+When a seed is given, two knobs control what "nearest" means:
+
+- **`seed_metric`** (default `"wrap_linf"`) ranks by the *largest* single-joint move, so the arm holds its branch instead of flipping mid-trajectory; `"wrap_l2"` ranks by summed distance.
+- **`seed_tolerance`** (radians) is a *hard* bound — only solutions whose every joint is within the tolerance of the seed are returned. The result may be **empty**, which is the signal that smooth continuation isn't possible at this pose (replan / accept a jump). Omitted ⇒ best-effort (always returns the nearest if any IK exists).
+
+```python
+# "no joint jumps more than 6° from where I am, or tell me it can't":
+sols = franka_panda_ik.solve(
+    T_target, q_seed=q_current, max_solutions=1, seed_tolerance=np.deg2rad(6)
+)
+q_command = sols[0].q if sols else replan()   # empty ⇒ discontinuity
 ```
 
 ### Build an artifact for your own arm
@@ -320,21 +333,22 @@ Per-arm worst-case behaviour under both policies is documented in [`docs/arm_cov
 
 ### `ssik.postprocess` — composable filters
 
-`solve()` returns the geometric IK set. For application-specific filtering, four helpers in `ssik.postprocess` compose into the typical "robot-aware IK" pipeline:
+`solve()` returns the geometric IK set. For application-specific filtering, five helpers in `ssik.postprocess` compose into the typical "robot-aware IK" pipeline:
 
 ```python
 from ssik.postprocess import (
-    respect_limits, wrap_to_limits, nearest_to_seed, take_first,
+    respect_limits, wrap_to_limits, nearest_to_seed, within_seed_tolerance, take_first,
 )
 
-sols = my_arm_ik.solve(T_target, respect_limits=False)  # raw geometric set
-sols = wrap_to_limits(sols, my_arm_ik._KB)              # try q ± 2π to bring in
-sols = respect_limits(sols, my_arm_ik._KB)              # drop anything still outside
-sols = nearest_to_seed(sols, q_current)                 # sort by wrap-to-pi distance
-sols = take_first(sols, k=4)                            # top-k after ranking
+sols = my_arm_ik.solve(T_target, respect_limits=False)       # raw geometric set
+sols = wrap_to_limits(sols, my_arm_ik._KB)                   # try q ± 2π to bring in
+sols = respect_limits(sols, my_arm_ik._KB)                   # drop anything still outside
+sols = within_seed_tolerance(sols, q_current, np.deg2rad(6)) # drop big-jump branches (may empty)
+sols = nearest_to_seed(sols, q_current, metric="wrap_linf")  # rank by max-joint-move
+sols = take_first(sols, k=4)                                 # top-k after ranking
 ```
 
-By default `solve()` already runs `wrap_to_limits` + `respect_limits`; the standalone helpers exist for callers who want a different order, a different metric, or to add their own filters (collision-aware filtering, dexterity scoring, custom seed metrics) between the layers.
+By default `solve()` already runs `wrap_to_limits` + `respect_limits` (and, when `q_seed`/`seed_tolerance`/`seed_metric` are passed, the seed filter + ranking); the standalone helpers exist for callers who want a different order, a different metric, or to add their own filters (collision-aware filtering, dexterity scoring) between the layers.
 
 Out of scope: collision filtering (use FCL or similar at the application layer) and continuous-trajectory smoothness (typically a separate planner concern).
 

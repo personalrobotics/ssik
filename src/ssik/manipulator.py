@@ -229,6 +229,7 @@ class Manipulator:
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
         seed_metric: str = "wrap_linf",
+        seed_tolerance: float | None = None,
         **solver_kwargs: Any,
     ) -> list[Solution]: ...
 
@@ -245,6 +246,7 @@ class Manipulator:
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
         seed_metric: str = "wrap_linf",
+        seed_tolerance: float | None = None,
         **solver_kwargs: Any,
     ) -> tuple[list[Solution], Diagnostic]: ...
 
@@ -260,6 +262,7 @@ class Manipulator:
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
         seed_metric: str = "wrap_linf",
+        seed_tolerance: float | None = None,
         **solver_kwargs: Any,
     ) -> list[Solution] | tuple[list[Solution], Diagnostic]:
         """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
@@ -283,6 +286,11 @@ class Manipulator:
             ``"wrap_linf"`` (default) minimises the largest single-joint
             wrap-to-pi move (holds the branch during tracking); ``"wrap_l2"``
             minimises the summed move. Ignored when ``q_seed`` is ``None``.
+        :param seed_tolerance: optional max per-joint deviation from ``q_seed``
+            (radians, wrap-to-pi). When set, only solutions with every joint
+            within ``seed_tolerance`` are returned -- a hard tracking guarantee
+            that may return an empty list. ``None`` (default) keeps the
+            best-effort behaviour. Requires ``q_seed``.
         :param respect_limits: when ``True`` (default), solutions outside
             URDF joint limits are dropped. Pass ``False`` for the raw
             geometric set (analysis / debugging).
@@ -312,11 +320,14 @@ class Manipulator:
         """
         from ssik.postprocess import nearest_to_seed as _ps_nearest_to_seed
         from ssik.postprocess import respect_limits as _ps_respect_limits
+        from ssik.postprocess import within_seed_tolerance as _ps_within_seed_tolerance
         from ssik.postprocess import wrap_to_limits as _ps_wrap_to_limits
 
         T = np.asarray(T_target, dtype=np.float64)
         if T.shape != (4, 4):
             raise ValueError(f"solve expected T_target of shape (4, 4), got {T.shape}")
+        if seed_tolerance is not None and q_seed is None:
+            raise ValueError("seed_tolerance requires q_seed")
         if q_seed is not None:
             q_seed_arr: NDArray[np.float64] | None = np.asarray(q_seed, dtype=np.float64)
             assert q_seed_arr is not None
@@ -370,6 +381,8 @@ class Manipulator:
         else:
             dropped_by_limits = 0
         if q_seed_arr is not None:
+            if seed_tolerance is not None:
+                sols = _ps_within_seed_tolerance(sols, q_seed_arr, seed_tolerance)
             sols = _ps_nearest_to_seed(sols, q_seed_arr, metric=seed_metric)
         if max_solutions is not None and len(sols) > max_solutions:
             dropped_by_max_solutions = len(sols) - max_solutions

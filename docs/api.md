@@ -54,6 +54,11 @@ The `solve()` pipeline already applies these by default (when `respect_limits=Tr
       show_root_heading: false
       show_root_full_path: false
 
+::: ssik.postprocess.within_seed_tolerance
+    options:
+      show_root_heading: false
+      show_root_full_path: false
+
 ::: ssik.postprocess.take_first
     options:
       show_root_heading: false

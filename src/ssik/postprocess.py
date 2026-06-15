@@ -12,11 +12,13 @@ seed / collision logic on the Python side).
 
 Each function takes ``list[Solution]`` (and any extra args) and returns
 ``list[Solution]`` -- pure transforms, easy to test, easy to compose.
-The four shipping with v0.1 cover ~95% of real-world post-processing:
+These cover ~95% of real-world post-processing:
 
   * :func:`respect_limits` -- drop solutions outside any joint's range
   * :func:`wrap_to_limits` -- try ``q ± 2*pi`` per joint to bring solutions in
   * :func:`nearest_to_seed` -- sort by wrap-to-pi distance to a reference q
+  * :func:`within_seed_tolerance` -- drop solutions beyond a per-joint
+    deviation from a reference q (hard tracking bound; may return empty)
   * :func:`take_first` -- truncate to the first ``k``
 
 Production pipeline pattern::
@@ -38,7 +40,7 @@ Out of scope for v0.1 (separate issues / future work):
   * Trajectory-context filters (continuous q-trajectory with smoothness).
   * Reachability / dexterity scoring.
 
-These can be follow-ups; the four above cover the common case and form a
+These can be follow-ups; the filters above cover the common case and form a
 self-contained module that compiles cleanly to a single shared ``.so``
 in Phase 4 (no per-arm specialisation, no symbolic precompute).
 """
@@ -57,6 +59,7 @@ __all__ = [
     "nearest_to_seed",
     "respect_limits",
     "take_first",
+    "within_seed_tolerance",
     "wrap_to_limits",
 ]
 
@@ -188,6 +191,39 @@ def nearest_to_seed(
 
     # Python's sort is stable, so ties preserve input order.
     return sorted(sols, key=distance)
+
+
+def within_seed_tolerance(
+    sols: list[Solution],
+    q_seed: NDArray[np.float64],
+    tolerance: float,
+) -> list[Solution]:
+    """Keep only solutions within a per-joint deviation of a reference config.
+
+    A solution passes when *every* joint is within ``tolerance`` of the seed in
+    wrap-to-pi distance -- ``max_i |wrap(q_i - seed_i)| <= tolerance``, the
+    L-infinity (max-joint-move) bound. This is the hard guarantee for
+    trajectory tracking ("no joint jumps more than ``tolerance``"), as opposed
+    to :func:`nearest_to_seed`, which only ranks. The result may be empty when
+    no in-tolerance branch exists -- itself the useful signal that smooth
+    continuation is not possible at this pose. Compose with
+    :func:`nearest_to_seed` + :func:`take_first` to rank and cap the survivors.
+
+    :param sols: candidate solutions.
+    :param q_seed: reference joint configuration (length matches the chain's
+        DOF).
+    :param tolerance: maximum allowed per-joint wrap-to-pi deviation, radians.
+    :returns: the subset of ``sols`` within ``tolerance`` of ``q_seed``, in
+        input order.
+    """
+    seed = np.asarray(q_seed, dtype=np.float64)
+
+    def within(sol: Solution) -> bool:
+        return all(
+            abs(_wrap_to_pi(float(sol.q[i] - seed[i]))) <= tolerance for i in range(len(seed))
+        )
+
+    return [s for s in sols if within(s)]
 
 
 def take_first(sols: list[Solution], k: int) -> list[Solution]:

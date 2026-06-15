@@ -25,6 +25,7 @@ from ssik.postprocess import (
     nearest_to_seed,
     respect_limits,
     take_first,
+    within_seed_tolerance,
     wrap_to_limits,
 )
 
@@ -233,6 +234,43 @@ def test_nearest_to_seed_unknown_metric_raises() -> None:
     seed = np.array([0.0])
     with pytest.raises(ValueError, match="unknown metric"):
         nearest_to_seed(sols, seed, metric="manhattan")
+
+
+def test_within_seed_tolerance_keeps_in_bound() -> None:
+    sols = [_sol([0.05, -0.05]), _sol([0.2, 0.0]), _sol([0.0, 0.0])]
+    seed = np.array([0.0, 0.0])
+    out = within_seed_tolerance(sols, seed, 0.1)
+    # [0.05,-0.05] (max 0.05) and [0,0] pass; [0.2,0] (max 0.2) is dropped.
+    assert [s.q.tolist() for s in out] == [[0.05, -0.05], [0.0, 0.0]]
+
+
+def test_within_seed_tolerance_is_per_joint_linf() -> None:
+    """A small summed move can still exceed the per-joint cap on one joint."""
+    sols = [_sol([0.09, 0.09]), _sol([0.15, 0.0])]
+    seed = np.array([0.0, 0.0])
+    out = within_seed_tolerance(sols, seed, 0.1)
+    # [0.09,0.09] passes (each joint <= 0.1); [0.15,0] fails (joint 0 = 0.15).
+    assert [s.q.tolist() for s in out] == [[0.09, 0.09]]
+
+
+def test_within_seed_tolerance_uses_wrap() -> None:
+    """q=3.1 vs seed=-3.1 is a ~0.08 wrap move, well within tolerance."""
+    sols = [_sol([3.1]), _sol([0.2])]
+    seed = np.array([-3.1])
+    out = within_seed_tolerance(sols, seed, 0.1)
+    assert [s.q.tolist() for s in out] == [[3.1]]
+
+
+def test_within_seed_tolerance_just_inside_and_outside() -> None:
+    seed = np.array([0.0])
+    assert len(within_seed_tolerance([_sol([0.099])], seed, 0.1)) == 1
+    assert len(within_seed_tolerance([_sol([0.101])], seed, 0.1)) == 0
+
+
+def test_within_seed_tolerance_can_return_empty() -> None:
+    sols = [_sol([0.5]), _sol([-0.5])]
+    seed = np.array([0.0])
+    assert within_seed_tolerance(sols, seed, 0.1) == []
 
 
 # ---------------------------------------------------------------------------

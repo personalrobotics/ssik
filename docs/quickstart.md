@@ -65,10 +65,30 @@ For real-time control / teleop, "give me the IK closest to where I am now":
 ```python
 q_current = np.array([0.0, -0.5, 0.0, 0.7, 0.0, 1.2, 0.0])
 
-# max_solutions=1 + q_seed: visit lock-samples nearest q_current first,
-# short-circuit on the first in-limits branch. ~5-6x faster than full sweep.
+# max_solutions=1 + q_seed: returns the single solution nearest q_current.
+# On 7R jointlock arms the seed also drives the lock-outward fast path
+# (~20x faster than the full sweep).
 sols = franka_panda_ik.solve(T_target, max_solutions=1, q_seed=q_current)
 q_command = sols[0].q if sols else q_current
+```
+
+Two knobs refine what "nearest" means when a seed is given:
+
+```python
+# seed_metric (default "wrap_linf"): rank by the LARGEST single-joint move,
+# so the arm holds its branch instead of flipping. Use "wrap_l2" for
+# summed-distance ranking.
+sols = franka_panda_ik.solve(T_target, q_seed=q_current, seed_metric="wrap_linf")
+
+# seed_tolerance (radians): a HARD bound -- only return solutions where every
+# joint is within the tolerance of the seed. The list may come back EMPTY,
+# which is the signal that smooth continuation isn't possible at this pose
+# (replan / accept a larger jump). Best-effort behaviour when omitted.
+sols = franka_panda_ik.solve(
+    T_target, q_seed=q_current, max_solutions=1, seed_tolerance=np.deg2rad(6)
+)
+if not sols:
+    ...  # no config within 6 deg of q_current -- handle the discontinuity
 ```
 
 ## When `solve()` returns an empty list

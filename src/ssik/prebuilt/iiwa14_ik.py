@@ -46,6 +46,7 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.postprocess import (
     nearest_to_seed as _ps_nearest_to_seed,
     respect_limits as _ps_respect_limits,
+    within_seed_tolerance as _ps_within_seed_tolerance,
     wrap_to_limits as _ps_wrap_to_limits,
 )
 from ssik.solvers.seven_r.srs import solve as _solver_solve
@@ -160,6 +161,7 @@ def solve(
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
+    seed_tolerance: float | None = None,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -174,6 +176,12 @@ def solve(
         ``"wrap_linf"`` (default, largest single-joint move) holds
         the branch during tracking; ``"wrap_l2"`` uses the summed
         move. Ignored when ``q_seed`` is ``None``.
+    :param seed_tolerance: optional max per-joint deviation from
+        ``q_seed`` (radians, wrap-to-pi). When set, only solutions with
+        *every* joint within ``seed_tolerance`` are returned -- a hard
+        tracking guarantee that may return an empty list when no branch
+        qualifies. ``None`` (default) keeps the best-effort behaviour.
+        Requires ``q_seed``.
     :param respect_limits: when ``True`` (default), solutions
         outside URDF joint limits are dropped. ``False`` returns
         the raw geometric set.
@@ -189,6 +197,8 @@ def solve(
 
     Solver: srs.
     """
+    if seed_tolerance is not None and q_seed is None:
+        raise ValueError("seed_tolerance requires q_seed")
     sols, _is_ls = _solver_solve(
         _KB,
         T_target,
@@ -200,6 +210,8 @@ def solve(
         sols = _ps_wrap_to_limits(sols, _KB)
         sols = _ps_respect_limits(sols, _KB)
     if q_seed is not None:
+        if seed_tolerance is not None:
+            sols = _ps_within_seed_tolerance(sols, q_seed, seed_tolerance)
         sols = _ps_nearest_to_seed(sols, q_seed, metric=seed_metric)
     if max_solutions is not None and len(sols) > max_solutions:
         sols = sols[:max_solutions]
