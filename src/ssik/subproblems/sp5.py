@@ -26,9 +26,11 @@ of a 2x2 quadratic-circle system, and ``theta2`` via :func:`sp1.solve`.
 3. *Post-verification against the original equation*. Every candidate
    residual is checked; candidates above ``subproblem_numerical`` are
    dropped.
-4. *Best-LS return on infeasibility*. If no candidate passes post-verify
-   but the algorithm produced candidates, return the minimum-residual one
-   with ``is_ls=True`` (consistent with SP1-SP4's LS semantics).
+4. *Empty return on infeasibility* (issue #324). If no candidate satisfies
+   the defining equation, return ``([], True)``. The equation is genuinely
+   infeasible for some inputs (cone ranges that don't overlap), so unlike
+   SP1-SP4 -- where the closest rotation always exists -- there is no useful
+   "nearest" triple to hand back; post-verification is the only gate.
 5. *Deduplication*. Near-duplicate solutions (angle-wise within
    ``subproblem_numerical``) are collapsed.
 
@@ -149,9 +151,9 @@ def solve(
     :returns: ``(solutions, is_ls)``. On exact feasibility, ``solutions``
         has 1 to 4 deduplicated triples that satisfy the defining equation
         within ``subproblem_numerical`` and ``is_ls`` is ``False``. On
-        infeasibility or degeneracy, ``solutions`` has at most 1 best-LS
-        triple (or is empty if no candidate was even generated) and
-        ``is_ls`` is ``True``.
+        infeasibility or degeneracy, ``solutions`` is empty and ``is_ls`` is
+        ``True`` -- every returned triple is guaranteed to satisfy the
+        equation (issue #324).
     """
     for name, v in (
         ("p0", p0),
@@ -278,13 +280,18 @@ def solve(
         solutions = _dedup(exact, policy.subproblem_dedup)
         return solutions, False
 
-    # No exact solution survived. Return best-LS if we have any candidate
-    # at all; otherwise signal total infeasibility.
-    if not refined:
-        return [], True
-
-    best = min(refined, key=residual)
-    return [best], True
+    # No candidate satisfies the defining equation. Post-verification is the
+    # single correctness gate (issue #324): return no solution with
+    # ``is_ls=True`` rather than a best-LS triple that fails the equation.
+    # SP5's defining equation is genuinely infeasible for some inputs (e.g.
+    # ``|p0 + Rot(k1,t1)p1| = |p1|`` can never equal ``|p2 + Rot(k3,t3)p3|``
+    # when their ranges don't overlap), and a far-off "nearest" triple is not
+    # a usable partial IK -- both callers fill non-existent branches with inf /
+    # drop them, and the outer FK-closure gate would discard it anyway. Valid
+    # solutions reach machine precision via the Gauss-Newton refinement above,
+    # so this branch no longer drops near-valid solutions (the original #55
+    # completeness concern that motivated the best-LS fallback).
+    return [], True
 
 
 @cython.ccall

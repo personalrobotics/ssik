@@ -61,6 +61,31 @@ def _sp5_adversarial(draw: st.DrawFn) -> tuple[np.ndarray, ...]:
     return p0, p1, p2, p3, k1, k2, k3
 
 
+def test_sp5_infeasible_returns_empty_not_best_ls() -> None:
+    """Regression for #324: a norm-infeasible SP5 returns ``([], True)``, not a
+    far-off best-LS triple.
+
+    Here ``|p0 + Rot(k1,t1)p1| = |p1| = 1`` always, but
+    ``|p2 + Rot(k3,t3)p3| in [1.5, 2.5]``, so the equation can never hold. SP5
+    used to hand back the minimum-residual triple (residual ~0.5) which failed
+    the defining equation; post-verify is now the single gate. (The Hypothesis
+    example that found this had a near-parallel k2, but the cause is
+    infeasibility, not degeneracy -- the degeneracy guard correctly does not
+    fire.)
+    """
+    p0 = np.array([0.0, 0.0, 0.0])
+    p1 = np.array([0.0, 1.0, 0.0])
+    p2 = np.array([2.0, 0.0, 0.0])
+    p3 = np.array([0.0, 0.5, 0.0])
+    k1 = np.array([0.0, 0.0, 1.0])
+    k2 = np.array([0.0, 6.10e-05, 0.99999998])
+    k2 = k2 / np.linalg.norm(k2)
+    k3 = np.array([0.0, 0.0, 1.0])
+    solutions, is_ls = sp5.solve(p0, p1, p2, p3, k1, k2, k3)
+    assert solutions == []
+    assert is_ls is True
+
+
 @given(_sp5_adversarial())
 @settings(
     max_examples=300,
