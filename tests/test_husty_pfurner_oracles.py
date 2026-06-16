@@ -9,10 +9,11 @@ Oracles (per #158):
 
 1. **FK closure** -- every returned ``q`` FK-closes the input pose at 1e-9.
 2. **Cross-solver agreement (UR5)** -- HP and Raghavan-Roth, two
-   independent universal-6R algebras, return the same solution set within
-   wrap-to-pi at 1e-8 on a clean spherical-wrist arm. (A direct EAIK
-   cross-check needs joint-convention reconciliation; the EAIK timing /
-   coverage comparison lives in ``examples/04_compare_vs_eaik.py``.)
+   independent universal-6R algebras, find the same solution branches on a
+   clean spherical-wrist arm (exact count parity + branch-level joint match,
+   robust to LAPACK-backend numeric drift). (A direct EAIK cross-check needs
+   joint-convention reconciliation; the EAIK timing / coverage comparison
+   lives in ``examples/04_compare_vs_eaik.py``.)
 3. **Raghavan-Roth solution-count parity** -- HP must not return fewer
    solutions than RR on reachable poses (cross-checks two universal-6R
    algebras).
@@ -179,9 +180,18 @@ def _nearest_wrap(q: np.ndarray, pool: list[np.ndarray]) -> float:
 
 
 def test_oracle2_hp_rr_cross_check_ur5() -> None:
-    """HP and Raghavan-Roth return the same UR5 solution set (wrap-to-pi)."""
+    """HP and Raghavan-Roth find the SAME UR5 solution branches.
+
+    The check is branch-level, not bit-identity: the two algebras run different
+    LAPACK paths, so a near-singular branch's joints can drift up to ~1e-3
+    between backends (macOS Accelerate vs Linux OpenBLAS) while still being the
+    same solution. Distinct UR5 branches differ by >>1e-2, so a 1e-2 match
+    tolerance + exact count parity catches a missing/spurious/wrong branch
+    without flaking on backend numerics.
+    """
     from ssik.solvers.ikgeo import general_6r as rr_general_6r
 
+    same_branch = 1e-2
     kb = build_kinbody(ur5_specs())
     rng = np.random.default_rng(0)
     for _ in range(20):
@@ -192,9 +202,9 @@ def test_oracle2_hp_rr_cross_check_ur5() -> None:
         assert hp_q
         assert len(hp_q) == len(rr_q), f"HP returned {len(hp_q)}, RR returned {len(rr_q)}"
         for q in hp_q:
-            assert _nearest_wrap(q, rr_q) < 1e-8
+            assert _nearest_wrap(q, rr_q) < same_branch
         for q in rr_q:
-            assert _nearest_wrap(q, hp_q) < 1e-8
+            assert _nearest_wrap(q, hp_q) < same_branch
 
 
 # ----------------------------------------------------------------------------
