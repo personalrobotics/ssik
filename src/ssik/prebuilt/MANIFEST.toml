@@ -257,11 +257,11 @@ drift_markers = [
 ]
 
 [arms.xarm7_ik.bench]
-ms_mean = 37.10
-ms_ci95 = 0.49
-max_fk = 4.0e-11
-sols_min = 56
-sols_max = 64
+ms_mean = 25.78
+ms_ci95 = 1.52
+max_fk = 5.1e-6
+sols_min = 48
+sols_max = 72
 
 [arms.xarm6_ik]
 display_name = "UFactory xArm6"
