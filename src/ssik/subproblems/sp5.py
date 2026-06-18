@@ -278,6 +278,15 @@ def solve(
 
     if exact:
         solutions = _dedup(exact, policy.subproblem_dedup)
+        # SP5 is a <=4-solution subproblem (quartic in h). A near-double
+        # quartic root can leave two refined candidates just outside
+        # ``subproblem_dedup`` -- a spurious 5th that violates the documented
+        # contract and overflows fixed-width consumers (e.g. two_intersecting's
+        # 4-branch univariate search, which crashed on a length-5 return).
+        # Keep the <=4 lowest-residual: the genuine roots FK-close tightest,
+        # the spurious near-duplicate carries the largest residual.
+        if len(solutions) > 4:
+            solutions = sorted(solutions, key=residual)[:4]
         return solutions, False
 
     # No candidate satisfies the defining equation. Post-verification is the

@@ -113,7 +113,10 @@ def solve(
         errors = np.full(4, np.inf, dtype=np.float64)
         target = float(axes[4] @ axes[5])
         triples = _shoulder_triples(q4)
-        for i, (q1, q2, q3) in enumerate(triples):
+        # SP5 is a <=4-solution subproblem; cap defensively so a spurious 5th
+        # (near-double quartic root) can't overflow this fixed-width branch
+        # vector. SP5 also enforces <=4 at the source (sp5.solve).
+        for i, (q1, q2, q3) in enumerate(triples[:4]):
             r_04 = (
                 rotation_matrix(axes[0], q1)
                 @ rotation_matrix(axes[1], q2)

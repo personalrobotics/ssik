@@ -285,3 +285,24 @@ def test_wrong_topology_raises_nonzero_p5() -> None:
     )
     with pytest.raises(ValueError, match=r"p\[5\] = 0"):
         two_intersecting.solve(shifted_kb, np.eye(4))
+
+
+def test_two_intersecting_survives_sp5_over_four(synth_a: KinBody, monkeypatch) -> None:
+    """#312: a spurious 5th SP5 return (a near-double quartic root that escapes
+    SP5's dedup) must not overflow two_intersecting's fixed-width 4-branch
+    search vector. SP5 now caps at <=4 at the source; this guards the consumer
+    defensively, since the original crash was platform-sensitive (Linux-only).
+    """
+    q = np.array([0.2, 0.3, 0.1, 0.4, 0.2, 0.3])
+    T = _fk(synth_a, q)
+    real_solve = two_intersecting.sp5.solve
+
+    def _over_four(*args: object, **kwargs: object) -> object:
+        sols, is_ls = real_solve(*args, **kwargs)
+        if sols:
+            sols = (list(sols) + [sols[0]] * 5)[:5]  # force a length-5 return
+        return sols, is_ls
+
+    monkeypatch.setattr(two_intersecting.sp5, "solve", _over_four)
+    # Must not raise IndexError on the 4-wide error vector.
+    two_intersecting.solve(synth_a, T)

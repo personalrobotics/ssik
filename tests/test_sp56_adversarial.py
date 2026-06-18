@@ -102,6 +102,9 @@ def test_sp5_returned_solutions_always_satisfy_equation(case: tuple[np.ndarray, 
     """
     p0, p1, p2, p3, k1, k2, k3 = case
     solutions, _ = sp5.solve(p0, p1, p2, p3, k1, k2, k3)
+    # SP5 is a <=4-solution subproblem; consumers (two_intersecting) rely on
+    # this contract for fixed-width branch vectors (#312).
+    assert len(solutions) <= 4
     for s1, s2, s3 in solutions:
         lhs = p0 + rotate(k1, s1, p1)
         rhs = rotate(k2, s2, p2 + rotate(k3, s3, p3))
