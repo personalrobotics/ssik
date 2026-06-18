@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -77,7 +78,7 @@ class Manipulator:
         loader). Most users should use :meth:`from_urdf` instead.
     """
 
-    __slots__ = ("_kb", "_plan", "_solver_module")
+    __slots__ = ("_kb", "_plan", "_solver_module", "_warned_cold_coverage")
 
     def __init__(
         self,
@@ -97,6 +98,8 @@ class Manipulator:
         self._solver_module: ModuleType = importlib.import_module(
             _SOLVER_MODULE_PATHS[self._plan.solver_name]
         )
+        # Guards the one-time cold-coverage warning (#328).
+        self._warned_cold_coverage: bool = False
 
     # ------------------------------------------------------------------
     # Factories
@@ -230,6 +233,7 @@ class Manipulator:
         refinement_max_iters: int = 15,
         seed_metric: str = "wrap_linf",
         seed_tolerance: float | None = None,
+        allow_rescue: bool = True,
         **solver_kwargs: Any,
     ) -> list[Solution]: ...
 
@@ -247,6 +251,7 @@ class Manipulator:
         refinement_max_iters: int = 15,
         seed_metric: str = "wrap_linf",
         seed_tolerance: float | None = None,
+        allow_rescue: bool = True,
         **solver_kwargs: Any,
     ) -> tuple[list[Solution], Diagnostic]: ...
 
@@ -263,6 +268,7 @@ class Manipulator:
         refinement_max_iters: int = 15,
         seed_metric: str = "wrap_linf",
         seed_tolerance: float | None = None,
+        allow_rescue: bool = True,
         **solver_kwargs: Any,
     ) -> list[Solution] | tuple[list[Solution], Diagnostic]:
         """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
@@ -299,6 +305,13 @@ class Manipulator:
             path is already at machine precision on tier-0 / SRS arms.
             Set ``True`` on tier-2 RR arms to recover edge-case
             candidates whose algebraic FK drifts above ``fk_atol``.
+        :param allow_rescue: when ``True`` (default), if the analytical
+            path returns no solutions for a target within the arm's reach
+            (a measure-zero rank-deficient ridge), recover the IK via the
+            T-perturbation rescue (#319) -- matching the baked ``ssik build``
+            artifact's coverage so ``from_urdf`` isn't a worse "try before
+            you build" path (#328). Set ``False`` for a guaranteed
+            analytical-only result.
         :param policy: tolerance policy. Rarely customised. Defaults to
             :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
         :param refinement_max_iters: cap on Newton iterations per candidate
@@ -360,10 +373,53 @@ class Manipulator:
         # Power-user kwargs override our defaults.
         kwargs.update(solver_kwargs)
 
+        # One-time coverage warning (#328): the cold jointlock-7R path (no
+        # build-time cached-RR prime) dispatches non-tier-0 inner sub-chains to
+        # the universal Husty-Pfurner solver, which has coverage gaps the baked
+        # ``ssik build`` artifact's cached-RR derivations don't. The
+        # T-perturbation rescue below recovers many such poses, but for arms
+        # whose cold path is broadly gappy it can't fully match the prebuilt --
+        # so surface the difference rather than let it be silent.
+        if self._plan.solver_name == "jointlock.seven_r" and not self._warned_cold_coverage:
+            self._warned_cold_coverage = True
+            warnings.warn(
+                f"{self._plan.solver_name}: solving this 7R arm from a URDF uses the "
+                "universal Husty-Pfurner inner solver, which can have reduced coverage "
+                "(and is slower) vs the cached-RR artifact from `ssik build`. For full "
+                "coverage and speed, build the per-arm artifact once.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         # Internal solver functions still return (sols, is_ls); unwrap the
         # tuple at the public-API boundary. `is_ls` is redundant with
         # `len(sols) == 0` in every shipped solver -- ssik #238 item 1.
         sols, _is_ls = self._solver_module.solve(self._kb, T, **kwargs)
+
+        # Bulletproof rescue (#319 / #328): when the analytical path returns
+        # nothing for a target within the arm's reach, recover the IK via the
+        # T-perturbation rescue -- the same runtime layer the baked ``ssik
+        # build`` artifacts apply. Without this, ``from_urdf(...).solve(T)``
+        # silently has worse coverage than the prebuilt at measure-zero
+        # rank-deficient ridges. Gated by the reach-sphere (triangle-inequality
+        # upper bound on ``|T_pos|``) so far-field unreachable targets stay
+        # cheap. ``allow_rescue=False`` is the guaranteed-analytical escape.
+        if not sols and allow_rescue:
+            reach_radius = sum(
+                float(np.linalg.norm(j.T_left[:3, 3])) + float(np.linalg.norm(j.T_right[:3, 3]))
+                for j in self._kb.joints
+            )
+            if float(np.linalg.norm(T[:3, 3])) <= reach_radius:
+                from ssik.refinement.rescue import rescue_via_T_perturbation
+
+                def _analytic(T_pert: NDArray[np.float64], **rescue_kwargs: Any) -> list[Solution]:
+                    inner: dict[str, Any] = {"policy": policy}
+                    inner.update({k: v for k, v in rescue_kwargs.items() if k in params})
+                    inner_sols, _ = self._solver_module.solve(self._kb, T_pert, **inner)
+                    return list(inner_sols)
+
+                sols = rescue_via_T_perturbation(self.fk, _analytic, T, jacobian_fn=None)
+
         raw_candidate_count = len(sols)
 
         # Cross-arm postprocess pass: solvers that didn't honour kwargs

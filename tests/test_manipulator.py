@@ -358,3 +358,44 @@ def test_ik_overhead_under_300us() -> None:
         f"Manipulator.solve overhead {overhead:.1f} us > 300 us regression gate "
         f"(manip={manip_per * 1e6:.1f} us, raw={raw_per * 1e6:.1f} us)"
     )
+
+
+# ---------------------------------------------------------------------------
+# #328: from_urdf cold-path coverage parity (rescue) + discoverability (warn).
+# ---------------------------------------------------------------------------
+
+
+def test_from_urdf_jointlock_solves_ridge_via_rescue() -> None:
+    """A rank-deficient ridge pose that the analytical path misses is recovered
+    by the T-perturbation rescue, so ``from_urdf`` matches the baked artifact's
+    coverage instead of silently returning [] (#328)."""
+    arm = ssik.Manipulator.from_urdf(FIXTURES / "rizon4.urdf", base="base_link", ee="flange")
+    q = np.array([0.0, 1.0, -2.0, 0.375, -2.0, 1.0, 0.0])  # rizon4 #304 ridge
+    T = arm.fk(q)
+    rescued = arm.solve(T, respect_limits=False)
+    assert rescued, "ridge pose should be recovered via rescue"
+    for s in rescued:
+        T_fk = poe_forward_kinematics(arm.kinbody, np.asarray(s.q))
+        assert np.allclose(T_fk, T, atol=1e-6), (
+            f"rescued solution FK off by {np.abs(T_fk - T).max():.1e}"
+        )
+    # Rescue never reduces the analytical result.
+    analytic = arm.solve(T, respect_limits=False, allow_rescue=False)
+    assert len(rescued) >= len(analytic)
+
+
+def test_from_urdf_jointlock_warns_once_about_cold_coverage() -> None:
+    """The cold jointlock-7R path warns once that coverage/speed differ from the
+    baked artifact, so the difference is discoverable rather than silent (#328)."""
+    import warnings
+
+    arm = ssik.Manipulator.from_urdf(FIXTURES / "rizon4.urdf", base="base_link", ee="flange")
+    T = arm.fk(np.zeros(7))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        arm.solve(T)
+        arm.solve(T)  # second call must NOT repeat the warning
+    cold = [
+        w for w in caught if issubclass(w.category, UserWarning) and "ssik build" in str(w.message)
+    ]
+    assert len(cold) == 1, f"expected exactly one cold-coverage warning, got {len(cold)}"
