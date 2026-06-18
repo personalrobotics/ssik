@@ -93,7 +93,7 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
 | `franka_panda_ik` | Franka Panda | **anthropomorphic 7R** | `panda_link0` | `panda_link8` |
-| `xarm7_ik` | UFactory xArm7 | **7R Pieper-wedge** (jointlock → `reversed:spherical`) | `link_base` | `link7` |
+| `xarm7_ik` | UFactory xArm7 | **7R** (jointlock → `reversed:two_intersecting`) | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | **non-Pieper 6R** (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
 | `piper_ik` | AgileX PiPER | **non-Pieper 6R** (joints 4 & 6 tilted axis) | `base_link` | `link6` |
@@ -126,7 +126,7 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `iiwa14_ik` | robot_descriptions / iiwa14_description |
 | `gen3_ik` | Kinovarobotics / ros_kortex (kortex_description / gen3.xacro) |
 | `franka_panda_ik` | robot_descriptions / panda_description |
-| `xarm7_ik` | UFactory xArm7 DH (hand-encoded; #312 tracks the URDF flip) |
+| `xarm7_ik` | robot_descriptions / xarm7_description |
 | `xarm6_ik` | robot_descriptions / xarm6_description |
 | `z1_ik` | robot_descriptions / z1_description |
 | `piper_ik` | robot_descriptions / piper_description |
@@ -367,7 +367,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | iiwa14 (SRS 7R) | **refuses** ("only 1-6R") | 4.83 ± 0.11 ms / FK 5e-13 / 128 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.46 ± 1.25 ms / FK 1e-12 / 10-95 sols |
 | Franka Panda (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 29.57 ± 2.95 ms / FK 1e-6 / 8-124 sols |
-| xArm7 (**non-SRS 7R**) | **refuses** (no 7R DH path in bench harness) | 37.10 ± 0.49 ms / FK 4e-11 / 56-64 sols |
+| xArm7 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 37.10 ± 0.49 ms / FK 4e-11 / 56-64 sols |
 | xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 2e-7 / 8-12 sols |
 | Z1 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 1e-15 / 4-8 sols | 487 ± 7 µs / FK 3e-15 / 4-8 sols |
 | PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.10 ± 0.03 ms / FK 1e-5 / 1-8 sols |
