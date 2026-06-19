@@ -15,6 +15,8 @@ dispatcher will pick this solver only for rare custom geometries).
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 from hypothesis import HealthCheck, assume, given, settings
@@ -293,16 +295,20 @@ def test_two_intersecting_survives_sp5_over_four(synth_a: KinBody, monkeypatch) 
     search vector. SP5 now caps at <=4 at the source; this guards the consumer
     defensively, since the original crash was platform-sensitive (Linux-only).
     """
+    from ssik.subproblems import sp5
+
     q = np.array([0.2, 0.3, 0.1, 0.4, 0.2, 0.3])
     T = _fk(synth_a, q)
-    real_solve = two_intersecting.sp5.solve
+    real_solve = sp5.solve
 
-    def _over_four(*args: object, **kwargs: object) -> object:
+    def _over_four(*args: Any, **kwargs: Any) -> object:
         sols, is_ls = real_solve(*args, **kwargs)
         if sols:
             sols = (list(sols) + [sols[0]] * 5)[:5]  # force a length-5 return
         return sols, is_ls
 
-    monkeypatch.setattr(two_intersecting.sp5, "solve", _over_four)
+    # two_intersecting calls ``sp5.solve`` by module-attr lookup, so patching
+    # the module's ``solve`` is what it sees.
+    monkeypatch.setattr(sp5, "solve", _over_four)
     # Must not raise IndexError on the 4-wide error vector.
     two_intersecting.solve(synth_a, T)
