@@ -54,6 +54,15 @@ class TolerancePolicy:
             produced by quartic / ellipse root-finding inside SP5 and SP6.
             Unit-circle closure is checked to this tolerance; returned
             solutions that fail are dropped.
+        subproblem_postverify: tighter closure gate for SP5's *refined*
+            candidates. Gauss-Newton refinement drives every genuine SP5
+            solution to machine precision (measured <= 6e-16 over ~3e5 calls),
+            so a refined candidate still above this threshold is a spurious
+            near-double-quartic-root least-squares point (a non-zero local
+            minimum, FK ~1e-6), not an IK solution -- it is dropped (#337 /
+            #159). Far above genuine residuals yet well below
+            ``subproblem_numerical`` (the artifact's FK-closure gate, which
+            this must not loosen); default ``1e-9``.
         subproblem_degeneracy: rank / collinearity threshold. A QR leading
             coefficient or sin-of-angle-between-axes below this value
             marks the input as degenerate and SP6/aux return
@@ -71,6 +80,7 @@ class TolerancePolicy:
     axis_intersect: float = 1e-8
     subproblem_feasibility: float = 1e-9
     subproblem_numerical: float = 1e-5
+    subproblem_postverify: float = 1e-9
     subproblem_degeneracy: float = 1e-12
     subproblem_dedup: float = 1e-3
 

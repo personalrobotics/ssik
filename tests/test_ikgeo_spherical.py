@@ -300,3 +300,20 @@ def test_wrong_topology_raises_no_spherical_wrist() -> None:
     bad_kb = KinBody(links=links, joints=joints)
     with pytest.raises(ValueError, match=r"\(3, 4, 5\)"):
         spherical.solve(bad_kb, np.eye(4))
+
+
+def test_spherical_rejects_spurious_near_double_root_branch(synth_a: KinBody) -> None:
+    """#337: at this pose the SP5 sub-solve's quartic has a near-double root
+    (gap ~9e-10) that produced a spurious branch -- a non-zero least-squares
+    point (FK ~5.7e-6) that slipped through SP5's loose post-verify. SP5 now
+    gates refined candidates at ``subproblem_postverify`` (1e-9), so every
+    returned spherical branch FK-closes at machine precision.
+    """
+    q_star = np.array([0.0, -0.61412196, -0.61412196, 1.0, 1.0, 0.0])
+    T_star = _fk(synth_a, q_star)
+    solutions, is_ls = spherical.solve(synth_a, T_star)
+    assert not is_ls
+    assert solutions
+    for s in solutions:
+        err = float(np.abs(_fk(synth_a, s.q) - T_star).max())
+        assert err < 1e-9, f"spurious branch survived: FK {err:.2e}"

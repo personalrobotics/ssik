@@ -24,7 +24,7 @@ of a 2x2 quadratic-circle system, and ``theta2`` via :func:`sp1.solve`.
    the single correctness gate; no valid solution can be dropped by a
    heuristic filter.
 3. *Post-verification against the original equation*. Every candidate
-   residual is checked; candidates above ``subproblem_numerical`` are
+   residual is checked; candidates above ``subproblem_postverify`` are
    dropped.
 4. *Empty return on infeasibility* (issue #324). If no candidate satisfies
    the defining equation, return ``([], True)``. The equation is genuinely
@@ -150,7 +150,7 @@ def solve(
         which stage.
     :returns: ``(solutions, is_ls)``. On exact feasibility, ``solutions``
         has 1 to 4 deduplicated triples that satisfy the defining equation
-        within ``subproblem_numerical`` and ``is_ls`` is ``False``. On
+        within ``subproblem_postverify`` and ``is_ls`` is ``False``. On
         infeasibility or degeneracy, ``solutions`` is empty and ``is_ls`` is
         ``True`` -- every returned triple is guaranteed to satisfy the
         equation (issue #324).
@@ -166,7 +166,6 @@ def solve(
     ):
         validate_vec3(v, name)
 
-    num_tol = policy.subproblem_numerical
     deg_tol = policy.subproblem_degeneracy
 
     if _degenerate(p1, p3, k1, k2, k3, deg_tol):
@@ -273,8 +272,12 @@ def solve(
         t1, t2, t3 = _refine_sp5(cand[0], cand[1], cand[2], p0, p1, p2, p3, k1, k2, k3)
         refined.append((t1, t2, t3))
 
-    # Post-verify against the SP5 equation.
-    exact = [cand for cand in refined if residual(cand) < num_tol]
+    # Post-verify against the SP5 equation. The gate is the *tight*
+    # subproblem_postverify (not subproblem_numerical): Gauss-Newton refinement
+    # drives every genuine solution to machine precision, so a candidate still
+    # above this is a spurious near-double-quartic-root least-squares point
+    # (FK ~1e-6, e.g. #337 / #159), not an IK solution -- drop it.
+    exact = [cand for cand in refined if residual(cand) < policy.subproblem_postverify]
 
     if exact:
         solutions = _dedup(exact, policy.subproblem_dedup)
