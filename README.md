@@ -361,25 +361,25 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 <!-- AUTOGEN:readme_eaik_table -->
 | Arm (class) | EAIK | ssik |
 |---|---|---|
-| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 2-8 sols | 521 ± 12 µs / FK 6e-12 / 2-8 sols |
-| Puma 560 (Pieper 6R, spherical wrist) | 5 ± 0 µs / FK 3e-14 / 8 sols | 220 ± 3 µs / FK 2e-14 / 8 sols |
-| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 976 ± 39 µs / FK 5e-6 / 2-12 sols |
-| iiwa14 (SRS 7R) | **refuses** ("only 1-6R") | 4.83 ± 0.11 ms / FK 5e-13 / 128 sols |
-| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 41.46 ± 1.25 ms / FK 1e-12 / 10-95 sols |
-| Franka Panda (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 29.57 ± 2.95 ms / FK 1e-6 / 8-124 sols |
-| xArm7 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 25.78 ± 1.52 ms / FK 5e-6 / 48-72 sols |
-| xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 2e-7 / 8-12 sols |
-| Z1 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 1e-15 / 4-8 sols | 487 ± 7 µs / FK 3e-15 / 4-8 sols |
-| PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.10 ± 0.03 ms / FK 1e-5 / 1-8 sols |
-| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 16.57 ± 0.30 ms / FK 4e-9 / 10-60 sols |
-| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 17.62 ± 0.29 ms / FK 7e-8 / 10-38 sols |
-| Rizon 10 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 16.26 ± 0.34 ms / FK 6e-8 / 10-64 sols |
-| CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 991 ± 14 µs / FK 6e-7 / 6-12 sols |
-| YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.08 ± 0.02 ms / FK 8e-9 / 8 sols |
-| big_yam (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.02 ms / FK 5e-6 / 8 sols |
-| FR3 (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 30.83 ± 3.12 ms / FK 6e-9 / 8-128 sols |
-| OpenArm L (**non-SRS 7R**) | **refuses** ("only 1-6R") | 13.41 ± 1.56 ms / FK 2e-15 / 8-40 sols |
-| OpenArm R (**non-SRS 7R**) | **refuses** ("only 1-6R") | 11.07 ± 0.82 ms / FK 1e-15 / 8-40 sols |
+| UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 2-8 sols | 520 ± 10 µs / FK 6e-12 / 2-8 sols |
+| Puma 560 (Pieper 6R, spherical wrist) | 5 ± 0 µs / FK 3e-14 / 8 sols | 220 ± 0 µs / FK 8e-12 / 8 sols |
+| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 940 ± 30 µs / FK 8e-7 / 2-12 sols |
+| iiwa14 (SRS 7R) | **refuses** ("only 1-6R") | 4.66 ± 0.03 ms / FK 1e-13 / 128 sols |
+| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("only 1-6R") | 40.65 ± 0.69 ms / FK 1e-12 / 11-92 sols |
+| Franka Panda (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 31.43 ± 1.82 ms / FK 3e-10 / 8-128 sols |
+| xArm7 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 22.82 ± 0.17 ms / FK 2e-6 / 48-80 sols |
+| xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 3e-6 / 8-16 sols |
+| Z1 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 1e-15 / 4-8 sols | 480 ± 10 µs / FK 3e-15 / 4-8 sols |
+| PiPER (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 3.06 ± 2.18 ms / FK 1e-5 / 2-8 sols |
+| Rizon 4 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 16.20 ± 0.19 ms / FK 3e-7 / 4-60 sols |
+| Kassow KR810 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 16.99 ± 0.18 ms / FK 5e-8 / 4-42 sols |
+| Rizon 10 (**non-SRS 7R**) | **refuses** ("only 1-6R") | 15.78 ± 0.16 ms / FK 6e-8 / 6-64 sols |
+| CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.01 ms / FK 2e-6 / 4-12 sols |
+| YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.01 ms / FK 3e-7 / 5-8 sols |
+| big_yam (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.01 ms / FK 7e-7 / 8 sols |
+| FR3 (**anthropomorphic 7R**) | **refuses** ("only 1-6R") | 30.57 ± 1.84 ms / FK 4e-10 / 8-128 sols |
+| OpenArm L (**non-SRS 7R**) | **refuses** ("only 1-6R") | 12.30 ± 0.46 ms / FK 2e-15 / 8-40 sols |
+| OpenArm R (**non-SRS 7R**) | **refuses** ("only 1-6R") | 10.70 ± 0.43 ms / FK 1e-15 / 8-40 sols |
 <!-- /AUTOGEN -->
 
 The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).

@@ -69,9 +69,25 @@ def test_add_arm_generates_files(workspace: Path) -> None:
     test_dest = workspace / "tests" / "test_rizon4_addarm_test.py"
     assert urdf_dest.exists(), "URDF not vendored"
     assert test_dest.exists(), "test scaffold not written"
-    # URDF byte-equal to source.
-    src_bytes = (REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf").read_bytes()
-    assert urdf_dest.read_bytes() == src_bytes
+    # Vendored URDF is stripped to kinematics-only (no mesh/visual/collision)
+    # but FK-identical to the source (#341).
+    text = urdf_dest.read_text()
+    assert "package://" not in text
+    assert "<visual" not in text
+    assert "<collision" not in text
+    import numpy as np
+
+    from ssik._urdf import load_urdf_kinbody_normalized
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+
+    src = REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"
+    kb_vendored = load_urdf_kinbody_normalized(urdf_dest, "base_link", "flange")
+    kb_src = load_urdf_kinbody_normalized(src, "base_link", "flange")
+    rng = np.random.default_rng(0)
+    for _ in range(5):
+        q = rng.uniform(-1.0, 1.0, size=len(kb_src.joints))
+        drift = np.abs(poe_forward_kinematics(kb_vendored, q) - poe_forward_kinematics(kb_src, q))
+        assert drift.max() < 1e-12, f"stripped URDF FK drift {drift.max():.2e}"
 
 
 def test_add_arm_refuses_overwrite_without_force(workspace: Path) -> None:

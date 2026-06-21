@@ -65,8 +65,8 @@ fk_ceiling_fuzz = 1e-7
 platform_drift = false
 
 [arms.ur5_ik.bench]
-ms_mean = 0.521
-ms_ci95 = 0.012
+ms_mean = 0.52
+ms_ci95 = 0.01
 max_fk = 6.3e-12
 sols_min = 2
 sols_max = 8
@@ -93,9 +93,9 @@ fk_ceiling_fuzz = 1e-12
 platform_drift = false
 
 [arms.puma560_ik.bench]
-ms_mean = 0.220
-ms_ci95 = 0.003
-max_fk = 2.0e-14
+ms_mean = 0.22
+ms_ci95 = 0.00
+max_fk = 8.3e-12
 sols_min = 8
 sols_max = 8
 
@@ -128,9 +128,9 @@ drift_markers = [
 ]
 
 [arms.jaco2_ik.bench]
-ms_mean = 0.976
-ms_ci95 = 0.039
-max_fk = 5.0e-6
+ms_mean = 0.94
+ms_ci95 = 0.03
+max_fk = 8.0e-07
 sols_min = 2
 sols_max = 12
 
@@ -156,9 +156,9 @@ fk_ceiling_fuzz = 1e-10
 platform_drift = false
 
 [arms.iiwa14_ik.bench]
-ms_mean = 4.83
-ms_ci95 = 0.11
-max_fk = 5.1e-13
+ms_mean = 4.66
+ms_ci95 = 0.03
+max_fk = 1.0e-13
 sols_min = 128
 sols_max = 128
 
@@ -190,11 +190,11 @@ drift_markers = [
 ]
 
 [arms.gen3_ik.bench]
-ms_mean = 41.46
-ms_ci95 = 1.25
-max_fk = 1.0e-12
-sols_min = 10
-sols_max = 95
+ms_mean = 40.65
+ms_ci95 = 0.69
+max_fk = 9.9e-13
+sols_min = 11
+sols_max = 92
 
 [arms.gen3_ik.known_gaps]
 xfail_reason = "srs_polished coverage gap on q*=[0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875] (0 sols at q*, 5 sols at q* + 0.01 on q5, 1 sol at q* + 0.01 on q7). Same shape as #286 / #288 / #298. Filed as #299."
@@ -222,11 +222,11 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.franka_panda_ik.bench]
-ms_mean = 29.57
-ms_ci95 = 2.95
-max_fk = 1.2e-6
+ms_mean = 31.43
+ms_ci95 = 1.82
+max_fk = 2.7e-10
 sols_min = 8
-sols_max = 124
+sols_max = 128
 
 [arms.xarm7_ik]
 display_name = "UFactory xArm7"
@@ -257,11 +257,11 @@ drift_markers = [
 ]
 
 [arms.xarm7_ik.bench]
-ms_mean = 25.78
-ms_ci95 = 1.52
-max_fk = 5.1e-6
+ms_mean = 22.82
+ms_ci95 = 0.17
+max_fk = 1.5e-06
 sols_min = 48
-sols_max = 72
+sols_max = 80
 
 [arms.xarm6_ik]
 display_name = "UFactory xArm6"
@@ -292,9 +292,9 @@ drift_markers = [
 [arms.xarm6_ik.bench]
 ms_mean = 1.06
 ms_ci95 = 0.02
-max_fk = 2.0e-7
+max_fk = 2.5e-06
 sols_min = 8
-sols_max = 12
+sols_max = 16
 
 [arms.z1_ik]
 display_name = "Unitree Z1"
@@ -318,9 +318,9 @@ fk_ceiling_fuzz = 1e-7
 platform_drift = false
 
 [arms.z1_ik.bench]
-ms_mean = 0.487
-ms_ci95 = 0.007
-max_fk = 3.0e-15
+ms_mean = 0.48
+ms_ci95 = 0.01
+max_fk = 2.8e-15
 sols_min = 4
 sols_max = 8
 
@@ -354,10 +354,10 @@ drift_markers = [
 ]
 
 [arms.piper_ik.bench]
-ms_mean = 1.10
-ms_ci95 = 0.03
-max_fk = 9.7e-6
-sols_min = 1
+ms_mean = 3.06
+ms_ci95 = 2.18
+max_fk = 9.8e-06
+sols_min = 2
 sols_max = 8
 
 
@@ -383,10 +383,10 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.rizon4_ik.bench]
-ms_mean = 16.57
-ms_ci95 = 0.30
-max_fk = 4.0e-9
-sols_min = 10
+ms_mean = 16.20
+ms_ci95 = 0.19
+max_fk = 2.8e-07
+sols_min = 4
 sols_max = 60
 
 
@@ -412,11 +412,11 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.kassow_kr810_ik.bench]
-ms_mean = 17.62
-ms_ci95 = 0.29
-max_fk = 7.0e-8
-sols_min = 10
-sols_max = 38
+ms_mean = 16.99
+ms_ci95 = 0.18
+max_fk = 5.4e-08
+sols_min = 4
+sols_max = 42
 
 
 [arms.rizon10_ik]
@@ -441,10 +441,10 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.rizon10_ik.bench]
-ms_mean = 16.26
-ms_ci95 = 0.34
-max_fk = 6.1e-8
-sols_min = 10
+ms_mean = 15.78
+ms_ci95 = 0.16
+max_fk = 5.5e-08
+sols_min = 6
 sols_max = 64
 
 [arms.fanuc_crx10ial_ik]
@@ -474,10 +474,10 @@ drift_markers = [
 ]
 
 [arms.fanuc_crx10ial_ik.bench]
-ms_mean = 0.991
-ms_ci95 = 0.014
-max_fk = 6.2e-7
-sols_min = 6
+ms_mean = 1.02
+ms_ci95 = 0.01
+max_fk = 2.3e-06
+sols_min = 4
 sols_max = 12
 
 
@@ -508,10 +508,10 @@ drift_markers = [
 ]
 
 [arms.yam_ik.bench]
-ms_mean = 1.08
-ms_ci95 = 0.02
-max_fk = 7.6e-9
-sols_min = 8
+ms_mean = 1.06
+ms_ci95 = 0.01
+max_fk = 3.5e-07
+sols_min = 5
 sols_max = 8
 
 [arms.big_yam_ik]
@@ -541,9 +541,9 @@ drift_markers = [
 ]
 
 [arms.big_yam_ik.bench]
-ms_mean = 1.03
-ms_ci95 = 0.02
-max_fk = 4.7e-6
+ms_mean = 1.06
+ms_ci95 = 0.01
+max_fk = 7.2e-07
 sols_min = 8
 sols_max = 8
 
@@ -569,9 +569,9 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.fr3_ik.bench]
-ms_mean = 30.83
-ms_ci95 = 3.12
-max_fk = 6.0e-9
+ms_mean = 30.57
+ms_ci95 = 1.84
+max_fk = 4.2e-10
 sols_min = 8
 sols_max = 128
 
@@ -597,9 +597,9 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.openarm_left_ik.bench]
-ms_mean = 13.41
-ms_ci95 = 1.56
-max_fk = 2.1e-15
+ms_mean = 12.30
+ms_ci95 = 0.46
+max_fk = 1.7e-15
 sols_min = 8
 sols_max = 40
 
@@ -625,9 +625,9 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.openarm_right_ik.bench]
-ms_mean = 11.07
-ms_ci95 = 0.82
-max_fk = 1.5e-15
+ms_mean = 10.70
+ms_ci95 = 0.43
+max_fk = 1.4e-15
 sols_min = 8
 sols_max = 40
 

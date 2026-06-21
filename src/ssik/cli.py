@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ssik._urdf import load_urdf_kinbody_normalized
+from ssik._urdf import load_urdf_kinbody_normalized, strip_urdf_to_fixture
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import DispatchPlan, dispatch
 from ssik.subproblems._rotation import rotation_matrix
@@ -440,9 +440,10 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     plan = dispatch(kb)
     _print_dispatch_summary(plan)
 
-    print(f"[ssik add-arm] Vendoring URDF -> {urdf_dest.relative_to(repo_root)}")
-    urdf_dest.write_bytes(args.urdf.read_bytes())
-    print(f"[ssik add-arm]   {urdf_dest.stat().st_size:,} bytes copied")
+    print(f"[ssik add-arm] Vendoring URDF (kinematics-only) -> {urdf_dest.relative_to(repo_root)}")
+    n_links, n_joints = strip_urdf_to_fixture(args.urdf, urdf_dest)
+    kb_bytes = urdf_dest.stat().st_size
+    print(f"[ssik add-arm]   stripped to {n_links} links, {n_joints} joints, {kb_bytes:,} bytes")
 
     print(f"[ssik add-arm] Generating test scaffold -> {test_dest.relative_to(repo_root)}")
     test_source = _render_test_scaffold(
@@ -457,14 +458,53 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     print(f"[ssik add-arm]   wrote {len(test_source):,} bytes ({test_source.count(chr(10))} lines)")
 
     print()
-    print("[ssik add-arm] ✓ Done. Try:")
-    print(f"[ssik add-arm]     uv run pytest {test_dest.relative_to(repo_root)} -v")
-    print(f"[ssik add-arm]     uv run pytest {test_dest.relative_to(repo_root)} -v -m slow")
+    print("[ssik add-arm] Add this stanza to src/ssik/prebuilt/MANIFEST.toml")
+    print("[ssik add-arm] (TODO fields need your judgement; the rest is derived):")
     print()
-    print("[ssik add-arm] Next steps (manual; not auto-generated yet):")
-    print("[ssik add-arm]   - Add an arm row to README.md under the matching solver class")
-    print(f"[ssik add-arm]   - Optionally add scripts/bench_{args.name}.py for FLOP profiling")
+    print(_render_manifest_stanza(args.name, args.base, args.ee, len(kb.joints), plan))
+    print()
+    print("[ssik add-arm] ✓ Then finish (build artifact, then one-click bench+docs):")
+    print(f"[ssik add-arm]     uv run pytest {test_dest.relative_to(repo_root)} -v")
+    print("[ssik add-arm]     uv run python scripts/regen_artifacts.py [--include-slow]")
+    print(f"[ssik add-arm]     uv run python scripts/regen_bench.py --arm {args.name} --docs")
     return 0
+
+
+def _render_manifest_stanza(name: str, base: str, ee: str, dof: int, plan: DispatchPlan) -> str:
+    """A ready-to-paste MANIFEST.toml stanza: derived fields filled, curated
+    fields left as ``TODO`` for human judgement. ``regen_bench.py`` fills the
+    ``[bench]`` block."""
+    sample = ", ".join("0.1" for _ in range(dof))
+    return "\n".join(
+        [
+            f"[arms.{name}]",
+            'display_name = "TODO"',
+            'short_name = "TODO"',
+            f'fixture = "{name}.urdf"',
+            'fixture_kind = "urdf"',
+            'fixture_source = "TODO (e.g. robot_descriptions / <pkg>)"',
+            f'base_link = "{base}"',
+            f'ee_link = "{ee}"',
+            f"dof = {dof}",
+            f'solver = "{plan.solver_name}"',
+            f"tier = {plan.tier}",
+            'kinematic_class = "TODO"',
+            'short_class = "TODO"',
+            'class_tags = ["TODO"]',
+            "slow_build = false  # set true if the build is minutes (cached-RR 7R)",
+            "build_time_sec = 0  # update after building",
+            "artifact_size_kb = 0  # update after building",
+            f"sample_q = [{sample}]",
+            "fk_ceiling_fuzz = 1e-4",
+            "",
+            f"[arms.{name}.bench]  # filled by scripts/regen_bench.py",
+            "ms_mean = 0.0",
+            "ms_ci95 = 0.0",
+            "max_fk = 0.0",
+            "sols_min = 0",
+            "sols_max = 0",
+        ]
+    )
 
 
 def _render_test_scaffold(

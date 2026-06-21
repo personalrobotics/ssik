@@ -14,6 +14,7 @@ will wrap this.
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,7 +26,45 @@ from ssik._kinbody import Joint, JointType, KinBody, Link
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from urchin import Joint as UrchinJoint
 
-__all__ = ["load_urdf_kinbody", "load_urdf_kinbody_normalized"]
+__all__ = ["load_urdf_kinbody", "load_urdf_kinbody_normalized", "strip_urdf_to_fixture"]
+
+# Non-kinematic elements stripped when vendoring a URDF as a test fixture:
+# everything irrelevant to inverse kinematics. Keeps fixtures small and free of
+# unresolved ``package://`` mesh paths.
+_FIXTURE_LINK_DROP = ("visual", "collision", "inertial")
+_FIXTURE_ROBOT_DROP = ("material", "gazebo", "transmission")
+
+
+def strip_urdf_to_fixture(source: Path, dest: Path) -> tuple[int, int]:
+    """Write a kinematics-only copy of ``source`` to ``dest``.
+
+    Drops ``<visual>`` / ``<collision>`` / ``<inertial>`` from every link and
+    top-level ``<material>`` / ``<gazebo>`` / ``<transmission>``, keeping link
+    names and the full joint definitions (origin / axis / parent / child /
+    limit) -- so forward kinematics are identical, but the file is small and has
+    no unresolved mesh paths. Used to vendor ``tests/fixtures/*.urdf``.
+
+    :returns: ``(n_links, n_joints)`` kept.
+    :raises ValueError: if any joint is missing its ``parent``/``child`` (which
+        would yield a silently-broken chain).
+    """
+    tree = ET.parse(source)
+    root = tree.getroot()
+    for tag in _FIXTURE_ROBOT_DROP:
+        for el in root.findall(tag):
+            root.remove(el)
+    for link in root.findall("link"):
+        for tag in _FIXTURE_LINK_DROP:
+            for el in link.findall(tag):
+                link.remove(el)
+    for joint in root.findall("joint"):
+        if joint.find("parent") is None or joint.find("child") is None:
+            raise ValueError(f"joint {joint.get('name')!r} is missing parent/child")
+    ET.indent(tree, space="  ")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(dest, encoding="unicode", xml_declaration=True)
+    return len(root.findall("link")), len(root.findall("joint"))
+
 
 _IDENTITY: NDArray[np.float64] = np.eye(4, dtype=np.float64)
 

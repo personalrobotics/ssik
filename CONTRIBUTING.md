@@ -91,6 +91,7 @@ uv run python scripts/bench_seven_r.py            # synthetic 7R
 
 - `tests/test_prebuilt_sanity.py`, `tests/test_prebuilt_uniform_fuzz.py`, `tests/test_artifact_snapshots.py` — per-arm parametrisation, FK ceilings, known-gap xfails, platform-drift markers
 - `scripts/regen_artifacts.py` — which arms to emit + their `--include-slow` gating
+- `scripts/regen_bench.py` — measures each prebuilt and writes the `[arms.*.bench]` blocks in place
 - `scripts/regen_docs.py` — the AUTOGEN doc tables (README prebuilt + EAIK comparison, docs/quickstart, src/ssik/prebuilt/README)
 - `examples/04_compare_vs_eaik.py` — bench fixtures
 
@@ -119,37 +120,39 @@ Then commit the updated `prebuilt/*.py` alongside the codegen change so reviewer
 
 ## Adding a new prebuilt arm
 
-The metadata for a shipped arm lives in `MANIFEST.toml`; adding one is mostly a manifest edit plus two regen commands.
+The metadata for a shipped arm lives in `MANIFEST.toml`. The flow is now mostly tooled:
 
-1. **Source the URDF / MJCF** and place the fixture under `tests/fixtures/` (a plain `.urdf`, or a Python `*_specs()` builder for spec-transcribed arms). For Xacro-only sources, expand to a plain URDF first.
-
-2. **Add a `[arms.<name>_ik]` block to `MANIFEST.toml`.** Copy a same-class neighbour's entry and adjust. The fields the dispatcher determines for you (`solver`, `tier`, `slow_build`) can be read off a one-shot:
+1. **Vendor the fixture + scaffold + get a manifest stanza** with `ssik add-arm`. It strips the source URDF to kinematics-only (`tests/fixtures/<name>.urdf`, no meshes — via `ssik._urdf.strip_urdf_to_fixture`, also exposed as `scripts/strip_urdf_fixture.py`), generates a bulletproof test scaffold, and **prints a ready-to-paste `[arms.<name>_ik]` stanza** with the dispatcher-derived fields (`solver`, `tier`, `dof`) filled and curated fields (`display_name`, `kinematic_class`, …) left as `TODO`:
 
    ```bash
-   uv run python -c "from ssik._urdf import load_urdf_kinbody_normalized as L; from ssik.core.dispatcher import dispatch; p = dispatch(L('tests/fixtures/<name>.urdf', '<base>', '<ee>')); print(p.solver_name, p.tier)"
+   ssik add-arm path/to/arm.urdf --base <base> --ee <ee> --name <name>_ik
    ```
 
-3. **Emit the artifact + bench it:**
+   (Spec-transcribed arms still use a Python `*_specs()` builder + `fixture_kind = "specs"`. Xacro: expand to plain URDF first — modular-URDF support is #327.)
+
+2. **Paste the stanza into `MANIFEST.toml`** and fill the `TODO` fields (copy a same-class neighbour for `kinematic_class` / `class_tags`).
+
+3. **Emit the artifact:**
 
    ```bash
    uv run python scripts/regen_artifacts.py [--include-slow]   # emits src/ssik/prebuilt/<name>_ik.py
-   uv run python examples/04_compare_vs_eaik.py --n 100        # fill in the [bench] block from the output
    ```
 
-   Add the arm to `examples/04_compare_vs_eaik.py`'s `FIXTURES` list so it benches.
-
-4. **Set `fk_ceiling_fuzz`** to ~10× the worst FK residual you observe in a 50-pose smoke test (`solve(fk(q), respect_limits=False)` over random non-singular `q`). If a specific pose returns no IK (a coverage gap), add a `[arms.<name>_ik.known_gaps]` block with an `xfail_reason` and file an issue.
-
-5. **Regenerate docs + run the gates:**
+4. **Bench + regenerate all docs — one click** (#341):
 
    ```bash
-   uv run python scripts/regen_docs.py
+   uv run python scripts/regen_bench.py --arm <name>_ik --docs   # fills [bench] + rewrites doc tables
+   ```
+
+   `regen_bench.py` measures the prebuilt's `solve()` (time / FK / branch count, examples/04 methodology) and writes the `[arms.<name>_ik.bench]` block in place, then runs `regen_docs.py`. Run it on the reference machine (timing is machine-dependent; FK/sols are not). Omit `--arm` to re-bench every arm.
+
+5. **Set `fk_ceiling_fuzz`** to ~10× the worst FK residual in a 50-pose smoke test. If a pose returns no IK (coverage gap), add a `[arms.<name>_ik.known_gaps]` block with an `xfail_reason` and file an issue. Then run the gates:
+
+   ```bash
    scripts/check.sh        # ruff + format + mypy + regen_docs --check + pytest
    ```
 
 `tests/test_manifest.py` cross-validates every manifest entry against the emitted artifact's baked constants (solver / base / ee / dof), so a typo surfaces immediately.
-
-> **Note:** A fully turnkey `ssik add-arm` that performs steps 2-5 in one command (auto-populating the manifest entry, benching, regenerating docs) is tracked in [#290](https://github.com/personalrobotics/ssik/issues/290). Today's `ssik add-arm` (below) handles the fixture + test-scaffold half.
 
 ## Adding a new arm fixture (test scaffold only)
 
@@ -157,7 +160,7 @@ The metadata for a shipped arm lives in `MANIFEST.toml`; adding one is mostly a 
 ssik add-arm path/to/arm.urdf --base base_link --ee flange --name my_arm
 ```
 
-Generates `tests/fixtures/my_arm.urdf` and `tests/test_my_arm.py` with FK-closure assertions on hand-picked + Hypothesis-fuzzed reachable poses. The generated test asserts the dispatcher routing matches the expected solver and that every retained IK FK-closes ≤ 1e-10. This does **not** yet ship the arm as a prebuilt — for that, follow "Adding a new prebuilt arm" above.
+Strips the source URDF to a kinematics-only `tests/fixtures/my_arm.urdf` (no meshes), generates `tests/test_my_arm.py` with FK-closure assertions on hand-picked + Hypothesis-fuzzed reachable poses (asserting dispatcher routing + FK ≤ 1e-10 on every retained IK), and **prints a ready-to-paste `MANIFEST.toml` stanza**. It does **not** build or bench the arm — to ship it as a prebuilt, paste the stanza and continue from step 3 of "Adding a new prebuilt arm" above.
 
 ## Adding a new solver
 
