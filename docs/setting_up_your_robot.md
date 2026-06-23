@@ -24,6 +24,18 @@ ssik's URDF loader (`ssik._urdf`, backed by `urchin`) is strict about valid URDF
 - ❌ Mid-chain fixed joints — must be either welded into adjacent revolute frames or expanded. Ssik treats the chain as 6R or 7R revolute; fixed joints break the chain.
 - ❌ Continuous joints without limits — ssik treats unset limits as `±2π`, which may produce out-of-range IKs. Set explicit `limit` tags.
 
+### Xacro and MJCF descriptions
+
+You don't need to pre-convert other formats — every loader entry point (`Manipulator.from_urdf`, `ssik build`, `ssik classify`, `ssik add-arm`) accepts them directly:
+
+- **Xacro** (`.xacro` / `*.urdf.xacro`, or a `.urdf` with a xacro namespace) — expanded via `xacrodoc` (`pip install ssik[xacro]`). This resolves `<xacro:include>`, macros, and substitution args, so multi-file descriptions like the Universal Robots family just work. Pass parametrized args with `--xacro-arg name:=value` (repeatable), e.g.:
+  ```bash
+  ssik build ur.xacro --base base_link --ee tool0 --xacro-arg ur_type:=ur10e
+  ```
+- **MJCF** (MuJoCo `.xml`) — load via `ssik._mjcf.load_mjcf_kinbody_normalized(path, base_body, ee_body)` (`pip install ssik[mjcf]`). Parsed through `mujoco` itself, so `<default>` classes, `<compiler>` settings, and `<include>` are all honored.
+
+`ssik add-arm` vendors a **plain, expanded, kinematics-only URDF** into `tests/fixtures/` regardless of the input format.
+
 ### Calibrated URDFs (UR's `.calibrated_urdf`, etc.)
 
 UR ships per-arm calibration offsets that nudge the nominal DH parameters by ~mm. Two paths:

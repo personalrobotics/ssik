@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<!-- Minimal parametrized xacro for the xacro-adapter tests (#327): exercises a
+     substitution arg ($(arg len2)), a property, and a ${} expression so the
+     loader proves it actually expands xacro rather than parsing it as URDF. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="toy2r">
+  <xacro:arg name="len2" default="0.3"/>
+  <xacro:property name="L2" value="$(arg len2)"/>
+  <link name="base_link"/>
+  <link name="link1"/>
+  <link name="link2"/>
+  <joint name="j1" type="revolute">
+    <parent link="base_link"/>
+    <child link="link1"/>
+    <origin xyz="0 0 0.2" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+  </joint>
+  <joint name="j2" type="revolute">
+    <parent link="link1"/>
+    <child link="link2"/>
+    <origin xyz="${L2} 0 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="10" velocity="1"/>
+  </joint>
+</robot>
