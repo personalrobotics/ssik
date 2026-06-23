@@ -1,0 +1,23 @@
+<mujoco model="toy3r">
+  <compiler angle="radian"/>
+  <!-- Minimal 3R serial arm for MJCF-adapter tests (#343): varied joint axes
+       (z, y, x), a non-trivial body orientation (quat on link2), and one
+       limited joint (j2). Inertials are required by the MuJoCo compiler but
+       irrelevant to the kinematics the adapter reads. -->
+  <worldbody>
+    <body name="base">
+      <body name="link1" pos="0 0 0.2">
+        <joint name="j1" type="hinge" axis="0 0 1"/>
+        <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+        <body name="link2" pos="0.3 0 0" quat="0.92388 0 0.38268 0">
+          <joint name="j2" type="hinge" axis="0 1 0" range="-2.0 2.0"/>
+          <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+          <body name="link3" pos="0.25 0 0.1">
+            <joint name="j3" type="hinge" axis="1 0 0"/>
+            <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

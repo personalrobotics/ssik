@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numpy.typing import NDArray
 
-from ssik._kinbody import Joint, JointType, KinBody, Link
+from ssik._kinbody import Joint, JointType, KinBody, Link, build_poe_kinbody
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
     from urchin import Joint as UrchinJoint
@@ -326,26 +326,4 @@ def load_urdf_kinbody_normalized(
     final_rotation[:3, :3] = r_ee_home
     final_t_right = final_t_right @ final_rotation
 
-    # Build the KinBody with synthesized intermediate link names.
-    n = len(records)
-    link_names = [base_link, *[f"_poe_link_{i}" for i in range(1, n)], ee_link]
-    links = [Link(name=name) for name in link_names]
-    joints: list[Joint] = []
-    for i, (name, joint_type, axis_base, p_offset, limits) in enumerate(records):
-        t_left = np.eye(4, dtype=np.float64)
-        t_left[:3, 3] = p_offset
-        t_right = final_t_right if i == n - 1 else _IDENTITY.copy()
-        joints.append(
-            Joint(
-                name=name,
-                dof_index=i,
-                parent_link=links[i],
-                T_left=t_left,
-                T_right=t_right,
-                axis=axis_base,
-                joint_type=joint_type,
-                limits=limits,
-            )
-        )
-
-    return KinBody(links=links, joints=joints)
+    return build_poe_kinbody(records, final_t_right, base_link, ee_link)

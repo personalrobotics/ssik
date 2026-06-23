@@ -33,7 +33,7 @@ from typing import Literal, overload
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["Joint", "JointSpec", "KinBody", "Link", "build_kinbody"]
+__all__ = ["Joint", "JointSpec", "KinBody", "Link", "build_kinbody", "build_poe_kinbody"]
 
 JointType = Literal["revolute", "prismatic"]
 
@@ -336,4 +336,50 @@ def build_kinbody(
         )
         prev_origin = joint_origin
 
+    return KinBody(links=links, joints=joints)
+
+
+# POE record: (joint name, joint type, axis in base frame, translation offset
+# from the previous joint's frame, optional (lo, hi) limits).
+PoeRecord = tuple[
+    str, "JointType", NDArray[np.float64], NDArray[np.float64], "tuple[float, float] | None"
+]
+
+
+def build_poe_kinbody(
+    records: list[PoeRecord],
+    final_t_right: NDArray[np.float64],
+    base_link: str,
+    ee_link: str,
+) -> KinBody:
+    """Construct a POE-normalized :class:`KinBody` from per-joint records.
+
+    Each record's ``T_left`` is the pure translation ``p_offset`` and its axis
+    is already in the base frame at ``q=0`` (the POE encoding). ``final_t_right``
+    absorbs the trailing offset + home orientation on the last joint so
+    ``FK(q=0)`` matches the source. Shared by the URDF and MJCF loaders so the
+    construction (and synthesized intermediate link names) lives in one place.
+    """
+    n = len(records)
+    if n == 0:
+        raise ValueError(f"chain from {base_link!r} to {ee_link!r} has no active joints")
+    link_names = [base_link, *[f"_poe_link_{i}" for i in range(1, n)], ee_link]
+    links = [Link(name=name) for name in link_names]
+    joints: list[Joint] = []
+    for i, (name, joint_type, axis_base, p_offset, limits) in enumerate(records):
+        t_left = np.eye(4, dtype=np.float64)
+        t_left[:3, 3] = p_offset
+        t_right = final_t_right if i == n - 1 else np.eye(4, dtype=np.float64)
+        joints.append(
+            Joint(
+                name=name,
+                dof_index=i,
+                parent_link=links[i],
+                T_left=t_left,
+                T_right=t_right,
+                axis=axis_base,
+                joint_type=joint_type,
+                limits=limits,
+            )
+        )
     return KinBody(links=links, joints=joints)

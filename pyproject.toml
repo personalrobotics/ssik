@@ -60,6 +60,9 @@ demo = [
     "robot-descriptions>=2.0.0",
     "imageio>=2.34",
 ]
+mjcf = [
+    "mujoco>=3.10.0",
+]
 
 [project.urls]
 Repository = "https://github.com/personalrobotics/ssik"
@@ -82,6 +85,7 @@ dev = [
     "robot-descriptions>=2.0.0",
     "yourdfpy>=0.0.60",
     "xacrodoc>=2.0.1",
+    "mujoco>=3.0", # exercised by the MJCF-adapter tests (also the [mjcf] extra)
 ]
 docs = [
     "mkdocs-material>=9.5",
@@ -209,6 +213,10 @@ ignore_missing_imports = true
 # urchin (URDF parser) ships no type stubs.
 [[tool.mypy.overrides]]
 module = "urchin.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "mujoco.*"
 ignore_missing_imports = true
 
 # cython runtime ships ``py.typed`` from 3.1+ but the marker is missing
