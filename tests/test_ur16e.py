@@ -80,6 +80,7 @@ def test_ur16e_hand_picked_fk_closure(q_star: np.ndarray) -> None:
     kb = _ur16e_kinbody()
     T_target = poe_forward_kinematics(kb, q_star)
     from ssik.solvers.ikgeo import three_parallel
+
     sols, _ = three_parallel.solve(kb, T_target, allow_refinement=True)
     assert sols, f"no IK returned for reachable q*={q_star.tolist()}"
     best_fk = min(s.fk_residual for s in sols)
@@ -107,6 +108,7 @@ def test_ur16e_random_pose_fk_closure(seed: int) -> None:
     kb = _ur16e_kinbody()
     T_target = poe_forward_kinematics(kb, q_star)
     from ssik.solvers.ikgeo import three_parallel
+
     sols, _ = three_parallel.solve(kb, T_target, allow_refinement=True)
     assert sols, f"no IK returned for random q*={q_star.tolist()}"
     best_fk = min(s.fk_residual for s in sols)
