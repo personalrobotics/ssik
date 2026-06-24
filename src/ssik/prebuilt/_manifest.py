@@ -19,20 +19,36 @@ from typing import Literal
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "MANIFEST.toml"
 
-__all__ = ["MANIFEST_PATH", "Arm", "ArmBench", "ArmKnownGap", "load_manifest"]
+__all__ = ["MANIFEST_PATH", "Arm", "ArmBench", "ArmEaik", "ArmKnownGap", "load_manifest"]
 
 MANIFEST_PATH = _MANIFEST_PATH
 
 
 @dataclass(frozen=True)
 class ArmBench:
-    """Latest bench measurements from ``examples/04_compare_vs_eaik.py``."""
+    """Latest ssik ``solve()`` measurements (from ``scripts/regen_bench.py``)."""
 
     ms_mean: float
     ms_ci95: float
     max_fk: float
     sols_min: int
     sols_max: int
+
+
+@dataclass(frozen=True)
+class ArmEaik:
+    """EAIK comparison result, measured by ``scripts/regen_bench.py`` against
+    EAIK itself (Ostermeier 2024). Either ``supported`` with timing/FK/branch
+    numbers, or refused with EAIK's verbatim family/error string."""
+
+    supported: bool
+    refusal: str = ""  # EAIK's verbatim refusal (family or load error) when unsupported
+    family: str = ""  # EAIK kinematic-family string when supported
+    ms_mean: float = 0.0
+    ms_ci95: float = 0.0
+    max_fk: float = 0.0
+    sols_min: int = 0
+    sols_max: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,6 +95,7 @@ class Arm:
     # Required for every arm (#311); empty string forbidden.
     fixture_source: str = ""
     bench: ArmBench | None = None
+    eaik: ArmEaik | None = None
     known_gaps: ArmKnownGap | None = None
 
 
@@ -94,6 +111,20 @@ def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
             sols_min=int(bench_dict["sols_min"]),
             sols_max=int(bench_dict["sols_max"]),
         )
+    eaik_dict = body.get("eaik")
+    eaik = None
+    if isinstance(eaik_dict, dict):
+        eaik = ArmEaik(
+            supported=bool(eaik_dict["supported"]),
+            refusal=str(eaik_dict.get("refusal", "")),
+            family=str(eaik_dict.get("family", "")),
+            ms_mean=float(eaik_dict.get("ms_mean", 0.0)),
+            ms_ci95=float(eaik_dict.get("ms_ci95", 0.0)),
+            max_fk=float(eaik_dict.get("max_fk", 0.0)),
+            sols_min=int(eaik_dict.get("sols_min", 0)),
+            sols_max=int(eaik_dict.get("sols_max", 0)),
+        )
+
     gaps_dict = body.get("known_gaps")
     known_gaps = None
     if isinstance(gaps_dict, dict):
@@ -140,6 +171,7 @@ def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
         drift_markers=tuple(str(m) for m in body.get("drift_markers", [])),  # type: ignore[arg-type]
         fixture_source=_required_fixture_source(name, body),
         bench=bench,
+        eaik=eaik,
         known_gaps=known_gaps,
     )
 
@@ -153,7 +185,7 @@ def _required_fixture_source(name: str, body: dict[str, object]) -> str:
         raise ValueError(
             f"arm {name!r}: ``fixture_source`` is required (#311); "
             "supply a short provenance line like "
-            '\'"robot_descriptions / ur5_description"\''
+            "'\"robot_descriptions / ur5_description\"'"
         )
     return src.strip()
 

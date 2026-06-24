@@ -69,6 +69,13 @@ xacro = [
     "urchin>=0.0.27",
     "xacrodoc>=2.0.1",
 ]
+# ``pip install ssik[bench]`` for the EAIK comparison in scripts/regen_bench.py
+# and examples/04. EAIK is a C++ wrapper -- kept out of the dev group so CI's
+# ``uv sync --dev`` never builds it (committed bench numbers flow to docs; CI
+# only runs the regen_docs drift-check, never EAIK). (#350)
+bench = [
+    "eaik>=1.2.2",
+]
 
 [project.urls]
 Repository = "https://github.com/personalrobotics/ssik"

@@ -176,52 +176,23 @@ def _row_readme_eaik(arm: Arm) -> str:
 
 
 def _eaik_cell_for(arm: Arm) -> str:
-    """Lookup the EAIK comparison cell for one arm.
+    """The EAIK comparison cell, read from the manifest's measured
+    ``[arms.X.eaik]`` block.
 
-    EAIK's behaviour is captured here (not in the manifest) because it
-    is a property of EAIK + our bench harness, not of the arm itself.
-    A future cross-library comparison bench (e.g. against TracIK or
-    MINK) would have its own per-class lookup table at the same layer.
-
-    Pieper 6R: EAIK solves analytically (~5 µs). Cells in this branch
-    fall back to a static "no-EAIK-bench-here" tag until the bench
-    harness re-runs EAIK side-by-side. (Most arms in this class haven't
-    been re-benched against EAIK in the current PR.) Override per arm
-    via a future ``arm.bench_eaik`` block if needed.
+    EAIK's behaviour per arm -- whether it has a known decomposition, and if so
+    its timing/FK/branch numbers, else its verbatim refusal string -- is
+    measured by ``scripts/regen_bench.py`` (against EAIK itself) and stored in
+    the manifest, exactly like ssik's own bench. No hand-maintained tables.
     """
-    tags = set(arm.class_tags)
-    if "Pieper" in tags:
-        # UR5 / Puma / Z1 — EAIK is native here. The current README
-        # cells carry the literal "5 ± 0 µs / FK <x> / <sols>" measured
-        # numbers; we preserve those by special-casing the known three.
-        return _PIEPER_EAIK.get(arm.name, "_(no EAIK bench cell yet)_")
-    if "non-Pieper" in tags:
-        return '**refuses** ("6R-Unknown Kinematic Class")'
-    if "approximate-SRS" in tags:
-        return '**refuses** ("only 1-6R")'
-    if "SRS" in tags and arm.fixture_kind == "specs":
-        # 7-joint specs fixture; EAIK's DH adapter rejects on joint count.
-        return "**refuses** (no 7R DH path in bench harness)"
-    if "SRS" in tags:
-        # SRS-class fixtures with URDF intake (#311: iiwa14): EAIK's URDF
-        # loader rejects 7R with the literal "only 1-6R" string.
-        return '**refuses** ("only 1-6R")'
-    if "non-SRS" in tags and arm.fixture_kind == "specs":
-        return "**refuses** (no 7R DH path in bench harness)"
-    if "non-SRS" in tags:
-        # URDF-loaded 7R — EAIK rejects with its actual message
-        return '**refuses** ("only 1-6R")'
-    return "_(uncategorised)_"
-
-
-# Hand-maintained EAIK measurements for Pieper-class arms (UR5, Puma 560,
-# Z1). Updating these requires re-running the bench against EAIK; the
-# numbers don't live in the manifest because they're EAIK's, not ssik's.
-_PIEPER_EAIK: dict[str, str] = {
-    "ur5_ik": "5 ± 0 µs / FK 2e-15 / 2-8 sols",
-    "puma560_ik": "5 ± 0 µs / FK 3e-14 / 8 sols",
-    "z1_ik": "5 ± 0 µs / FK 1e-15 / 4-8 sols",
-}
+    e = arm.eaik
+    if e is None:
+        return "_(no EAIK bench cell yet)_"
+    if not e.supported:
+        return f'**refuses** ("{e.refusal or "unsupported"}")'
+    return (
+        f"{_fmt_time(e.ms_mean, e.ms_ci95)} / FK {_fmt_fk(e.max_fk)} "
+        f"/ {_fmt_sols(e.sols_min, e.sols_max)} sols"
+    )
 
 
 def _row_quickstart_prebuilt(arm: Arm) -> str:

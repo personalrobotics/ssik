@@ -260,6 +260,31 @@ wheels = [
 ]
 
 [[package]]
+name = "eaik"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "scipy" },
+    { name = "urchin" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ed/f6/326b5bdc5c9d33c400d274d790e472170b82c3e0a307cbecc54b21897e93/eaik-1.2.2.tar.gz", hash = "sha256:1f70e77e49f22e148b21a973c0dc84c2f88c5bb7fd258c6daef00b9736697e68", size = 47168, upload-time = "2026-06-16T11:55:55.082Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a9/53/7ffb79ac7617a11432116e16c4166948710427ac252b091a6d848603e084/eaik-1.2.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:f17d1bcdf02d519d17e77bc90010c46781d0d3ff77faa6a726add487cba52bf3", size = 625468, upload-time = "2026-06-16T11:55:30.049Z" },
+    { url = "https://files.pythonhosted.org/packages/08/d7/fedc238eb2e5af397f6e4c9ba79dc880bd159bf33f7c72e342a8146aeea6/eaik-1.2.2-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7133388deb93fb7db355a8e6e7e32f6df40069ede98aeb6d799dca92ca5fcca1", size = 324706, upload-time = "2026-06-16T11:55:31.65Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/9a/5f84bce76ea29f3a115c505208dc082e06669e91ec74f033a612ae2824f9/eaik-1.2.2-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:f1674d998c764abb527acc7e9a32307b8c18ee50614046049baf46be3ce8ebf3", size = 357231, upload-time = "2026-06-16T11:55:33.23Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/a3/ad21807184322172273a5c3bacc3b6fbbad3cc0d051a8f9687dba40b6bb6/eaik-1.2.2-cp311-cp311-win_amd64.whl", hash = "sha256:ca77461e4caed4dbef283b552355eb12f11fc9aa26eb8d77d2477367771e4680", size = 1408216, upload-time = "2026-06-16T11:55:34.677Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/07/0f1bc0237c2040fe0c03f2722042faf9d387a2470c5d81c1a34bc23762bf/eaik-1.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:c3d951e938d25b0d9aaa2595542d70cba29eae518791244bfacb2a18024cb15c", size = 630158, upload-time = "2026-06-16T11:55:36.286Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/8e/5795c4d5ccde96835f6afb93096471541d8f22c8ab5f9253284fdd55e8ee/eaik-1.2.2-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:74205aa5a5abbbb3bea70427de314eb2140046033bbcbd66043cd4f821da7fcb", size = 325080, upload-time = "2026-06-16T11:55:37.913Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/15/0ee33b4e3eba7f7955f88279f5417fc9637650f3b6bec193c401b31656be/eaik-1.2.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:30e9d6c1e476edfcb4df90fb400bcd29422a3b71249ef50a3e6960a170b10d32", size = 357497, upload-time = "2026-06-16T11:55:39.464Z" },
+    { url = "https://files.pythonhosted.org/packages/23/cb/9db59383ff0098489d4d32527da92c8718fd236c8fe3d2c1e13bc3460eb1/eaik-1.2.2-cp312-cp312-win_amd64.whl", hash = "sha256:6e1e6dcb5dabf432c6133a2be27b4ad286170b5feb81b044ee7b115344311d90", size = 1409505, upload-time = "2026-06-16T11:55:40.907Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/03/217875aad397c454fd87204eb55adcb799986b21d0b3c4f16b3b2516df72/eaik-1.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:ab9b1012c0c3beaee9ae49beb8405ff31175b0289a88b18f514c4581e0941800", size = 630285, upload-time = "2026-06-16T11:55:43.04Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/ea/a33b423866873f3302853ab8be08a13375e9c0f2a764f017565e02081cdb/eaik-1.2.2-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7ed64f7cad1c236c2c301cf28d26f1a208a5d25752cd82207ba4b98825914e11", size = 325164, upload-time = "2026-06-16T11:55:44.468Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/d6/02b40db580c3bc304bf0e84b94d2af0c79f6b7d0d328f2e14ca7f5cad1f6/eaik-1.2.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e41e42df026e8b70230cd37b9b09c32ec1e515eabfaffbced8e1a5701cb37368", size = 357586, upload-time = "2026-06-16T11:55:45.847Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/84/c9bcf9b4decb84c98db87630aed464211efaba7cac234be5ebd8028d6240/eaik-1.2.2-cp313-cp313-win_amd64.whl", hash = "sha256:b120e7f215125126c569682810b1c3d84c486c0fef23cbe65bdb2977a6f85f56", size = 1409528, upload-time = "2026-06-16T11:55:47.335Z" },
+]
+
+[[package]]
 name = "embreex"
 version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2017,6 +2042,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+bench = [
+    { name = "eaik" },
+]
 demo = [
     { name = "imageio" },
     { name = "robot-descriptions" },
@@ -2057,6 +2085,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "cython", specifier = ">=3.1" },
+    { name = "eaik", marker = "extra == 'bench'", specifier = ">=1.2.2" },
     { name = "imageio", marker = "extra == 'demo'", specifier = ">=2.34" },
     { name = "mujoco", marker = "extra == 'mjcf'", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.0" },
@@ -2069,7 +2098,7 @@ requires-dist = [
     { name = "xacrodoc", marker = "extra == 'xacro'", specifier = ">=2.0.1" },
     { name = "yourdfpy", marker = "extra == 'demo'", specifier = ">=0.0.60" },
 ]
-provides-extras = ["demo", "mjcf", "urdf", "xacro"]
+provides-extras = ["bench", "demo", "mjcf", "urdf", "xacro"]
 
 [package.metadata.requires-dev]
 dev = [

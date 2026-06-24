@@ -169,6 +169,21 @@ def test_every_arm_has_provenance() -> None:
         assert arm.fixture_source, f"arm {name!r}: fixture_source must not be empty (#311)"
 
 
+def test_every_arm_has_eaik_comparison() -> None:
+    """Every manifest entry must carry an ``[eaik]`` block (populated by
+    ``scripts/regen_bench.py``), so a newly-onboarded arm never silently ships
+    with a blank EAIK comparison cell. Each block must be internally consistent:
+    supported arms carry a family + timing; refused arms carry a reason."""
+    for name, arm in load_manifest().items():
+        e = arm.eaik
+        assert e is not None, f"arm {name!r}: missing [eaik] block (run scripts/regen_bench.py)"
+        if e.supported:
+            assert e.family, f"arm {name!r}: supported EAIK block must name a family"
+            assert e.ms_mean > 0, f"arm {name!r}: supported EAIK block must have timing"
+        else:
+            assert e.refusal, f"arm {name!r}: refused EAIK block must carry a refusal string"
+
+
 def test_at_least_one_arm_has_upstream_parity_coverage() -> None:
     """At least one arm in the manifest must have a
     ``robot_descriptions / <name>`` provenance line, so the parametrised

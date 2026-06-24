@@ -40,7 +40,11 @@
 #                       provenance line so users can audit whether ssik's IK
 #                       solves the same chain the manufacturer ships. Required
 #                       per #311; loader rejects empty.
-#   [bench]             Latest measurements from examples/04_compare_vs_eaik.py
+#   [bench]             Latest ssik solve() measurements (scripts/regen_bench.py)
+#   [eaik]              EAIK comparison, measured by scripts/regen_bench.py against
+#                       EAIK itself: supported=true + timing/FK/branch numbers, or
+#                       supported=false + a verbatim refusal string. Renders the
+#                       README EAIK comparison table.
 #   [known_gaps]        Optional xfail entries for the uniform fuzz test
 
 [arms.ur5_ik]
@@ -68,6 +72,15 @@ platform_drift = false
 ms_mean = 0.52
 ms_ci95 = 0.01
 max_fk = 6.3e-12
+sols_min = 2
+sols_max = 8
+
+[arms.ur5_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00425628
+ms_ci95 = 0.00031069
+max_fk = 1.6e-15
 sols_min = 2
 sols_max = 8
 
@@ -99,6 +112,15 @@ max_fk = 1.4e-08
 sols_min = 2
 sols_max = 8
 
+[arms.ur3e_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00409399
+ms_ci95 = 0.000413332
+max_fk = 1.4e-15
+sols_min = 2
+sols_max = 6
+
 [arms.ur5e_ik]
 display_name = "Universal Robots UR5e"
 short_name = "UR5e"
@@ -127,6 +149,15 @@ max_fk = 2.0e-09
 sols_min = 2
 sols_max = 8
 
+[arms.ur5e_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00412479
+ms_ci95 = 0.000527687
+max_fk = 1.4e-15
+sols_min = 4
+sols_max = 8
+
 [arms.ur10e_ik]
 display_name = "Universal Robots UR10e"
 short_name = "UR10e"
@@ -152,6 +183,15 @@ platform_drift = false
 ms_mean = 0.56
 ms_ci95 = 0.01
 max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
+
+[arms.ur10e_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00380271
+ms_ci95 = 4.07953e-05
+max_fk = 1.4e-15
 sols_min = 2
 sols_max = 8
 
@@ -183,6 +223,15 @@ max_fk = 1.4e-08
 sols_min = 2
 sols_max = 8
 
+[arms.ur16e_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00404688
+ms_ci95 = 0.000112286
+max_fk = 1.3e-15
+sols_min = 4
+sols_max = 8
+
 [arms.ur20_ik]
 display_name = "Universal Robots UR20"
 short_name = "UR20"
@@ -209,6 +258,15 @@ ms_mean = 0.59
 ms_ci95 = 0.01
 max_fk = 1.4e-08
 sols_min = 2
+sols_max = 8
+
+[arms.ur20_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00380187
+ms_ci95 = 4.48338e-05
+max_fk = 1.4e-15
+sols_min = 4
 sols_max = 8
 
 [arms.ur30_ik]
@@ -239,6 +297,15 @@ max_fk = 2.0e-09
 sols_min = 2
 sols_max = 8
 
+[arms.ur30_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00369166
+ms_ci95 = 4.25578e-05
+max_fk = 1.6e-15
+sols_min = 2
+sols_max = 8
+
 [arms.puma560_ik]
 display_name = "KUKA Puma 560"
 short_name = "Puma 560"
@@ -263,6 +330,15 @@ platform_drift = false
 [arms.puma560_ik.bench]
 ms_mean = 0.22
 ms_ci95 = 0.00
+max_fk = 8.3e-12
+sols_min = 8
+sols_max = 8
+
+[arms.puma560_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00393604
+ms_ci95 = 9.73211e-05
 max_fk = 8.3e-12
 sols_min = 8
 sols_max = 8
@@ -302,6 +378,10 @@ max_fk = 8.0e-07
 sols_min = 2
 sols_max = 12
 
+[arms.jaco2_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
 [arms.iiwa14_ik]
 display_name = "KUKA iiwa LBR 14"
 short_name = "iiwa14"
@@ -329,6 +409,10 @@ ms_ci95 = 0.03
 max_fk = 1.0e-13
 sols_min = 128
 sols_max = 128
+
+[arms.iiwa14_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
 [arms.gen3_ik]
 display_name = "Kinova Gen3 (7-DOF)"
@@ -364,6 +448,10 @@ max_fk = 9.9e-13
 sols_min = 11
 sols_max = 92
 
+[arms.gen3_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
 [arms.gen3_ik.known_gaps]
 xfail_reason = "srs_polished coverage gap on q*=[0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875] (0 sols at q*, 5 sols at q* + 0.01 on q5, 1 sol at q* + 0.01 on q7). Same shape as #286 / #288 / #298. Filed as #299."
 
@@ -395,6 +483,10 @@ ms_ci95 = 1.82
 max_fk = 2.7e-10
 sols_min = 8
 sols_max = 128
+
+[arms.franka_panda_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
 [arms.xarm7_ik]
 display_name = "UFactory xArm7"
@@ -431,6 +523,10 @@ max_fk = 1.5e-06
 sols_min = 48
 sols_max = 80
 
+[arms.xarm7_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
 [arms.xarm6_ik]
 display_name = "UFactory xArm6"
 short_name = "xArm6"
@@ -464,6 +560,10 @@ max_fk = 2.5e-06
 sols_min = 8
 sols_max = 16
 
+[arms.xarm6_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
 [arms.z1_ik]
 display_name = "Unitree Z1"
 short_name = "Z1"
@@ -489,6 +589,15 @@ platform_drift = false
 ms_mean = 0.48
 ms_ci95 = 0.01
 max_fk = 2.8e-15
+sols_min = 4
+sols_max = 8
+
+[arms.z1_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00424417
+ms_ci95 = 0.000164035
+max_fk = 1.6e-15
 sols_min = 4
 sols_max = 8
 
@@ -529,6 +638,10 @@ sols_min = 2
 sols_max = 8
 
 
+[arms.piper_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
 [arms.rizon4_ik]
 display_name = "Flexiv Rizon 4"
 short_name = "Rizon 4"
@@ -557,6 +670,10 @@ max_fk = 2.8e-07
 sols_min = 4
 sols_max = 60
 
+
+[arms.rizon4_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
 [arms.kassow_kr810_ik]
 display_name = "Kassow KR810"
@@ -587,6 +704,10 @@ sols_min = 4
 sols_max = 42
 
 
+[arms.kassow_kr810_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
 [arms.rizon10_ik]
 display_name = "Flexiv Rizon 10"
 short_name = "Rizon 10"
@@ -614,6 +735,10 @@ ms_ci95 = 0.16
 max_fk = 5.5e-08
 sols_min = 6
 sols_max = 64
+
+[arms.rizon10_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
 [arms.fanuc_crx10ial_ik]
 display_name = "FANUC CRX-10iA/L"
@@ -649,6 +774,10 @@ sols_min = 4
 sols_max = 12
 
 
+[arms.fanuc_crx10ial_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
 [arms.yam_ik]
 display_name = "I2RT YAM"
 short_name = "YAM"
@@ -681,6 +810,10 @@ ms_ci95 = 0.01
 max_fk = 3.5e-07
 sols_min = 5
 sols_max = 8
+
+[arms.yam_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
 
 [arms.big_yam_ik]
 display_name = "I2RT big_yam"
@@ -715,6 +848,10 @@ max_fk = 7.2e-07
 sols_min = 8
 sols_max = 8
 
+[arms.big_yam_ik.eaik]
+supported = false
+refusal = "Intersection point can't be calculated for two parallel axes"
+
 [arms.fr3_ik]
 display_name = "Franka Research 3"
 short_name = "FR3"
@@ -742,6 +879,10 @@ ms_ci95 = 1.84
 max_fk = 4.2e-10
 sols_min = 8
 sols_max = 128
+
+[arms.fr3_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
 [arms.openarm_left_ik]
 display_name = "Enactic OpenArm v2.0 (left)"
@@ -771,6 +912,10 @@ max_fk = 1.7e-15
 sols_min = 8
 sols_max = 40
 
+[arms.openarm_left_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
 [arms.openarm_right_ik]
 display_name = "Enactic OpenArm v2.0 (right)"
 short_name = "OpenArm R"
@@ -798,4 +943,8 @@ ms_ci95 = 0.43
 max_fk = 1.4e-15
 sols_min = 8
 sols_max = 40
+
+[arms.openarm_right_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
