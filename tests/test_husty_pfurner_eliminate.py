@@ -455,6 +455,7 @@ def test_pencil_eigenvalues_match_sympy_rational_resultant() -> None:
 # ----------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_eliminate_uw_numeric_under_perf_gate() -> None:
     """Average over 30 runs after a warmup. Tests on baseline DH so this
     is the *typical* expected runtime (large-alpha and other extremes

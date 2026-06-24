@@ -158,6 +158,7 @@ def test_iiwa14_srs_vs_jointlock_both_find_fk_correct_ik(q_star: np.ndarray) -> 
 # ----------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_iiwa14_full_sweep_under_2ms() -> None:
     """Full swivel sweep + 8-branch enumeration on iiwa14 must take < 2 ms median.
 
@@ -182,6 +183,7 @@ def test_iiwa14_full_sweep_under_2ms() -> None:
     assert median_ms < 50, f"SRS full-sweep too slow: {median_ms:.2f} ms"
 
 
+@pytest.mark.perf
 def test_iiwa14_max_solutions_one_under_1ms() -> None:
     """`max_solutions=1` (give-me-any-IK use case) must take < 1 ms median.
 

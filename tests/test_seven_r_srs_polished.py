@@ -274,6 +274,7 @@ def test_polished_refuses_non_7r() -> None:
 # ----------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_gen3_polished_under_400ms() -> None:
     """Median full-sweep on Gen3 must be < 400 ms (vs ~1500 ms jointlock+HP).
 
