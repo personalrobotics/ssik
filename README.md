@@ -127,12 +127,12 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | Module | Fixture provenance |
 |---|---|
 | `ur5_ik` | robot_descriptions / ur5_description |
-| `ur3e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur3e) |
-| `ur5e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur5e) |
-| `ur10e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur10e) |
-| `ur16e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur16e) |
-| `ur20_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur20) |
-| `ur30_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur30) |
+| `ur3e_ik` | robot_descriptions / ur3e_description (ur.urdf.xacro, ur_type:=ur3e) |
+| `ur5e_ik` | robot_descriptions / ur5e_description (ur.urdf.xacro, ur_type:=ur5e) |
+| `ur10e_ik` | robot_descriptions / ur10e_description (ur.urdf.xacro, ur_type:=ur10e) |
+| `ur16e_ik` | robot_descriptions / ur16e_description (ur.urdf.xacro, ur_type:=ur16e) |
+| `ur20_ik` | robot_descriptions / ur20_description (ur.urdf.xacro, ur_type:=ur20) |
+| `ur30_ik` | robot_descriptions / ur30_description (ur.urdf.xacro, ur_type:=ur30) |
 | `puma560_ik` | classical DH (Lee, Asada & Slotine 1986) |
 | `jaco2_ik` | Kinova j2n6s200 DH (kinova-ros / kinova_description) |
 | `iiwa14_ik` | robot_descriptions / iiwa14_description |
