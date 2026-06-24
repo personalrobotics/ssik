@@ -63,6 +63,12 @@ demo = [
 mjcf = [
     "mujoco>=3.10.0",
 ]
+# ``pip install ssik[xacro]`` to load xacro descriptions (multi-file / macros /
+# substitution args) directly, e.g. the Universal Robots family.
+xacro = [
+    "urchin>=0.0.27",
+    "xacrodoc>=2.0.1",
+]
 
 [project.urls]
 Repository = "https://github.com/personalrobotics/ssik"
@@ -217,6 +223,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "mujoco.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "xacrodoc.*"
 ignore_missing_imports = true
 
 # cython runtime ships ``py.typed`` from 3.1+ but the marker is missing

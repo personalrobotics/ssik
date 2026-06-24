@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ssik._urdf import load_urdf_kinbody_normalized, strip_urdf_to_fixture
+from ssik._urdf import _as_plain_urdf, load_urdf_kinbody_normalized, strip_urdf_to_fixture
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import DispatchPlan, dispatch
 from ssik.subproblems._rotation import rotation_matrix
@@ -176,7 +176,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _add_common_kinbody_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("urdf", type=Path, help="Path to the URDF file.")
+    parser.add_argument("urdf", type=Path, help="Path to the URDF or xacro file.")
     parser.add_argument(
         "--base",
         required=True,
@@ -187,6 +187,31 @@ def _add_common_kinbody_args(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="Link name to treat as the end-effector of the kinematic chain.",
     )
+    parser.add_argument(
+        "--xacro-arg",
+        action="append",
+        default=[],
+        metavar="NAME:=VALUE",
+        dest="xacro_arg",
+        help=(
+            "Xacro substitution arg for parametrized descriptions (repeatable), "
+            "e.g. --xacro-arg ur_type:=ur10e. Ignored for plain URDFs."
+        ),
+    )
+
+
+def _parse_xacro_args(args: argparse.Namespace) -> dict[str, str] | None:
+    """Parse ``--xacro-arg NAME:=VALUE`` pairs into a substitution dict."""
+    pairs: list[str] = getattr(args, "xacro_arg", []) or []
+    if not pairs:
+        return None
+    out: dict[str, str] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition(":=")
+        if not sep or not key:
+            raise SystemExit(f"[ssik] ERROR: bad --xacro-arg {pair!r}; expected NAME:=VALUE")
+        out[key] = value
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +246,9 @@ def _configure_logging(verbose_count: int) -> None:
 
 def _run_classify(args: argparse.Namespace) -> int:
     print(f"[ssik] Loading {args.urdf}")
-    kb = load_urdf_kinbody_normalized(args.urdf, args.base, args.ee)
+    kb = load_urdf_kinbody_normalized(
+        args.urdf, args.base, args.ee, xacro_args=_parse_xacro_args(args)
+    )
     print(f"[ssik]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK")
     plan = dispatch(kb)
     _print_dispatch_summary(plan)
@@ -235,7 +262,9 @@ def _run_classify(args: argparse.Namespace) -> int:
 
 def _run_build(args: argparse.Namespace) -> int:
     print(f"[ssik] Loading {args.urdf}")
-    kb = load_urdf_kinbody_normalized(args.urdf, args.base, args.ee)
+    kb = load_urdf_kinbody_normalized(
+        args.urdf, args.base, args.ee, xacro_args=_parse_xacro_args(args)
+    )
     print(f"[ssik]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK")
 
     print("[ssik] Classifying topology")
@@ -433,15 +462,21 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     if not args.urdf.is_file():
         print(f"[ssik add-arm] ERROR: {args.urdf} not found.")
         return 1
-    kb = load_urdf_kinbody_normalized(args.urdf, args.base, args.ee)
-    print(f"[ssik add-arm]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK")
+    # Resolve xacro -> plain URDF once, then load + vendor from the same source
+    # (vendoring a self-contained, expanded URDF, never the raw xacro).
+    with _as_plain_urdf(args.urdf, _parse_xacro_args(args)) as plain_urdf:
+        kb = load_urdf_kinbody_normalized(plain_urdf, args.base, args.ee)
+        print(
+            f"[ssik add-arm]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK"
+        )
 
-    print("[ssik add-arm] Classifying topology")
-    plan = dispatch(kb)
-    _print_dispatch_summary(plan)
+        print("[ssik add-arm] Classifying topology")
+        plan = dispatch(kb)
+        _print_dispatch_summary(plan)
 
-    print(f"[ssik add-arm] Vendoring URDF (kinematics-only) -> {urdf_dest.relative_to(repo_root)}")
-    n_links, n_joints = strip_urdf_to_fixture(args.urdf, urdf_dest)
+        rel = urdf_dest.relative_to(repo_root)
+        print(f"[ssik add-arm] Vendoring URDF (kinematics-only) -> {rel}")
+        n_links, n_joints = strip_urdf_to_fixture(plain_urdf, urdf_dest)
     kb_bytes = urdf_dest.stat().st_size
     print(f"[ssik add-arm]   stripped to {n_links} links, {n_joints} joints, {kb_bytes:,} bytes")
 

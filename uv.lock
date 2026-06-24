@@ -2007,6 +2007,10 @@ mjcf = [
 urdf = [
     { name = "urchin" },
 ]
+xacro = [
+    { name = "urchin" },
+    { name = "xacrodoc" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -2037,10 +2041,12 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.13" },
     { name = "sympy", specifier = ">=1.10" },
     { name = "urchin", marker = "extra == 'urdf'", specifier = ">=0.0.27" },
+    { name = "urchin", marker = "extra == 'xacro'", specifier = ">=0.0.27" },
     { name = "viser", marker = "extra == 'demo'", specifier = ">=1.0" },
+    { name = "xacrodoc", marker = "extra == 'xacro'", specifier = ">=2.0.1" },
     { name = "yourdfpy", marker = "extra == 'demo'", specifier = ">=0.0.60" },
 ]
-provides-extras = ["demo", "mjcf", "urdf"]
+provides-extras = ["demo", "mjcf", "urdf", "xacro"]
 
 [package.metadata.requires-dev]
 dev = [

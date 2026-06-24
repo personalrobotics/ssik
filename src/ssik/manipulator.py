@@ -113,19 +113,26 @@ class Manipulator:
         base: str,
         ee: str,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+        xacro_args: dict[str, str] | None = None,
     ) -> Manipulator:
-        """Load a URDF and build a :class:`Manipulator` for the chain
+        """Load a URDF (or xacro) and build a :class:`Manipulator` for the chain
         between ``base`` and ``ee``.
 
         The kinematic chain is POE-normalised internally so the dispatcher
         can match the arm's topology against the solver roster. Mesh loading
         is lazy (the URDF parser does not load STL files unless asked).
 
-        :param path: path to the URDF file.
+        Xacro descriptions (``.xacro`` / ``*.urdf.xacro``, or a ``.urdf`` with a
+        xacro namespace) are expanded automatically via ``xacrodoc``
+        (``pip install ssik[xacro]``).
+
+        :param path: path to the URDF or xacro file.
         :param base: name of the base link in the URDF.
         :param ee: name of the end-effector link in the URDF.
         :param policy: tolerance policy. Defaults to
             :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
+        :param xacro_args: substitution args for parametrized xacro descriptions
+            (e.g. ``{"ur_type": "ur10e"}``); ignored for plain URDFs.
 
         :raises FileNotFoundError: if ``path`` doesn't exist.
         :raises ValueError: if ``base`` or ``ee`` are not link names in the URDF.
@@ -142,7 +149,7 @@ class Manipulator:
         if not path_obj.exists():
             raise FileNotFoundError(f"URDF file not found: {path_obj}")
 
-        kb = load_urdf_kinbody_normalized(path, base, ee)
+        kb = load_urdf_kinbody_normalized(path, base, ee, xacro_args=xacro_args)
         return cls(kb, policy=policy)
 
     # ------------------------------------------------------------------

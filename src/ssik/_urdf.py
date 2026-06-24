@@ -14,7 +14,10 @@ will wrap this.
 
 from __future__ import annotations
 
+import os
+import tempfile
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,9 +27,16 @@ from numpy.typing import NDArray
 from ssik._kinbody import Joint, JointType, KinBody, Link, build_poe_kinbody
 
 if TYPE_CHECKING:  # pragma: no cover — typing only
+    from collections.abc import Iterator
+
     from urchin import Joint as UrchinJoint
 
-__all__ = ["load_urdf_kinbody", "load_urdf_kinbody_normalized", "strip_urdf_to_fixture"]
+__all__ = [
+    "load_urdf_kinbody",
+    "load_urdf_kinbody_normalized",
+    "process_xacro",
+    "strip_urdf_to_fixture",
+]
 
 # Non-kinematic elements stripped when vendoring a URDF as a test fixture:
 # everything irrelevant to inverse kinematics. Keeps fixtures small and free of
@@ -80,6 +90,60 @@ def _import_urchin() -> object:
     return urchin
 
 
+def _import_xacrodoc() -> object:
+    try:
+        import xacrodoc
+    except ImportError as err:
+        raise ImportError(
+            "Xacro descriptions require the optional 'xacro' extra: "
+            "`pip install ssik[xacro]` (or `uv add xacrodoc`)."
+        ) from err
+    return xacrodoc
+
+
+def _is_xacro(path: Path) -> bool:
+    """True if ``path`` is a xacro description -- by extension (``.xacro`` /
+    ``*.urdf.xacro``) or by a xacro namespace/macro in a ``.urdf`` file."""
+    name = path.name.lower()
+    if name.endswith(".xacro"):
+        return True
+    try:
+        head = path.read_text(errors="ignore")
+    except OSError:
+        return False
+    return "xmlns:xacro" in head or "<xacro:" in head
+
+
+def process_xacro(source: str | Path, subargs: dict[str, str] | None = None) -> str:
+    """Expand a xacro description to a flat URDF string via ``xacrodoc``
+    (resolving ``<xacro:include>``, macros, and substitution args).
+
+    :param subargs: xacro substitution args (e.g. ``{"ur_type": "ur10e"}``) for
+        parametrized descriptions.
+    """
+    xacrodoc = _import_xacrodoc()
+    doc = xacrodoc.XacroDoc.from_file(str(source), subargs=subargs or {})  # type: ignore[attr-defined]
+    return str(doc.to_urdf_string())
+
+
+@contextmanager
+def _as_plain_urdf(source: str | Path, subargs: dict[str, str] | None = None) -> Iterator[Path]:
+    """Yield a plain-URDF path for ``source``: the path itself for a URDF, or a
+    temporary expanded URDF for a xacro description (cleaned up on exit)."""
+    src = Path(source)
+    if not _is_xacro(src):
+        yield src
+        return
+    urdf_text = process_xacro(src, subargs)
+    fd, tmp_name = tempfile.mkstemp(suffix=".urdf", prefix=f"{src.stem}_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(urdf_text)
+        yield Path(tmp_name)
+    finally:
+        Path(tmp_name).unlink(missing_ok=True)
+
+
 def _walk_chain(urdf: object, base_link: str, ee_link: str) -> list[UrchinJoint]:
     """Return the ordered list of URDF joints from ``base_link`` to ``ee_link``,
     walking the public ``joints`` list (no private-graph internals).
@@ -129,9 +193,10 @@ def load_urdf_kinbody(
     ee_link: str,
     *,
     lazy_load_meshes: bool = True,
+    xacro_args: dict[str, str] | None = None,
 ) -> KinBody:
-    """Load a URDF file and build a :class:`KinBody` for the chain between
-    ``base_link`` and ``ee_link``.
+    """Load a URDF (or xacro) file and build a :class:`KinBody` for the chain
+    between ``base_link`` and ``ee_link``.
 
     Active joints (revolute / continuous / prismatic) become :class:`Joint`s in
     the kinbody. Fixed joints are fused into the adjacent active joint's
@@ -141,9 +206,12 @@ def load_urdf_kinbody(
 
     :param lazy_load_meshes: forwarded to ``urchin.URDF.load``; default ``True``
         since we don't need mesh geometry for kinematics.
+    :param xacro_args: substitution args for parametrized xacro descriptions
+        (see :func:`process_xacro`); ignored for plain URDFs.
     """
     urchin = _import_urchin()
-    urdf = urchin.URDF.load(str(urdf_path), lazy_load_meshes=lazy_load_meshes)  # type: ignore[attr-defined]
+    with _as_plain_urdf(urdf_path, xacro_args) as plain:
+        urdf = urchin.URDF.load(str(plain), lazy_load_meshes=lazy_load_meshes)  # type: ignore[attr-defined]
 
     chain = _walk_chain(urdf, base_link, ee_link)
 
@@ -221,8 +289,9 @@ def load_urdf_kinbody_normalized(
     ee_link: str,
     *,
     lazy_load_meshes: bool = True,
+    xacro_args: dict[str, str] | None = None,
 ) -> KinBody:
-    """Load a URDF and build a **POE-normalized** :class:`KinBody` for the
+    """Load a URDF (or xacro) and build a **POE-normalized** :class:`KinBody` for the
     chain between ``base_link`` and ``ee_link``.
 
     The resulting chain is kinematically identical to :func:`load_urdf_kinbody`
@@ -251,9 +320,12 @@ def load_urdf_kinbody_normalized(
     q=0, making the structure visible. See #33 for the full analysis.
 
     :param lazy_load_meshes: forwarded to ``urchin.URDF.load``.
+    :param xacro_args: substitution args for parametrized xacro descriptions
+        (see :func:`process_xacro`); ignored for plain URDFs.
     """
     urchin = _import_urchin()
-    urdf = urchin.URDF.load(str(urdf_path), lazy_load_meshes=lazy_load_meshes)  # type: ignore[attr-defined]
+    with _as_plain_urdf(urdf_path, xacro_args) as plain:
+        urdf = urchin.URDF.load(str(plain), lazy_load_meshes=lazy_load_meshes)  # type: ignore[attr-defined]
 
     chain = _walk_chain(urdf, base_link, ee_link)
 
