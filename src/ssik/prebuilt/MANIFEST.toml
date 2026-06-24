@@ -71,6 +71,174 @@ max_fk = 6.3e-12
 sols_min = 2
 sols_max = 8
 
+[arms.ur3e_ik]
+display_name = "Universal Robots UR3e"
+short_name = "UR3e"
+fixture = "ur3e.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur3e)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 33
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.ur3e_ik.bench]
+ms_mean = 0.69
+ms_ci95 = 0.05
+max_fk = 1.4e-08
+sols_min = 2
+sols_max = 8
+
+[arms.ur5e_ik]
+display_name = "Universal Robots UR5e"
+short_name = "UR5e"
+fixture = "ur5e.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur5e)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 33
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.ur5e_ik.bench]
+ms_mean = 0.57
+ms_ci95 = 0.01
+max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
+
+[arms.ur10e_ik]
+display_name = "Universal Robots UR10e"
+short_name = "UR10e"
+fixture = "ur10e.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur10e)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 33
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.ur10e_ik.bench]
+ms_mean = 0.56
+ms_ci95 = 0.01
+max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
+
+[arms.ur16e_ik]
+display_name = "Universal Robots UR16e"
+short_name = "UR16e"
+fixture = "ur16e.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur16e)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 33
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.ur16e_ik.bench]
+ms_mean = 0.61
+ms_ci95 = 0.04
+max_fk = 1.4e-08
+sols_min = 2
+sols_max = 8
+
+[arms.ur20_ik]
+display_name = "Universal Robots UR20"
+short_name = "UR20"
+fixture = "ur20.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur20)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 33
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.ur20_ik.bench]
+ms_mean = 0.59
+ms_ci95 = 0.01
+max_fk = 1.4e-08
+sols_min = 2
+sols_max = 8
+
+[arms.ur30_ik]
+display_name = "Universal Robots UR30"
+short_name = "UR30"
+fixture = "ur30.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur30)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 33
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.ur30_ik.bench]
+ms_mean = 0.58
+ms_ci95 = 0.01
+max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
+
 [arms.puma560_ik]
 display_name = "KUKA Puma 560"
 short_name = "Puma 560"

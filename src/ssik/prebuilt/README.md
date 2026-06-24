@@ -37,6 +37,12 @@ preprocessing) and cleaner to ship in production stacks.
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `ur5_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+| `ur3e_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
+| `ur5e_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
+| `ur10e_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
+| `ur16e_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
+| `ur20_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
+| `ur30_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
 | `puma560_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
 | `jaco2_ik` | `ikgeo.general_6r` | ~25 s | ~73 KB |
 | `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |

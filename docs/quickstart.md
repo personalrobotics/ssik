@@ -28,6 +28,12 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
+| `ur3e_ik` | Universal Robots UR3e | three-parallel 6R | `base_link` | `tool0` |
+| `ur5e_ik` | Universal Robots UR5e | three-parallel 6R | `base_link` | `tool0` |
+| `ur10e_ik` | Universal Robots UR10e | three-parallel 6R | `base_link` | `tool0` |
+| `ur16e_ik` | Universal Robots UR16e | three-parallel 6R | `base_link` | `tool0` |
+| `ur20_ik` | Universal Robots UR20 | three-parallel 6R | `base_link` | `tool0` |
+| `ur30_ik` | Universal Robots UR30 | three-parallel 6R | `base_link` | `tool0` |
 | `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
 | `jaco2_ik` | Kinova JACO 2 | non-Pieper 6R | `base_link` | `ee_link` |
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |

@@ -88,6 +88,12 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
+| `ur3e_ik` | Universal Robots UR3e | three-parallel 6R | `base_link` | `tool0` |
+| `ur5e_ik` | Universal Robots UR5e | three-parallel 6R | `base_link` | `tool0` |
+| `ur10e_ik` | Universal Robots UR10e | three-parallel 6R | `base_link` | `tool0` |
+| `ur16e_ik` | Universal Robots UR16e | three-parallel 6R | `base_link` | `tool0` |
+| `ur20_ik` | Universal Robots UR20 | three-parallel 6R | `base_link` | `tool0` |
+| `ur30_ik` | Universal Robots UR30 | three-parallel 6R | `base_link` | `tool0` |
 | `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
 | `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** | `base_link` | `ee_link` |
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
@@ -121,6 +127,12 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | Module | Fixture provenance |
 |---|---|
 | `ur5_ik` | robot_descriptions / ur5_description |
+| `ur3e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur3e) |
+| `ur5e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur5e) |
+| `ur10e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur10e) |
+| `ur16e_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur16e) |
+| `ur20_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur20) |
+| `ur30_ik` | robot_descriptions / ur_description (ur.urdf.xacro, ur_type:=ur30) |
 | `puma560_ik` | classical DH (Lee, Asada & Slotine 1986) |
 | `jaco2_ik` | Kinova j2n6s200 DH (kinova-ros / kinova_description) |
 | `iiwa14_ik` | robot_descriptions / iiwa14_description |
@@ -362,6 +374,12 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | UR5 (Pieper 6R, three-parallel) | 5 ± 0 µs / FK 2e-15 / 2-8 sols | 520 ± 10 µs / FK 6e-12 / 2-8 sols |
+| UR3e (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 690 ± 50 µs / FK 1e-8 / 2-8 sols |
+| UR5e (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 570 ± 10 µs / FK 2e-9 / 2-8 sols |
+| UR10e (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 560 ± 10 µs / FK 2e-9 / 2-8 sols |
+| UR16e (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 610 ± 40 µs / FK 1e-8 / 2-8 sols |
+| UR20 (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 590 ± 10 µs / FK 1e-8 / 2-8 sols |
+| UR30 (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 580 ± 10 µs / FK 2e-9 / 2-8 sols |
 | Puma 560 (Pieper 6R, spherical wrist) | 5 ± 0 µs / FK 3e-14 / 8 sols | 220 ± 0 µs / FK 8e-12 / 8 sols |
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 940 ± 30 µs / FK 8e-7 / 2-12 sols |
 | iiwa14 (SRS 7R) | **refuses** ("only 1-6R") | 4.66 ± 0.03 ms / FK 1e-13 / 128 sols |
