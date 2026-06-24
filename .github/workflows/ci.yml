@@ -10,9 +10,10 @@ name: CI
 # class of bug local-only can't catch: Linux-specific behavior (LAPACK
 # backend, libc/manylinux quirks, #82-style variance).
 #
-# Cost per PR: ~17 min wall, free (public repo). Was ~26 min wall
-# pre-cleanup (Linux + macOS). Doc-only PRs skip CI entirely via
-# paths-ignore.
+# Cost per PR: target ~5-10 min wall, free (public repo). The suite had
+# grown to 43-68 min (serial pytest + uncached robot_descriptions clones);
+# #348 cached the description repos and parallelized pytest (-n auto).
+# Doc-only PRs skip CI entirely via paths-ignore.
 
 on:
   pull_request:
@@ -58,6 +59,23 @@ jobs:
       - name: Sync dependencies
         run: uv sync --dev --python ${{ matrix.python-version }}
 
+      # Cache the robot_descriptions clones (~16 repos, several with mesh
+      # files). Uncached, these clones dominate CI wall-clock (~30-55 min) and
+      # cause the run-to-run variance. Keyed on MANIFEST.toml so adding an arm
+      # invalidates; restore-keys lets a manifest change reuse the prior cache
+      # so the prewarm step only clones the new entry. (#348)
+      - name: Cache robot_descriptions
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/robot_descriptions
+          key: rd-${{ hashFiles('src/ssik/prebuilt/MANIFEST.toml') }}
+          restore-keys: rd-
+
+      - name: Pre-warm robot_descriptions
+        # Serial clone before pytest so the parallel (-n auto) workers only
+        # read the cache -- no concurrent clones racing on the same dir.
+        run: uv run python scripts/prewarm_descriptions.py
+
       - name: ruff check
         run: uv run ruff check
 
@@ -76,4 +94,6 @@ jobs:
         run: uv run python scripts/regen_docs.py --check
 
       - name: pytest
-        run: uv run pytest -q
+        # -n auto parallelizes across the runner's cores. Descriptions are
+        # pre-warmed above so workers never clone concurrently. (#348)
+        run: uv run pytest -q -n auto
