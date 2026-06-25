@@ -94,11 +94,14 @@ jobs:
         run: uv run python scripts/regen_docs.py --check
 
       - name: pytest (parallel)
-        # -n auto parallelizes across the runner's cores. Descriptions are
-        # pre-warmed above so workers never clone concurrently. perf gates are
-        # excluded here and run serially below -- worker contention inflates
-        # wall-clock timing and flakes the sub-ms gates. (#348)
-        run: uv run pytest -q -n auto -m "not slow and not perf"
+        # Fixed -n 4 (ubuntu-latest = 4 vCPUs): `-n auto` resolved to ~1 worker
+        # on the runner (it uses sched_getaffinity, which the VM misreports), so
+        # the suite ran serially -- 48 min. Descriptions are pre-warmed above so
+        # workers never clone concurrently. perf gates are excluded here and run
+        # serially below -- worker contention inflates timing. (#348)
+        run: |
+          python3 -c "import os; print('cpu_count', os.cpu_count(), 'affinity', len(os.sched_getaffinity(0)))"
+          uv run pytest -q -n 4 -m "not slow and not perf"
 
       - name: pytest (perf gates, serial)
         # Wall-clock performance gates: run serially (no -n) so timing is
