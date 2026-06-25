@@ -107,7 +107,7 @@ jobs:
         # hook + nightly, so the per-PR suite is lean. Descriptions are
         # pre-warmed above so workers never clone concurrently. perf gates are
         # excluded here and run serially below. (#348)
-        run: uv run pytest -q -n 4 -m "not slow and not perf"
+        run: uv run pytest -n 4 -m "not slow and not perf" --durations=25 -ra
 
       - name: pytest (perf gates, serial)
         # Wall-clock performance gates: run serially (no -n) so timing is
