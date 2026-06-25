@@ -59,6 +59,14 @@ jobs:
       - name: Sync dependencies
         run: uv sync --dev --python ${{ matrix.python-version }}
 
+      - name: Runner info
+        # Surfaces the runner's real core count up front (a standalone step so it
+        # logs immediately, unlike a line inside the long pytest step). Confirms
+        # whether xdist parallelism can help here. (#348)
+        run: |
+          echo "nproc=$(nproc)"
+          python3 -c "import os; print('cpu_count', os.cpu_count(), 'affinity', len(os.sched_getaffinity(0)))"
+
       # Cache the robot_descriptions clones (~16 repos, several with mesh
       # files). Uncached, these clones dominate CI wall-clock (~30-55 min) and
       # cause the run-to-run variance. Keyed on MANIFEST.toml so adding an arm
@@ -94,14 +102,12 @@ jobs:
         run: uv run python scripts/regen_docs.py --check
 
       - name: pytest (parallel)
-        # Fixed -n 4 (ubuntu-latest = 4 vCPUs): `-n auto` resolved to ~1 worker
-        # on the runner (it uses sched_getaffinity, which the VM misreports), so
-        # the suite ran serially -- 48 min. Descriptions are pre-warmed above so
-        # workers never clone concurrently. perf gates are excluded here and run
-        # serially below -- worker contention inflates timing. (#348)
-        run: |
-          python3 -c "import os; print('cpu_count', os.cpu_count(), 'affinity', len(os.sched_getaffinity(0)))"
-          uv run pytest -q -n 4 -m "not slow and not perf"
+        # -n 4 (ubuntu-latest = 4 vCPUs). The heavy redundant tests (full
+        # snapshot roster, etc.) are marked slow and run on the macOS pre-push
+        # hook + nightly, so the per-PR suite is lean. Descriptions are
+        # pre-warmed above so workers never clone concurrently. perf gates are
+        # excluded here and run serially below. (#348)
+        run: uv run pytest -q -n 4 -m "not slow and not perf"
 
       - name: pytest (perf gates, serial)
         # Wall-clock performance gates: run serially (no -n) so timing is
