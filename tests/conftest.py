@@ -41,3 +41,23 @@ def _restore_rr_global_caches():
             _rr_mod._DERIVATION_CACHE.setdefault(dkey, dval)
         for lkey, lval in lin_before.items():
             _rr_mod._PRIMED_LINEARITY_MAP.setdefault(lkey, lval)
+
+
+# xarm7's analytical IK is ~140x slower on Linux/OpenBLAS than macOS/Accelerate
+# (#350): its fuzz / aot-prime / tight-policy tests take 30+ min on Linux CI and
+# single-handedly set the wall-clock floor, while staying ~13s on macOS (even
+# under xdist -- so this is a genuine platform pathology, not test flake or a
+# cache-coldness artifact). Defer them to `-m slow` (the macOS pre-push hook +
+# nightly, where xarm7 is fast) until the Linux perf bug is root-caused. xarm7's
+# other (fast) tests still run per-PR; only these three heavyweights move.
+_XARM7_SLOW_ON_CI = (
+    "test_prebuilt_7r_random_q_roundtrip",
+    "test_prebuilt_7r_tight_policy_machine_precision",
+    "test_aot_primed_solve_matches_fixed_pose_fingerprint",
+)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    for item in items:
+        if "xarm7_ik" in item.nodeid and any(p in item.nodeid for p in _XARM7_SLOW_ON_CI):
+            item.add_marker(pytest.mark.slow)
