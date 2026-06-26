@@ -29,5 +29,10 @@ jobs:
         run: |
           echo "nproc=$(nproc)"
           python3 -c "import os; print('cpu_count', os.cpu_count())"
-      - name: Profile xarm7
+      - name: Profile xarm7 (default BLAS threads)
+        run: uv run python scripts/profile_xarm7.py
+      - name: Profile xarm7 (OPENBLAS_NUM_THREADS=1)
+        env:
+          OPENBLAS_NUM_THREADS: "1"
+          OMP_NUM_THREADS: "1"
         run: uv run python scripts/profile_xarm7.py

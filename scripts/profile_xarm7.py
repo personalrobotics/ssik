@@ -8,12 +8,16 @@ solver's Linux conditioning, or a one-time precompute.
 
 from __future__ import annotations
 
+import os
 import time
 
 import numpy as np
 
 
 def main() -> None:
+    print("=== thread env ===")
+    for var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        print(f"  {var}={os.environ.get(var, '(unset)')}")
     print("=== BLAS backend ===")
     try:
         np.show_config()
