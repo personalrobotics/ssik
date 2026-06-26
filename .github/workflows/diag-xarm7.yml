@@ -1,0 +1,33 @@
+name: diag-xarm7
+
+# On-demand Linux profiler for the xarm7 ~140x slowdown (#350). Runs only when
+# the profiler script (or this file) changes, so it doesn't fire on every push.
+# Fast: sync + build + profile (~2 min), no test suite.
+
+on:
+  push:
+    paths:
+      - scripts/profile_xarm7.py
+      - .github/workflows/diag-xarm7.yml
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Sync dependencies
+        run: uv sync --dev
+      - name: Runner info
+        run: |
+          echo "nproc=$(nproc)"
+          python3 -c "import os; print('cpu_count', os.cpu_count())"
+      - name: Profile xarm7
+        run: uv run python scripts/profile_xarm7.py
