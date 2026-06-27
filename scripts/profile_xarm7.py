@@ -33,13 +33,41 @@ def main() -> None:
         q[3] = float(rng.uniform(0.3, 0.7))
         poses.append(m.fk(q))
 
+    # Instrument the cached-RR path: is it primed? does it return solutions or
+    # None (→ slow two_intersecting fallback)? This distinguishes "prime didn't
+    # load on Linux" from "primed but RR eig returns nothing on OpenBLAS".
+    import ssik.solvers.jointlock.seven_r as jl
+    from ssik.kinematics.poe_to_dh import poe_to_dh
+    from ssik.solvers.ikgeo._raghavan_roth import primed_linearity_for_dh
+
+    stats = {"calls": 0, "primed": 0, "returned_none": 0, "returned_sols": 0}
+    _orig = jl._try_cached_rr
+
+    def _wrapped(sub_kb, *a, **k):  # type: ignore[no-untyped-def]
+        stats["calls"] += 1
+        dh = poe_to_dh(sub_kb)
+        if (
+            primed_linearity_for_dh(
+                tuple(float(x) for x in dh.alpha),
+                tuple(float(x) for x in dh.a),
+                tuple(float(x) for x in dh.d),
+            )
+            is not None
+        ):
+            stats["primed"] += 1
+        r = _orig(sub_kb, *a, **k)
+        stats["returned_none" if r is None else "returned_sols"] += 1
+        return r
+
+    jl._try_cached_rr = _wrapped
     m.solve(poses[0])  # warm
     t = time.perf_counter()
     for T in poses:
         m.solve(T)
-    print(
-        f"\n=== {len(poses)} solves: {(time.perf_counter() - t) / len(poses) * 1000:.0f} ms/solve ==="
-    )
+    per = (time.perf_counter() - t) / len(poses) * 1000
+    print(f"\n=== {len(poses)} solves: {per:.0f} ms/solve ===")
+    print(f"=== _try_cached_rr: {stats} ===")
+    jl._try_cached_rr = _orig
 
     print("\n=== cProfile of 3 solves (top 25 by cumulative time) ===")
     pr = cProfile.Profile()
