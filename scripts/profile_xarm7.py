@@ -66,7 +66,7 @@ def main() -> None:
         m.solve(T)
     per = (time.perf_counter() - t) / len(poses) * 1000
     print(f"\n=== {len(poses)} solves: {per:.0f} ms/solve ===")
-    print(f"=== _try_cached_rr: {stats} ===")
+    print(f"=== _try_cached_rr: {stats} ===")  # expect primed==calls, none==0 after #350 fix
     jl._try_cached_rr = _orig
 
     print("\n=== cProfile of 3 solves (top 25 by cumulative time) ===")
