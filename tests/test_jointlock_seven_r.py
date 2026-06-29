@@ -183,6 +183,7 @@ def test_user_provided_samples_override(srs_kb: KinBody) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_default_sweep_under_budget(srs_kb: KinBody) -> None:
     """16-sample sweep on synthetic SRS arm should complete well under any
     tier-2 fallback timescale.

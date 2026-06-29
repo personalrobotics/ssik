@@ -81,6 +81,7 @@ ssik = "ssik.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "pytest-xdist>=3.6", # parallel test execution in CI (#348)
     "ruff>=0.8",
     "mypy>=1.13",
     "urchin>=0.0.27", # exercised by the URDF-adapter tests
@@ -293,4 +294,5 @@ testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "-m", "not slow"]
 markers = [
     "slow: symbolic IK generation tests that run on the order of seconds to minutes; opt in with `-m slow`",
+    "perf: wall-clock performance gates; run serially (CI runs them in a separate non-parallel step) since `-n auto` worker contention inflates timing (#348)",
 ]

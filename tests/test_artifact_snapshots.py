@@ -62,6 +62,36 @@ _MANIFEST = load_manifest()
 _SNAPSHOT_ARMS = [arm.name for arm in _MANIFEST.values() if not arm.slow_build]
 
 
+def _codegen_representatives(arm_names: list[str]) -> set[str]:
+    """One arm per distinct codegen path ``(solver, tier)``, preferring a
+    non-``platform_drift`` arm so the check is a real byte-compare on Linux.
+
+    Re-emitting an artifact re-runs its codegen; the cached-RR (general_6r)
+    arms cost ~20-40s *each* and dominate CI. Codegen drift is a property of
+    the *path*, not the arm, so per-PR we byte-check one representative per
+    path; the full roster is byte-checked under ``-m slow`` (the macOS pre-push
+    hook + nightly). (#348)
+    """
+    by_path: dict[tuple[str, int], list[Arm]] = {}
+    for name in arm_names:
+        arm = _MANIFEST[name]
+        by_path.setdefault((arm.solver, arm.tier), []).append(arm)
+    reps: set[str] = set()
+    for group in by_path.values():
+        preferred = [a for a in group if not a.platform_drift] or group
+        reps.add(preferred[0].name)
+    return reps
+
+
+_REPRESENTATIVES = _codegen_representatives(_SNAPSHOT_ARMS)
+# Per-PR (`-m "not slow"`) runs one representative per codegen path; the
+# remaining same-path arms are marked slow (full roster via `-m slow`).
+_SNAPSHOT_PARAMS = [
+    name if name in _REPRESENTATIVES else pytest.param(name, marks=pytest.mark.slow)
+    for name in _SNAPSHOT_ARMS
+]
+
+
 def _emit(arm: Arm) -> str:
     """Re-emit the artifact for ``arm`` and return its source code."""
     if arm.fixture_kind == "urdf":
@@ -91,11 +121,7 @@ def _emit(arm: Arm) -> str:
     return result.source
 
 
-@pytest.mark.parametrize(
-    "arm_name",
-    _SNAPSHOT_ARMS,
-    ids=_SNAPSHOT_ARMS,
-)
+@pytest.mark.parametrize("arm_name", _SNAPSHOT_PARAMS, ids=_SNAPSHOT_ARMS)
 def test_committed_artifact_matches_regeneration(arm_name: str) -> None:
     """Re-emit + byte-compare. Any drift fails the test with a unified-diff
     of the divergence and a pointer to the regen script.
