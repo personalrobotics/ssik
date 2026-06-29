@@ -431,6 +431,21 @@ _DerivationValue = tuple[
 ]
 _DERIVATION_CACHE: dict[_DerivationKey, _DerivationValue] = {}
 
+# Both caches are keyed on per-sample sub-chain DH (from ``poe_to_dh``). Those
+# values differ in the last bits across BLAS backends (OpenBLAS vs Accelerate,
+# ~1e-12); keying on exact floats then misses *across platforms* -- the
+# macOS-baked key != the Linux-runtime key -- silently dropping the cached-RR
+# fast path into the ~200x-slower ``search_1d`` fallback (#350: 55/176 keys
+# missed on Linux, xarm7 5.3 s/solve vs 23 ms on macOS). Quantizing the key to
+# 1e-6 absorbs the cross-backend jitter while keeping distinct sub-chains (which
+# differ by >= 1e-2 between lock samples) separate. The full-precision DH is
+# still used for the derivation itself; only the dict *key* is rounded.
+_DH_KEY_DECIMALS = 6
+
+
+def _dh_key(values: tuple[float, ...] | NDArray[np.float64]) -> tuple[float, ...]:
+    return tuple(round(float(x), _DH_KEY_DECIMALS) for x in values)
+
 
 def _cached_derivation(
     alpha: tuple[float, ...],
@@ -439,7 +454,7 @@ def _cached_derivation(
     linearity_joint: int = 2,
     apply_so3: bool = False,
 ) -> _DerivationValue:
-    key = (alpha, a, d, int(linearity_joint), bool(apply_so3))
+    key = (_dh_key(alpha), _dh_key(a), _dh_key(d), int(linearity_joint), bool(apply_so3))
     cached = _DERIVATION_CACHE.get(key)
     if cached is not None:
         return cached
@@ -486,7 +501,10 @@ def prime_derivation(
     alpha_t = tuple(float(x) for x in alpha)
     a_t = tuple(float(x) for x in a)
     d_t = tuple(float(x) for x in d)
-    _PRIMED_LINEARITY_MAP[(alpha_t, a_t, d_t)] = (int(linearity_joint), bool(apply_so3))
+    _PRIMED_LINEARITY_MAP[(_dh_key(alpha_t), _dh_key(a_t), _dh_key(d_t))] = (
+        int(linearity_joint),
+        bool(apply_so3),
+    )
     _cached_derivation(alpha_t, a_t, d_t, int(linearity_joint), bool(apply_so3))
 
 
@@ -579,14 +597,16 @@ def prime_derivation_from_blob(blob: bytes) -> None:
         "_sym_t_target": T_syms,
     }
     key = (
-        payload["alpha"],
-        payload["a"],
-        payload["d"],
+        _dh_key(payload["alpha"]),
+        _dh_key(payload["a"]),
+        _dh_key(payload["d"]),
         payload["linearity_joint"],
         payload["apply_so3"],
     )
     _DERIVATION_CACHE[key] = (p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata)
-    _PRIMED_LINEARITY_MAP[(payload["alpha"], payload["a"], payload["d"])] = (
+    _PRIMED_LINEARITY_MAP[
+        (_dh_key(payload["alpha"]), _dh_key(payload["a"]), _dh_key(payload["d"]))
+    ] = (
         payload["linearity_joint"],
         payload["apply_so3"],
     )
@@ -629,9 +649,12 @@ def _prime_aot(
         "right_bilinear": right_bilinear,
         "drop_joint": int(drop_joint),
     }
-    key = (alpha, a, d, int(linearity_joint), bool(apply_so3))
+    key = (_dh_key(alpha), _dh_key(a), _dh_key(d), int(linearity_joint), bool(apply_so3))
     _DERIVATION_CACHE[key] = (p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata)
-    _PRIMED_LINEARITY_MAP[(alpha, a, d)] = (int(linearity_joint), bool(apply_so3))
+    _PRIMED_LINEARITY_MAP[(_dh_key(alpha), _dh_key(a), _dh_key(d))] = (
+        int(linearity_joint),
+        bool(apply_so3),
+    )
 
 
 def primed_linearity_for_dh(
@@ -649,10 +672,7 @@ def primed_linearity_for_dh(
     fast-path. The lookup is O(1) and free of sympy work, so it's safe
     to call on every per-sample inner dispatch.
     """
-    alpha_t = tuple(float(x) for x in alpha)
-    a_t = tuple(float(x) for x in a)
-    d_t = tuple(float(x) for x in d)
-    return _PRIMED_LINEARITY_MAP.get((alpha_t, a_t, d_t))
+    return _PRIMED_LINEARITY_MAP.get((_dh_key(alpha), _dh_key(a), _dh_key(d)))
 
 
 # ---------------------------------------------------------------------------

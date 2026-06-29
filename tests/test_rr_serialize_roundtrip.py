@@ -29,6 +29,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (
     _DERIVATION_CACHE,
     _PRIMED_LINEARITY_MAP,
     _cached_best_leftvar,
+    _dh_key,
     prime_derivation_from_blob,
     primed_linearity_for_dh,
     serialize_derivation,
@@ -97,8 +98,35 @@ def test_prime_from_blob_populates_cache(fresh_cache) -> None:
     _DERIVATION_CACHE.clear()
     _PRIMED_LINEARITY_MAP.clear()
     prime_derivation_from_blob(blob)
-    assert (_ALPHA, _A, _D, linearity, False) in _DERIVATION_CACHE
+    # Caches are keyed on the quantized DH (#350: exact floats miss across BLAS
+    # backends); the public lookup quantizes internally.
+    assert (_dh_key(_ALPHA), _dh_key(_A), _dh_key(_D), linearity, False) in _DERIVATION_CACHE
     assert primed_linearity_for_dh(_ALPHA, _A, _D) == (linearity, False)
+
+
+def test_primed_lookup_tolerates_blas_jitter() -> None:
+    """#350 regression: a sub-chain primed on one BLAS backend must still be
+    found when ``poe_to_dh`` returns DH that differs in the last ~1e-12 bits on
+    another backend (OpenBLAS vs Accelerate). Before quantization, 55/176 of
+    xarm7's lock-sample lookups missed on Linux -> cached-RR returned None ->
+    jointlock fell to the ~200x-slower search solver (xarm7 5.3 s vs 23 ms).
+
+    Fast + deterministic: exercises the keying directly, no sympy derivation.
+    """
+    base = (0.1, -0.5, 1.0, 0.0, 0.25, -0.3)
+    # Perturb by BLAS-jitter scale (well under the 1e-6 key grid), alternating
+    # sign so it isn't a uniform shift.
+    jittered = tuple(x + (1e-11 if i % 2 else -1e-11) for i, x in enumerate(base))
+    assert jittered != base
+    assert _dh_key(base) == _dh_key(jittered)
+
+    key = (_dh_key(base), _dh_key(base), _dh_key(base))
+    _PRIMED_LINEARITY_MAP[key] = (2, False)
+    try:
+        # Lookup with the jittered DH must still hit the primed entry.
+        assert primed_linearity_for_dh(jittered, jittered, jittered) == (2, False)
+    finally:
+        _PRIMED_LINEARITY_MAP.pop(key, None)
 
 
 def test_prime_from_blob_rejects_version_mismatch() -> None:
