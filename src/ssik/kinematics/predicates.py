@@ -348,8 +348,7 @@ def is_srs_7r(
 ) -> SrsClassification | None:
     """Detect SRS-class 7R topology: shoulder-roll-spherical with shoulder
     axes (joints 0, 1, 2) meeting at one point and wrist axes (joints
-    4, 5, 6) meeting at one point, **with the first and third axes of
-    each triple parallel** (canonical Z*Z Euler structure).
+    4, 5, 6) meeting at one point (joint 3 is the elbow).
 
     Returns the :class:`SrsClassification` evidence (shoulder pivot, elbow
     index, wrist pivot, joint splits) when the topology matches; ``None``
@@ -359,32 +358,28 @@ def is_srs_7r(
     Real arms that pass this predicate (verified against published
     URDF/MJCF):
 
-    * KUKA iiwa LBR (7 / 14 / R820 / R14 / ...)
+    * KUKA iiwa LBR (7 / 14 / R820 / R14 / ...) -- canonical Z*Z
     * Flexiv Rizon 4 / 10
     * Kinova Gen3 (7-DOF)
     * Sawyer (Rethink)
     * Baxter (per-arm)
     * Kassow KR810 / KR1410
+    * Galaxea R1 Pro -- y-x-z shoulder / z-y-x wrist (non-Z*Z; #354)
 
     Arms that FAIL (different topology, different solver families):
 
     * Franka Panda / FR3 -- anthropomorphic 7R (shoulder spherical but
       wrist axes don't meet at one common point in the home configuration).
     * xArm7 -- mixed structure with non-canonical wrist pivot.
-    * Enactic OpenArm v2.0 -- shoulder/wrist axes meet at a point but
-      the triples are not Z*Z (wrist is z-y-x style). Singh-Kreutz's
-      closed-form ZYZ Euler decomposition silently produces wrong
-      q-vectors on these chains (#307). The relaxed-pivot polished
-      variant :func:`is_approximately_srs_7r` accepts these geometries
-      and the LM polish in ``seven_r.srs_polished`` rescues them.
 
-    The Z*Z (parallel first/third) requirement matches the Singh-Kreutz
-    parameterization in :mod:`ssik.solvers.seven_r.srs`: the wrist triple
-    is decomposed as ``R_z(q_4) R_y(q_5) R_z(q_6)`` (and symmetrically
-    for the shoulder), which only recovers an arbitrary target rotation
-    when the first and third axes are parallel. Without this check the
-    predicate over-accepts and the solver silently emits non-FK-closing
-    candidates -- the dispatch gap that #307 surfaced.
+    No Z*Z (parallel first/third axis) requirement (#354): the solver in
+    :mod:`ssik.solvers.seven_r.srs` now decomposes both shoulder and wrist
+    triples via the general Davenport (arbitrary three-axis) decomposition,
+    which recovers an arbitrary target rotation for *any* concurrent triple,
+    not just ``R_z R_y R_z``. The earlier Z*Z gate (#307) guarded the old
+    ZYZ-Euler extraction that silently mis-solved non-Z*Z chains (OpenArm
+    v2.0, R1 Pro); with the general extraction the gate is no longer needed
+    and concurrent-axis non-Z*Z arms route straight to the native solver.
 
     Distinguishing axis concurrence (this predicate) vs. axis +
     origin coincidence (the IK-Geo ``spherical`` predicate, #155): a
@@ -396,30 +391,7 @@ def is_srs_7r(
     ``p[3] = T_left[3] + T_left[4] + T_left[5]`` only represents the
     correct offset when origins lie at the intersection.
     """
-    cls = _classify_srs_7r_geometric(kb, policy)
-    if cls is None:
-        return None
-    # Z*Z Euler requirement (#307): the strict Singh-Kreutz solver
-    # decomposes both rotation triples as Euler ZYZ, which only inverts
-    # to an arbitrary target rotation when the first and third axes of
-    # the triple are parallel. Without this gate the predicate accepts
-    # arms whose axes meet at a point but whose triples are e.g. z-y-x
-    # (OpenArm v2.0); the solver then emits q-vectors that FK-close
-    # ~1-3 m off target. The Z*Z subset still covers every prebuilt
-    # we historically routed to ``seven_r.srs`` (iiwa14 et al.).
-    if not axis_parallel(
-        kb.joints[cls.shoulder_indices[0]].axis,
-        kb.joints[cls.shoulder_indices[2]].axis,
-        policy,
-    ):
-        return None
-    if not axis_parallel(
-        kb.joints[cls.wrist_indices[0]].axis,
-        kb.joints[cls.wrist_indices[2]].axis,
-        policy,
-    ):
-        return None
-    return cls
+    return _classify_srs_7r_geometric(kb, policy)
 
 
 def _max_axis_drift(

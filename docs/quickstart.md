@@ -50,8 +50,8 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `yam_ik` | I2RT YAM | non-Pieper 6R | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | non-Pieper 6R | `base` | `gripper` |
 | `fr3_ik` | Franka Research 3 | anthropomorphic 7R (Panda successor) | `fr3_link0` | `fr3_link8` |
-| `openarm_left_ik` | Enactic OpenArm v2.0 (left) | non-SRS 7R (axes concurrent, non-ZYZ wrist) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
-| `openarm_right_ik` | Enactic OpenArm v2.0 (right) | non-SRS 7R (axes concurrent, non-ZYZ wrist) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
+| `openarm_left_ik` | Enactic OpenArm v2.0 (left) | SRS 7R (non-Z*Z) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
+| `openarm_right_ik` | Enactic OpenArm v2.0 (right) | SRS 7R (non-Z*Z) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:
