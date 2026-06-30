@@ -38,7 +38,7 @@ def test_round_trip_recovers_rotation(name: str) -> None:
         R = _compose(n1, n2, n3, a, b, c)
         sols = decompose_3axis(R, n1, n2, n3)
         assert sols, f"{name}: no decomposition returned"
-        best = min(np.abs(_compose(n1, n2, n3, *s) - R).max() for s in sols)
+        best = min(np.abs(_compose(n1, n2, n3, s[0], s[1], s[2]) - R).max() for s in sols)
         worst = max(worst, best)
     assert worst < 1e-9, f"{name}: worst reconstruction error {worst:.2e}"
 
@@ -48,12 +48,14 @@ def test_round_trip_random_axes() -> None:
     rng = np.random.default_rng(1)
     worst = 0.0
     for _ in range(300):
-        axes = [rng.normal(size=3) for _ in range(3)]
+        m1, m2, m3 = (rng.normal(size=3) for _ in range(3))
         a, b, c = rng.uniform(-3.1, 3.1, size=3)
-        R = _compose(*axes, a, b, c)
-        sols = decompose_3axis(R, *axes)
+        R = _compose(m1, m2, m3, a, b, c)
+        sols = decompose_3axis(R, m1, m2, m3)
         assert sols
-        worst = max(worst, min(np.abs(_compose(*axes, *s) - R).max() for s in sols))
+        worst = max(
+            worst, min(np.abs(_compose(m1, m2, m3, sa, sb, sc) - R).max() for sa, sb, sc in sols)
+        )
     assert worst < 1e-9, f"random axes: worst {worst:.2e}"
 
 
@@ -73,7 +75,7 @@ def test_gimbal_still_reconstructs() -> None:
     R = _compose(n1, n2, n3, 0.7, 0.0, -0.2)  # b == 0 -> gimbal (a + c determined)
     sols = decompose_3axis(R, n1, n2, n3)
     assert sols
-    assert min(np.abs(_compose(n1, n2, n3, *s) - R).max() for s in sols) < 1e-9
+    assert min(np.abs(_compose(n1, n2, n3, s[0], s[1], s[2]) - R).max() for s in sols) < 1e-9
 
 
 def test_collinear_axes_returns_empty() -> None:

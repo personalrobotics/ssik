@@ -33,7 +33,7 @@ carrying ``R^T n1`` onto ``Rot(n2, b)^T n1``.
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
 __all__ = ["decompose_3axis"]
 
@@ -80,10 +80,10 @@ def _angle_about(
 
 
 def decompose_3axis(
-    R: NDArray[np.float64],
-    n1: NDArray[np.float64],
-    n2: NDArray[np.float64],
-    n3: NDArray[np.float64],
+    R: ArrayLike,
+    n1: ArrayLike,
+    n2: ArrayLike,
+    n3: ArrayLike,
 ) -> list[tuple[float, float, float]]:
     """Decompose ``R`` into ``Rot(n1, a) @ Rot(n2, b) @ Rot(n3, c)``.
 
