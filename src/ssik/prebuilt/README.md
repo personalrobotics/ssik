@@ -59,8 +59,8 @@ preprocessing) and cleaner to ship in production stacks.
 | `yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 | `big_yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 | `fr3_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
-| `openarm_left_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
-| `openarm_right_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
+| `openarm_left_ik` | `seven_r.srs` | <1 s | ~9 KB |
+| `openarm_right_ik` | `seven_r.srs` | <1 s | ~9 KB |
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached

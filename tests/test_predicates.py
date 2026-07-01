@@ -456,19 +456,21 @@ def test_is_srs_7r_rejects_non_7r() -> None:
     assert is_srs_7r(kb) is None
 
 
-def test_is_srs_7r_rejects_non_zyz_wrist() -> None:
-    """Geometrically-SRS chains with non-Z*Z wrist (first/third wrist axes
-    NOT parallel) must be rejected by the strict predicate -- the Singh-
-    Kreutz solver's ZYZ Euler decomposition silently produces wrong
-    q-vectors on these chains (#307; first surfaced on Enactic OpenArm v2.0).
-
-    The geometric-only helper still accepts the chain so ``srs_polished``
-    can use it as a warm-start path with LM polish.
+def test_is_srs_7r_accepts_non_zyz_wrist() -> None:
+    """Geometrically-SRS chains with a non-Z*Z wrist (first/third wrist axes
+    NOT parallel, e.g. z-y-x) are now accepted (#354): the general Davenport
+    extraction in ``seven_r.srs`` recovers an arbitrary target rotation for
+    any concurrent triple, so the old Z*Z gate (#307) is gone. The native
+    solver closes FK to machine precision on these chains.
     """
-    from ssik.kinematics.predicates import _classify_srs_7r_geometric, is_srs_7r
+    import numpy as np
 
-    # 7R chain with strict SRS shoulder (z, y, z meeting at origin),
-    # axis-concurrent but non-Z*Z wrist (z, y, x meeting at (0, 0, -1.0)).
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+    from ssik.kinematics.predicates import is_srs_7r
+    from ssik.solvers.seven_r import srs
+
+    # SRS shoulder (z, y, z meeting at origin), axis-concurrent but non-Z*Z
+    # wrist (z, y, x meeting at (0, 0, -1.0)).
     kb = _make_chain(
         positions=[
             (0, 0, 0),
@@ -486,17 +488,27 @@ def test_is_srs_7r_rejects_non_zyz_wrist() -> None:
             (0, 1, 0),  # j3 elbow y
             (0, 0, 1),  # j4 z (wrist)
             (0, 1, 0),  # j5 y
-            (1, 0, 0),  # j6 x -- breaks ZYZ (j4 z, j6 x are perpendicular)
+            (1, 0, 0),  # j6 x -- non-Z*Z wrist (j4 z perp j6 x)
         ],
     )
 
-    # Strict predicate: must reject (Z*Z wrist fails: z not parallel x).
-    assert is_srs_7r(kb) is None
-    # Geometric helper: still accepts (axes meet at a point).
-    geom = _classify_srs_7r_geometric(kb)
-    assert geom is not None
-    assert geom.shoulder_indices == (0, 1, 2)
-    assert geom.wrist_indices == (4, 5, 6)
+    cls = is_srs_7r(kb)
+    assert cls is not None
+    assert cls.shoulder_indices == (0, 1, 2)
+    assert cls.wrist_indices == (4, 5, 6)
+
+    rng = np.random.default_rng(0)
+    worst = 0.0
+    for _ in range(50):
+        q = rng.uniform(-0.7, 0.7, 7)
+        t_target = poe_forward_kinematics(kb, q)
+        sols, _ = srs.solve(kb, t_target)
+        assert sols, "general SRS solver returned no solutions on a reachable pose"
+        worst = max(
+            worst,
+            min(float(np.linalg.norm(poe_forward_kinematics(kb, s.q) - t_target)) for s in sols),
+        )
+    assert worst < 1e-9, f"non-Z*Z wrist worst FK closure {worst:.2e}"
 
 
 def test_is_approximately_srs_7r_rejects_non_zyz() -> None:
@@ -534,9 +546,15 @@ def test_is_approximately_srs_7r_rejects_non_zyz() -> None:
     assert is_approximately_srs_7r(kb, max_drift_m=0.04) is None
 
 
-def test_is_srs_7r_rejects_non_zyz_shoulder() -> None:
-    """Same gate, applied at the shoulder triple (#307)."""
-    from ssik.kinematics.predicates import _classify_srs_7r_geometric, is_srs_7r
+def test_is_srs_7r_accepts_non_zyz_shoulder() -> None:
+    """Same generalization as the wrist case (#354), applied at the shoulder
+    triple: a non-Z*Z shoulder (z, y, x) is accepted and solved to machine
+    precision by the general Davenport shoulder decomposition."""
+    import numpy as np
+
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+    from ssik.kinematics.predicates import is_srs_7r
+    from ssik.solvers.seven_r import srs
 
     # Non-Z*Z shoulder (z, y, x) but Z*Z wrist (z, y, z).
     kb = _make_chain(
@@ -552,7 +570,7 @@ def test_is_srs_7r_rejects_non_zyz_shoulder() -> None:
         axes=[
             (0, 0, 1),  # j0 z
             (0, 1, 0),  # j1 y
-            (1, 0, 0),  # j2 x -- breaks Z*Z shoulder
+            (1, 0, 0),  # j2 x -- non-Z*Z shoulder
             (0, 1, 0),  # elbow
             (0, 0, 1),  # j4 z
             (0, 1, 0),  # j5 y
@@ -560,6 +578,19 @@ def test_is_srs_7r_rejects_non_zyz_shoulder() -> None:
         ],
     )
 
-    assert is_srs_7r(kb) is None
-    geom = _classify_srs_7r_geometric(kb)
-    assert geom is not None
+    cls = is_srs_7r(kb)
+    assert cls is not None
+    assert cls.shoulder_indices == (0, 1, 2)
+
+    rng = np.random.default_rng(1)
+    worst = 0.0
+    for _ in range(50):
+        q = rng.uniform(-0.7, 0.7, 7)
+        t_target = poe_forward_kinematics(kb, q)
+        sols, _ = srs.solve(kb, t_target)
+        assert sols, "general SRS solver returned no solutions on a reachable pose"
+        worst = max(
+            worst,
+            min(float(np.linalg.norm(poe_forward_kinematics(kb, s.q) - t_target)) for s in sols),
+        )
+    assert worst < 1e-9, f"non-Z*Z shoulder worst FK closure {worst:.2e}"

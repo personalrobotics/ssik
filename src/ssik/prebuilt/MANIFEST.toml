@@ -893,24 +893,24 @@ fixture_source = "enactic / openarm_description"
 base_link = "openarm_left_base_link"
 ee_link = "openarm_left_ee_base_link"
 dof = 7
-solver = "jointlock.seven_r"
-tier = 1
-kinematic_class = "non-SRS 7R (axes concurrent, non-ZYZ wrist)"
-short_class = "non-SRS 7R"
-class_tags = ["non-SRS", "non-Z*Z", "7R"]
+solver = "seven_r.srs"
+tier = 0
+kinematic_class = "SRS 7R (non-Z*Z)"
+short_class = "SRS 7R"
+class_tags = ["SRS", "non-Z*Z", "7R"]
 slow_build = false
 build_time_sec = 1
-artifact_size_kb = 22
+artifact_size_kb = 9
 sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
-fk_ceiling_fuzz = 1e-4
+fk_ceiling_fuzz = 1e-10
 platform_drift = false
 
 [arms.openarm_left_ik.bench]
-ms_mean = 12.30
-ms_ci95 = 0.46
-max_fk = 1.7e-15
-sols_min = 8
-sols_max = 40
+ms_mean = 14.59
+ms_ci95 = 0.50
+max_fk = 2.0e-15
+sols_min = 128
+sols_max = 128
 
 [arms.openarm_left_ik.eaik]
 supported = false
@@ -925,24 +925,24 @@ fixture_source = "enactic / openarm_description"
 base_link = "openarm_right_base_link"
 ee_link = "openarm_right_ee_base_link"
 dof = 7
-solver = "jointlock.seven_r"
-tier = 1
-kinematic_class = "non-SRS 7R (axes concurrent, non-ZYZ wrist)"
-short_class = "non-SRS 7R"
-class_tags = ["non-SRS", "non-Z*Z", "7R"]
+solver = "seven_r.srs"
+tier = 0
+kinematic_class = "SRS 7R (non-Z*Z)"
+short_class = "SRS 7R"
+class_tags = ["SRS", "non-Z*Z", "7R"]
 slow_build = false
 build_time_sec = 1
-artifact_size_kb = 22
+artifact_size_kb = 9
 sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
-fk_ceiling_fuzz = 1e-4
+fk_ceiling_fuzz = 1e-10
 platform_drift = false
 
 [arms.openarm_right_ik.bench]
-ms_mean = 10.70
-ms_ci95 = 0.43
-max_fk = 1.4e-15
-sols_min = 8
-sols_max = 40
+ms_mean = 14.54
+ms_ci95 = 0.50
+max_fk = 2.0e-15
+sols_min = 128
+sols_max = 128
 
 [arms.openarm_right_ik.eaik]
 supported = false
