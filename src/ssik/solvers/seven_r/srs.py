@@ -92,14 +92,16 @@ _LOG = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _arm_constants(kb: KinBody, cls: SrsClassification) -> tuple[float, float, NDArray[np.float64]]:
-    """Compute (L_se, L_ew, ee_offset_local) from the chain at q=0."""
+def _arm_constants(
+    kb: KinBody, cls: SrsClassification
+) -> tuple[float, float, NDArray[np.float64], list[NDArray[np.float64]]]:
+    """Compute (L_se, L_ew, ee_offset_local, joint_origins) from the chain at q=0."""
     origins = joint_origins(kb.joints)
     L_se = float(np.linalg.norm(origins[cls.elbow_index] - cls.shoulder_pivot))
     L_ew = float(np.linalg.norm(origins[cls.elbow_index] - cls.wrist_pivot))
     ee_home = poe_forward_kinematics(kb, np.zeros(len(kb.joints)))[:3, 3]
     ee_offset_local = ee_home - cls.wrist_pivot
-    return L_se, L_ew, ee_offset_local
+    return L_se, L_ew, ee_offset_local, origins
 
 
 def _swivel_basis(
@@ -336,29 +338,28 @@ def solve(
             "ssik.kinematics.predicates.is_srs_7r to check."
         )
 
-    L_se, L_ew, ee_offset_local = _arm_constants(kb, cls)
+    L_se, L_ew, ee_offset_local, origins = _arm_constants(kb, cls)
 
-    # Axis + home-geometry setup for the shoulder/wrist angle extraction.
-    n_axes = [
-        np.asarray(j.axis, dtype=np.float64) / float(np.linalg.norm(j.axis)) for j in kb.joints
-    ]
-    origins = joint_origins(kb.joints)
-    u_home = origins[cls.elbow_index] - cls.shoulder_pivot
-    u_home = u_home / float(np.linalg.norm(u_home))
+    # Home upper-arm vector (S -> elbow at q=0). Cheap; needed by both paths.
+    upper_home = origins[cls.elbow_index] - cls.shoulder_pivot
+    u_home = upper_home / float(np.linalg.norm(upper_home))
     # Canonical-ZYZ fast path (iiwa-class): shoulder z-y with the home upper
     # arm along +z, wrist z-y-z. The original vectorised extraction hardcodes
     # these literals; keep it byte-identical + sub-millisecond there and fall
     # to the general Davenport extraction for any other concurrent-axis SRS
-    # arm (#354 -- e.g. Galaxea R1 Pro's y-x-z shoulder / z-y-x wrist).
+    # arm (#354 -- e.g. Galaxea R1 Pro's y-x-z shoulder / z-y-x wrist). The
+    # axes are already unit in a POE-normalized chain, so check them directly
+    # (no list-comp normalize -- this runs on the iiwa hot path every call).
     _EZ = np.array([0.0, 0.0, 1.0])
     _EY = np.array([0.0, 1.0, 0.0])
+    j = kb.joints
     canonical_zyz = bool(
-        np.allclose(n_axes[0], _EZ)
-        and np.allclose(n_axes[1], _EY)
+        np.allclose(j[0].axis, _EZ)
+        and np.allclose(j[1].axis, _EY)
         and np.allclose(u_home, _EZ)
-        and np.allclose(n_axes[4], _EZ)
-        and np.allclose(n_axes[5], _EY)
-        and np.allclose(n_axes[6], _EZ)
+        and np.allclose(j[4].axis, _EZ)
+        and np.allclose(j[5].axis, _EY)
+        and np.allclose(j[6].axis, _EZ)
     )
     # Approximate-SRS callers (``reach_slack > 0``; only ``srs_polished``,
     # which is Z*Z-gated so the arm is canonical z-y-z up to its small pivot
@@ -472,14 +473,6 @@ def solve(
 
     candidates: list[Solution] = []
 
-    n0_axis, n1_axis, n2_axis = n_axes[0], n_axes[1], n_axes[2]
-    n3_axis = n_axes[cls.elbow_index]
-    n4_axis, n5_axis, n6_axis = n_axes[4], n_axes[5], n_axes[6]
-    # Home upper-arm + forearm vectors (in the shoulder's home frame), used by
-    # the general path to build the shoulder rotation via frame alignment.
-    upper_home = origins[cls.elbow_index] - S  # S -> elbow at q = 0
-    forearm_home = cls.wrist_pivot - origins[cls.elbow_index]  # elbow -> wrist at q = 0
-
     def _append(q_vec: NDArray[np.float64]) -> list[Solution] | None:
         """Append a finite candidate; return the capped verified set if
         ``max_solutions`` is already satisfied (short-circuit), else None.
@@ -576,6 +569,16 @@ def solve(
         # canonical path's cosine rule, q_2-as-roll SP1, and ZYZ extraction are
         # all invalid. Pure rotation algebra (no FK frame walks); each swivel
         # yields up to 2 (q_3) x 2 (shoulder) x 2 (wrist) = 8 candidates. ---
+        # Unit axes + home forearm (built lazily: the canonical hot path above
+        # never needs them, and the per-call cost matters at max_solutions=1).
+        n_axes = [
+            np.asarray(jt.axis, dtype=np.float64) / float(np.linalg.norm(jt.axis))
+            for jt in kb.joints
+        ]
+        n0_axis, n1_axis, n2_axis = n_axes[0], n_axes[1], n_axes[2]
+        n3_axis = n_axes[cls.elbow_index]
+        n4_axis, n5_axis, n6_axis = n_axes[4], n_axes[5], n_axes[6]
+        forearm_home = cls.wrist_pivot - origins[cls.elbow_index]  # elbow -> wrist at q = 0
         for i in range(N):
             elbow = E_t[i]
             upper = elbow - S  # S -> elbow (target), length L_se
