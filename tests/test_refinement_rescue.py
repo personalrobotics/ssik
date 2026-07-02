@@ -52,6 +52,15 @@ GROUP_A = [
         4,
         id="280_kassow",
     ),
+    # #299 gen3 exercises the *thin-wrapper* rescue path (seven_r.srs_polished),
+    # which #358 wired to match the orchestrator arms above. Raw srs_polished
+    # returns 0 sols here; the rescue recovers dozens (86 on macOS).
+    pytest.param(
+        "gen3_ik",
+        np.array([0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875]),
+        4,
+        id="299_gen3",
+    ),
 ]
 
 

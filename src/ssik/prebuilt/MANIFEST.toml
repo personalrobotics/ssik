@@ -453,7 +453,13 @@ supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
 [arms.gen3_ik.known_gaps]
-xfail_reason = "srs_polished coverage gap on q*=[0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875] (0 sols at q*, 5 sols at q* + 0.01 on q5, 1 sol at q* + 0.01 on q7). Same shape as #286 / #288 / #298. Filed as #299."
+# The bulletproof rescue (#358) now recovers this pose for callers -- default
+# solve() returns ~86 LM-polished sols tagged "lm" instead of [] (regression-
+# guarded by 299_gen3 in tests/test_refinement_rescue.py::GROUP_A). The uniform
+# fuzz stays xfailed because it asserts the strict 1e-9 *analytical* ceiling,
+# which the LM rescue (fk_atol 1e-8) doesn't meet -- the analytical srs_polished
+# gap itself is still open (#299).
+xfail_reason = "srs_polished analytical coverage gap on q*=[0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875] (0 sols at q*); recovered for callers by the #358 rescue at ~1e-8, but the strict 1e-9 analytical fuzz stays gated. Filed as #299."
 
 [arms.franka_panda_ik]
 display_name = "Franka Emika Panda (no hand)"
