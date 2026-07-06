@@ -49,6 +49,9 @@ from ssik.postprocess import (
     within_seed_tolerance as _ps_within_seed_tolerance,
     wrap_to_limits as _ps_wrap_to_limits,
 )
+import functools as _functools
+from ssik.refinement import kinbody_jacobian as _kinbody_jacobian
+from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.solvers.seven_r.srs import solve as _solver_solve
 
 SOLVER_NAME = "seven_r.srs"
@@ -158,6 +161,7 @@ def solve(
     q_seed=None,
     respect_limits: bool = True,
     allow_refinement: bool = False,
+    allow_rescue: bool = True,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
@@ -188,12 +192,22 @@ def solve(
     :param allow_refinement: when ``True`` (default), Newton polish
         fires on near-miss algebraic candidates. Tightens FK
         closure to machine precision.
+    :param allow_rescue: when ``True`` (default), if the analytical
+        path returns no solutions but the target is within the arm's
+        reach-sphere, ``solve()`` recovers the IK via the
+        T-perturbation rescue (#319) -- reachable-but-degenerate poses
+        (near-singular / near-parallel-axis) return LM-polished
+        solutions tagged ``refinement_used="lm"`` instead of ``[]``.
+        Set ``False`` for a guaranteed-analytical-or-empty result.
+        Gated by the reach-sphere, so far-field unreachable targets
+        stay cheap (no rescue fired).
     :param policy: tolerance policy. Rarely customised.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
     :returns: list of :class:`Solution`, one per analytical IK
-        branch. Empty list iff no candidate met the FK tolerance
-        -- check ``if not sols:`` for "unreachable target".
+        branch (plus any rescued at a degenerate pose). Empty list
+        iff the target is unreachable or ``allow_rescue=False`` and
+        the analytical path found nothing.
 
     Solver: srs.
     """
@@ -206,6 +220,31 @@ def solve(
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
     )
+    # Bulletproof fallback (#319 / #358): the analytical path found
+    # nothing. If the target is within the arm's max reach it may be a
+    # measure-zero degenerate pose (near-singular elbow/gimbal, or a
+    # near-parallel-axis spherical joint) the algebraic extraction
+    # can't resolve -- rather than an unreachable target. Recover via
+    # the T-perturbation rescue. The reach-sphere (sum of link lengths;
+    # an exact upper bound by the triangle inequality, so it never
+    # rejects a reachable pose) is checked only in this rare empty
+    # branch and keeps far-field targets cheap. Perturbed re-solves run
+    # with allow_rescue=False (recursion guard + analytical escape
+    # hatch); the rescue calls back with respect_limits=False, so the
+    # rescued set flows through the same limit/seed postprocess below.
+    if not sols and allow_rescue:
+        _reach_radius = sum(
+            float(np.linalg.norm(np.asarray(_t)[:3, 3]))
+            for _t in (*_JOINT_T_LEFTS, *_JOINT_T_RIGHTS)
+        )
+        _T = np.asarray(T_target, dtype=np.float64)
+        if float(np.linalg.norm(_T[:3, 3])) <= _reach_radius:
+            sols = _rescue_via_T_perturbation(
+                fk,
+                _functools.partial(solve, allow_rescue=False),
+                _T,
+                jacobian_fn=lambda _q: _kinbody_jacobian(_KB, _q),
+            )
     if respect_limits:
         sols = _ps_wrap_to_limits(sols, _KB)
         sols = _ps_respect_limits(sols, _KB)
