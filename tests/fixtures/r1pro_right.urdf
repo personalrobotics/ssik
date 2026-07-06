@@ -1,0 +1,110 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="r1_pro">
+  <link name="torso_link4">
+    </link>
+  <link name="right_arm_base_link">
+    </link>
+  <joint name="right_arm_base_joint" type="fixed">
+    <origin xyz="-0.00048706 -0.097236 0.30302" rpy="0 0 0" />
+    <parent link="torso_link4" />
+    <child link="right_arm_base_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_arm_link1">
+    </link>
+  <joint name="right_arm_joint1" type="revolute">
+    <origin xyz="0 -0.0735 0" rpy="0 0 0" />
+    <parent link="right_arm_base_link" />
+    <child link="right_arm_link1" />
+    <axis xyz="0 1 0" />
+    <limit lower="-4.4506" upper="1.3090" effort="55" velocity="7.1209" />
+  </joint>
+  <link name="right_arm_link2">
+    </link>
+  <joint name="right_arm_joint2" type="revolute">
+    <origin xyz="0.023988 -0.081265 0" rpy="0 0 0" />
+    <parent link="right_arm_link1" />
+    <child link="right_arm_link2" />
+    <axis xyz="1 0 0" />
+    <limit lower="-3.1416" upper="0.1745" effort="55" velocity="7.1209" />
+  </joint>
+  <link name="right_arm_link3">
+    </link>
+  <joint name="right_arm_joint3" type="revolute">
+    <origin xyz="-0.023988 0 -0.1155" rpy="0 0 0" />
+    <parent link="right_arm_link2" />
+    <child link="right_arm_link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.356196" upper="2.356196" effort="25" velocity="8.3776" />
+  </joint>
+  <link name="right_arm_link4">
+    </link>
+  <joint name="right_arm_joint4" type="revolute">
+    <origin xyz="0 0.035058 -0.1945" rpy="0 0 0" />
+    <parent link="right_arm_link3" />
+    <child link="right_arm_link4" />
+    <axis xyz="0 1 0" />
+    <limit lower="-2.0944" upper="0.3491" effort="25" velocity="8.3776" />
+  </joint>
+  <link name="right_arm_link5">
+    </link>
+  <joint name="right_arm_joint5" type="revolute">
+    <origin xyz="0 -0.035058 -0.095" rpy="0 0 0" />
+    <parent link="right_arm_link4" />
+    <child link="right_arm_link5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.356196" upper="2.356196" effort="18" velocity="10.4720" />
+  </joint>
+  <link name="right_arm_link6">
+    </link>
+  <joint name="right_arm_joint6" type="revolute">
+    <origin xyz="0 0.028001 -0.16305" rpy="0 0 0" />
+    <parent link="right_arm_link5" />
+    <child link="right_arm_link6" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.047198" upper="1.047198" effort="18" velocity="10.4720" />
+  </joint>
+  <link name="right_arm_link7">
+    </link>
+  <joint name="right_arm_joint7" type="revolute">
+    <origin xyz="0.0295 -0.028001 0" rpy="0 0 0" />
+    <parent link="right_arm_link6" />
+    <child link="right_arm_link7" />
+    <axis xyz="1 0 0" />
+    <limit lower="-1.5708" upper="1.5708" effort="18" velocity="10.4720" />
+  </joint>
+  <link name="right_gripper_link">
+    </link>
+  <joint name="right_gripper_joint" type="fixed">
+    <origin xyz="-0.0295 0 -0.13665" rpy="0 0 0" />
+    <parent link="right_arm_link7" />
+    <child link="right_gripper_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_realsense_link">
+    </link>
+  <joint name="right_realsense_joint" type="fixed">
+    <origin xyz="0.05051 0.0028934 0.0051317" rpy="-3.1376 -0.43631 3.1399" />
+    <parent link="right_gripper_link" />
+    <child link="right_realsense_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="right_gripper_finger_link1">
+    </link>
+  <joint name="right_gripper_finger_joint1" type="prismatic">
+    <origin xyz="-8.8709E-05 0.013453 -0.03689" rpy="0 0 0" />
+    <parent link="right_gripper_link" />
+    <child link="right_gripper_finger_link1" />
+    <axis xyz="-0.0077873 0.99997 0" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+  <link name="right_gripper_finger_link2">
+    </link>
+  <joint name="right_gripper_finger_joint2" type="prismatic">
+    <origin xyz="8.9046E-05 -0.013453 -0.03689" rpy="0 0 0" />
+    <parent link="right_gripper_link" />
+    <child link="right_gripper_finger_link2" />
+    <axis xyz="0.0077873 -0.99997 0" />
+    <limit lower="0" upper="0" effort="0" velocity="0" />
+  </joint>
+</robot>
