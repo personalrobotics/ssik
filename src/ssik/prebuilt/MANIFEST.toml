@@ -954,3 +954,67 @@ sols_max = 128
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
+[arms.r1pro_left_ik]
+display_name = "Galaxea R1 Pro (left)"
+short_name = "R1 Pro L"
+fixture = "r1pro_left.urdf"
+fixture_kind = "urdf"
+fixture_source = "OpenGalaxea / GalaxeaManipSim (Apache-2.0)"
+base_link = "left_arm_base_link"
+ee_link = "left_arm_link7"
+dof = 7
+solver = "seven_r.srs"
+tier = 0
+kinematic_class = "SRS 7R (non-Z*Z)"
+short_class = "SRS 7R"
+class_tags = ["SRS", "non-Z*Z", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 12
+sample_q = [-0.707, 1.981, 0.707, -0.506, 0.707, 0.314, 0.471]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.r1pro_left_ik.bench]
+ms_mean = 13.56
+ms_ci95 = 0.05
+max_fk = 3.3e-15
+sols_min = 128
+sols_max = 128
+
+[arms.r1pro_left_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
+[arms.r1pro_right_ik]
+display_name = "Galaxea R1 Pro (right)"
+short_name = "R1 Pro R"
+fixture = "r1pro_right.urdf"
+fixture_kind = "urdf"
+fixture_source = "OpenGalaxea / GalaxeaManipSim (Apache-2.0)"
+base_link = "right_arm_base_link"
+ee_link = "right_arm_link7"
+dof = 7
+solver = "seven_r.srs"
+tier = 0
+kinematic_class = "SRS 7R (non-Z*Z)"
+short_class = "SRS 7R"
+class_tags = ["SRS", "non-Z*Z", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 12
+sample_q = [-0.707, -0.986, 0.707, -0.506, 0.707, 0.314, 0.471]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.r1pro_right_ik.bench]
+ms_mean = 13.52
+ms_ci95 = 0.06
+max_fk = 2.7e-15
+sols_min = 128
+sols_max = 128
+
+[arms.r1pro_right_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+

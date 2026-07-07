@@ -21,7 +21,7 @@ T_target[:3, 3] = [0.5, 0.1, 0.3]
 sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 ```
 
-<!-- AUTOGEN:arm_count -->25<!-- /AUTOGEN --> prebuilt arms ship with the wheel: <!-- AUTOGEN:arm_roster -->UR5, UR3e, UR5e, UR10e, UR16e, UR20, UR30, Puma 560, JACO 2, iiwa14, Gen3, Franka Panda, xArm7, xArm6, Z1, PiPER, Rizon 4, Kassow KR810, Rizon 10, CRX-10iA/L, YAM, big_yam, FR3, OpenArm L, OpenArm R<!-- /AUTOGEN -->. For other arms, run `ssik build <your.urdf>` once and import the emitted module.
+<!-- AUTOGEN:arm_count -->27<!-- /AUTOGEN --> prebuilt arms ship with the wheel: <!-- AUTOGEN:arm_roster -->UR5, UR3e, UR5e, UR10e, UR16e, UR20, UR30, Puma 560, JACO 2, iiwa14, Gen3, Franka Panda, xArm7, xArm6, Z1, PiPER, Rizon 4, Kassow KR810, Rizon 10, CRX-10iA/L, YAM, big_yam, FR3, OpenArm L, OpenArm R, R1 Pro L, R1 Pro R<!-- /AUTOGEN -->. For other arms, run `ssik build <your.urdf>` once and import the emitted module.
 
 ## Where to go next
 

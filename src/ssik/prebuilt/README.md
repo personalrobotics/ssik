@@ -61,6 +61,8 @@ preprocessing) and cleaner to ship in production stacks.
 | `fr3_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
 | `openarm_left_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `openarm_right_ik` | `seven_r.srs` | <1 s | ~9 KB |
+| `r1pro_left_ik` | `seven_r.srs` | <1 s | ~12 KB |
+| `r1pro_right_ik` | `seven_r.srs` | <1 s | ~12 KB |
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached
