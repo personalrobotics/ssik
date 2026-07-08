@@ -243,3 +243,73 @@ def test_prebuilt_7r_tight_policy_machine_precision(arm_name: str, q_star: np.nd
     assert max_fk < 1e-7, (
         f"{arm_name}: tight-policy max FK {max_fk:.2e} > 1e-7 at q*={q_star.tolist()}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Default-path (respect_limits=True) in-limits coverage (#359).
+#
+# The round-trip fuzz above deliberately passes ``respect_limits=False`` to
+# isolate the analytical solver from URDF joint-limit filtering. But the
+# DEFAULT ``solve()`` applies ``respect_limits=True`` -- the path every user
+# actually takes. Nothing exercised it, which is exactly why the swivel-vs-
+# limits gap (#359) stayed invisible. This test closes that: sample q strictly
+# within each arm's joint limits (so an in-limits IK provably exists), FK, and
+# assert the default solve() returns >= 1 solution.
+#
+# Redundant 7R arms with tight joint limits (OpenArm, R1 Pro) return [] on a
+# small fraction of these: the elbow-swivel sweep samples [-pi, pi] uniformly
+# and can miss the narrow in-limits swivel arc. Tracked as #359, xfailed below
+# so the gap is visible; the other 7 arms get a real 0-empty guarantee.
+# ---------------------------------------------------------------------------
+
+# The SRS-family swivel-sampled arms (seven_r.srs / srs_polished) with tight
+# joint limits. iiwa14 is also seven_r.srs but has wide limits, so its in-limits
+# swivel arc is never narrow enough to miss -- it holds the guarantee.
+_LIMITS_GAP_7R = {
+    "gen3_ik",
+    "openarm_left_ik",
+    "openarm_right_ik",
+    "r1pro_left_ik",
+    "r1pro_right_ik",
+}
+
+
+def _joint_ranges(kb: object) -> list[tuple[float, float]]:
+    """Per-joint (lo, hi) sampling range; continuous joints (no limit) -> +/-pi."""
+    out: list[tuple[float, float]] = []
+    for j in kb.joints:  # type: ignore[attr-defined]
+        lim = j.limits
+        if lim is None or lim[0] is None or lim[1] is None:
+            out.append((-np.pi, np.pi))
+        else:
+            out.append((float(lim[0]), float(lim[1])))
+    return out
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "arm_name",
+    [a[0] for a in PREBUILT_ARMS_7R],
+    ids=[a[0] for a in PREBUILT_ARMS_7R],
+)
+def test_prebuilt_7r_in_limits_default_path(arm_name: str) -> None:
+    """Every reachable *in-limits* pose returns >= 1 IK on the DEFAULT
+    ``solve()`` path (``respect_limits=True``) -- the path users take (the
+    round-trip fuzz above uses ``respect_limits=False``). 200 deterministic
+    in-limits poses per arm. Redundant tight-limit arms are xfailed for the
+    swivel-vs-limits gap (#359)."""
+    if arm_name in _LIMITS_GAP_7R:
+        pytest.xfail(
+            f"{arm_name}: redundant 7R with tight joint limits -- the elbow-swivel "
+            "sweep can miss the narrow in-limits arc, so some reachable in-limits "
+            "poses return [] on the default respect_limits=True path (#359)"
+        )
+    mod = _load(arm_name)
+    ranges = _joint_ranges(mod._KB)
+    rng = np.random.default_rng(0)
+    for _ in range(200):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        assert mod.solve(mod.fk(q)), (
+            f"{arm_name}: reachable in-limits pose q={q.tolist()} returned [] "
+            "on the default respect_limits=True path"
+        )
