@@ -92,6 +92,28 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Verify built version matches the tag
+        # Same guard as publish_pypi (#364): catch a version/tag mismatch in
+        # the rc dry-run, before the real release.
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "tag version: $TAG"; ls -1 dist/
+          SDIST=$(ls dist/ssik-*.tar.gz 2>/dev/null | head -1)
+          [ -n "$SDIST" ] || { echo "::error::no sdist in dist/"; exit 1; }
+          BUILT=$(basename "$SDIST" .tar.gz); BUILT="${BUILT#ssik-}"
+          echo "built version: $BUILT"
+          if [ "$BUILT" != "$TAG" ]; then
+            echo "::error::built version '$BUILT' != tag '$TAG' -- refusing to publish (likely two tags on one commit; ensure a single v* tag points at the release commit)"
+            exit 1
+          fi
+          for w in dist/ssik-*.whl; do
+            case "$(basename "$w")" in
+              ssik-"$TAG"-*) ;;
+              *) echo "::error::wheel $(basename "$w") is not version $TAG"; exit 1 ;;
+            esac
+          done
+          echo "OK: all dist artifacts are version $TAG"
+
       - name: Publish to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
@@ -115,6 +137,32 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Verify built version matches the tag
+        # Guard against the "two v* tags on one commit" footgun (#364): when
+        # both e.g. v3.0.0rc1 and v3.0.0 point at the same commit, hatch-vcs
+        # (via ``git describe``) can resolve the *rc*, so the v3.0.0 run builds
+        # ssik-3.0.0rc1 wheels and would publish those to real PyPI. Refuse to
+        # publish unless every artifact carries the tag's exact version. Tag
+        # convention: ``vX.Y.Z`` / ``vX.Y.ZrcN`` (no dash; already PEP 440).
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "tag version: $TAG"; ls -1 dist/
+          SDIST=$(ls dist/ssik-*.tar.gz 2>/dev/null | head -1)
+          [ -n "$SDIST" ] || { echo "::error::no sdist in dist/"; exit 1; }
+          BUILT=$(basename "$SDIST" .tar.gz); BUILT="${BUILT#ssik-}"
+          echo "built version: $BUILT"
+          if [ "$BUILT" != "$TAG" ]; then
+            echo "::error::built version '$BUILT' != tag '$TAG' -- refusing to publish (likely two tags on one commit; ensure a single v* tag points at the release commit)"
+            exit 1
+          fi
+          for w in dist/ssik-*.whl; do
+            case "$(basename "$w")" in
+              ssik-"$TAG"-*) ;;
+              *) echo "::error::wheel $(basename "$w") is not version $TAG"; exit 1 ;;
+            esac
+          done
+          echo "OK: all dist artifacts are version $TAG"
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
