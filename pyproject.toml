@@ -8,7 +8,7 @@ description = "Analytical inverse kinematics for 6R and 7R revolute arms. Return
 readme = "README.md"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [{ name = "Siddhartha Srinivasa" }]
 keywords = ["robotics", "inverse-kinematics", "ik-geo", "kinematics"]
 classifiers = [
@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "numpy>=2.0",
+    "numpy>=1.26",
     # scipy.linalg / scipy.signal are imported at module top in
     # ``ssik._pencil`` and ``ssik.solvers.husty_pfurner._eliminate``; HP backs
     # every non-SRS 7R prebuilt (Franka, Rizon, Kassow). Without scipy a
