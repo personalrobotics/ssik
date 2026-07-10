@@ -61,6 +61,7 @@ References:
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -68,7 +69,12 @@ from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.kinematics._generalized_euler import _axis_angle_matrix, decompose_3axis
+from ssik.kinematics._generalized_euler import (
+    _axis_angle_matrix,
+    _cross3,
+    _norm3,
+    decompose_3axis,
+)
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import (
     SrsClassification,
@@ -111,8 +117,8 @@ def _swivel_basis(
     # Pick a reference vector that's not too aligned with u_sw.
     ref = np.array([0.0, 0.0, 1.0]) if abs(u_sw[2]) < 0.99 else np.array([1.0, 0.0, 0.0])
     u_perp1 = ref - np.dot(ref, u_sw) * u_sw
-    u_perp1 /= np.linalg.norm(u_perp1)
-    u_perp2 = np.cross(u_sw, u_perp1)
+    u_perp1 /= _norm3(u_perp1)
+    u_perp2 = _cross3(u_sw, u_perp1)
     return u_perp1, u_perp2
 
 
@@ -201,19 +207,19 @@ def _shoulder_angles_zyz(
 
 def _min_rotation(u: NDArray[np.float64], v: NDArray[np.float64]) -> NDArray[np.float64]:
     """Minimal rotation matrix carrying the direction of ``u`` onto ``v``."""
-    u = u / np.linalg.norm(u)
-    v = v / np.linalg.norm(v)
+    u = u / _norm3(u)
+    v = v / _norm3(v)
     c = float(u @ v)
     if c > 1.0 - 1e-12:
         return np.eye(3, dtype=np.float64)
     if c < -1.0 + 1e-12:
         # Antiparallel: rotate pi about any axis perpendicular to u.
-        perp = np.cross(u, np.array([1.0, 0.0, 0.0]))
-        if float(np.linalg.norm(perp)) < 1e-6:
-            perp = np.cross(u, np.array([0.0, 1.0, 0.0]))
-        return _axis_angle_matrix(perp / np.linalg.norm(perp), np.pi)
-    axis = np.cross(u, v)
-    return _axis_angle_matrix(axis / np.linalg.norm(axis), float(np.arccos(c)))
+        perp = _cross3(u, np.array([1.0, 0.0, 0.0]))
+        if _norm3(perp) < 1e-6:
+            perp = _cross3(u, np.array([0.0, 1.0, 0.0]))
+        return _axis_angle_matrix(perp / _norm3(perp), np.pi)
+    axis = _cross3(u, v)
+    return _axis_angle_matrix(axis / _norm3(axis), float(np.arccos(c)))
 
 
 def _sp4_branches(
@@ -229,7 +235,7 @@ def _sp4_branches(
     h_dot_k = float(h @ k)
     k_dot_p = float(k @ p)
     a_coef = float(h @ p) - h_dot_k * k_dot_p
-    b_coef = float(h @ np.cross(k, p))
+    b_coef = float(h @ _cross3(k, p))
     c_const = delta - h_dot_k * k_dot_p
     amplitude = float(np.hypot(a_coef, b_coef))
     if amplitude < 1e-12:
@@ -260,7 +266,8 @@ def _verify_fk(
     out: list[Solution] = []
     for s in sols:
         T_fk = poe_forward_kinematics(kb, s.q)
-        fk_residual = float(np.linalg.norm(T_fk - t_target))
+        _d = (T_fk - t_target).ravel()
+        fk_residual = math.sqrt(float(_d @ _d))
         if fk_residual <= fk_threshold:
             # Direct construction beats dataclasses.replace (~10 us per
             # call) on the warm-path post-dedup loop.
@@ -572,7 +579,7 @@ def solve(
         # Unit axes + home forearm (built lazily: the canonical hot path above
         # never needs them, and the per-call cost matters at max_solutions=1).
         n_axes = [
-            np.asarray(jt.axis, dtype=np.float64) / float(np.linalg.norm(jt.axis))
+            np.asarray(jt.axis, dtype=np.float64) / _norm3(np.asarray(jt.axis, dtype=np.float64))
             for jt in kb.joints
         ]
         n0_axis, n1_axis, n2_axis = n_axes[0], n_axes[1], n_axes[2]
@@ -599,11 +606,11 @@ def solve(
                 # phi (shoulder roll about d_hat) mapping g onto wrist_vec: SP1.
                 g_perp = g - d_hat * float(d_hat @ g)
                 w_perp = wrist_vec - d_hat * float(d_hat @ wrist_vec)
-                if float(np.linalg.norm(g_perp)) < 1e-9:
+                if _norm3(g_perp) < 1e-9:
                     phi = 0.0
                 else:
                     phi = float(
-                        np.arctan2(float(d_hat @ np.cross(g_perp, w_perp)), float(g_perp @ w_perp))
+                        np.arctan2(float(d_hat @ _cross3(g_perp, w_perp)), float(g_perp @ w_perp))
                     )
                 r_sh = _axis_angle_matrix(d_hat, phi) @ r0
                 r_pre_elbow = r_sh @ _axis_angle_matrix(n3_axis, q_3)
