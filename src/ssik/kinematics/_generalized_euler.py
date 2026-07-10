@@ -32,10 +32,33 @@ carrying ``R^T n1`` onto ``Rot(n2, b)^T n1``.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 __all__ = ["decompose_3axis"]
+
+# Constant identity -- np.eye(3) allocates + fills on every call (~0.8 us);
+# these 3-vector/3x3 hot paths run it hundreds of times per solve.
+_EYE3 = np.eye(3, dtype=np.float64)
+
+
+def _cross3(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Scalar 3-vector cross product. ~12x faster than ``np.cross`` on
+    length-3 inputs, which pays for axis-normalization + moveaxis machinery
+    irrelevant to a single 3-vector."""
+    a0, a1, a2 = a[0], a[1], a[2]
+    b0, b1, b2 = b[0], b[1], b[2]
+    return np.array(
+        [a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0], dtype=np.float64
+    )
+
+
+def _norm3(a: NDArray[np.float64]) -> float:
+    """Euclidean norm of a 3-vector. ~2x faster than ``np.linalg.norm``,
+    which pays for ravel + complex-type checks + dispatcher."""
+    return math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
 
 # Below this the b-sinusoid amplitude sqrt(A^2 + B^2) is ~0: the three axes are
 # (near-)collinear and no general decomposition exists. SRS shoulder/wrist
@@ -48,10 +71,10 @@ _GIMBAL_EPS = 1e-9
 
 def _axis_angle_matrix(axis: NDArray[np.float64], theta: float) -> NDArray[np.float64]:
     """Rodrigues rotation matrix for ``theta`` about a unit ``axis``."""
-    c, s = np.cos(theta), np.sin(theta)
+    c, s = math.cos(theta), math.sin(theta)
     x, y, z = axis
     k = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]], dtype=np.float64)
-    out: NDArray[np.float64] = np.eye(3, dtype=np.float64) + s * k + (1.0 - c) * (k @ k)
+    out: NDArray[np.float64] = _EYE3 + s * k + (1.0 - c) * (k @ k)
     return out
 
 
@@ -59,7 +82,7 @@ def _unit_perp(axis: NDArray[np.float64]) -> NDArray[np.float64]:
     """Some unit vector perpendicular to ``axis``."""
     ref = np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
     v = ref - axis * (axis @ ref)
-    unit: NDArray[np.float64] = v / np.linalg.norm(v)
+    unit: NDArray[np.float64] = v / _norm3(v)
     return unit
 
 
@@ -74,9 +97,9 @@ def _angle_about(
     """
     vf = v_from - axis * (axis @ v_from)
     vt = v_to - axis * (axis @ v_to)
-    if np.linalg.norm(vf) < _GIMBAL_EPS or np.linalg.norm(vt) < _GIMBAL_EPS:
+    if _norm3(vf) < _GIMBAL_EPS or _norm3(vt) < _GIMBAL_EPS:
         return 0.0
-    return float(np.arctan2(axis @ np.cross(vf, vt), vf @ vt))
+    return float(np.arctan2(axis @ _cross3(vf, vt), vf @ vt))
 
 
 def decompose_3axis(
@@ -97,12 +120,12 @@ def decompose_3axis(
     u1 = np.asarray(n1, dtype=np.float64)
     u2 = np.asarray(n2, dtype=np.float64)
     u3 = np.asarray(n3, dtype=np.float64)
-    u1 = u1 / np.linalg.norm(u1)
-    u2 = u2 / np.linalg.norm(u2)
-    u3 = u3 / np.linalg.norm(u3)
+    u1 = u1 / _norm3(u1)
+    u2 = u2 / _norm3(u2)
+    u3 = u3 / _norm3(u3)
 
     a_coef = u1 @ u3 - (u1 @ u2) * (u2 @ u3)
-    b_coef = u1 @ np.cross(u2, u3)
+    b_coef = u1 @ _cross3(u2, u3)
     c_const = u1 @ R @ u3 - (u1 @ u2) * (u2 @ u3)
 
     amplitude = float(np.hypot(a_coef, b_coef))
@@ -125,7 +148,7 @@ def decompose_3axis(
         # ``a = 0`` and recover ``c`` from the residual ``Rot(n2,-b) R``, which
         # is then a pure ``n3`` rotation. (Hit by symmetric ZYZ triples at
         # b = 0 / pi -- classical Euler gimbal.)
-        if np.linalg.norm(vf - u1 * (u1 @ vf)) < _GIMBAL_EPS:
+        if _norm3(vf - u1 * (u1 @ vf)) < _GIMBAL_EPS:
             a = 0.0
             residual = _axis_angle_matrix(u2, -b) @ R
             ref = _unit_perp(u3)
