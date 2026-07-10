@@ -73,7 +73,7 @@ from ssik.kinematics._generalized_euler import (
     _axis_angle_matrix,
     _cross3,
     _norm3,
-    decompose_3axis,
+    decompose_3axis_batch,
 )
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import (
@@ -184,6 +184,80 @@ def _frame_at_joint_batch(
     return R, p
 
 
+def _rodrigues_axes_batch(
+    axes: NDArray[np.float64], angles: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Rodrigues matrices for *per-row* ``axes`` ``(N, 3)`` and ``angles``
+    ``(N,)`` -> ``(N, 3, 3)``. Unlike :func:`_rodrigues_batch` (fixed axis),
+    the rotation axis varies per row -- needed for the shoulder-roll about the
+    per-swivel elbow direction ``d_hat``."""
+    c = np.cos(angles)
+    s = np.sin(angles)
+    omc = 1.0 - c
+    ax, ay, az = axes[:, 0], axes[:, 1], axes[:, 2]
+    n = axes.shape[0]
+    K = np.zeros((n, 3, 3), dtype=np.float64)
+    K[:, 0, 1] = -az
+    K[:, 0, 2] = ay
+    K[:, 1, 0] = az
+    K[:, 1, 2] = -ax
+    K[:, 2, 0] = -ay
+    K[:, 2, 1] = ax
+    K2 = K @ K
+    return (
+        np.eye(3)[None, :, :]
+        + s[:, None, None] * K
+        + omc[:, None, None] * K2
+    )
+
+
+def _min_rotation_batch(
+    u_home: NDArray[np.float64], v_batch: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Vectorised :func:`_min_rotation`: minimal rotations carrying ``u_home``
+    onto each row of ``v_batch`` ``(N, 3)`` -> ``(N, 3, 3)``. The rare
+    (anti)parallel rows (cross product degenerate) fall back to the scalar
+    path to preserve its exact perpendicular-axis choice."""
+    u = u_home / _norm3(u_home)
+    vn = v_batch / np.linalg.norm(v_batch, axis=1, keepdims=True)
+    c = vn @ u  # (N,)
+    axis = np.cross(np.broadcast_to(u, vn.shape), vn)  # (N, 3)
+    an = np.linalg.norm(axis, axis=1)  # (N,)
+    ok = an > 1e-9
+    axu = np.zeros_like(axis)
+    axu[ok] = axis[ok] / an[ok, None]
+    out = _rodrigues_axes_batch(axu, np.arccos(np.clip(c, -1.0, 1.0)))
+    for idx in np.nonzero(~ok)[0]:
+        out[idx] = _min_rotation(u_home, v_batch[idx])
+    return out
+
+
+def _sp4_branches_batch(
+    h: NDArray[np.float64],
+    k: NDArray[np.float64],
+    p: NDArray[np.float64],
+    delta: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
+    """Vectorised :func:`_sp4_branches` over ``(N, 3)`` vector stacks.
+
+    :returns: ``(q_a, q_b, valid)`` -- the two elbow branches ``(N,)`` and a
+        ``(N,)`` mask that is ``False`` where the projection is unreachable
+        (``|C| > |A,B|``) or the amplitude degenerates. Both branches coincide
+        where ``off -> 0``; the duplicate is collapsed downstream by dedup."""
+    h_dot_k = np.einsum("ni,ni->n", h, k)
+    k_dot_p = np.einsum("ni,ni->n", k, p)
+    a_coef = np.einsum("ni,ni->n", h, p) - h_dot_k * k_dot_p
+    b_coef = np.einsum("ni,ni->n", h, np.cross(k, p))
+    c_const = delta - h_dot_k * k_dot_p
+    amplitude = np.hypot(a_coef, b_coef)
+    valid = amplitude >= 1e-12
+    ratio = np.where(valid, c_const / np.where(valid, amplitude, 1.0), 2.0)
+    valid &= np.abs(ratio) <= 1.0 + 1e-9
+    base = np.arctan2(b_coef, a_coef)
+    off = np.arccos(np.clip(ratio, -1.0, 1.0))
+    return base + off, base - off, valid
+
+
 def _shoulder_angles_zyz(
     d: NDArray[np.float64], q_1_sign: int
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -220,32 +294,6 @@ def _min_rotation(u: NDArray[np.float64], v: NDArray[np.float64]) -> NDArray[np.
         return _axis_angle_matrix(perp / _norm3(perp), np.pi)
     axis = _cross3(u, v)
     return _axis_angle_matrix(axis / _norm3(axis), float(np.arccos(c)))
-
-
-def _sp4_branches(
-    h: NDArray[np.float64], k: NDArray[np.float64], p: NDArray[np.float64], delta: float
-) -> tuple[float, ...]:
-    """Subproblem 4: solve ``h . (Rot(k, q) p) == delta`` for ``q``.
-
-    ``A cos q + B sin q == C`` with ``A = h.p - (h.k)(k.p)``,
-    ``B = h.(k x p)``, ``C = delta - (h.k)(k.p)`` -- up to two roots
-    ``atan2(B, A) +/- arccos(C / |A,B|)`` (the elbow-up / elbow-down pair).
-    Empty when the projection is unreachable (``|C| > |A,B|``).
-    """
-    h_dot_k = float(h @ k)
-    k_dot_p = float(k @ p)
-    a_coef = float(h @ p) - h_dot_k * k_dot_p
-    b_coef = float(h @ _cross3(k, p))
-    c_const = delta - h_dot_k * k_dot_p
-    amplitude = float(np.hypot(a_coef, b_coef))
-    if amplitude < 1e-12:
-        return ()
-    ratio = c_const / amplitude
-    if abs(ratio) > 1.0 + 1e-9:
-        return ()
-    base = float(np.arctan2(b_coef, a_coef))
-    off = float(np.arccos(np.clip(ratio, -1.0, 1.0)))
-    return (base + off,) if off < 1e-12 else (base + off, base - off)
 
 
 def _verify_fk(
@@ -586,41 +634,55 @@ def solve(
         n3_axis = n_axes[cls.elbow_index]
         n4_axis, n5_axis, n6_axis = n_axes[4], n_axes[5], n_axes[6]
         forearm_home = cls.wrist_pivot - origins[cls.elbow_index]  # elbow -> wrist at q = 0
-        for i in range(N):
-            elbow = E_t[i]
-            upper = elbow - S  # S -> elbow (target), length L_se
-            d_hat = d[i]
-            # R0: a reference shoulder rotation placing the elbow (upper_home
-            # -> upper). The true shoulder also rolls about d_hat by phi.
-            r0 = _min_rotation(upper_home, upper)
-            wrist_vec = W_t - elbow  # elbow -> wrist pivot (target), length L_ew
 
-            # q_3 (elbow): the wrist-pivot latitude along the upper arm,
-            # ``d_hat . (W - E)``, is invariant under the shoulder roll about
-            # d_hat, so it fixes q_3. SP4 on the forearm rotated by R0.
-            k_elbow = r0 @ n3_axis
-            v_forearm0 = r0 @ forearm_home
-            for q_3 in _sp4_branches(d_hat, k_elbow, v_forearm0, float(wrist_vec @ d_hat)):
-                g = _axis_angle_matrix(n3_axis, q_3) @ forearm_home
-                g = r0 @ g  # forearm direction at this q_3, before the roll
-                # phi (shoulder roll about d_hat) mapping g onto wrist_vec: SP1.
-                g_perp = g - d_hat * float(d_hat @ g)
-                w_perp = wrist_vec - d_hat * float(d_hat @ wrist_vec)
-                if _norm3(g_perp) < 1e-9:
-                    phi = 0.0
-                else:
-                    phi = float(
-                        np.arctan2(float(d_hat @ _cross3(g_perp, w_perp)), float(g_perp @ w_perp))
-                    )
-                r_sh = _axis_angle_matrix(d_hat, phi) @ r0
-                r_pre_elbow = r_sh @ _axis_angle_matrix(n3_axis, q_3)
-                r_res = r_pre_elbow.T @ R_target @ R_post_wrist.T
-                wrist_branches = decompose_3axis(r_res, n4_axis, n5_axis, n6_axis)
-                for s0, s1, s2 in decompose_3axis(r_sh, n0_axis, n1_axis, n2_axis):
-                    for w4, w5, w6 in wrist_branches:
-                        capped = _append(np.array([s0, s1, s2, q_3, w4, w5, w6], dtype=np.float64))
-                        if capped is not None:
-                            return capped, False
+        # Batched over the N swivels (mirrors the canonical path's structure:
+        # discrete branch enumeration outside, one broadcast per branch). The
+        # elbow direction ``d`` and the target wrist offset vary per swivel; the
+        # joint axes are constant, so the Davenport coefficients reduce to
+        # scalars inside ``decompose_3axis_batch``.
+        uppers = E_t - S  # (N, 3): S -> elbow (target)
+        wrist_vecs = W_t - E_t  # (N, 3): elbow -> wrist pivot (target)
+        # R0: reference shoulder rotations placing the elbow (upper_home -> upper).
+        r0 = _min_rotation_batch(upper_home, uppers)  # (N, 3, 3)
+        k_elbow = np.einsum("nij,j->ni", r0, n3_axis)  # (N, 3)
+        v_forearm0 = np.einsum("nij,j->ni", r0, forearm_home)  # (N, 3)
+        # q_3 (elbow): wrist-pivot latitude along the upper arm fixes it; SP4 on
+        # the forearm rotated by R0. Two elbow branches, both computed.
+        delta_sp4 = np.einsum("ni,ni->n", wrist_vecs, d)  # wrist_vec . d_hat
+        q3a, q3b, sp4_valid = _sp4_branches_batch(d, k_elbow, v_forearm0, delta_sp4)
+
+        # Wrist post-rotation folded once (r_res = r_pre_elbow^T @ R_target @ R_post^T).
+        M_wrist = R_target @ R_post_wrist.T  # (3, 3)
+        dw = np.einsum("ni,ni->n", d, wrist_vecs)  # d_hat . wrist_vec (roll-invariant)
+
+        for q3 in (q3a, q3b):  # each (N,)
+            rot_n3_q3 = _rodrigues_batch(n3_axis, q3)  # (N, 3, 3)
+            g = np.einsum("nij,j->ni", rot_n3_q3, forearm_home)  # axis_angle(n3,q3) @ forearm
+            g = np.einsum("nij,nj->ni", r0, g)  # r0 @ g (forearm dir before roll)
+            # phi (shoulder roll about d_hat) mapping g onto wrist_vec: SP1.
+            g_perp = g - d * np.einsum("ni,ni->n", d, g)[:, None]
+            w_perp = wrist_vecs - d * dw[:, None]
+            num = np.einsum("ni,ni->n", d, np.cross(g_perp, w_perp))
+            den = np.einsum("ni,ni->n", g_perp, w_perp)
+            phi = np.arctan2(num, den)
+            phi[np.linalg.norm(g_perp, axis=1) < 1e-9] = 0.0
+
+            r_sh = _rodrigues_axes_batch(d, phi) @ r0  # (N, 3, 3)
+            r_pre_elbow = r_sh @ rot_n3_q3  # (N, 3, 3)
+            r_res = np.einsum("nij,jk->nik", r_pre_elbow.transpose(0, 2, 1), M_wrist)
+
+            sh_branches, sh_ok = decompose_3axis_batch(r_sh, n0_axis, n1_axis, n2_axis)
+            wr_branches, wr_ok = decompose_3axis_batch(r_res, n4_axis, n5_axis, n6_axis)
+            if not (sh_ok and wr_ok):
+                continue
+            for s0, s1, s2 in sh_branches:  # up to 2 shoulder branches
+                for w4, w5, w6 in wr_branches:  # up to 2 wrist branches
+                    q_full = np.stack([s0, s1, s2, q3, w4, w5, w6], axis=1)  # (N, 7)
+                    keep = sp4_valid & np.all(np.isfinite(q_full), axis=1)
+                    for row in np.nonzero(keep)[0]:
+                        candidates.append(
+                            Solution(q=q_full[row], fk_residual=0.0, refinement_used="none")
+                        )
 
     if not candidates:
         return [], True
