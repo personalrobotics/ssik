@@ -1,0 +1,398 @@
+"""Exact feasible-swivel (joint-limit-aware) resolution for SRS-class 7R (#359).
+
+The elbow swivel ``psi`` is the 1-DOF redundancy. For a fixed IK branch every
+joint is a closed-form function ``q_i(psi)`` because the shoulder rotation is
+
+    R_sh(psi) = Rot(u_sw, psi) @ R_sh(0)
+
+(rotating the elbow about the shoulder-wrist axis *is* the swivel). So the set
+of ``psi`` with all joints inside their limits is computed *exactly* -- no
+sampling -- and we return in-limits solutions directly. The uniform swivel
+sweep in :mod:`ssik.solvers.seven_r.srs` samples ``psi`` blindly and can miss a
+narrow in-limits arc (a reachable in-limits pose then returns ``[]``); this
+closes that gap.
+
+Method (Shimizu, Kim, Kakuya & Freeman, IEEE T-RO 24(5), 2008), generalised
+here to arbitrary concurrent axes -- the same generalisation that #356 applied
+to the base SRS solver -- so the closed forms hold for non-Z*Z shoulders/wrists:
+
+1. Enumerate the <=8 discrete branches (2 elbow x 2 shoulder-sign x 2 wrist-sign)
+   natively at ``psi = 0`` from the general-path geometry (``R_sh(0)``, ``q_3``).
+2. Per joint, the feasible arcs of ``psi`` come from ``phi_i(psi) = cos(q_i(psi)
+   - c_i) - cos(h_i) >= 0`` (``c_i``/``h_i`` = limit centre/half-width). The
+   ``cos`` removes the ``atan2`` branch-wrap discontinuity, so ``phi_i`` is
+   smooth and its sign-zeros are the exact arc boundaries.
+3. Intersect the 6 non-elbow joints' arcs; union over branches.
+4. Sample representative ``psi`` (arc centres = max limit margin) and emit the
+   wrapped-to-limits joint vectors.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from itertools import pairwise
+from typing import TYPE_CHECKING
+
+import numpy as np
+from numpy.typing import NDArray
+
+from ssik.core.solution import Solution
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.kinematics._generalized_euler import _axis_angle_matrix as _rot
+from ssik.kinematics.poe_fk import poe_forward_kinematics
+from ssik.kinematics.predicates import (
+    SrsClassification,
+    _classify_srs_7r_geometric,
+)
+from ssik.solvers.seven_r.srs import (
+    _arm_constants,
+    _min_rotation,
+    _rodrigues_batch,
+    _sp4_branches,
+    _swivel_basis,
+)
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ssik._kinbody import KinBody
+
+_TWO_PI = 2.0 * np.pi
+_ARC_GRID = 180  # bracketing resolution for phi sign-zeros (refined by bisection)
+_EPS = 1e-9
+
+
+def _wrap(a: float) -> float:
+    return float((a + np.pi) % _TWO_PI - np.pi)
+
+
+def _signed_angle(k: NDArray[np.float64], a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
+    """Angle about unit ``k`` carrying ``a``'s perp component onto ``b``'s."""
+    ap = a - k * (k @ a)
+    bp = b - k * (k @ b)
+    return float(np.arctan2(k @ np.cross(ap, bp), ap @ bp))
+
+
+def _signed_angle_batch(
+    k: NDArray[np.float64], a: NDArray[np.float64], b: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Vectorised :func:`_signed_angle` over ``a, b`` of shape ``(N, 3)``."""
+    ap = a - k[None, :] * (a @ k)[:, None]
+    bp = b - k[None, :] * (b @ k)[:, None]
+    out: NDArray[np.float64] = np.arctan2(np.cross(ap, bp) @ k, (ap * bp).sum(axis=1))
+    return out
+
+
+def _bisect(f: Callable[[float], float], a: float, b: float, tol: float = 1e-8) -> float:
+    """Root of monotone-crossing ``f`` in ``[a, b]`` (dependency-free; the SRS
+    import chain stays scipy-free to keep iiwa's import lean). ``tol`` on the
+    bracket width is ample: we return arc *centres* and FK-verify downstream."""
+    fa = f(a)
+    while b - a > tol:
+        m = 0.5 * (a + b)
+        fm = f(m)
+        if fm == 0.0:
+            return m
+        if fa * fm < 0:
+            b = m
+        else:
+            a, fa = m, fm
+    return 0.5 * (a + b)
+
+
+def _triple_phase(
+    m0: NDArray[np.float64], m1: NDArray[np.float64], m2: NDArray[np.float64]
+) -> tuple[float, float, float]:
+    """``rho, delta, gamma`` with ``m0 . Rot(m1,q) m2 == rho cos(q - delta) + gamma``."""
+    a = float((m0 @ m2) - (m0 @ m1) * (m1 @ m2))
+    b = float(m0 @ np.cross(m1, m2))
+    return float(np.hypot(a, b)), float(np.arctan2(b, a)), float((m0 @ m1) * (m1 @ m2))
+
+
+class _Branch:
+    """One discrete IK branch: fixed elbow ``(R_sh0, q3)`` + shoulder/wrist sign.
+
+    ``q(psi)`` is the closed-form, continuous joint vector along the swivel.
+    """
+
+    __slots__ = (
+        "R_post",
+        "R_sh0",
+        "R_t",
+        "_ps",
+        "_pw",
+        "n",
+        "q3",
+        "s_sgn",
+        "u_sw",
+        "w_sgn",
+    )
+
+    def __init__(
+        self,
+        n: list[NDArray[np.float64]],
+        u_sw: NDArray[np.float64],
+        R_sh0: NDArray[np.float64],
+        q3: float,
+        R_t: NDArray[np.float64],
+        R_post: NDArray[np.float64],
+        s_sgn: int,
+        w_sgn: int,
+    ) -> None:
+        self.n = n
+        self.u_sw = u_sw
+        self.R_sh0 = R_sh0
+        self.q3 = q3
+        self.R_t = R_t
+        self.R_post = R_post
+        self.s_sgn = s_sgn
+        self.w_sgn = w_sgn
+        self._ps = _triple_phase(n[0], n[1], n[2])
+        self._pw = _triple_phase(n[4], n[5], n[6])
+
+    def q(self, psi: float) -> NDArray[np.float64]:
+        n = self.n
+        R_sh = _rot(self.u_sw, psi) @ self.R_sh0
+        rho, dlt, gam = self._ps
+        q1 = dlt + self.s_sgn * float(
+            np.arccos(np.clip((n[0] @ R_sh @ n[2] - gam) / rho, -1.0, 1.0))
+        )
+        q0 = _signed_angle(n[0], _rot(n[1], q1) @ n[2], R_sh @ n[2])
+        q2 = -_signed_angle(n[2], _rot(n[1], -q1) @ n[0], R_sh.T @ n[0])
+        R_res = (R_sh @ _rot(n[3], self.q3)).T @ self.R_t @ self.R_post.T
+        rho, dlt, gam = self._pw
+        q5 = dlt + self.w_sgn * float(
+            np.arccos(np.clip((n[4] @ R_res @ n[6] - gam) / rho, -1.0, 1.0))
+        )
+        q4 = _signed_angle(n[4], _rot(n[5], q5) @ n[6], R_res @ n[6])
+        q6 = -_signed_angle(n[6], _rot(n[5], -q5) @ n[4], R_res.T @ n[4])
+        return np.array([q0, q1, q2, self.q3, q4, q5, q6], dtype=np.float64)
+
+    def q_grid(self, psis: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Vectorised :meth:`q` over a ``(N,)`` swivel grid -> ``(N, 7)``."""
+        n = self.n
+        rsh = _rodrigues_batch(self.u_sw, psis) @ self.R_sh0  # (N,3,3)
+        rho, dlt, gam = self._ps
+        q1 = dlt + self.s_sgn * np.arccos(
+            np.clip((np.einsum("i,nij,j->n", n[0], rsh, n[2]) - gam) / rho, -1.0, 1.0)
+        )
+        rsh_n2 = rsh @ n[2]
+        q0 = _signed_angle_batch(n[0], _rodrigues_batch(n[1], q1) @ n[2], rsh_n2)
+        q2 = -_signed_angle_batch(
+            n[2], _rodrigues_batch(n[1], -q1) @ n[0], rsh.transpose(0, 2, 1) @ n[0]
+        )
+        m = rsh @ _rot(n[3], self.q3)  # (N,3,3)
+        rres = m.transpose(0, 2, 1) @ (self.R_t @ self.R_post.T)  # (N,3,3)
+        rho, dlt, gam = self._pw
+        q5 = dlt + self.w_sgn * np.arccos(
+            np.clip((np.einsum("i,nij,j->n", n[4], rres, n[6]) - gam) / rho, -1.0, 1.0)
+        )
+        q4 = _signed_angle_batch(n[4], _rodrigues_batch(n[5], q5) @ n[6], rres @ n[6])
+        q6 = -_signed_angle_batch(
+            n[6], _rodrigues_batch(n[5], -q5) @ n[4], rres.transpose(0, 2, 1) @ n[4]
+        )
+        return np.stack([q0, q1, q2, np.full_like(q0, self.q3), q4, q5, q6], axis=1)
+
+
+def _arcs_for_joint(
+    branch: _Branch,
+    i: int,
+    lo: float,
+    hi: float,
+    grid: NDArray[np.float64],
+    q_col: NDArray[np.float64],
+) -> list[tuple[float, float]]:
+    """Feasible-``psi`` arcs for joint ``i`` in ``[lo, hi]``.
+
+    Feasibility is ``phi(psi) = cos(q_i(psi) - c) - cos(half) >= 0`` (``c`` /
+    ``half`` = limit centre / half-width); ``cos`` removes the ``atan2`` wrap so
+    ``phi`` is smooth. Sign changes on the precomputed grid ``q_col`` bracket the
+    exact boundaries, refined by Brent on the scalar ``phi``.
+    """
+    c = 0.5 * (lo + hi)
+    half = 0.5 * (hi - lo)
+    if half >= np.pi:  # unconstrained (continuous) joint
+        return [(-np.pi, np.pi)]
+    thr = float(np.cos(half))
+    val = np.cos(q_col - c) - thr
+
+    def phi(p: float) -> float:
+        return float(np.cos(branch.q(p)[i] - c)) - thr
+
+    n_grid = grid.shape[0]
+    roots: list[float] = []
+    for k in range(n_grid):
+        a = float(grid[k])
+        b = float(grid[k + 1]) if k + 1 < n_grid else np.pi
+        if val[k] * val[(k + 1) % n_grid] < 0:
+            roots.append(_bisect(phi, a, b))
+    if not roots:
+        return [(-np.pi, np.pi)] if val[0] >= 0 else []
+    roots.sort()
+    arcs: list[tuple[float, float]] = []
+    for u, w in pairwise([*roots, roots[0] + _TWO_PI]):
+        if phi(_wrap(0.5 * (u + w))) >= 0:
+            if w <= np.pi:
+                arcs.append((u, w))
+            else:  # arc straddles +pi: split
+                arcs.append((u, np.pi))
+                arcs.append((-np.pi, _wrap(w)))
+    return _merge(arcs)
+
+
+def _merge(arcs: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if not arcs:
+        return []
+    arcs = sorted(arcs)
+    out = [list(arcs[0])]
+    for a, b in arcs[1:]:
+        if a <= out[-1][1] + _EPS:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return [(a, b) for a, b in out]
+
+
+def _intersect(
+    A: list[tuple[float, float]], B: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    out: list[tuple[float, float]] = []
+    for a0, a1 in A:
+        for b0, b1 in B:
+            lo, hi = max(a0, b0), min(a1, b1)
+            if hi - lo > _EPS:
+                out.append((lo, hi))
+    return _merge(out)
+
+
+_GRID = np.linspace(-np.pi, np.pi, _ARC_GRID, endpoint=False)
+
+
+def _branch_arcs(branch: _Branch, limits: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    if not (limits[3][0] <= branch.q3 <= limits[3][1]):
+        return []
+    q_grid = branch.q_grid(_GRID)  # (N, 7) -- one batched eval per branch
+    arcs = [(-np.pi, np.pi)]
+    for i in (0, 1, 2, 4, 5, 6):
+        arcs = _intersect(
+            arcs, _arcs_for_joint(branch, i, limits[i][0], limits[i][1], _GRID, q_grid[:, i])
+        )
+        if not arcs:
+            return []
+    return arcs
+
+
+def _enumerate_branches(
+    kb: KinBody, cls: SrsClassification, T: NDArray[np.float64]
+) -> list[_Branch]:
+    """All <=8 branches, with each ``R_sh(0)`` built natively at ``psi=0``."""
+    n = [np.asarray(j.axis, dtype=np.float64) / float(np.linalg.norm(j.axis)) for j in kb.joints]
+    L_se, L_ew, ee, origins = _arm_constants(kb, cls)
+    S = cls.shoulder_pivot
+    R_t = T[:3, :3]
+    W_t = T[:3, 3] - R_t @ ee
+    R_post = kb.joints[6].T_right[:3, :3]
+    upper_home = origins[cls.elbow_index] - S
+    forearm_home = cls.wrist_pivot - origins[cls.elbow_index]
+    n3 = n[cls.elbow_index]
+
+    d_sw = float(np.linalg.norm(W_t - S))
+    if d_sw < _EPS or not (abs(L_se - L_ew) < d_sw < L_se + L_ew):
+        return []
+    u_sw = (W_t - S) / d_sw
+    x_c = (L_se**2 - L_ew**2 + d_sw**2) / (2.0 * d_sw)
+    r_circle = float(np.sqrt(max(L_se**2 - x_c**2, 0.0)))
+    u_p1, _u_p2 = _swivel_basis(u_sw)
+
+    # psi = 0 geometry (cos 0 = 1, sin 0 = 0 -> elbow on u_p1)
+    elbow0 = S + x_c * u_sw + r_circle * u_p1
+    upper0 = elbow0 - S
+    d0 = upper0 / L_se
+    r0 = _min_rotation(upper_home, upper0)
+    wrist_vec0 = W_t - elbow0
+
+    branches: list[_Branch] = []
+    for q3 in _sp4_branches(d0, r0 @ n3, r0 @ forearm_home, float(wrist_vec0 @ d0)):
+        g = r0 @ (_rot(n3, q3) @ forearm_home)
+        g_perp = g - d0 * float(d0 @ g)
+        w_perp = wrist_vec0 - d0 * float(d0 @ wrist_vec0)
+        if float(np.linalg.norm(g_perp)) < _EPS:
+            phi = 0.0
+        else:
+            phi = float(np.arctan2(float(d0 @ np.cross(g_perp, w_perp)), float(g_perp @ w_perp)))
+        R_sh0 = _rot(d0, phi) @ r0
+        for s_sgn in (+1, -1):
+            for w_sgn in (+1, -1):
+                branches.append(_Branch(n, u_sw, R_sh0, q3, R_t, R_post, s_sgn, w_sgn))
+    return branches
+
+
+def _to_limits(v: float, lo: float, hi: float) -> float:
+    """The 2*pi-equivalent of ``v`` nearest the limit centre."""
+    k = round((0.5 * (lo + hi) - v) / _TWO_PI)
+    return v + _TWO_PI * k
+
+
+def feasible_in_limits_solutions(
+    kb: KinBody,
+    cls: SrsClassification,
+    T: NDArray[np.float64],
+    limits: list[tuple[float, float]],
+    *,
+    max_solutions: int | None = None,
+) -> list[NDArray[np.float64]]:
+    """Exact in-limits IK solutions via feasible-swivel resolution.
+
+    Returns wrapped-to-limits joint vectors, one per feasible swivel arc
+    (sampled at the arc centre = maximum joint-limit margin). Empty iff no
+    in-limits solution exists (target unreachable-in-limits).
+    """
+    T = np.asarray(T, dtype=np.float64)
+    out: list[NDArray[np.float64]] = []
+    for branch in _enumerate_branches(kb, cls, T):
+        for a, b in _branch_arcs(branch, limits):
+            psi = 0.5 * (a + b)
+            q = branch.q(psi)
+            q = np.array([_to_limits(float(q[i]), limits[i][0], limits[i][1]) for i in range(7)])
+            out.append(q)
+            if max_solutions is not None and len(out) >= max_solutions:
+                return out
+    return out
+
+
+def _joint_limits(kb: KinBody) -> list[tuple[float, float]]:
+    lims: list[tuple[float, float]] = []
+    for j in kb.joints:
+        lo_hi = j.limits
+        if lo_hi is None or lo_hi[0] is None or lo_hi[1] is None:
+            lims.append((-np.pi, np.pi))
+        else:
+            lims.append((float(lo_hi[0]), float(lo_hi[1])))
+    return lims
+
+
+def resolve_in_limits(
+    kb: KinBody,
+    T_target: NDArray[np.float64],
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    *,
+    max_solutions: int | None = None,
+) -> list[Solution]:
+    """Exact joint-limit-aware IK for SRS-class 7R via feasible-swivel resolution.
+
+    Intended as the ``respect_limits`` fallback for the SRS-family prebuilt
+    ``solve()``: when the blind swivel sweep samples no in-limits candidate, the
+    feasible-swivel arcs recover the in-limits solution(s) exactly (#359).
+    Returns FK-verified :class:`Solution` objects (already wrapped into limits);
+    empty when the chain is not SRS-class or no in-limits solution exists.
+    """
+    cls = _classify_srs_7r_geometric(kb, policy)
+    if cls is None or len(kb.joints) != 7:
+        return []
+    limits = _joint_limits(kb)
+    T = np.asarray(T_target, dtype=np.float64)
+    fk_atol = policy.subproblem_numerical
+    out: list[Solution] = []
+    for q in feasible_in_limits_solutions(kb, cls, T, limits, max_solutions=max_solutions):
+        residual = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
+        if residual <= fk_atol:
+            out.append(Solution(q=q, fk_residual=residual, refinement_used="none"))
+    return out

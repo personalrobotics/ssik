@@ -262,15 +262,14 @@ def test_prebuilt_7r_tight_policy_machine_precision(arm_name: str, q_star: np.nd
 # so the gap is visible; the other 7 arms get a real 0-empty guarantee.
 # ---------------------------------------------------------------------------
 
-# The SRS-family swivel-sampled arms (seven_r.srs / srs_polished) with tight
-# joint limits. iiwa14 is also seven_r.srs but has wide limits, so its in-limits
-# swivel arc is never narrow enough to miss -- it holds the guarantee.
+# gen3 (seven_r.srs_polished, *approximately* SRS) still gaps: the exact
+# feasible-swivel resolver (#359) only applies to exactly-concurrent SRS chains,
+# so it no-ops here and gen3 falls back to the blind sweep. The exactly-SRS
+# arms (iiwa14 + openarm + r1pro) now hold the in-limits guarantee via the
+# resolver. Extending it to approximate-SRS (relaxed-pivot + LM polish) is a
+# follow-up.
 _LIMITS_GAP_7R = {
     "gen3_ik",
-    "openarm_left_ik",
-    "openarm_right_ik",
-    "r1pro_left_ik",
-    "r1pro_right_ik",
 }
 
 

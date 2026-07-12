@@ -179,6 +179,12 @@ def _render_thin_wrapper(
         "from ssik.refinement.rescue import "
         "rescue_via_T_perturbation as _rescue_via_T_perturbation\n"
     )
+    # Exact joint-limit-aware swivel resolution for SRS-class 7R (#359): recovers
+    # in-limits solutions the blind swivel sweep drops. No-op (returns []) for
+    # non-SRS chains, so it's safe to import for every thin-wrapper arm.
+    buf.write(
+        "from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits\n"
+    )
     buf.write(f"from {solver_module} import solve as _solver_solve\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -1423,6 +1429,13 @@ def _render_solve_function(solver_short: str) -> str:
             if respect_limits:
                 sols = _ps_wrap_to_limits(sols, _KB)
                 sols = _ps_respect_limits(sols, _KB)
+                if not sols:
+                    # #359: the blind swivel sweep sampled no in-limits candidate
+                    # even though a reachable in-limits solution exists (the
+                    # in-limits swivel arc was narrower than the sampling). The
+                    # feasible-swivel resolver computes the in-limits arcs exactly
+                    # and returns solutions directly (no-op for non-SRS chains).
+                    sols = _resolve_in_limits(_KB, T_target, policy=policy)
             if q_seed is not None:
                 if seed_tolerance is not None:
                     sols = _ps_within_seed_tolerance(sols, q_seed, seed_tolerance)

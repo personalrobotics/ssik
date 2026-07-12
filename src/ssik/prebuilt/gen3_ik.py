@@ -52,6 +52,7 @@ from ssik.postprocess import (
 import functools as _functools
 from ssik.refinement import kinbody_jacobian as _kinbody_jacobian
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
+from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits
 from ssik.solvers.seven_r.srs_polished import solve as _solver_solve
 
 SOLVER_NAME = "seven_r.srs_polished"
@@ -248,6 +249,13 @@ def solve(
     if respect_limits:
         sols = _ps_wrap_to_limits(sols, _KB)
         sols = _ps_respect_limits(sols, _KB)
+        if not sols:
+            # #359: the blind swivel sweep sampled no in-limits candidate
+            # even though a reachable in-limits solution exists (the
+            # in-limits swivel arc was narrower than the sampling). The
+            # feasible-swivel resolver computes the in-limits arcs exactly
+            # and returns solutions directly (no-op for non-SRS chains).
+            sols = _resolve_in_limits(_KB, T_target, policy=policy)
     if q_seed is not None:
         if seed_tolerance is not None:
             sols = _ps_within_seed_tolerance(sols, q_seed, seed_tolerance)
