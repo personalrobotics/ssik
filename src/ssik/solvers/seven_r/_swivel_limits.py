@@ -18,19 +18,15 @@ to the base SRS solver -- so the closed forms hold for non-Z*Z shoulders/wrists:
 
 1. Enumerate the <=8 discrete branches (2 elbow x 2 shoulder-sign x 2 wrist-sign)
    natively at ``psi = 0`` from the general-path geometry (``R_sh(0)``, ``q_3``).
-2. Per joint, the feasible arcs of ``psi`` come from ``phi_i(psi) = cos(q_i(psi)
-   - c_i) - cos(h_i) >= 0`` (``c_i``/``h_i`` = limit centre/half-width). The
-   ``cos`` removes the ``atan2`` branch-wrap discontinuity, so ``phi_i`` is
-   smooth and its sign-zeros are the exact arc boundaries.
-3. Intersect the 6 non-elbow joints' arcs; union over branches.
-4. Sample representative ``psi`` (arc centres = max limit margin) and emit the
+2. Per branch, intersect the 6 non-elbow joints' feasible-``psi`` arcs -- the
+   parameter-agnostic feasible-interval core in :mod:`._feasible_param` (shared
+   with the non-SRS locked-joint redundancy of #148); union over branches.
+3. Sample representative ``psi`` (arc centres = max limit margin) and emit the
    wrapped-to-limits joint vectors.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from itertools import pairwise
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -46,6 +42,11 @@ from ssik.kinematics.predicates import (
     is_approximately_srs_7r,
 )
 from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian, lm_refine_batch
+from ssik.solvers.seven_r._feasible_param import (
+    PARAM_GRID,
+    feasible_arcs,
+    to_limits,
+)
 from ssik.solvers.seven_r.srs import (
     _arm_constants,
     _min_rotation,
@@ -57,13 +58,7 @@ from ssik.solvers.seven_r.srs import (
 if TYPE_CHECKING:  # pragma: no cover
     from ssik._kinbody import KinBody
 
-_TWO_PI = 2.0 * np.pi
-_ARC_GRID = 180  # bracketing resolution for phi sign-zeros (refined by bisection)
 _EPS = 1e-9
-
-
-def _wrap(a: float) -> float:
-    return float((a + np.pi) % _TWO_PI - np.pi)
 
 
 def _signed_angle(k: NDArray[np.float64], a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
@@ -81,23 +76,6 @@ def _signed_angle_batch(
     bp = b - k[None, :] * (b @ k)[:, None]
     out: NDArray[np.float64] = np.arctan2(np.cross(ap, bp) @ k, (ap * bp).sum(axis=1))
     return out
-
-
-def _bisect(f: Callable[[float], float], a: float, b: float, tol: float = 1e-8) -> float:
-    """Root of monotone-crossing ``f`` in ``[a, b]`` (dependency-free; the SRS
-    import chain stays scipy-free to keep iiwa's import lean). ``tol`` on the
-    bracket width is ample: we return arc *centres* and FK-verify downstream."""
-    fa = f(a)
-    while b - a > tol:
-        m = 0.5 * (a + b)
-        fm = f(m)
-        if fm == 0.0:
-            return m
-        if fa * fm < 0:
-            b = m
-        else:
-            a, fa = m, fm
-    return 0.5 * (a + b)
 
 
 def _triple_phase(
@@ -194,92 +172,12 @@ class _Branch:
         return np.stack([q0, q1, q2, np.full_like(q0, self.q3), q4, q5, q6], axis=1)
 
 
-def _arcs_for_joint(
-    branch: _Branch,
-    i: int,
-    lo: float,
-    hi: float,
-    grid: NDArray[np.float64],
-    q_col: NDArray[np.float64],
-) -> list[tuple[float, float]]:
-    """Feasible-``psi`` arcs for joint ``i`` in ``[lo, hi]``.
-
-    Feasibility is ``phi(psi) = cos(q_i(psi) - c) - cos(half) >= 0`` (``c`` /
-    ``half`` = limit centre / half-width); ``cos`` removes the ``atan2`` wrap so
-    ``phi`` is smooth. Sign changes on the precomputed grid ``q_col`` bracket the
-    exact boundaries, refined by Brent on the scalar ``phi``.
-    """
-    c = 0.5 * (lo + hi)
-    half = 0.5 * (hi - lo)
-    if half >= np.pi:  # unconstrained (continuous) joint
-        return [(-np.pi, np.pi)]
-    thr = float(np.cos(half))
-    val = np.cos(q_col - c) - thr
-
-    def phi(p: float) -> float:
-        return float(np.cos(branch.q(p)[i] - c)) - thr
-
-    n_grid = grid.shape[0]
-    roots: list[float] = []
-    for k in range(n_grid):
-        a = float(grid[k])
-        b = float(grid[k + 1]) if k + 1 < n_grid else np.pi
-        if val[k] * val[(k + 1) % n_grid] < 0:
-            roots.append(_bisect(phi, a, b))
-    if not roots:
-        return [(-np.pi, np.pi)] if val[0] >= 0 else []
-    roots.sort()
-    arcs: list[tuple[float, float]] = []
-    for u, w in pairwise([*roots, roots[0] + _TWO_PI]):
-        if phi(_wrap(0.5 * (u + w))) >= 0:
-            if w <= np.pi:
-                arcs.append((u, w))
-            else:  # arc straddles +pi: split
-                arcs.append((u, np.pi))
-                arcs.append((-np.pi, _wrap(w)))
-    return _merge(arcs)
-
-
-def _merge(arcs: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    if not arcs:
-        return []
-    arcs = sorted(arcs)
-    out = [list(arcs[0])]
-    for a, b in arcs[1:]:
-        if a <= out[-1][1] + _EPS:
-            out[-1][1] = max(out[-1][1], b)
-        else:
-            out.append([a, b])
-    return [(a, b) for a, b in out]
-
-
-def _intersect(
-    A: list[tuple[float, float]], B: list[tuple[float, float]]
-) -> list[tuple[float, float]]:
-    out: list[tuple[float, float]] = []
-    for a0, a1 in A:
-        for b0, b1 in B:
-            lo, hi = max(a0, b0), min(a1, b1)
-            if hi - lo > _EPS:
-                out.append((lo, hi))
-    return _merge(out)
-
-
-_GRID = np.linspace(-np.pi, np.pi, _ARC_GRID, endpoint=False)
-
-
 def _branch_arcs(branch: _Branch, limits: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    # The elbow q3 is fixed along the swivel: pre-check it, then sweep the rest.
     if not (limits[3][0] <= branch.q3 <= limits[3][1]):
         return []
-    q_grid = branch.q_grid(_GRID)  # (N, 7) -- one batched eval per branch
-    arcs = [(-np.pi, np.pi)]
-    for i in (0, 1, 2, 4, 5, 6):
-        arcs = _intersect(
-            arcs, _arcs_for_joint(branch, i, limits[i][0], limits[i][1], _GRID, q_grid[:, i])
-        )
-        if not arcs:
-            return []
-    return arcs
+    q_grid = branch.q_grid(PARAM_GRID)  # (N, 7) -- one batched eval per branch
+    return feasible_arcs(branch.q, q_grid, (0, 1, 2, 4, 5, 6), limits, PARAM_GRID)
 
 
 def _enumerate_branches(
@@ -327,12 +225,6 @@ def _enumerate_branches(
     return branches
 
 
-def _to_limits(v: float, lo: float, hi: float) -> float:
-    """The 2*pi-equivalent of ``v`` nearest the limit centre."""
-    k = round((0.5 * (lo + hi) - v) / _TWO_PI)
-    return v + _TWO_PI * k
-
-
 def feasible_in_limits_solutions(
     kb: KinBody,
     cls: SrsClassification,
@@ -362,9 +254,7 @@ def feasible_in_limits_solutions(
             for psi in psis:
                 q = branch.q(float(psi))
                 out.append(
-                    np.array(
-                        [_to_limits(float(q[i]), limits[i][0], limits[i][1]) for i in range(7)]
-                    )
+                    np.array([to_limits(float(q[i]), limits[i][0], limits[i][1]) for i in range(7)])
                 )
                 if max_solutions is not None and len(out) >= max_solutions:
                     return out
