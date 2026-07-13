@@ -64,6 +64,34 @@ def test_resolves_every_in_limits_pose(name: str, base: str, ee: str) -> None:
     assert worst < 1e-9, f"{name}: worst in-limits FK closure {worst:.2e}"
 
 
+def test_resolves_approximate_srs_gen3() -> None:
+    """Kinova Gen3 is only *approximately* SRS (~12 mm axis drift), so the exact
+    resolver no-ops; the approximate path (#370) seeds from best-fit pivots and
+    LM-polishes to the true FK. At the #299/#359 gen3 gap pose (raw solve returns
+    a set none of which is in-limits) it must return in-limits ``"lm"`` solutions.
+    """
+    kb = load_urdf_kinbody_normalized(FIXTURES / "gen3.urdf", "base_link", "end_effector_link")
+    lims = _limits(kb)
+    q_gap = np.array(
+        [
+            1.6474334178,
+            0.5114245864,
+            -1.1049209077,
+            1.1166184280,
+            -0.0972974297,
+            2.0879156524,
+            1.7343580230,
+        ]
+    )
+    T = poe_forward_kinematics(kb, q_gap)
+    sols = resolve_in_limits(kb, T)
+    assert sols, "gen3: approximate resolver returned no in-limits solution at the gap pose"
+    for s in sols:
+        assert all(lims[i][0] - 1e-9 <= s.q[i] <= lims[i][1] + 1e-9 for i in range(7))
+        assert s.refinement_used == "lm"
+        assert float(np.linalg.norm(poe_forward_kinematics(kb, s.q) - T)) < 1e-8
+
+
 def test_returns_empty_for_non_srs_chain() -> None:
     """Non-SRS chains (no spherical shoulder+wrist) are not resolvable this way;
     the resolver must no-op so it is safe as a universal thin-wrapper fallback."""

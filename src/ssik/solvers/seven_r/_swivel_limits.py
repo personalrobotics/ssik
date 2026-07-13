@@ -43,7 +43,9 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import (
     SrsClassification,
     _classify_srs_7r_geometric,
+    is_approximately_srs_7r,
 )
+from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian, lm_refine_batch
 from ssik.solvers.seven_r.srs import (
     _arm_constants,
     _min_rotation,
@@ -338,23 +340,34 @@ def feasible_in_limits_solutions(
     limits: list[tuple[float, float]],
     *,
     max_solutions: int | None = None,
+    samples_per_arc: int = 1,
 ) -> list[NDArray[np.float64]]:
-    """Exact in-limits IK solutions via feasible-swivel resolution.
+    """In-limits IK solutions via feasible-swivel resolution.
 
-    Returns wrapped-to-limits joint vectors, one per feasible swivel arc
-    (sampled at the arc centre = maximum joint-limit margin). Empty iff no
-    in-limits solution exists (target unreachable-in-limits).
+    Returns wrapped-to-limits joint vectors. ``samples_per_arc=1`` (the exact-SRS
+    default) takes each arc's centre (maximum joint-limit margin); >1 spreads
+    that many interior samples per arc -- used by the approximate-SRS path, where
+    each seed is LM-polished and only some stay in-limits after the polish shift.
+    Empty iff no in-limits solution exists (target unreachable-in-limits).
     """
     T = np.asarray(T, dtype=np.float64)
     out: list[NDArray[np.float64]] = []
     for branch in _enumerate_branches(kb, cls, T):
         for a, b in _branch_arcs(branch, limits):
-            psi = 0.5 * (a + b)
-            q = branch.q(psi)
-            q = np.array([_to_limits(float(q[i]), limits[i][0], limits[i][1]) for i in range(7)])
-            out.append(q)
-            if max_solutions is not None and len(out) >= max_solutions:
-                return out
+            psis = (
+                [0.5 * (a + b)]
+                if samples_per_arc == 1
+                else np.linspace(a, b, samples_per_arc + 2)[1:-1].tolist()
+            )
+            for psi in psis:
+                q = branch.q(float(psi))
+                out.append(
+                    np.array(
+                        [_to_limits(float(q[i]), limits[i][0], limits[i][1]) for i in range(7)]
+                    )
+                )
+                if max_solutions is not None and len(out) >= max_solutions:
+                    return out
     return out
 
 
@@ -369,6 +382,15 @@ def _joint_limits(kb: KinBody) -> list[tuple[float, float]]:
     return lims
 
 
+_APPROX_MAX_DRIFT_M = 0.04  # matches seven_r.srs_polished's default gate
+_APPROX_SAMPLES_PER_ARC = 5  # LM shift can push the arc centre out of limits
+_APPROX_FK_ATOL = 1e-8
+
+
+def _in_limits(q: NDArray[np.float64], limits: list[tuple[float, float]]) -> bool:
+    return all(lo - 1e-9 <= q[i] <= hi + 1e-9 for i, (lo, hi) in enumerate(limits))
+
+
 def resolve_in_limits(
     kb: KinBody,
     T_target: NDArray[np.float64],
@@ -376,23 +398,57 @@ def resolve_in_limits(
     *,
     max_solutions: int | None = None,
 ) -> list[Solution]:
-    """Exact joint-limit-aware IK for SRS-class 7R via feasible-swivel resolution.
+    """Joint-limit-aware IK for SRS-class 7R via feasible-swivel resolution.
 
     Intended as the ``respect_limits`` fallback for the SRS-family prebuilt
     ``solve()``: when the blind swivel sweep samples no in-limits candidate, the
-    feasible-swivel arcs recover the in-limits solution(s) exactly (#359).
-    Returns FK-verified :class:`Solution` objects (already wrapped into limits);
-    empty when the chain is not SRS-class or no in-limits solution exists.
+    feasible-swivel arcs recover the in-limits solution(s) (#359). Returns
+    FK-verified, in-limits :class:`Solution` objects; empty when the chain is not
+    SRS-class or no in-limits solution exists.
+
+    Exactly-concurrent SRS chains are solved in closed form (machine precision).
+    Approximately-SRS chains (e.g. Kinova Gen3) run the resolver on the best-fit
+    pivots to seed candidates, then LM-polish each to machine-precision FK against
+    the true URDF, keeping those still in-limits (#370).
     """
-    cls = _classify_srs_7r_geometric(kb, policy)
-    if cls is None or len(kb.joints) != 7:
+    if len(kb.joints) != 7:
         return []
-    limits = _joint_limits(kb)
     T = np.asarray(T_target, dtype=np.float64)
-    fk_atol = policy.subproblem_numerical
-    out: list[Solution] = []
-    for q in feasible_in_limits_solutions(kb, cls, T, limits, max_solutions=max_solutions):
-        residual = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
-        if residual <= fk_atol:
-            out.append(Solution(q=q, fk_residual=residual, refinement_used="none"))
-    return out
+    limits = _joint_limits(kb)
+
+    cls = _classify_srs_7r_geometric(kb, policy)
+    if cls is not None:
+        fk_atol = policy.subproblem_numerical
+        exact: list[Solution] = []
+        for q in feasible_in_limits_solutions(kb, cls, T, limits, max_solutions=max_solutions):
+            residual = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
+            if residual <= fk_atol:
+                exact.append(Solution(q=q, fk_residual=residual, refinement_used="none"))
+        return exact
+
+    # Approximately-SRS (#370): best-fit resolver seeds + LM polish.
+    approx = is_approximately_srs_7r(kb, max_drift_m=_APPROX_MAX_DRIFT_M, policy=policy)
+    if approx is None:
+        return []
+    seeds = feasible_in_limits_solutions(
+        kb, approx.base, T, limits, samples_per_arc=_APPROX_SAMPLES_PER_ARC
+    )
+    if not seeds:
+        return []
+
+    def _fk(q: NDArray[np.float64]) -> NDArray[np.float64]:
+        t: NDArray[np.float64] = poe_forward_kinematics(kb, q)
+        return t
+
+    def _jac(q: NDArray[np.float64]) -> NDArray[np.float64]:
+        j: NDArray[np.float64] = kinbody_jacobian(kb, q)
+        return j
+
+    q_polished, residuals, _iters = lm_refine_batch(np.asarray(seeds), _fk, _jac, T)
+    polished: list[Solution] = [
+        Solution(q=q_polished[i], fk_residual=float(residuals[i]), refinement_used="lm")
+        for i in range(q_polished.shape[0])
+        if residuals[i] <= _APPROX_FK_ATOL and _in_limits(q_polished[i], limits)
+    ]
+    out = dedup_by_wrap_close(polished, policy.subproblem_dedup)
+    return out[:max_solutions] if max_solutions is not None else out

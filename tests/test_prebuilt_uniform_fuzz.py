@@ -262,15 +262,11 @@ def test_prebuilt_7r_tight_policy_machine_precision(arm_name: str, q_star: np.nd
 # so the gap is visible; the other 7 arms get a real 0-empty guarantee.
 # ---------------------------------------------------------------------------
 
-# gen3 (seven_r.srs_polished, *approximately* SRS) still gaps: the exact
-# feasible-swivel resolver (#359) only applies to exactly-concurrent SRS chains,
-# so it no-ops here and gen3 falls back to the blind sweep. The exactly-SRS
-# arms (iiwa14 + openarm + r1pro) now hold the in-limits guarantee via the
-# resolver. Extending it to approximate-SRS (relaxed-pivot + LM polish) is a
-# follow-up.
-_LIMITS_GAP_7R = {
-    "gen3_ik",
-}
+# Every shipped 7R arm now holds the default-path in-limits guarantee: the
+# exactly-SRS arms via the closed-form feasible-swivel resolver (#359), and the
+# approximately-SRS gen3 via the same resolver on best-fit pivots + LM polish
+# (#370). Empty set = no arm is allowed to drop a reachable in-limits pose.
+_LIMITS_GAP_7R: set[str] = set()
 
 
 def _joint_ranges(kb: object) -> list[tuple[float, float]]:
