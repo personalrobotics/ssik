@@ -106,6 +106,22 @@ def test_choose_lock_joint_picks_low_rank(srs_kb: KinBody) -> None:
     assert lock_idx == 3, f"expected lock_idx=3, got {lock_idx}"
 
 
+@pytest.mark.parametrize("lock_idx", range(7))
+def test_lock_joint_fk_consistent_all_indices(srs_kb: KinBody, lock_idx: int) -> None:
+    """The locked 6R sub-chain's FK must match the full 7R FK for *every* lock
+    index, including the last joint. Locking the last joint previously dropped
+    the locked transform entirely, yielding a ~2 m FK mismatch and silent
+    wrong solutions (#374)."""
+    rng = np.random.default_rng(lock_idx)
+    for _ in range(8):
+        q = rng.uniform(-np.pi, np.pi, size=7)
+        sub = seven_r._lock_joint(srs_kb, lock_idx, float(q[lock_idx]))
+        q_free = np.delete(q, lock_idx)
+        assert np.allclose(_fk(sub, q_free), _fk(srs_kb, q), atol=1e-12), (
+            f"lock_idx={lock_idx}: 6R sub-chain FK diverges from full 7R FK"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Targeted lock recovers seeded q*.
 # ---------------------------------------------------------------------------
