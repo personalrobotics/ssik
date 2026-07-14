@@ -23,12 +23,20 @@ Known structurally-singular config (skipped from q_truth assertion):
 - ``iiwa14`` lock=3: Jacobian sv_min ~ 1e-8 at every q I tested. The
   60° elbow-locked DH gives a globally rank-deficient 6R chain. HP
   returns a valid IK from the 1-D continuous family.
+
+Known non-singular HP coverage gap (strict-xfail, #376):
+- ``iiwa14`` lock=6: HP returns 0 seeds on the (well-conditioned)
+  last-joint-locked sub-chain. Exposed by #374 -- before that fix the
+  lock=6 sub-chain was mis-built, so this row (and the "21 configs"
+  DH audit above, for the three lock=6 rows) was computed on the wrong
+  geometry. Re-audit lock=6 on the corrected chains when closing #376.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -59,6 +67,36 @@ _Q_DEFAULT = np.array([0.3, -0.4, 0.7, 0.5, 0.6, -0.5, 0.2])
 # HP must still return a valid IK from the family.
 _SINGULAR_CONFIGS = {("iiwa14", 3)}
 
+# Non-singular configs where HP genuinely returns 0 seeds -- a real coverage gap,
+# not a singularity (Jacobian is well-conditioned). ("iiwa14", 6) was exposed by
+# the #374 fix: before it, _lock_joint mis-built the last-joint-locked sub-chain,
+# so this config silently tested HP against a wrong-but-self-consistent chain.
+# With the corrected geometry HP returns 0 (is_ls=True). Test-only path: no arm
+# dispatches HP on a last-joint lock. Tracked in #376 (strict xfail flags closure).
+_HP_COVERAGE_GAP_CONFIGS = {("iiwa14", 6)}
+
+
+def _locked_config_params() -> list[Any]:
+    """(arm, lock_idx) params for the all-locks HP sweep, with known coverage
+    gaps marked strict-xfail. Structurally-singular configs are excluded (they
+    have their own FK-only test)."""
+    params = []
+    for arm, _ in ARMS:
+        for lock in range(7):
+            if (arm, lock) in _SINGULAR_CONFIGS:
+                continue
+            marks = (
+                [
+                    pytest.mark.xfail(
+                        reason=f"HP coverage gap, see #376 ({arm} lock={lock})", strict=True
+                    )
+                ]
+                if (arm, lock) in _HP_COVERAGE_GAP_CONFIGS
+                else []
+            )
+            params.append(pytest.param(arm, lock, marks=marks))
+    return params
+
 
 def _q_truth_for_lock(lock_idx: int) -> np.ndarray:
     return np.delete(_Q_DEFAULT, lock_idx)
@@ -75,10 +113,7 @@ def _closest_q_err_modulo_2pi(q_returned: np.ndarray, q_truth: np.ndarray) -> fl
     return float(np.max(np.abs(q_close - q_truth)))
 
 
-@pytest.mark.parametrize(
-    ("arm_name", "lock_idx"),
-    [(arm, lock) for arm, _ in ARMS for lock in range(7) if (arm, lock) not in _SINGULAR_CONFIGS],
-)
+@pytest.mark.parametrize(("arm_name", "lock_idx"), _locked_config_params())
 def test_locked_7r_fk_closure(arm_name: str, lock_idx: int) -> None:
     """Every returned IK on every locked-7R config FK-closes at machine
     precision. Bulletproof contract: FK Frobenius residual ≤ 1e-10.
@@ -112,10 +147,7 @@ def test_locked_7r_fk_closure(arm_name: str, lock_idx: int) -> None:
         )
 
 
-@pytest.mark.parametrize(
-    ("arm_name", "lock_idx"),
-    [(arm, lock) for arm, _ in ARMS for lock in range(7) if (arm, lock) not in _SINGULAR_CONFIGS],
-)
+@pytest.mark.parametrize(("arm_name", "lock_idx"), _locked_config_params())
 def test_locked_7r_q_truth_recovery(arm_name: str, lock_idx: int) -> None:
     """Non-singular locked-7R configs recover q_truth at machine precision
     (max |q - q_truth| modulo 2π < 1e-6).

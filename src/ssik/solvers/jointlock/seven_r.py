@@ -171,6 +171,18 @@ def _lock_joint(kb: KinBody, lock_idx: int, q_lock: float) -> KinBody:
             )
         )
 
+    if lock_idx == last_idx:
+        # Locking the final joint: there are no downstream joints to propagate
+        # R_lock through, so the loop above left the locked joint's fixed
+        # transform ``T_left @ Rot(axis, q_lock) @ T_right`` out entirely. Absorb
+        # it into the new last joint's T_right (now the final joint, so it may
+        # carry this rotation on top of its own translation).
+        r_lock4 = np.eye(4)
+        r_lock4[:3, :3] = R_lock
+        absorbed = locked.T_left @ r_lock4 @ locked.T_right
+        prev = new_joints[-1]
+        new_joints[-1] = replace(prev, T_right=prev.T_right @ absorbed)
+
     # Drop one link to preserve N+1 links / N joints. Drop the link
     # immediately after the locked joint (or the locked joint's own link
     # if locking the last joint).
