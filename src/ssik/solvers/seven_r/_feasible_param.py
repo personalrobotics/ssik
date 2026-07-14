@@ -144,6 +144,7 @@ def feasible_arcs(
     (parameter-independent) joints are the caller's responsibility to pre-check.
     Empty iff no ``t`` keeps all swept joints in-limits.
     """
+
     def joint(i: int) -> Callable[[float], float]:
         return lambda t: float(q_scalar(t)[i])
 
