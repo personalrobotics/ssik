@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -75,7 +76,7 @@ _SINGULAR_CONFIGS = {("iiwa14", 3)}
 _HP_COVERAGE_GAP_CONFIGS = {("iiwa14", 6)}
 
 
-def _locked_config_params() -> list:
+def _locked_config_params() -> list[Any]:
     """(arm, lock_idx) params for the all-locks HP sweep, with known coverage
     gaps marked strict-xfail. Structurally-singular configs are excluded (they
     have their own FK-only test)."""
