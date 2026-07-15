@@ -156,3 +156,63 @@ def feasible_arcs(
         if not arcs:
             return []
     return arcs
+
+
+# --- Bounded, non-periodic domain --------------------------------------------
+# The SRS swivel psi lives on the circle [-pi, pi); a locked-joint redundancy
+# (e.g. #373's q6) lives on the joint's own limits [a, b] with no wrap-around.
+# Same phi_i = cos(q_i - c) - cos(h) >= 0 test, but sub-intervals are clipped to
+# [a, b] and the domain endpoints are interval boundaries (no roots[0] + 2pi).
+
+
+def arcs_for_joint_bounded(
+    q_of: Callable[[float], float],
+    lo: float,
+    hi: float,
+    grid: NDArray[np.float64],
+    q_col: NDArray[np.float64],
+) -> list[tuple[float, float]]:
+    """Feasible sub-intervals of the bounded domain ``[grid[0], grid[-1]]`` for a
+    single joint ``q_of(t)`` in ``[lo, hi]`` -- the non-periodic analogue of
+    :func:`arcs_for_joint` (no wrap; endpoints are boundaries)."""
+    a0, b0 = float(grid[0]), float(grid[-1])
+    c = 0.5 * (lo + hi)
+    half = 0.5 * (hi - lo)
+    if half >= np.pi:  # unconstrained (continuous) joint
+        return [(a0, b0)]
+    thr = float(np.cos(half))
+    val = np.cos(q_col - c) - thr
+
+    def phi(p: float) -> float:
+        return float(np.cos(q_of(p) - c)) - thr
+
+    roots: list[float] = []
+    for k in range(grid.shape[0] - 1):
+        if val[k] * val[k + 1] < 0:
+            roots.append(bisect(phi, float(grid[k]), float(grid[k + 1])))
+    pts = [a0, *sorted(roots), b0]
+    arcs = [(u, w) for u, w in pairwise(pts) if phi(0.5 * (u + w)) >= 0]
+    return merge(arcs)
+
+
+def feasible_arcs_bounded(
+    q_scalar: Callable[[float], NDArray[np.float64]],
+    q_grid: NDArray[np.float64],
+    swept_joints: Sequence[int],
+    limits: list[tuple[float, float]],
+    grid: NDArray[np.float64],
+) -> list[tuple[float, float]]:
+    """Bounded-domain analogue of :func:`feasible_arcs`: the in-limits sub-set of
+    ``[grid[0], grid[-1]]`` (non-periodic) where every swept joint is in range."""
+
+    def joint(i: int) -> Callable[[float], float]:
+        return lambda t: float(q_scalar(t)[i])
+
+    arcs: list[tuple[float, float]] = [(float(grid[0]), float(grid[-1]))]
+    for i in swept_joints:
+        arcs = intersect(
+            arcs, arcs_for_joint_bounded(joint(i), limits[i][0], limits[i][1], grid, q_grid[:, i])
+        )
+        if not arcs:
+            return []
+    return arcs
