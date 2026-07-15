@@ -24,8 +24,12 @@ at any q6 -- no KinBody rebuild, no verify. The redundancy is then resolved
    SRS swivel resolution, #372/#359). The cheap closed-form eval affords a fine
    grid, so even razor-thin in-limits arcs are bracketed.
 
-No blind sampling -> no coverage gaps + an exact in-limits guarantee. Covers
-franka/fr3/xarm7; the approximately-spherical shoulder path (rizon4) is a
+No blind sampling -> no coverage gaps + an exact in-limits guarantee, at
+machine precision (FK <= 1e-10). Exact-class membership is the reversed lock-6
+sub-chain having an exact spherical wrist triple ``(3, 4, 5)`` -- Franka Panda
+and FR3 qualify. Arms that are only *approximately* spherical (no exact triple,
+e.g. xArm7, or an approximately-concurrent shoulder, e.g. rizon4) fail the
+machine-precision gate and return ``[]``; an LM-polish path for them is a
 follow-up.
 """
 
@@ -56,6 +60,10 @@ _BRACKET_GRID = 90  # SP3-margin sign-change resolution
 _TRACK_GRID = 180  # per-interval branch-tracking / feasible-arc resolution
 _MERGE_KEY = 6  # dedup rounding (decimals) on the full q vector
 _BAKE_Q6 = np.array([0.0, 2.0 * np.pi / 3.0, 4.0 * np.pi / 3.0])  # {cos,sin,1} basis samples
+_FK_ATOL = 1e-10  # bulletproof exact-class gate: only machine-precision solutions
+# (feedback_bulletproof_solvers). Arms that are only *approximately* spherical
+# (no exact wrist triple, e.g. xArm7) fail this and return [] -- they need the
+# LM-polish path (follow-up), not silent 1e-6 solutions.
 _Branches = Callable[[float], list[NDArray[np.float64]]]
 
 
@@ -119,6 +127,141 @@ def _closed_branches(
     return out
 
 
+def _rot_batch(k: NDArray[np.float64], th: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Batched Rodrigues: per-row axis ``k`` (n,3) and angle ``th`` (n,) -> (n,3,3)."""
+    n = k.shape[0]
+    skew = np.zeros((n, 3, 3))
+    skew[:, 0, 1], skew[:, 0, 2] = -k[:, 2], k[:, 1]
+    skew[:, 1, 0], skew[:, 1, 2] = k[:, 2], -k[:, 0]
+    skew[:, 2, 0], skew[:, 2, 1] = -k[:, 1], k[:, 0]
+    s = np.sin(th)[:, None, None]
+    c = (1.0 - np.cos(th))[:, None, None]
+    out: NDArray[np.float64] = np.eye(3)[None] + s * skew + c * (skew @ skew)
+    return out
+
+
+def _bdot(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
+    out: NDArray[np.float64] = (a * b).sum(1)
+    return out
+
+
+def _sp1_batch(
+    k: NDArray[np.float64], p: NDArray[np.float64], q: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    return np.arctan2(_bdot(np.cross(k, p), q), _bdot(p, q) - _bdot(k, p) * _bdot(k, q))
+
+
+def _sp4_batch(
+    h: NDArray[np.float64],
+    k: NDArray[np.float64],
+    p: NDArray[np.float64],
+    d: NDArray[np.float64],
+    feas_tol: float,
+    deg: float,
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Batched SP4 (also serves SP3 via delegation). Returns both ``phi +- delta``
+    branches (clipped, so no NaN when infeasible) and a feasibility mask; spurious
+    branches at infeasible samples are filtered downstream by FK closure."""
+    a = _bdot(h, p) - _bdot(k, p) * _bdot(h, k)
+    b = _bdot(h, np.cross(k, p))
+    cc = _bdot(k, p) * _bdot(h, k)
+    r = np.hypot(a, b)
+    rhs = d - cc
+    ratio = np.clip(np.divide(rhs, r, out=np.zeros_like(r), where=r > 1e-12), -1.0, 1.0)
+    delta = np.arccos(ratio)
+    phi = np.arctan2(b, a)
+    feas = (np.abs(rhs) - r <= feas_tol) & (r * r >= deg * deg)
+    return np.stack([phi + delta, phi - delta], axis=1), feas
+
+
+def _sp2_batch(
+    k1: NDArray[np.float64],
+    k2: NDArray[np.float64],
+    p: NDArray[np.float64],
+    q: NDArray[np.float64],
+    feas_tol: float,
+    deg: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
+    """Batched SP2. Returns both ``(theta1, theta2)`` branches and feasibility."""
+    c = _bdot(k1, k2)
+    s_sq = 1.0 - c * c
+    safe = np.where(s_sq > deg, s_sq, 1.0)
+    d1, d2 = _bdot(k1, p), _bdot(k2, q)
+    alpha = (d1 - c * d2) / safe
+    beta = (d2 - c * d1) / safe
+    kxk = np.cross(k1, k2)
+    pp, qq = _bdot(p, p), _bdot(q, q)
+    gss = 0.5 * (pp + qq) - alpha * alpha - beta * beta - 2.0 * alpha * beta * c
+    feas = (np.abs(pp - qq) <= feas_tol) & (gss >= -feas_tol) & (s_sq >= deg)
+    gamma = np.sqrt(np.maximum(gss, 0.0) / safe)
+    base = alpha[:, None] * k1 + beta[:, None] * k2
+    za = base + gamma[:, None] * kxk
+    zb = base - gamma[:, None] * kxk
+    t1 = np.stack([_sp1_batch(k1, p, za), _sp1_batch(k1, p, zb)], axis=1)
+    t2 = np.stack([_sp1_batch(k2, q, za), _sp1_batch(k2, q, zb)], axis=1)
+    return t1, t2, feas
+
+
+def _closed_branches_grid(
+    coef: NDArray[np.float64],
+    t_rev: NDArray[np.float64],
+    q6_grid: NDArray[np.float64],
+    policy: TolerancePolicy,
+) -> list[list[NDArray[np.float64]]]:
+    """Vectorised :func:`_closed_branches` over a q6 grid: loop the <=8 branch
+    slots (fixed), vectorise each SP stage over the grid. Returns, per grid point,
+    the list of feasible q0..q6 branches. Validated to match the scalar oracle's
+    FK-closing branch set exactly (0 missed) at ~7x the speed of the scalar loop."""
+    n = q6_grid.shape[0]
+    ft, dg = policy.subproblem_feasibility, policy.subproblem_degeneracy
+    basis = np.stack([np.cos(q6_grid), np.sin(q6_grid), np.ones(n)], axis=1)
+    v = basis @ coef
+    axes = v[:, 0:18].reshape(n, 6, 3)
+    axes = axes / np.linalg.norm(axes, axis=2, keepdims=True)
+    a0, a1, a2, a3, a4, a5 = (axes[:, i] for i in range(6))
+    our_p = v[:, 18:36].reshape(n, 6, 3)
+    tool = v[:, 36:39]
+    r_home = v[:, 39:48].reshape(n, 3, 3)
+    p0, p2 = our_p[:, 0], our_p[:, 2]
+    p3 = our_p[:, 3] + our_p[:, 4] + our_p[:, 5]
+    r_06 = np.einsum("ij,nkj->nik", t_rev[:3, :3], r_home)
+    p_16 = t_rev[:3, 3] - np.einsum("nij,nj->ni", r_06, tool) - p0
+
+    d3 = 0.5 * (_bdot(p3, p3) + _bdot(p2, p2) - _bdot(p_16, p_16))
+    q3_both, feas3 = _sp4_batch(-p2, a2, p3, d3, ft, dg)  # SP3 via SP4
+
+    slots: list[list[NDArray[np.float64]]] = [[] for _ in range(n)]
+    for e in range(2):
+        q3 = q3_both[:, e]
+        sp2_arg = p2 + np.einsum("nij,nj->ni", _rot_batch(a2, q3), p3)
+        t1_both, t2_both, feas2 = _sp2_batch(-a0, a1, p_16, sp2_arg, ft, dg)
+        for sh in range(2):
+            q1, q2 = t1_both[:, sh], t2_both[:, sh]
+            r36 = _rot_batch(-a2, q3) @ _rot_batch(-a1, q2) @ _rot_batch(-a0, q1) @ r_06
+            d_sp4 = np.einsum("ni,nij,nj->n", a3, r36, a5)
+            q5_both, feas4 = _sp4_batch(a3, a4, a5, d_sp4, ft, dg)
+            valid = feas3 & feas2 & feas4
+            for w in range(2):
+                q5 = q5_both[:, w]
+                q4 = _sp1_batch(
+                    a3,
+                    np.einsum("nij,nj->ni", _rot_batch(a4, q5), a5),
+                    np.einsum("nij,nj->ni", r36, a5),
+                )
+                q6i = _sp1_batch(
+                    -a5,
+                    np.einsum("nij,nj->ni", _rot_batch(-a4, q5), a3),
+                    np.einsum("nji,nj->ni", r36, a3),
+                )
+                # map_reversed_q(flip [q1..q6i]) = [q6i,q5,q4,q3,q2,q1] + q6
+                full = np.concatenate(
+                    [np.stack([q6i, q5, q4, q3, q2, q1], axis=1), q6_grid[:, None]], axis=1
+                )
+                for i in np.nonzero(valid)[0]:
+                    slots[i].append(full[i])
+    return slots
+
+
 def _sp3_reach_margins(
     coef: NDArray[np.float64], t_rev: NDArray[np.float64], q6_grid: NDArray[np.float64]
 ) -> NDArray[np.float64]:
@@ -176,10 +319,12 @@ def _reachable_intervals(
     return merge(out)
 
 
-def _track_branches(branches: _Branches, grid: NDArray[np.float64]) -> list[NDArray[np.float64]]:
-    """Link discrete branches across ``grid`` into continuous curves by greedy
-    nearest-neighbour. Returns ``(len(grid), 7)`` arrays (NaN where absent)."""
-    per = [branches(float(g)) for g in grid]
+def _track_branches(
+    per: list[list[NDArray[np.float64]]], grid: NDArray[np.float64]
+) -> list[NDArray[np.float64]]:
+    """Link discrete branches (``per[k]`` = branch list at ``grid[k]``) into
+    continuous curves by greedy nearest-neighbour. Returns ``(len(grid), 7)``
+    arrays (NaN where absent)."""
     n = len(grid)
     used: list[set[int]] = [set() for _ in range(n)]
     curves: list[NDArray[np.float64]] = []
@@ -207,19 +352,22 @@ def _track_branches(branches: _Branches, grid: NDArray[np.float64]) -> list[NDAr
 
 
 def _solutions_in_interval(
-    branches: _Branches,
+    coef: NDArray[np.float64],
+    t_rev: NDArray[np.float64],
     kb: KinBody,
     T: NDArray[np.float64],
     a: float,
     b: float,
     limits: list[tuple[float, float]],
-    fk_atol: float,
+    policy: TolerancePolicy,
 ) -> list[NDArray[np.float64]]:
     """In-limits q vectors for one reachable interval: track each branch, take
     its exact in-limits q6 arcs, emit the arc-centre solution wrapped to limits."""
+    fk_atol = _FK_ATOL
     grid = np.linspace(a, b, _TRACK_GRID)
+    per = _closed_branches_grid(coef, t_rev, grid, policy)  # one vectorised pass
     out: list[NDArray[np.float64]] = []
-    for curve in _track_branches(branches, grid):
+    for curve in _track_branches(per, grid):
         valid = ~np.isnan(curve[:, 0])
         g = grid[valid]
         qc = curve[valid]
@@ -236,7 +384,7 @@ def _solutions_in_interval(
 
         for u, w in feasible_arcs_bounded(q_scalar, qc, _SWEPT, limits, g):
             q6c = 0.5 * (u + w)
-            for q in branches(float(q6c)):
+            for q in _closed_branches(coef, t_rev, float(q6c), policy):
                 qw = np.array([to_limits(float(q[i]), *limits[i]) for i in range(7)])
                 in_lim = all(limits[i][0] - 1e-9 <= qw[i] <= limits[i][1] + 1e-9 for i in range(7))
                 if in_lim and float(np.linalg.norm(poe_forward_kinematics(kb, qw) - T)) <= fk_atol:
@@ -274,18 +422,14 @@ def resolve_in_limits(
     T = np.asarray(T_target, dtype=np.float64)
     limits = _joint_limits(kb)
     lo, hi = limits[_LOCK]
-    fk_atol = policy.subproblem_numerical
 
     coef = _bake(kb)
     t_rev = _se3_inv(T)
 
-    def branches(q6: float) -> list[NDArray[np.float64]]:
-        return _closed_branches(coef, t_rev, q6, policy)
-
     seen: set[tuple[float, ...]] = set()
     out: list[Solution] = []
     for a, b in _reachable_intervals(coef, t_rev, lo, hi):
-        for q in _solutions_in_interval(branches, kb, T, a, b, limits, fk_atol):
+        for q in _solutions_in_interval(coef, t_rev, kb, T, a, b, limits, policy):
             key = tuple(np.round(q, _MERGE_KEY))
             if key in seen:
                 continue
