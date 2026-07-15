@@ -128,6 +128,7 @@ _SOLVER_IMPORT_PATHS: dict[str, str] = {
     "husty_pfurner.general_6r": "ssik.solvers.husty_pfurner.general_6r",
     "seven_r.srs": "ssik.solvers.seven_r.srs",
     "seven_r.srs_polished": "ssik.solvers.seven_r.srs_polished",
+    "seven_r.spherical_shoulder": "ssik.solvers.seven_r.spherical_shoulder",
     "jointlock.seven_r": "ssik.solvers.jointlock.seven_r",
 }
 

@@ -121,6 +121,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "husty_pfurner.general_6r": (2, 120.0, 50_000_000),
     "seven_r.srs": (0, 8.5, 1_900),  # native SRS-class 7R, full sweep (16 swivel x 8 branches)
     "seven_r.srs_polished": (0, 56.0, 80_000),  # approximate-SRS + batched LM polish (Gen3 et al.)
+    "seven_r.spherical_shoulder": (0, 17.0, 6_000),  # exact spherical-shoulder 7R (Franka/FR3)
     "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 
@@ -163,6 +164,29 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                 needs_symbolic_precompute=False,
             )
             _LOG.info("dispatch: chose %s (tier 0, native SRS-7R)", plan.solver_name)
+            return plan
+
+        # Tier-0 7R: exact spherical-shoulder + offset-wrist (Franka Panda / FR3
+        # and any arm of the class). Not SRS (the wrist is offset, not spherical),
+        # but the last joint's redundancy resolves in closed form -- faster than
+        # the jointlock sweep, machine precision, and zero coverage gaps.
+        from ssik.solvers.seven_r.spherical_shoulder import is_spherical_shoulder_7r
+
+        if is_spherical_shoulder_7r(kb, policy):
+            plan = _make_plan(
+                "seven_r.spherical_shoulder",
+                reason=(
+                    "Spherical-shoulder + offset-wrist 7R: shoulder axes\n"
+                    "(joints 0, 1, 2) meet at one point but the wrist is\n"
+                    "offset. Treats the last joint as the redundancy and\n"
+                    "resolves its reachable/in-limits interval exactly in\n"
+                    "closed form (SP3 bracket x feasible arcs on q_i(q6)).\n"
+                    "Faster than the jointlock sweep, machine precision, no\n"
+                    "coverage gaps. Covers Franka Panda / FR3."
+                ),
+                needs_symbolic_precompute=False,
+            )
+            _LOG.info("dispatch: chose %s (tier 0, spherical-shoulder-7R)", plan.solver_name)
             return plan
 
         # Tier-0 7R: approximate-SRS variant for arms whose URDF axes only

@@ -45,6 +45,7 @@ from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics._scalar3 import _se3_inv
 from ssik.kinematics.poe_fk import poe_forward_kinematics
+from ssik.kinematics.predicates import three_consecutive_intersecting
 from ssik.kinematics.reverse import map_reversed_q, reverse_kinematic_chain
 from ssik.solvers.jointlock.seven_r import _lock_joint
 from ssik.solvers.seven_r._feasible_param import feasible_arcs_bounded, merge, to_limits
@@ -65,6 +66,32 @@ _FK_ATOL = 1e-10  # bulletproof exact-class gate: only machine-precision solutio
 # (no exact wrist triple, e.g. xArm7) fail this and return [] -- they need the
 # LM-polish path (follow-up), not silent 1e-6 solutions.
 _Branches = Callable[[float], list[NDArray[np.float64]]]
+
+
+def is_spherical_shoulder_7r(
+    kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY
+) -> bool:
+    """True iff ``kb`` is an *exact* spherical-shoulder + offset-wrist 7R this
+    solver handles at machine precision.
+
+    Pure topology (no pose): lock the last joint and reverse the chain; the class
+    is exactly the one whose reversed sub-chain is ``spherical_two_intersecting``
+    -- an exact spherical wrist triple at ``(3, 4, 5)`` (the original spherical
+    shoulder, invariant to the distal lock) with the shoulder pivot at the base
+    (``p[1] = 0``). Franka Panda and FR3 qualify. Arms that are only
+    *approximately* spherical (xArm7: non-concurrent wrist; rizon4: drifted
+    shoulder) fail and route elsewhere -- they would not solve to machine
+    precision here (an LM-polish variant is a follow-up).
+    """
+    if len(kb.joints) != 7:
+        return False
+    try:
+        sub = reverse_kinematic_chain(_lock_joint(kb, _LOCK, 0.0))
+    except (IndexError, ValueError):
+        return False
+    if three_consecutive_intersecting(sub.joints, policy) != (3, 4, 5):
+        return False
+    return bool(float(np.linalg.norm(sub.joints[1].T_left[:3, 3])) < policy.axis_intersect)
 
 
 # --- baked closed-form q_i(q6) ------------------------------------------------
@@ -401,6 +428,59 @@ def _joint_limits(kb: KinBody) -> list[tuple[float, float]]:
         else:
             lims.append((float(lo_hi[0]), float(lo_hi[1])))
     return lims
+
+
+_SAMPLE_GRID = 16  # default-path samples per reachable interval (like the sweep)
+
+
+def solve(
+    kb: KinBody,
+    T_target: NDArray[np.float64],
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    *,
+    allow_refinement: bool = False,
+    refinement_max_iters: int = 15,
+    max_solutions: int | None = None,
+    q_seed: NDArray[np.float64] | None = None,
+    respect_limits: bool = False,
+) -> tuple[list[Solution], bool]:
+    """Analytic IK for the spherical-shoulder + offset-wrist 7R class.
+
+    ``respect_limits=True`` returns the exact in-limits solution set (no coverage
+    gaps -- see :func:`resolve_in_limits`). The default samples each reachable q6
+    interval for a representative solution set. ``allow_refinement`` /
+    ``refinement_max_iters`` are accepted for interface parity and unused (the
+    closed-form solutions are already machine-precision). Returns
+    ``(solutions, is_ls)`` with ``is_ls = True`` iff empty.
+    """
+    if len(kb.joints) != 7:
+        return [], True
+    if respect_limits:
+        sols = resolve_in_limits(kb, T_target, policy, max_solutions=max_solutions)
+        return sols, len(sols) == 0
+
+    T = np.asarray(T_target, dtype=np.float64)
+    coef = _bake(kb)
+    t_rev = _se3_inv(T)
+    lo, hi = _joint_limits(kb)[_LOCK]
+    seen: set[tuple[float, ...]] = set()
+    out: list[Solution] = []
+    for a, b in _reachable_intervals(coef, t_rev, lo, hi):
+        grid = np.linspace(a, b, _SAMPLE_GRID)
+        per = _closed_branches_grid(coef, t_rev, grid, policy)
+        for branch_list in per:
+            for q in branch_list:
+                residual = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
+                if residual > _FK_ATOL:
+                    continue
+                key = tuple(np.round(q, _MERGE_KEY))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(Solution(q=q, fk_residual=residual, refinement_used="none"))
+                if max_solutions is not None and len(out) >= max_solutions:
+                    return out, False
+    return out, len(out) == 0
 
 
 def resolve_in_limits(

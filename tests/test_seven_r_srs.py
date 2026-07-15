@@ -258,12 +258,14 @@ def test_dispatcher_picks_srs_for_iiwa14() -> None:
     assert plan.tier == 0
 
 
-def test_dispatcher_falls_back_to_jointlock_for_franka() -> None:
-    """Franka Panda is non-SRS; dispatcher falls back to jointlock."""
+def test_dispatcher_routes_franka_to_spherical_shoulder_not_srs() -> None:
+    """Franka Panda is non-SRS (offset wrist), so it must NOT route to
+    seven_r.srs. Since #373 it routes to the exact spherical-shoulder specialist
+    (not the jointlock fallback it used before)."""
     from franka_panda import franka_panda_specs
 
     from ssik.core.dispatcher import dispatch
 
     kb = build_kinbody(franka_panda_specs())
     plan = dispatch(kb)
-    assert plan.solver_name == "jointlock.seven_r"
+    assert plan.solver_name == "seven_r.spherical_shoulder"

@@ -48,14 +48,15 @@ def test_fr3_loads_as_7r() -> None:
         assert j.joint_type == "revolute"
 
 
-def test_fr3_dispatches_to_jointlock_seven_r() -> None:
-    """Dispatcher routing is stable. Updating the dispatcher should
-    update this assertion deliberately.
+def test_fr3_dispatches_to_spherical_shoulder() -> None:
+    """FR3 is exact spherical-shoulder + offset-wrist (#373): dispatcher routes
+    it to the closed-form specialist (was jointlock.seven_r before #373).
+    Updating the dispatcher should update this assertion deliberately.
     """
     kb = _fr3_kinbody()
     plan = dispatch(kb)
-    assert plan.solver_name == "jointlock.seven_r"
-    assert plan.tier == 1
+    assert plan.solver_name == "seven_r.spherical_shoulder"
+    assert plan.tier == 0
 
 
 # ----------------------------------------------------------------------------
