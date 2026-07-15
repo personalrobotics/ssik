@@ -48,7 +48,7 @@ preprocessing) and cleaner to ship in production stacks.
 | `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `gen3_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
 | `franka_panda_ik` | `seven_r.spherical_shoulder` | <1 s | ~22 KB |
-| `xarm7_ik` | `jointlock.seven_r` + cached-RR | ~19 min | ~1643 KB |
+| `xarm7_ik` | `seven_r.spherical_shoulder_polished` | <1 s | ~22 KB |
 | `xarm6_ik` | `ikgeo.general_6r` | ~15 s | ~70 KB |
 | `z1_ik` | `ikgeo.three_parallel` | <1 s | ~23 KB |
 | `piper_ik` | `ikgeo.general_6r` | ~25 s | ~88 KB |

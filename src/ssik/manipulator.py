@@ -61,6 +61,7 @@ _SOLVER_MODULE_PATHS: dict[str, str] = {
     "seven_r.srs": "ssik.solvers.seven_r.srs",
     "seven_r.srs_polished": "ssik.solvers.seven_r.srs_polished",
     "seven_r.spherical_shoulder": "ssik.solvers.seven_r.spherical_shoulder",
+    "seven_r.spherical_shoulder_polished": "ssik.solvers.seven_r.spherical_shoulder_polished",
     "jointlock.seven_r": "ssik.solvers.jointlock.seven_r",
 }
 

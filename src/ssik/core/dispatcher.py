@@ -122,6 +122,7 @@ _SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
     "seven_r.srs": (0, 8.5, 1_900),  # native SRS-class 7R, full sweep (16 swivel x 8 branches)
     "seven_r.srs_polished": (0, 56.0, 80_000),  # approximate-SRS + batched LM polish (Gen3 et al.)
     "seven_r.spherical_shoulder": (0, 17.0, 6_000),  # exact spherical-shoulder 7R (Franka/FR3)
+    "seven_r.spherical_shoulder_polished": (0, 8.0, 40_000),  # near-spherical + LM polish (xArm7)
     "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
 }
 
@@ -187,6 +188,28 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                 needs_symbolic_precompute=False,
             )
             _LOG.info("dispatch: chose %s (tier 0, spherical-shoulder-7R)", plan.solver_name)
+            return plan
+
+        # Tier-0 7R: approximately-spherical-shoulder (xArm7) -- the reversed
+        # lock-6 wrist triple is concurrent to within a small drift, so the
+        # closed-form q_i(q6) seeds + LM polish reach machine precision.
+        from ssik.solvers.seven_r.spherical_shoulder_polished import (
+            is_approximately_spherical_shoulder_7r,
+        )
+
+        if is_approximately_spherical_shoulder_7r(kb, policy=policy):
+            plan = _make_plan(
+                "seven_r.spherical_shoulder_polished",
+                reason=(
+                    "Approximately-spherical-shoulder 7R: the reversed\n"
+                    "last-joint-locked wrist triple is concurrent to within\n"
+                    "a small drift. The closed-form spherical-shoulder recipe\n"
+                    "produces excellent seeds; LM polish against the true FK\n"
+                    "recovers machine precision. Covers uFactory xArm7."
+                ),
+                needs_symbolic_precompute=False,
+            )
+            _LOG.info("dispatch: chose %s (tier 0, approx-spherical-7R)", plan.solver_name)
             return plan
 
         # Tier-0 7R: approximate-SRS variant for arms whose URDF axes only

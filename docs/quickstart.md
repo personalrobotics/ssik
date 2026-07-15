@@ -39,7 +39,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
 | `franka_panda_ik` | Franka Panda | spherical-shoulder + offset-wrist 7R | `panda_link0` | `panda_link8` |
-| `xarm7_ik` | UFactory xArm7 | 7R (jointlock → `reversed:two_intersecting`) | `link_base` | `link7` |
+| `xarm7_ik` | UFactory xArm7 | approximately-spherical-shoulder 7R | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | non-Pieper 6R (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
 | `piper_ik` | AgileX PiPER | non-Pieper 6R (joints 4 & 6 tilted axis) | `base_link` | `link6` |

@@ -503,31 +503,24 @@ fixture_source = "robot_descriptions / xarm7_description"
 base_link = "link_base"
 ee_link = "link7"
 dof = 7
-solver = "jointlock.seven_r"
-tier = 1
-kinematic_class = "7R (jointlock → `reversed:two_intersecting`)"
-short_class = "non-SRS 7R"
-class_tags = ["non-SRS", "7R"]
-slow_build = true
-build_time_sec = 1184
-artifact_size_kb = 1643
+solver = "seven_r.spherical_shoulder_polished"
+tier = 0
+kinematic_class = "approximately-spherical-shoulder 7R"
+short_class = "approx spherical-shoulder 7R"
+class_tags = ["non-SRS", "spherical-shoulder", "approximate", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 22
 sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
 fk_ceiling_fuzz = 1e-4
-platform_drift = true
-drift_markers = [
-    'SOLVER_NAME = "jointlock.seven_r"',
-    'BASE_LINK = "link_base"',
-    'EE_LINK = "link7"',
-    "DOF = 7",
-    "def solve(",
-]
+platform_drift = false
 
 [arms.xarm7_ik.bench]
-ms_mean = 22.82
-ms_ci95 = 0.17
-max_fk = 1.5e-06
-sols_min = 48
-sols_max = 80
+ms_mean = 7.0
+ms_ci95 = 0.5
+max_fk = 1e-11
+sols_min = 8
+sols_max = 128
 
 [arms.xarm7_ik.eaik]
 supported = false

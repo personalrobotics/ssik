@@ -99,7 +99,7 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
 | `franka_panda_ik` | Franka Panda | **spherical-shoulder + offset-wrist 7R** | `panda_link0` | `panda_link8` |
-| `xarm7_ik` | UFactory xArm7 | **7R** (jointlock → `reversed:two_intersecting`) | `link_base` | `link7` |
+| `xarm7_ik` | UFactory xArm7 | **approximately-spherical-shoulder 7R** | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | **non-Pieper 6R** (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
 | `piper_ik` | AgileX PiPER | **non-Pieper 6R** (joints 4 & 6 tilted axis) | `base_link` | `link6` |
@@ -389,7 +389,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.66 ± 0.03 ms / FK 1e-13 / 128 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 40.65 ± 0.69 ms / FK 1e-12 / 11-92 sols |
 | Franka Panda (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 17.50 ± 1.00 ms / FK 1e-15 / 8-128 sols |
-| xArm7 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 22.82 ± 0.17 ms / FK 2e-6 / 48-80 sols |
+| xArm7 (**approx spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 7.00 ± 0.50 ms / FK 1e-11 / 8-128 sols |
 | xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 3e-6 / 8-16 sols |
 | Z1 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 4-8 sols | 480 ± 10 µs / FK 3e-15 / 4-8 sols |
 | PiPER (**non-Pieper 6R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 3.06 ± 2.18 ms / FK 1e-5 / 2-8 sols |
