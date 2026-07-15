@@ -98,7 +98,7 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 | `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** | `base_link` | `ee_link` |
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
-| `franka_panda_ik` | Franka Panda | **anthropomorphic 7R** | `panda_link0` | `panda_link8` |
+| `franka_panda_ik` | Franka Panda | **spherical-shoulder + offset-wrist 7R** | `panda_link0` | `panda_link8` |
 | `xarm7_ik` | UFactory xArm7 | **7R** (jointlock → `reversed:two_intersecting`) | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | **non-Pieper 6R** (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
@@ -109,7 +109,7 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 | `fanuc_crx10ial_ik` | FANUC CRX-10iA/L | **non-Pieper 6R** (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
 | `yam_ik` | I2RT YAM | **non-Pieper 6R** | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | **non-Pieper 6R** | `base` | `gripper` |
-| `fr3_ik` | Franka Research 3 | **anthropomorphic 7R** (Panda successor) | `fr3_link0` | `fr3_link8` |
+| `fr3_ik` | Franka Research 3 | **spherical-shoulder + offset-wrist 7R** (Panda successor) | `fr3_link0` | `fr3_link8` |
 | `openarm_left_ik` | Enactic OpenArm v2.0 (left) | SRS 7R (non-Z*Z) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
 | `openarm_right_ik` | Enactic OpenArm v2.0 (right) | SRS 7R (non-Z*Z) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
 | `r1pro_left_ik` | Galaxea R1 Pro (left) | SRS 7R (non-Z*Z) | `left_arm_base_link` | `left_arm_link7` |
@@ -388,7 +388,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 940 ± 30 µs / FK 8e-7 / 2-12 sols |
 | iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.66 ± 0.03 ms / FK 1e-13 / 128 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 40.65 ± 0.69 ms / FK 1e-12 / 11-92 sols |
-| Franka Panda (**anthropomorphic 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 31.43 ± 1.82 ms / FK 3e-10 / 8-128 sols |
+| Franka Panda (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 17.50 ± 1.00 ms / FK 1e-15 / 8-128 sols |
 | xArm7 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 22.82 ± 0.17 ms / FK 2e-6 / 48-80 sols |
 | xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 3e-6 / 8-16 sols |
 | Z1 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 4-8 sols | 480 ± 10 µs / FK 3e-15 / 4-8 sols |
@@ -399,7 +399,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.01 ms / FK 2e-6 / 4-12 sols |
 | YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.01 ms / FK 3e-7 / 5-8 sols |
 | big_yam (**non-Pieper 6R**) | **refuses** ("Intersection point can't be calculated for two parallel axes") | 1.06 ± 0.01 ms / FK 7e-7 / 8 sols |
-| FR3 (**anthropomorphic 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 30.57 ± 1.84 ms / FK 4e-10 / 8-128 sols |
+| FR3 (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.70 ± 1.00 ms / FK 1e-15 / 8-128 sols |
 | OpenArm L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 14.59 ± 0.50 ms / FK 2e-15 / 128 sols |
 | OpenArm R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 14.54 ± 0.50 ms / FK 2e-15 / 128 sols |
 | R1 Pro L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.56 ± 0.05 ms / FK 3e-15 / 128 sols |

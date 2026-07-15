@@ -38,7 +38,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `jaco2_ik` | Kinova JACO 2 | non-Pieper 6R | `base_link` | `ee_link` |
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
-| `franka_panda_ik` | Franka Panda | anthropomorphic 7R | `panda_link0` | `panda_link8` |
+| `franka_panda_ik` | Franka Panda | spherical-shoulder + offset-wrist 7R | `panda_link0` | `panda_link8` |
 | `xarm7_ik` | UFactory xArm7 | 7R (jointlock → `reversed:two_intersecting`) | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | non-Pieper 6R (joint 6 y-offset) | `link_base` | `link_eef` |
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
@@ -49,7 +49,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `fanuc_crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
 | `yam_ik` | I2RT YAM | non-Pieper 6R | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | non-Pieper 6R | `base` | `gripper` |
-| `fr3_ik` | Franka Research 3 | anthropomorphic 7R (Panda successor) | `fr3_link0` | `fr3_link8` |
+| `fr3_ik` | Franka Research 3 | spherical-shoulder + offset-wrist 7R (Panda successor) | `fr3_link0` | `fr3_link8` |
 | `openarm_left_ik` | Enactic OpenArm v2.0 (left) | SRS 7R (non-Z*Z) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
 | `openarm_right_ik` | Enactic OpenArm v2.0 (right) | SRS 7R (non-Z*Z) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
 | `r1pro_left_ik` | Galaxea R1 Pro (left) | SRS 7R (non-Z*Z) | `left_arm_base_link` | `left_arm_link7` |

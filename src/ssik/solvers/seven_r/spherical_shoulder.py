@@ -462,14 +462,25 @@ def solve(
     T = np.asarray(T_target, dtype=np.float64)
     coef = _bake(kb)
     t_rev = _se3_inv(T)
-    lo, hi = _joint_limits(kb)[_LOCK]
+    # Default path ignores limits, so sweep the redundancy over its full rotation
+    # [-pi, pi] (not the joint's URDF limits) -- matches the jointlock sweep and
+    # recovers targets whose only solutions have an out-of-limit q6.
+    lo, hi = -np.pi, np.pi
     seen: set[tuple[float, ...]] = set()
     out: list[Solution] = []
+    # Track each branch over the reachable interval (robust: finds thin reachable
+    # regions a blind sweep drops) and subsample it -- a representative set of the
+    # continuous q6 redundancy, one strand per IK branch.
     for a, b in _reachable_intervals(coef, t_rev, lo, hi):
-        grid = np.linspace(a, b, _SAMPLE_GRID)
+        grid = np.linspace(a, b, _TRACK_GRID)
         per = _closed_branches_grid(coef, t_rev, grid, policy)
-        for branch_list in per:
-            for q in branch_list:
+        for curve in _track_branches(per, grid):
+            qc = curve[~np.isnan(curve[:, 0])]
+            if qc.shape[0] == 0:
+                continue
+            k = min(_SAMPLE_GRID, qc.shape[0])
+            for idx in np.linspace(0, qc.shape[0] - 1, k).round().astype(int):
+                q = qc[idx]
                 residual = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
                 if residual > _FK_ATOL:
                     continue
@@ -478,8 +489,11 @@ def solve(
                     continue
                 seen.add(key)
                 out.append(Solution(q=q, fk_residual=residual, refinement_used="none"))
-                if max_solutions is not None and len(out) >= max_solutions:
-                    return out, False
+    if q_seed is not None:
+        seed = np.asarray(q_seed, dtype=np.float64)
+        out.sort(key=lambda s: float(np.max(np.abs((s.q - seed + np.pi) % (2 * np.pi) - np.pi))))
+    if max_solutions is not None:
+        out = out[:max_solutions]
     return out, len(out) == 0
 
 

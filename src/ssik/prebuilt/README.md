@@ -47,7 +47,7 @@ preprocessing) and cleaner to ship in production stacks.
 | `jaco2_ik` | `ikgeo.general_6r` | ~25 s | ~73 KB |
 | `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `gen3_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
-| `franka_panda_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
+| `franka_panda_ik` | `seven_r.spherical_shoulder` | <1 s | ~22 KB |
 | `xarm7_ik` | `jointlock.seven_r` + cached-RR | ~19 min | ~1643 KB |
 | `xarm6_ik` | `ikgeo.general_6r` | ~15 s | ~70 KB |
 | `z1_ik` | `ikgeo.three_parallel` | <1 s | ~23 KB |
@@ -58,7 +58,7 @@ preprocessing) and cleaner to ship in production stacks.
 | `fanuc_crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
 | `yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 | `big_yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
-| `fr3_ik` | `jointlock.seven_r` | <1 s | ~22 KB |
+| `fr3_ik` | `seven_r.spherical_shoulder` | <1 s | ~22 KB |
 | `openarm_left_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `openarm_right_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `r1pro_left_ik` | `seven_r.srs` | <1 s | ~12 KB |

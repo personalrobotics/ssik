@@ -471,11 +471,11 @@ fixture_source = "robot_descriptions / panda_description"
 base_link = "panda_link0"
 ee_link = "panda_link8"
 dof = 7
-solver = "jointlock.seven_r"
-tier = 1
-kinematic_class = "anthropomorphic 7R"
-short_class = "anthropomorphic 7R"
-class_tags = ["non-SRS", "anthropomorphic", "7R"]
+solver = "seven_r.spherical_shoulder"
+tier = 0
+kinematic_class = "spherical-shoulder + offset-wrist 7R"
+short_class = "spherical-shoulder 7R"
+class_tags = ["non-SRS", "spherical-shoulder", "offset-wrist", "7R"]
 slow_build = false
 build_time_sec = 1
 artifact_size_kb = 22
@@ -484,9 +484,9 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.franka_panda_ik.bench]
-ms_mean = 31.43
-ms_ci95 = 1.82
-max_fk = 2.7e-10
+ms_mean = 17.5
+ms_ci95 = 1.0
+max_fk = 1e-15
 sols_min = 8
 sols_max = 128
 
@@ -867,11 +867,11 @@ fixture_source = "robot_descriptions / fr3_description"
 base_link = "fr3_link0"
 ee_link = "fr3_link8"
 dof = 7
-solver = "jointlock.seven_r"
-tier = 1
-kinematic_class = "anthropomorphic 7R (Panda successor)"
-short_class = "anthropomorphic 7R"
-class_tags = ["non-SRS", "anthropomorphic", "7R"]
+solver = "seven_r.spherical_shoulder"
+tier = 0
+kinematic_class = "spherical-shoulder + offset-wrist 7R (Panda successor)"
+short_class = "spherical-shoulder 7R"
+class_tags = ["non-SRS", "spherical-shoulder", "offset-wrist", "7R"]
 slow_build = false
 build_time_sec = 1
 artifact_size_kb = 22
@@ -880,9 +880,9 @@ fk_ceiling_fuzz = 1e-4
 platform_drift = false
 
 [arms.fr3_ik.bench]
-ms_mean = 30.57
-ms_ci95 = 1.84
-max_fk = 4.2e-10
+ms_mean = 13.7
+ms_ci95 = 1.0
+max_fk = 1e-15
 sols_min = 8
 sols_max = 128
 
