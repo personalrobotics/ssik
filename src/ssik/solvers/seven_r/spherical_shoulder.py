@@ -119,38 +119,47 @@ def _closed_branches(
     return out
 
 
-def _sp3_reach_margin(coef: NDArray[np.float64], t_rev: NDArray[np.float64], q6: float) -> float:
-    """Smooth elbow-solvability margin (>= 0 exactly on the reachable set; a
-    *necessary* condition, so a superset bracket -- no reachable q6 is missed)."""
-    axes, our_p, tool, r_home = _eval_geom(coef, q6)
-    p2, p3 = our_p[2], our_p[3] + our_p[4] + our_p[5]
-    r_06 = t_rev[:3, :3] @ r_home.T
-    p_16 = t_rev[:3, 3] - r_06 @ tool - our_p[0]
-    k, pp, qq = axes[2], p3, -p2
-    target = 0.5 * (float(pp @ pp) + float(qq @ qq) - float(p_16 @ p_16))
-    center = float(qq @ k) * float(pp @ k)
-    radius = float(np.linalg.norm(qq - k * (qq @ k)) * np.linalg.norm(pp - k * (pp @ k)))
-    return radius - abs(target - center)
+def _sp3_reach_margins(
+    coef: NDArray[np.float64], t_rev: NDArray[np.float64], q6_grid: NDArray[np.float64]
+) -> NDArray[np.float64]:
+    """Vectorised elbow-solvability margin over a q6 grid: ``>= 0`` on the
+    reachable set (a *necessary* condition, so a superset bracket -- no reachable
+    q6 is missed). Batches the ``{cos,sin,1} @ coef`` geometry so the reachability
+    bracket costs one array pass, no per-sample sub-chain work."""
+    n = q6_grid.shape[0]
+    basis = np.stack([np.cos(q6_grid), np.sin(q6_grid), np.ones(n)], axis=1)  # (n,3)
+    v = basis @ coef  # (n,48)
+    axes = v[:, 0:18].reshape(n, 6, 3)
+    axes = axes / np.linalg.norm(axes, axis=2, keepdims=True)
+    our_p = v[:, 18:36].reshape(n, 6, 3)
+    tool = v[:, 36:39]
+    r_home = v[:, 39:48].reshape(n, 3, 3)
+    p0, p2 = our_p[:, 0], our_p[:, 2]
+    p3 = our_p[:, 3] + our_p[:, 4] + our_p[:, 5]
+    r_06 = np.einsum("ij,nkj->nik", t_rev[:3, :3], r_home)  # t_rev_R @ r_home.T
+    p_16 = t_rev[:3, 3] - np.einsum("nij,nj->ni", r_06, tool) - p0  # (n,3)
+    k, pp, qq = axes[:, 2], p3, -p2
+    target = 0.5 * ((pp * pp).sum(1) + (qq * qq).sum(1) - (p_16 * p_16).sum(1))
+    center = (qq * k).sum(1) * (pp * k).sum(1)
+    qperp = np.linalg.norm(qq - k * (qq * k).sum(1, keepdims=True), axis=1)
+    pperp = np.linalg.norm(pp - k * (pp * k).sum(1, keepdims=True), axis=1)
+    out: NDArray[np.float64] = qperp * pperp - np.abs(target - center)
+    return out
 
 
 # --- redundancy resolution ----------------------------------------------------
 
 
 def _reachable_intervals(
-    coef: NDArray[np.float64],
-    t_rev: NDArray[np.float64],
-    branches: _Branches,
-    lo: float,
-    hi: float,
+    coef: NDArray[np.float64], t_rev: NDArray[np.float64], lo: float, hi: float
 ) -> list[tuple[float, float]]:
-    """Reachable q6 sub-intervals of ``[lo, hi]``: SP3-margin brackets refined to
-    the true solvable boundary (where the closed-form solve gains/loses a sol)."""
+    """Reachable q6 sub-intervals of ``[lo, hi]`` -- the SP3-margin >= 0 brackets
+    (a guaranteed superset of the true reachable set), padded by one grid step so
+    the true boundary is contained. Branch-tracking + feasible_arcs restrict to
+    the truly solvable, in-limits region within, so no full-solve boundary
+    refinement is needed here."""
     grid = np.linspace(lo, hi, _BRACKET_GRID)
-    m = np.array([_sp3_reach_margin(coef, t_rev, float(g)) >= 0.0 for g in grid])
-
-    def reach(q6: float) -> bool:
-        return bool(branches(q6))
-
+    m = _sp3_reach_margins(coef, t_rev, grid) >= 0.0
     out: list[tuple[float, float]] = []
     k = 0
     while k < _BRACKET_GRID:
@@ -160,36 +169,11 @@ def _reachable_intervals(
                 j += 1
             a = float(grid[max(k - 1, 0)])  # pad by one step: bracket contains the true edge
             b = float(grid[min(j + 1, _BRACKET_GRID - 1)])
-            iv = _refine_reachable(reach, a, b)
-            if iv is not None:
-                out.append(iv)
+            out.append((a, b))
             k = j + 1
         else:
             k += 1
     return merge(out)
-
-
-def _refine_reachable(
-    reach: Callable[[float], bool], a: float, b: float
-) -> tuple[float, float] | None:
-    grid = np.linspace(a, b, _TRACK_GRID)
-    hits = [float(g) for g in grid if reach(float(g))]
-    if not hits:
-        return None
-    lo_h, hi_h = min(hits), max(hits)
-    lo_e = _bisect_edge(reach, a, lo_h) if lo_h > a + 1e-12 else a
-    hi_e = _bisect_edge(reach, b, hi_h) if hi_h < b - 1e-12 else b
-    return (lo_e, hi_e)
-
-
-def _bisect_edge(reach: Callable[[float], bool], out: float, inn: float, iters: int = 40) -> float:
-    for _ in range(iters):
-        mid = 0.5 * (out + inn)
-        if reach(mid):
-            inn = mid
-        else:
-            out = mid
-    return inn
 
 
 def _track_branches(branches: _Branches, grid: NDArray[np.float64]) -> list[NDArray[np.float64]]:
@@ -300,7 +284,7 @@ def resolve_in_limits(
 
     seen: set[tuple[float, ...]] = set()
     out: list[Solution] = []
-    for a, b in _reachable_intervals(coef, t_rev, branches, lo, hi):
+    for a, b in _reachable_intervals(coef, t_rev, lo, hi):
         for q in _solutions_in_interval(branches, kb, T, a, b, limits, fk_atol):
             key = tuple(np.round(q, _MERGE_KEY))
             if key in seen:
