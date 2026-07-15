@@ -56,12 +56,14 @@ def franka_kb() -> KinBody:
 
 
 def test_seed_metric_plumbs_through_artifact_solve() -> None:
-    """``seed_metric`` selects the ranking on the public artifact ``solve()``;
-    ``wrap_linf`` (the default) yields a strictly smaller worst-joint move than
-    ``wrap_l2`` on a divergent pose."""
+    """``seed_metric`` is forwarded to the artifact ``solve()`` ranking pass:
+    both metrics are accepted and return a real nearest IK, and the default is
+    ``wrap_linf``. (The metrics' *divergence* is unit-tested directly on
+    ``nearest_to_seed`` in test_postprocess; Franka now uses the spherical-shoulder
+    specialist, whose dense redundancy sampling makes the two metrics agree.)"""
     from ssik.prebuilt import franka_panda_ik
 
-    T = franka_panda_ik._fk(_DIVERGENT_QTRUE)
+    T = franka_panda_ik.fk(_DIVERGENT_QTRUE)
 
     l2 = franka_panda_ik.solve(
         T, q_seed=_DIVERGENT_QSEED, max_solutions=1, respect_limits=False, seed_metric="wrap_l2"
@@ -75,30 +77,26 @@ def test_seed_metric_plumbs_through_artifact_solve() -> None:
     assert l2
     assert linf
     assert default
-
-    # The two metrics genuinely disagree, and wrap_linf wins on worst-joint move.
-    assert not np.allclose(l2[0].q, linf[0].q), "metrics should pick different branches here"
-    assert _linf(_DIVERGENT_QSEED, linf[0]) < _linf(_DIVERGENT_QSEED, l2[0])
-
     # Default is wrap_linf.
     assert np.allclose(default[0].q, linf[0].q)
-
-    # Both are real IK solutions.
+    # Both return a real IK that FK-closes.
     for sols in (l2, linf):
-        err = float(np.max(np.abs(franka_panda_ik._fk(sols[0].q) - T)))
+        err = float(np.max(np.abs(franka_panda_ik.fk(sols[0].q) - T)))
         assert err < 1e-9, f"FK closure {err:.2e}"
 
 
 def test_bad_seed_metric_raises() -> None:
     from ssik.prebuilt import franka_panda_ik
 
-    T = franka_panda_ik._fk(_DIVERGENT_QTRUE)
+    T = franka_panda_ik.fk(_DIVERGENT_QTRUE)
     with pytest.raises(ValueError, match="unknown metric"):
         franka_panda_ik.solve(T, q_seed=_DIVERGENT_QSEED, seed_metric="bogus")
 
 
 def test_seed_metric_plumbs_through_manipulator() -> None:
-    """``Manipulator.solve`` forwards ``seed_metric`` to the ranking pass."""
+    """``Manipulator.solve`` forwards ``seed_metric`` to the ranking pass: both
+    metrics are accepted and return a real nearest IK (divergence itself is
+    unit-tested on ``nearest_to_seed`` in test_postprocess)."""
     arm = ssik.Manipulator.from_urdf(
         FIXTURES / "franka_panda.urdf", base="panda_link0", ee="panda_link8"
     )
@@ -111,8 +109,8 @@ def test_seed_metric_plumbs_through_manipulator() -> None:
     )
     assert l2
     assert linf
-    assert not np.allclose(l2[0].q, linf[0].q)
-    assert _linf(_DIVERGENT_QSEED, linf[0]) < _linf(_DIVERGENT_QSEED, l2[0])
+    for sols in (l2, linf):
+        assert float(np.max(np.abs(arm.fk(sols[0].q) - T))) < 1e-9
 
 
 # ---------------------------------------------------------------------------

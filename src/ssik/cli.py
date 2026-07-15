@@ -701,6 +701,11 @@ def _solver_invocation_block(solver_name: str, kb_var: str, t_var: str) -> str:
     """
     if solver_name == "seven_r.srs":
         return f"from ssik.solvers.seven_r import srs\n    sols, _ = srs.solve({kb_var}, {t_var})"
+    if solver_name == "seven_r.spherical_shoulder":
+        return (
+            "from ssik.solvers.seven_r import spherical_shoulder\n"
+            f"    sols, _ = spherical_shoulder.solve({kb_var}, {t_var})"
+        )
     if solver_name == "seven_r.srs_polished":
         return (
             "from ssik.solvers.seven_r import srs_polished\n"

@@ -468,19 +468,15 @@ def solve(
     lo, hi = -np.pi, np.pi
     seen: set[tuple[float, ...]] = set()
     out: list[Solution] = []
-    # Track each branch over the reachable interval (robust: finds thin reachable
-    # regions a blind sweep drops) and subsample it -- a representative set of the
-    # continuous q6 redundancy, one strand per IK branch.
+    # Sample each reachable q6 interval at a fixed budget of values (like the
+    # jointlock sweep) and collect every branch -- a representative set of the
+    # continuous redundancy. The reachable interval over [-pi, pi] is wide, so a
+    # coarse sweep covers it; the exact thin-arc handling is the respect_limits
+    # path (resolve_in_limits).
     for a, b in _reachable_intervals(coef, t_rev, lo, hi):
-        grid = np.linspace(a, b, _TRACK_GRID)
-        per = _closed_branches_grid(coef, t_rev, grid, policy)
-        for curve in _track_branches(per, grid):
-            qc = curve[~np.isnan(curve[:, 0])]
-            if qc.shape[0] == 0:
-                continue
-            k = min(_SAMPLE_GRID, qc.shape[0])
-            for idx in np.linspace(0, qc.shape[0] - 1, k).round().astype(int):
-                q = qc[idx]
+        grid = np.linspace(a, b, _SAMPLE_GRID)
+        for branch_list in _closed_branches_grid(coef, t_rev, grid, policy):
+            for q in branch_list:
                 residual = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
                 if residual > _FK_ATOL:
                     continue
