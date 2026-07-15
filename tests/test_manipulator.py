@@ -252,7 +252,8 @@ def test_construct_from_kinbody_directly() -> None:
     kb = build_kinbody(franka_panda_specs())
     arm = ssik.Manipulator(kb)
     assert arm.dof == 7
-    assert arm.solver_name == "seven_r.spherical_shoulder"  # Franka: exact spherical-shoulder (#373)
+    # Franka: exact spherical-shoulder specialist (#373).
+    assert arm.solver_name == "seven_r.spherical_shoulder"
     # Same FK roundtrip contract.
     rng = np.random.default_rng(0)
     q = rng.uniform(-0.5, 0.5, size=7)
