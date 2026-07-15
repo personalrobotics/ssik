@@ -247,9 +247,15 @@ def test_franka_artifact_q_seed_returns_nearest() -> None:
     q_true = np.array([0.0, 0.5, 0.0, -1.5, 0.0, 1.5, 0.0])
     T_target = franka_panda_ik.fk(q_true)
 
-    sols = franka_panda_ik.solve(T_target, q_seed=q_true, max_solutions=1)
-    assert len(sols) == 1
-    # Seeded exactly at a valid config: the nearest returned IK reproduces it to
-    # within one redundancy-sample step across all joints (wrap-aware L-inf).
-    diff = float(np.max(np.abs((sols[0].q - q_true + np.pi) % (2 * np.pi) - np.pi)))
-    assert diff <= 2 * np.pi / 16 + 1e-6, f"q_seed didn't return nearest IK: L-inf={diff:.4f}"
+    seeded = franka_panda_ik.solve(T_target, q_seed=q_true, max_solutions=1)
+    assert len(seeded) == 1
+
+    def _linf(q):
+        return float(np.max(np.abs((q - q_true + np.pi) % (2 * np.pi) - np.pi)))
+
+    # The seeded max_solutions=1 result is THE nearest to the seed across the full
+    # solution set (not sampling-granularity dependent -- q6 is sampled discretely
+    # so the exact seed config need not be a returned sample).
+    all_sols = franka_panda_ik.solve(T_target, respect_limits=False)
+    nearest = min(_linf(s.q) for s in all_sols)
+    assert _linf(seeded[0].q) <= nearest + 1e-9, "q_seed didn't return the nearest IK"
