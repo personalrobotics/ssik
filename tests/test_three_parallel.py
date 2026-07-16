@@ -362,12 +362,13 @@ def test_wrong_dof_raises(ur5_kb: Any) -> None:
 
 
 def test_near_singular_pose_drops_spurious_branch_362() -> None:
-    """Regression for #362: at a near-singular UR pose (q0 = q5 = 0) an SP
-    argument clipped to the reachability boundary produced a *spurious* branch
-    that FK-closed to only ~7e-6 -- above the arm's 1e-7 precision but below the
-    old 1e-5 accept gate, so it leaked out (no exact IK exists there; damped LM
-    stalls at ~4e-6). The tightened 1e-7 gate drops it; every returned solution
-    FK-closes tightly, for both the live solver and the baked artifact."""
+    """Regression for #362 (and its cousin #288): at a near-singular pose the
+    closed form emits a candidate that only FK-closes to ~1e-6. Newton polish of
+    such near-misses *separates* the two cases -- a spurious boundary near-miss
+    (#362, UR: no exact IK nearby, LM stalls at ~4e-6) is dropped by the 1e-7
+    gate, while a genuine near-singular solution (#288, z1 q4=pi/2) converges to
+    machine precision and is kept. Here: every returned UR solution FK-closes
+    tightly (spurious gone), for both the live solver and the baked artifact."""
     from ssik.kinematics.poe_fk import poe_forward_kinematics
     from ssik.prebuilt import ur16e_ik
 

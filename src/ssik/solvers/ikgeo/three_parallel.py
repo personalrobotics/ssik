@@ -186,7 +186,14 @@ def solve(
         fk_atol=_FK_VERIFY_ATOL,
         dedup_atol=policy.subproblem_dedup,
         solver_name=_SOLVER_NAME,
-        allow_refinement=allow_refinement,
+        # Always polish near-miss candidates (not gated on the caller's
+        # ``allow_refinement``): at a near-singular pose the closed form can
+        # only reach ~1e-6 FK. Newton polish then *separates* the two cases --
+        # a genuine near-singular solution converges to machine precision and is
+        # kept (#288, z1 q4=pi/2); a spurious boundary near-miss stalls above the
+        # gate and is dropped (#362, UR). Fires only for the rare > gate
+        # candidate, so the common (already-exact) path is unaffected.
+        allow_refinement=True,
         refinement_max_iters=refinement_max_iters,
         max_solutions=max_solutions,
     )

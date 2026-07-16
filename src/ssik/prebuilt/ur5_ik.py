@@ -551,7 +551,7 @@ def solve(
         if residual <= fk_atol:
             verified.append((q, residual, "none", 0))
             continue
-        if not allow_refinement:
+        if not (allow_refinement or True):
             continue
         # Newton polish using the per-arm spatial Jacobian.
         refined = _lm_refine(

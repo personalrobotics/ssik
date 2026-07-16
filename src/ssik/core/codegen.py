@@ -286,7 +286,8 @@ def _render_specialised(
     else:
         buf.write(
             _render_specialised_solve_orchestrator(
-                _SPECIALISED_FK_ATOL_EXPR.get(plan.solver_name, "policy.subproblem_numerical")
+                _SPECIALISED_FK_ATOL_EXPR.get(plan.solver_name, "policy.subproblem_numerical"),
+                force_refine=plan.solver_name in _SPECIALISED_FORCE_REFINE,
             )
         )
     buf.write(_render_fk_alias())
@@ -304,9 +305,20 @@ _SPECIALISED_FK_ATOL_EXPR: dict[str, str] = {
     "ikgeo.three_parallel": "1e-7",  # == ssik.solvers.ikgeo.three_parallel._FK_VERIFY_ATOL
 }
 
+# Solvers whose artifact always Newton-polishes near-miss candidates (even when
+# the caller passes ``allow_refinement=False``). At a near-singular pose the
+# closed form only reaches ~1e-6 FK; polish then separates genuine near-singular
+# solutions (converge -> kept, #288) from spurious boundary near-misses (stall ->
+# dropped, #362). Fires only for the rare > fk_atol candidate. Mirrors the live
+# solver's unconditional ``allow_refinement=True``. Not for tier-2 RR arms --
+# their near-misses are common and their default (drop) / opt-in-polish contract
+# is deliberate.
+_SPECIALISED_FORCE_REFINE: frozenset[str] = frozenset({"ikgeo.three_parallel"})
+
 
 def _render_specialised_solve_orchestrator(
     fk_atol_expr: str = "policy.subproblem_numerical",
+    force_refine: bool = False,
 ) -> str:
     """Render the public ``solve()`` for specialised artifacts.
 
@@ -323,7 +335,7 @@ def _render_specialised_solve_orchestrator(
     :func:`ssik.refinement.kinbody_jacobian`; only the indirection
     changes.
     """
-    return textwrap.dedent(
+    template = textwrap.dedent(
         '''\
 
         # Module-scope ``2*pi`` constant referenced inside the dedup hot
@@ -697,6 +709,13 @@ def _render_specialised_solve_orchestrator(
             return solutions
         '''
     ).replace("fk_atol = policy.subproblem_numerical", f"fk_atol = {fk_atol_expr}")
+    if force_refine:
+        # Always polish near-misses (see _SPECIALISED_FORCE_REFINE). Only rewrite
+        # the gate when set, so non-forced artifacts stay byte-identical.
+        template = template.replace(
+            "if not allow_refinement:", "if not (allow_refinement or True):"
+        )
+    return template
 
 
 def _render_specialised_solve_orchestrator_7r() -> str:
