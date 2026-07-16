@@ -284,13 +284,30 @@ def _render_specialised(
     if plan.solver_name == "jointlock.seven_r":
         buf.write(_render_specialised_solve_orchestrator_7r())
     else:
-        buf.write(_render_specialised_solve_orchestrator())
+        buf.write(
+            _render_specialised_solve_orchestrator(
+                _SPECIALISED_FK_ATOL_EXPR.get(plan.solver_name, "policy.subproblem_numerical")
+            )
+        )
     buf.write(_render_fk_alias())
     buf.write(_render_all_export())
     return buf.getvalue()
 
 
-def _render_specialised_solve_orchestrator() -> str:
+# Per-solver FK-verify gate baked into the specialised artifact's solve(). The
+# default (``policy.subproblem_numerical`` = 1e-5) is what tier-2 RR arms rely on
+# -- their algebraic FK can drift above it and is recovered by refinement. Exact
+# Pieper solvers that can emit a near-singular SP-clip near-miss (~1e-6 FK, no
+# real IK nearby) tighten the gate to drop it (#362); keep in sync with the live
+# solver's own gate.
+_SPECIALISED_FK_ATOL_EXPR: dict[str, str] = {
+    "ikgeo.three_parallel": "1e-7",  # == ssik.solvers.ikgeo.three_parallel._FK_VERIFY_ATOL
+}
+
+
+def _render_specialised_solve_orchestrator(
+    fk_atol_expr: str = "policy.subproblem_numerical",
+) -> str:
     """Render the public ``solve()`` for specialised artifacts.
 
     Wraps ``_solve_algebraic`` with FK verification + wrap-to-pi dedup;
@@ -679,7 +696,7 @@ def _render_specialised_solve_orchestrator() -> str:
                 solutions = solutions[:max_solutions]
             return solutions
         '''
-    )
+    ).replace("fk_atol = policy.subproblem_numerical", f"fk_atol = {fk_atol_expr}")
 
 
 def _render_specialised_solve_orchestrator_7r() -> str:

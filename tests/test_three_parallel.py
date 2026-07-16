@@ -359,3 +359,37 @@ def test_wrong_dof_raises(ur5_kb: Any) -> None:
     kb = load_urdf_kinbody_normalized(UR5_URDF, "base_link", "wrist_2_link")
     with pytest.raises(ValueError, match="6-DOF"):
         three_parallel.solve(kb, np.eye(4))
+
+
+def test_near_singular_pose_drops_spurious_branch_362() -> None:
+    """Regression for #362: at a near-singular UR pose (q0 = q5 = 0) an SP
+    argument clipped to the reachability boundary produced a *spurious* branch
+    that FK-closed to only ~7e-6 -- above the arm's 1e-7 precision but below the
+    old 1e-5 accept gate, so it leaked out (no exact IK exists there; damped LM
+    stalls at ~4e-6). The tightened 1e-7 gate drops it; every returned solution
+    FK-closes tightly, for both the live solver and the baked artifact."""
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+    from ssik.prebuilt import ur16e_ik
+
+    kb = ur16e_ik._KB
+    q = np.array(
+        [
+            0.0,
+            -2.4834242925436327,
+            -2.446578501260409,
+            -2.6545207067859944,
+            -2.5361296670486584,
+            0.0,
+        ]
+    )
+    T = poe_forward_kinematics(kb, q)
+
+    sols, _ = three_parallel.solve(kb, T)
+    assert sols, "live solver returned no IK at the near-singular pose"
+    worst = max(float(np.abs(poe_forward_kinematics(kb, s.q) - T).max()) for s in sols)
+    assert worst < 1e-7, f"live solver leaked a spurious branch: worst FK {worst:.2e}"
+
+    art = ur16e_ik.solve(T, respect_limits=False)
+    assert art, "artifact returned no IK at the near-singular pose"
+    worst_art = max(float(np.abs(ur16e_ik.fk(s.q) - T).max()) for s in art)
+    assert worst_art < 1e-7, f"artifact leaked a spurious branch: worst FK {worst_art:.2e}"

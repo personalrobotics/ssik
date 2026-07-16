@@ -526,7 +526,7 @@ def solve(
     T = np.asarray(T_target, dtype=np.float64)
     candidates = _solve_algebraic(T)
 
-    fk_atol = policy.subproblem_numerical
+    fk_atol = 1e-7
     dedup_atol = policy.subproblem_dedup
 
     # Three-bucket sort: exact (closes within fk_atol), near-miss
