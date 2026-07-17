@@ -49,13 +49,18 @@ Bulletproof tolerance philosophy (per ``feedback_bulletproof_solvers.md``,
 from __future__ import annotations
 
 import math
-import time
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 import sympy as sp
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+
+sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
+
+from _perf import best_call_ms
 
 from ssik.solvers.husty_pfurner._eliminate import (
     EliminatePrecompute,
@@ -457,9 +462,10 @@ def test_pencil_eigenvalues_match_sympy_rational_resultant() -> None:
 
 @pytest.mark.perf
 def test_eliminate_uw_numeric_under_perf_gate() -> None:
-    """Average over 30 runs after a warmup. Tests on baseline DH so this
-    is the *typical* expected runtime (large-alpha and other extremes
-    may run slightly slower; full perf characterisation is Phase 5h).
+    """Best-of-N per-call time (see :mod:`tests._perf`) on baseline DH, so
+    this is the *typical* expected runtime tracked robustly against
+    shared-runner noise (large-alpha and other extremes may run slightly
+    slower; full perf characterisation is Phase 5h).
     """
     dh = _DH_BASELINE
     v = (0.30, -0.40, 0.60, 0.20, 0.50, -0.70)
@@ -470,15 +476,8 @@ def test_eliminate_uw_numeric_under_perf_gate() -> None:
         ls=(dh["l_1"], dh["l_2"], dh["l_3"], dh["l_4"], dh["l_5"]),
         d=(dh["d_2"], dh["d_3"], dh["d_4"], dh["d_5"]),
     )
-    # Warmup
-    for _ in range(3):
-        eliminate_uw_numeric(pre, sigma_E, drop_indices=(7,))
-    N = 30
-    t0 = time.perf_counter()
-    for _ in range(N):
-        eliminate_uw_numeric(pre, sigma_E, drop_indices=(7,))
-    avg_ms = (time.perf_counter() - t0) * 1000 / N
-    assert avg_ms < 50.0, f"avg per call {avg_ms:.2f}ms exceeds 50ms gate"
+    best_ms = best_call_ms(lambda: eliminate_uw_numeric(pre, sigma_E, drop_indices=(7,)), runs=30)
+    assert best_ms < 50.0, f"best per call {best_ms:.2f}ms exceeds 50ms gate"
 
 
 # ----------------------------------------------------------------------------

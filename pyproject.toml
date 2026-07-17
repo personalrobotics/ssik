@@ -285,6 +285,11 @@ ignore_missing_imports = true
 module = "ur5"
 ignore_missing_imports = true
 
+# Same for tests/fixtures/_perf.py (shared perf-gate timing helper).
+[[tool.mypy.overrides]]
+module = "_perf"
+ignore_missing_imports = true
+
 # Generated per-arm artifacts under src/ssik/prebuilt/ are byte-stable
 # emitted code; their format is dictated by ``ssik.core.codegen`` and
 # validated via byte-equal snapshot tests. mypy excludes the directory

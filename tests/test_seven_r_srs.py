@@ -18,7 +18,6 @@ Test contract (per `feedback_bulletproof_solvers`):
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +27,7 @@ from hypothesis import strategies as st
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 
+from _perf import best_call_ms
 from kuka_iiwa14 import kuka_iiwa14_specs
 
 from ssik._kinbody import build_kinbody
@@ -160,47 +160,37 @@ def test_iiwa14_srs_vs_jointlock_both_find_fk_correct_ik(q_star: np.ndarray) -> 
 
 @pytest.mark.perf
 def test_iiwa14_full_sweep_under_2ms() -> None:
-    """Full swivel sweep + 8-branch enumeration on iiwa14 must take < 2 ms median.
+    """Full swivel sweep + 8-branch enumeration on iiwa14 must take < 2 ms.
 
     Empirical (M3, single-thread): ~17 ms today. The 2 ms gate is the
     target after #186 (Cython compile of the inner FK loop). Until #186
     lands, we use a generous gate to catch *regressions*; the true
-    target is sub-ms.
+    target is sub-ms. Best-of-N timing (see :mod:`tests._perf`) so the gate
+    tracks compute cost, not shared-runner scheduling noise.
     """
     kb = build_kinbody(kuka_iiwa14_specs())
     q_star = _HAND_PICKED_Q[0]
     T_target = poe_forward_kinematics(kb, q_star)
-    # Warmup
-    srs_solve(kb, T_target)
-    times = []
-    for _ in range(20):
-        t0 = time.perf_counter()
-        srs_solve(kb, T_target)
-        times.append(time.perf_counter() - t0)
-    median_ms = float(np.median(times)) * 1000
+    best_ms = best_call_ms(lambda: srs_solve(kb, T_target))
     # Conservative gate: 50 ms catches >2.5x regression from current ~17 ms
     # baseline. Tighten to 2 ms target after #186 Cython compile.
-    assert median_ms < 50, f"SRS full-sweep too slow: {median_ms:.2f} ms"
+    assert best_ms < 50, f"SRS full-sweep too slow: {best_ms:.2f} ms"
 
 
 @pytest.mark.perf
 def test_iiwa14_max_solutions_one_under_1ms() -> None:
-    """`max_solutions=1` (give-me-any-IK use case) must take < 1 ms median.
+    """`max_solutions=1` (give-me-any-IK use case) must take < 1 ms.
 
     Empirical (M3, single-thread): ~0.23 ms today. Gate set generously
-    at 1 ms to catch regressions.
+    at 1 ms to catch regressions. Best-of-N timing (see :mod:`tests._perf`):
+    at 0.23 ms compute a single scheduler preemption dragged the *median*
+    of 20 to 1.00 ms on CI (#383 flake); the best-of-N is the noise floor.
     """
     kb = build_kinbody(kuka_iiwa14_specs())
     q_star = _HAND_PICKED_Q[0]
     T_target = poe_forward_kinematics(kb, q_star)
-    srs_solve(kb, T_target, max_solutions=1)  # warmup
-    times = []
-    for _ in range(20):
-        t0 = time.perf_counter()
-        srs_solve(kb, T_target, max_solutions=1)
-        times.append(time.perf_counter() - t0)
-    median_ms = float(np.median(times)) * 1000
-    assert median_ms < 1.0, f"SRS max_solutions=1 too slow: {median_ms:.2f} ms"
+    best_ms = best_call_ms(lambda: srs_solve(kb, T_target, max_solutions=1))
+    assert best_ms < 1.0, f"SRS max_solutions=1 too slow: {best_ms:.2f} ms"
 
 
 # ----------------------------------------------------------------------------
