@@ -43,6 +43,16 @@ from numpy.typing import NDArray
 from ssik.core.solution import Solution
 from ssik.refinement import lm_refine
 
+# Tight polish target tried before the loose acceptability gate. A rescue whose
+# perturbation landed off-ridge (the common case) is well-conditioned and
+# converges to machine precision in a step or two; aiming for it there means we
+# return the *exact* solution rather than one that merely cleared ``fk_atol``
+# (the #384 gen3 case: lm_refine stopped at ~6e-9 the instant it dipped under
+# the 1e-8 gate, leaving the machine precision it would reach one iteration
+# later unused). Genuinely rank-deficient ridge poses (#319) stall above this
+# and fall back to the loose polish, so ridge recovery is unchanged.
+_TIGHT_POLISH_FK_ATOL = 1e-12
+
 
 def rescue_via_T_perturbation(
     fk_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
@@ -166,14 +176,27 @@ def rescue_via_T_perturbation(
 
         for sol in pert_sols:
             q_seed = np.asarray(sol.q, dtype=np.float64)
+            # Polish as tightly as the pose allows: aim for machine precision
+            # first so a well-conditioned rescue returns its exact solution, and
+            # fall back to the loose acceptability target only when the tight
+            # polish can't converge (a genuinely rank-deficient ridge, #319).
             result = lm_refine(
                 q_seed,
                 fk_fn,
                 T_target,
-                fk_atol=fk_atol,
+                fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
                 max_iters=refinement_max_iters,
                 jacobian_fn=jacobian_fn,
             )
+            if result is None:
+                result = lm_refine(
+                    q_seed,
+                    fk_fn,
+                    T_target,
+                    fk_atol=fk_atol,
+                    max_iters=refinement_max_iters,
+                    jacobian_fn=jacobian_fn,
+                )
             if result is None:
                 continue
             q_ref, fk_resid, _iters = result

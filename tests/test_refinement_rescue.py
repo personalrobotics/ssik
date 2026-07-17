@@ -204,3 +204,28 @@ def test_rescue_idempotent_when_direct_solve_succeeds() -> None:
             f"rescue produced FK-incorrect sol on healthy pose: "
             f"q={sol.q.tolist()}, fk_err={fk_err:.2e}"
         )
+
+
+def test_rescue_polishes_well_conditioned_to_machine_precision_384() -> None:
+    """#384 regression: a rescue whose perturbation lands off-ridge is
+    well-conditioned and must be polished to machine precision, not merely to
+    the loose 1e-8 acceptability gate.
+
+    The gen3 pose below routes to ``srs_polished``, which returns [] (its
+    approximate pivots don't clear the strict polish filter here), so the
+    thin-wrapper rescue fires. Its solutions FK-close to <=~6e-9 under the old
+    early-stopping polish -- above gen3's 1e-9 fuzz ceiling -- even though one
+    more Newton step reaches ~5e-13. The tight-then-loose polish now delivers
+    that: every returned branch closes well under the ceiling.
+    """
+    from ssik.prebuilt import gen3_ik
+
+    q_star = np.array([0.125, 0.46875, 2.125, 0.4765625, 1.5, 1.0, 0.5])
+    T = gen3_ik.fk(q_star)
+    sols = gen3_ik.solve(T, respect_limits=False)
+    assert sols, "expected the rescue to recover solutions at this gen3 pose"
+    worst = max(s.fk_residual for s in sols)
+    assert worst < 1e-9, (
+        f"rescue left a branch under-polished at {worst:.2e} (> gen3 1e-9 ceiling); "
+        f"the tight polish should reach machine precision on this well-conditioned pose"
+    )
