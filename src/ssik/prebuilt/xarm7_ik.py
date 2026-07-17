@@ -51,6 +51,7 @@ from ssik.postprocess import (
 )
 import functools as _functools
 from ssik.refinement import kinbody_jacobian as _kinbody_jacobian
+from ssik.refinement import seeded_track as _seeded_track
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits
 from ssik.solvers.seven_r.spherical_shoulder_polished import solve as _solver_solve
@@ -214,6 +215,32 @@ def solve(
     """
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
+    # Seeded numerical-tracking fast path (#380): the caller gave a seed
+    # and wants a single IK -- the trajectory-tracking idiom. Newton-
+    # continue from the seed (~0.2 ms) instead of resolving the whole
+    # redundancy (several ms). On a smooth trajectory the continuation is
+    # exactly the seed-nearest solution the full solve would return; it
+    # is run through the same limit/tolerance postprocess below so its
+    # output is indistinguishable from the full path's. When the seed
+    # doesn't continue cleanly (Newton jumped a branch, diverged, or the
+    # result fails limits/seed_tolerance) ``_seeded_track`` returns
+    # ``None`` / the postprocess empties and we fall through to the full
+    # analytical solve -- correctness is never traded for speed.
+    if q_seed is not None and max_solutions == 1:
+        _tracked = _seeded_track(
+            np.asarray(q_seed, dtype=np.float64),
+            fk,
+            lambda _q: _kinbody_jacobian(_KB, _q),
+            np.asarray(T_target, dtype=np.float64),
+        )
+        if _tracked is not None:
+            _fast = [_tracked]
+            if respect_limits:
+                _fast = _ps_respect_limits(_ps_wrap_to_limits(_fast, _KB), _KB)
+            if _fast and seed_tolerance is not None:
+                _fast = _ps_within_seed_tolerance(_fast, q_seed, seed_tolerance)
+            if _fast:
+                return _fast[:1]
     sols, _is_ls = _solver_solve(
         _KB,
         T_target,
