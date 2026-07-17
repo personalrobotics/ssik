@@ -17,7 +17,6 @@ already exist (e.g. test_kinova_gen3.py); this file is the API contract.
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 import numpy as np
@@ -29,6 +28,8 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics
 
 FIXTURES = Path(__file__).parent / "fixtures"
 sys.path.insert(0, str(FIXTURES))
+
+from _perf import best_call_ms  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # URDF-based fixtures: full smoke matrix
@@ -335,29 +336,19 @@ def test_ik_overhead_under_300us() -> None:
     """
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
     T = arm.fk(np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
-
-    # Warm
-    for _ in range(20):
-        arm.solve(T)
-
-    # Manipulator path
-    t = time.perf_counter()
-    for _ in range(200):
-        arm.solve(T)
-    manip_per = (time.perf_counter() - t) / 200
-
-    # Raw solver path
     from ssik.solvers.ikgeo import three_parallel
 
-    t = time.perf_counter()
-    for _ in range(200):
-        three_parallel.solve(arm.kinbody, T)
-    raw_per = (time.perf_counter() - t) / 200
+    # Overhead = wrapper-path best minus raw-solver best. Best-of-N on each side
+    # (see tests._perf) is the noise floor, so their difference isolates the
+    # Manipulator wrapper's true per-call cost instead of the differenced
+    # scheduler noise of two means (which can even go negative under load).
+    manip_ms = best_call_ms(lambda: arm.solve(T), warmup=20, runs=200)
+    raw_ms = best_call_ms(lambda: three_parallel.solve(arm.kinbody, T), warmup=20, runs=200)
 
-    overhead = (manip_per - raw_per) * 1e6
+    overhead = (manip_ms - raw_ms) * 1e3  # ms -> us
     assert overhead < 300.0, (
         f"Manipulator.solve overhead {overhead:.1f} us > 300 us regression gate "
-        f"(manip={manip_per * 1e6:.1f} us, raw={raw_per * 1e6:.1f} us)"
+        f"(manip={manip_ms * 1e3:.1f} us, raw={raw_ms * 1e3:.1f} us)"
     )
 
 

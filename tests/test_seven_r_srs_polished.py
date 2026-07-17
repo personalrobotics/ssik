@@ -22,7 +22,6 @@ Test contract (per `feedback_bulletproof_solvers`):
 from __future__ import annotations
 
 import sys
-import time
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +38,7 @@ from ssik.solvers.seven_r import srs_polished
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 
+from _perf import best_call_ms
 
 GEN3_URDF = Path(__file__).parent / "fixtures" / "gen3.urdf"
 RIZON4_URDF = Path(__file__).parent / "fixtures" / "rizon4.urdf"
@@ -284,19 +284,15 @@ def test_gen3_polished_under_400ms() -> None:
 
     Empirical: ~95 ms on Apple M3, ~210 ms on the slower x86_64 GHA
     runner. The 400 ms gate covers both with margin and still catches
-    >1.5x regressions against the slow-runner baseline.
+    >1.5x regressions against the slow-runner baseline. Best-of-N timing
+    (see :mod:`tests._perf`) so the gate tracks compute cost, not
+    shared-runner scheduling noise.
     """
     kb = _gen3_kb()
     q_star = _HAND_PICKED_Q[0]
     T_target = poe_forward_kinematics(kb, q_star)
-    srs_polished.solve(kb, T_target)  # warmup
-    times = []
-    for _ in range(10):
-        t0 = time.perf_counter()
-        srs_polished.solve(kb, T_target)
-        times.append(time.perf_counter() - t0)
-    median_ms = float(np.median(times)) * 1000
-    assert median_ms < 400, f"Gen3 srs_polished too slow: {median_ms:.1f} ms"
+    best_ms = best_call_ms(lambda: srs_polished.solve(kb, T_target), runs=10)
+    assert best_ms < 400, f"Gen3 srs_polished too slow: {best_ms:.1f} ms"
 
 
 # ----------------------------------------------------------------------------
