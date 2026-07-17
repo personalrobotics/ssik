@@ -54,6 +54,16 @@ from ssik.subproblems._rotation import rotate, rotation_matrix
 __all__ = ["solve"]
 
 _SOLVER_NAME = "ikgeo.three_parallel"
+
+# FK-closure gate for accepting a composed candidate. Tighter than the generic
+# ``subproblem_numerical`` (1e-5): at a near-singular pose an SP3/SP4 argument
+# clipped to the reachability boundary yields a *spurious* branch that FK-closes
+# to only ~1e-6 -- a least-squares near-miss with no exact IK nearby (#362).
+# Genuine closed-form solutions close to <=~1e-9 (verified over thousands of
+# random poses across the UR/Z1 roster), so 1e-7 -- the arms' declared precision
+# (``fk_ceiling_fuzz``) -- cleanly drops the near-miss while keeping every real
+# (incl. near-singular) solution.
+_FK_VERIFY_ATOL = 1e-7
 _LOG = logging.getLogger(__name__)
 
 
@@ -173,9 +183,16 @@ def solve(
         fk_fn=lambda q: poe_forward_kinematics(kb, q),
         jacobian_fn=lambda q: kinbody_jacobian(kb, q),
         t_target=t_target,
-        fk_atol=policy.subproblem_numerical,
+        fk_atol=_FK_VERIFY_ATOL,
         dedup_atol=policy.subproblem_dedup,
         solver_name=_SOLVER_NAME,
+        # The tight 1e-7 gate drops the spurious near-singular near-miss (#362,
+        # UR ~7e-6) directly. Recovering a *genuine* near-singular solution
+        # (#288, z1 q4=pi/2 ~1e-6 -> machine precision) needs Newton polish, so
+        # the caller opts in via ``allow_refinement`` (the standalone-arm
+        # artifacts force it on -- ``_SPECIALISED_FORCE_REFINE``). We honour the
+        # caller here so inner-solver users like jointlock keep their own
+        # refinement policy (and their machine-precision-or-drop contract).
         allow_refinement=allow_refinement,
         refinement_max_iters=refinement_max_iters,
         max_solutions=max_solutions,

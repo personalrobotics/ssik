@@ -600,9 +600,6 @@ max_fk = 1.6e-15
 sols_min = 4
 sols_max = 8
 
-[arms.z1_ik.known_gaps]
-xfail_reason = "three_parallel SP6 conditioning gap at q[4]=π/2 (Z1-specific; UR5 OK on same fuzz). Filed as #288."
-
 [arms.piper_ik]
 display_name = "AgileX PiPER"
 short_name = "PiPER"
