@@ -134,6 +134,10 @@ _HAND_PICKED_Q = [
     np.array([-0.5, 0.3, -0.7, 1.0, -0.4, 0.5, -0.3]),
     np.array([0.0, 0.5, 0.0, 1.5, 0.0, -0.5, 0.0]),
     np.array([1.2, -0.8, 0.3, 0.4, 1.1, -0.6, 0.9]),
+    # #299 regression: the srs_polished *analytical* path once returned 0 sols
+    # here (recovered only by the #358 LM rescue at ~1e-8); the general-Davenport
+    # SRS work (#354/#356) closed the analytical gap -- now 13 sols at ~2e-16.
+    np.array([0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875]),
 ]
 
 
