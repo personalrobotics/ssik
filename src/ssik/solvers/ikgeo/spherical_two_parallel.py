@@ -56,7 +56,7 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
-from ssik._kinbody import KinBody
+from ssik._kinbody import KinBody, canonicalize_spherical_wrist
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.poe_fk import poe_forward_kinematics
@@ -98,6 +98,10 @@ def solve(
         raise ValueError(
             f"spherical_two_parallel requires a 6-DOF chain; got {len(kb.joints)} joints"
         )
+    # Re-gauge a URDF flange offset (last wrist joint placed along its own axis)
+    # onto the wrist intersection so the p[3] consolidation below is correct;
+    # FK-identical and a no-op for already-canonical wrists (#377).
+    kb = canonicalize_spherical_wrist(kb, policy)
     triple = three_consecutive_intersecting(kb.joints, policy)
     if triple != (3, 4, 5):
         raise ValueError(

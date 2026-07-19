@@ -63,8 +63,8 @@ import numpy as np
 from ssik._kinbody import KinBody
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.predicates import (
+    axes_meet_at_common_point,
     axis_parallel,
-    three_consecutive_intersecting,
     three_consecutive_parallel,
 )
 
@@ -253,7 +253,14 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
         raise ValueError(f"dispatch supports 6-DOF and 7-DOF chains; got {len(kb.joints)} joints.")
 
     parallel_triple = three_consecutive_parallel(kb.joints, policy)
-    intersecting_triple = three_consecutive_intersecting(kb.joints, policy)
+    # Gauge-invariant spherical-wrist test: the wrist axes (3, 4, 5) meeting at a
+    # common point is the true Pieper condition, independent of where the joint
+    # frame origins sit along those axes. A URDF flange offset (last wrist joint
+    # placed along its own axis, e.g. ABB IRB 6700, #377) still routes here; the
+    # spherical solver re-gauges it via ``canonicalize_spherical_wrist`` before
+    # consolidating. (``three_consecutive_intersecting`` additionally requires
+    # origin coincidence -- a consolidation convenience, not a routing condition.)
+    wrist_meets = axes_meet_at_common_point(kb.joints, (3, 4, 5), policy) is not None
     j12_parallel = axis_parallel(kb.joints[1].axis, kb.joints[2].axis, policy)
     p1_norm = float(np.linalg.norm(kb.joints[1].T_left[:3, 3]))
     p1_on_axis = p1_norm < policy.axis_intersect
@@ -273,7 +280,7 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
         return plan
 
     # Tier 0 -- spherical wrist (Pieper class).
-    if intersecting_triple == (3, 4, 5):
+    if wrist_meets:
         if j12_parallel and p1_on_axis:
             # Both shoulder specializations match (Puma-560 case). Prefer the
             # parallel-shoulder solver -- typically smaller IK set and slightly
