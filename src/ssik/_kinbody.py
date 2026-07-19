@@ -27,13 +27,29 @@ This module is private. The public solver entry points
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Literal, overload
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Literal, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
-__all__ = ["Joint", "JointSpec", "KinBody", "Link", "build_kinbody", "build_poe_kinbody"]
+if TYPE_CHECKING:
+    from ssik.core.tolerances import TolerancePolicy
+
+__all__ = [
+    "Joint",
+    "JointSpec",
+    "KinBody",
+    "Link",
+    "build_kinbody",
+    "build_poe_kinbody",
+    "canonicalize_spherical_wrist",
+]
+
+# A revolute joint's frame origin may sit anywhere along its own axis without
+# changing kinematics; below this the residual off-axis component of a wrist
+# offset is treated as zero (a genuine spherical wrist meets to ~1e-15).
+_WRIST_PERP_ATOL = 1e-9
 
 JointType = Literal["revolute", "prismatic"]
 
@@ -383,3 +399,74 @@ def build_poe_kinbody(
             )
         )
     return KinBody(links=links, joints=joints)
+
+
+def canonicalize_spherical_wrist(kb: KinBody, policy: TolerancePolicy | None = None) -> KinBody:
+    """Return ``kb`` with its spherical wrist expressed in the canonical gauge.
+
+    The ik-geo ``spherical`` family consolidates the wrist as
+    ``p[3] = T_left[3] + T_left[4] + T_left[5]`` (a telescoping sum that reduces
+    to the *last* wrist joint's origin) and reads the tool-flange offset from
+    ``T_right[5]``. A URDF that places the last wrist joint's frame a fixed
+    distance *along its own rotation axis* from the wrist-center intersection --
+    the flange offset, standard on industrial arms like the ABB IRB 6700 (#377)
+    -- breaks that: the offset lands in the consolidated ``p[3]`` instead of the
+    tool term, so the wrist center is computed wrong and the solver returns
+    nothing.
+
+    A revolute joint's origin may slide freely along its own axis without
+    changing kinematics (a translation along the axis commutes with the joint
+    rotation: ``R(axis, q)^-1 @ Trans(d) @ R(axis, q) == Trans(d)`` for
+    ``d || axis``). This returns a copy with the last wrist joint slid onto the
+    axis intersection and the along-axis offset moved into ``T_right`` -- exactly
+    FK-identical, and canonical for the solver's consolidation. It is a no-op
+    (returns ``kb`` unchanged) when the last three axes are not concurrent or the
+    wrist is already canonical, so it is safe to call unconditionally at solver
+    entry. Only the *along-axis* component is a gauge freedom; an off-axis origin
+    is a genuinely non-spherical wrist and is left untouched.
+
+    Gauge-invariance lives here, in the solver path, rather than in construction:
+    the un-gauged representation is what other solvers (SRS / jointlock / HP) and
+    the baked artifacts depend on, so nothing outside the spherical solve is
+    perturbed (#377).
+    """
+    # Local imports keep the module's import surface flat and cycle-free
+    # (``predicates`` imports this module only under TYPE_CHECKING).
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+    from ssik.kinematics.predicates import axes_meet_at_common_point
+
+    if policy is None:
+        policy = DEFAULT_TOLERANCE_POLICY
+
+    joints = kb.joints
+    n = len(joints)
+    if n < 3:
+        return kb
+    last = joints[-1]
+    if not last.IsRevolute(0):
+        return kb
+
+    p = axes_meet_at_common_point(joints, (n - 3, n - 2, n - 1), policy)
+    if p is None:
+        return kb
+
+    # Last wrist joint origin in the base frame (T_left is a pure translation
+    # post-normalization, so origins accumulate along the chain).
+    origin = np.zeros(3, dtype=np.float64)
+    for j in joints:
+        origin = origin + j.T_left[:3, 3]
+
+    axis = last.axis
+    delta = origin - p
+    along = float(np.dot(delta, axis)) * axis
+    if float(np.linalg.norm(delta - along)) > _WRIST_PERP_ATOL:
+        return kb  # off-axis: genuinely non-spherical, not a gauge freedom
+    if float(np.linalg.norm(along)) < _WRIST_PERP_ATOL:
+        return kb  # already canonical
+
+    new_left = last.T_left.copy()
+    new_left[:3, 3] = new_left[:3, 3] - along
+    new_right = last.T_right.copy()
+    new_right[:3, 3] = new_right[:3, 3] + along
+    new_joints = [*joints[:-1], replace(last, T_left=new_left, T_right=new_right)]
+    return KinBody(links=list(kb.links), joints=new_joints)
