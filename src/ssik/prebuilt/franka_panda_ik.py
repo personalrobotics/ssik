@@ -53,7 +53,7 @@ import functools as _functools
 from ssik.refinement import kinbody_jacobian as _kinbody_jacobian
 from ssik.refinement import seeded_track as _seeded_track
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
-from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits
+from ssik.solvers.seven_r.spherical_shoulder import resolve_in_limits as _resolve_in_limits
 from ssik.solvers.seven_r.spherical_shoulder import solve as _solver_solve
 
 SOLVER_NAME = "seven_r.spherical_shoulder"
