@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import textwrap
 from dataclasses import dataclass
+from importlib import import_module
 from io import StringIO
 from typing import TYPE_CHECKING
 
@@ -186,12 +187,19 @@ def _render_thin_wrapper(
         "from ssik.refinement.rescue import "
         "rescue_via_T_perturbation as _rescue_via_T_perturbation\n"
     )
-    # Exact joint-limit-aware swivel resolution for SRS-class 7R (#359): recovers
-    # in-limits solutions the blind swivel sweep drops. No-op (returns []) for
-    # non-SRS chains, so it's safe to import for every thin-wrapper arm.
-    buf.write(
-        "from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits\n"
+    # Exact joint-limit-aware redundancy resolution (#359): recovers in-limits
+    # solutions the coarse redundancy sweep drops. Each redundant-7R solver family
+    # ships its own resolver (SRS swivel vs spherical-shoulder q6), so wire the one
+    # that matches this arm's solver -- importing the SRS resolver for a
+    # spherical-shoulder arm is a silent no-op (#377 audit / D1, #389). Derived
+    # from the solver module itself (has-attr), not a hand-kept map, so a new
+    # thin-wrapper solver that defines ``resolve_in_limits`` is wired automatically.
+    _resolver_module = (
+        solver_module
+        if hasattr(import_module(solver_module), "resolve_in_limits")
+        else "ssik.solvers.seven_r._swivel_limits"
     )
+    buf.write(f"from {_resolver_module} import resolve_in_limits as _resolve_in_limits\n")
     buf.write(f"from {solver_module} import solve as _solver_solve\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -226,7 +234,6 @@ def _render_specialised(
     composer_func_name = composer.__name__
 
     # Local import to avoid a hard dep cycle.
-    from importlib import import_module
 
     comp_mod = import_module(composer_module)
     compose = getattr(comp_mod, composer_func_name)
@@ -1142,7 +1149,6 @@ ComposerFn = Callable[["KinBody"], str]
 
 
 def _import_composer(module_path: str, func_name: str) -> ComposerFn:
-    from importlib import import_module
 
     fn = getattr(import_module(module_path), func_name)
     return fn  # type: ignore[no-any-return]
