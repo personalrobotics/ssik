@@ -37,6 +37,7 @@ from ssik._kinbody import KinBody
 from ssik.core.diagnostic import Diagnostic
 from ssik.core.dispatcher import DispatchPlan, dispatch
 from ssik.core.solution import Solution
+from ssik.core.solver_registry import SOLVERS
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 
@@ -44,26 +45,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 __all__ = ["Manipulator"]
-
-
-# Map dispatcher solver names (e.g. "ikgeo.three_parallel") to the dotted
-# module path under :mod:`ssik.solvers`. Centralised so the import-path
-# convention is stated once.
-_SOLVER_MODULE_PATHS: dict[str, str] = {
-    "ikgeo.three_parallel": "ssik.solvers.ikgeo.three_parallel",
-    "ikgeo.spherical_two_parallel": "ssik.solvers.ikgeo.spherical_two_parallel",
-    "ikgeo.spherical_two_intersecting": "ssik.solvers.ikgeo.spherical_two_intersecting",
-    "ikgeo.spherical": "ssik.solvers.ikgeo.spherical",
-    "ikgeo.two_parallel": "ssik.solvers.ikgeo.two_parallel",
-    "ikgeo.two_intersecting": "ssik.solvers.ikgeo.two_intersecting",
-    "ikgeo.general_6r": "ssik.solvers.ikgeo.general_6r",
-    "husty_pfurner.general_6r": "ssik.solvers.husty_pfurner.general_6r",
-    "seven_r.srs": "ssik.solvers.seven_r.srs",
-    "seven_r.srs_polished": "ssik.solvers.seven_r.srs_polished",
-    "seven_r.spherical_shoulder": "ssik.solvers.seven_r.spherical_shoulder",
-    "seven_r.spherical_shoulder_polished": "ssik.solvers.seven_r.spherical_shoulder_polished",
-    "jointlock.seven_r": "ssik.solvers.jointlock.seven_r",
-}
 
 
 class Manipulator:
@@ -98,7 +79,7 @@ class Manipulator:
         self._kb: KinBody = kinbody
         self._plan: DispatchPlan = dispatch(kinbody, policy=policy)
         self._solver_module: ModuleType = importlib.import_module(
-            _SOLVER_MODULE_PATHS[self._plan.solver_name]
+            SOLVERS[self._plan.solver_name].module_path
         )
         # Guards the one-time cold-coverage warning (#328).
         self._warned_cold_coverage: bool = False

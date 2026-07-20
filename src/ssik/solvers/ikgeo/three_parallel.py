@@ -190,7 +190,7 @@ def solve(
         # UR ~7e-6) directly. Recovering a *genuine* near-singular solution
         # (#288, z1 q4=pi/2 ~1e-6 -> machine precision) needs Newton polish, so
         # the caller opts in via ``allow_refinement`` (the standalone-arm
-        # artifacts force it on -- ``_SPECIALISED_FORCE_REFINE``). We honour the
+        # artifacts force it on -- ``SolverSpec.force_refine``). We honour the
         # caller here so inner-solver users like jointlock keep their own
         # refinement policy (and their machine-precision-or-drop contract).
         allow_refinement=allow_refinement,
