@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ssik.core.solver_registry import SOLVERS
+
 if TYPE_CHECKING:  # pragma: no cover -- typing only
     from ssik._kinbody import KinBody
     from ssik.core.dispatcher import DispatchPlan
@@ -115,26 +117,6 @@ def emit_artifact(
     )
 
 
-# Maps the dispatcher's solver_name (e.g. ``ikgeo.three_parallel``) onto the
-# fully-qualified Python module path under :mod:`ssik.solvers` that the
-# emitted artifact will import.
-_SOLVER_IMPORT_PATHS: dict[str, str] = {
-    "ikgeo.three_parallel": "ssik.solvers.ikgeo.three_parallel",
-    "ikgeo.spherical_two_parallel": "ssik.solvers.ikgeo.spherical_two_parallel",
-    "ikgeo.spherical_two_intersecting": "ssik.solvers.ikgeo.spherical_two_intersecting",
-    "ikgeo.spherical": "ssik.solvers.ikgeo.spherical",
-    "ikgeo.two_parallel": "ssik.solvers.ikgeo.two_parallel",
-    "ikgeo.two_intersecting": "ssik.solvers.ikgeo.two_intersecting",
-    "ikgeo.general_6r": "ssik.solvers.ikgeo.general_6r",
-    "husty_pfurner.general_6r": "ssik.solvers.husty_pfurner.general_6r",
-    "seven_r.srs": "ssik.solvers.seven_r.srs",
-    "seven_r.srs_polished": "ssik.solvers.seven_r.srs_polished",
-    "seven_r.spherical_shoulder": "ssik.solvers.seven_r.spherical_shoulder",
-    "seven_r.spherical_shoulder_polished": "ssik.solvers.seven_r.spherical_shoulder_polished",
-    "jointlock.seven_r": "ssik.solvers.jointlock.seven_r",
-}
-
-
 def _render(*, kb: KinBody, plan: DispatchPlan, module_name: str, arm_label: str) -> str:
     """Render the artifact source as a single string.
 
@@ -143,7 +125,7 @@ def _render(*, kb: KinBody, plan: DispatchPlan, module_name: str, arm_label: str
     into ssik solver at runtime; #110 Phase 1 default). The specialised
     form is preferred when a per-solver composer is registered.
     """
-    if plan.solver_name in _SPECIALISED_COMPOSERS:
+    if SOLVERS[plan.solver_name].composer is not None:
         return _render_specialised(kb=kb, plan=plan, module_name=module_name, arm_label=arm_label)
     return _render_thin_wrapper(kb=kb, plan=plan, module_name=module_name, arm_label=arm_label)
 
@@ -156,7 +138,7 @@ def _render_thin_wrapper(
     Used for solvers without a registered specialised composer (today:
     every solver except spherical_two_parallel; expand as composers land).
     """
-    solver_module = _SOLVER_IMPORT_PATHS[plan.solver_name]
+    solver_module = SOLVERS[plan.solver_name].module_path
     solver_short = plan.solver_name.split(".")[-1]
 
     buf = StringIO()
@@ -229,15 +211,11 @@ def _render_specialised(
     the algebraic candidates with FK verification + dedup, mirroring
     `verify_candidates`.
     """
-    composer = _SPECIALISED_COMPOSERS[plan.solver_name]
-    composer_module = composer.__module__
-    composer_func_name = composer.__name__
-
-    # Local import to avoid a hard dep cycle.
-
+    composer_module = SOLVERS[plan.solver_name].composer
+    assert composer_module is not None  # _render_specialised is only called when set
     comp_mod = import_module(composer_module)
-    compose = getattr(comp_mod, composer_func_name)
-    render_constants_header = getattr(comp_mod, "render_constants_header")  # noqa: B009
+    compose = comp_mod.compose
+    render_constants_header = comp_mod.render_constants_header
 
     algebraic_body = compose(kb)
 
@@ -296,36 +274,16 @@ def _render_specialised(
     if plan.solver_name == "jointlock.seven_r":
         buf.write(_render_specialised_solve_orchestrator_7r())
     else:
+        _spec = SOLVERS[plan.solver_name]
         buf.write(
             _render_specialised_solve_orchestrator(
-                _SPECIALISED_FK_ATOL_EXPR.get(plan.solver_name, "policy.subproblem_numerical"),
-                force_refine=plan.solver_name in _SPECIALISED_FORCE_REFINE,
+                _spec.fk_atol_expr,
+                force_refine=_spec.force_refine,
             )
         )
     buf.write(_render_fk_alias())
     buf.write(_render_all_export())
     return buf.getvalue()
-
-
-# Per-solver FK-verify gate baked into the specialised artifact's solve(). The
-# default (``policy.subproblem_numerical`` = 1e-5) is what tier-2 RR arms rely on
-# -- their algebraic FK can drift above it and is recovered by refinement. Exact
-# Pieper solvers that can emit a near-singular SP-clip near-miss (~1e-6 FK, no
-# real IK nearby) tighten the gate to drop it (#362); keep in sync with the live
-# solver's own gate.
-_SPECIALISED_FK_ATOL_EXPR: dict[str, str] = {
-    "ikgeo.three_parallel": "1e-7",  # == ssik.solvers.ikgeo.three_parallel._FK_VERIFY_ATOL
-}
-
-# Solvers whose artifact always Newton-polishes near-miss candidates (even when
-# the caller passes ``allow_refinement=False``). At a near-singular pose the
-# closed form only reaches ~1e-6 FK; polish then separates genuine near-singular
-# solutions (converge -> kept, #288) from spurious boundary near-misses (stall ->
-# dropped, #362). Fires only for the rare > fk_atol candidate. Mirrors the live
-# solver's unconditional ``allow_refinement=True``. Not for tier-2 RR arms --
-# their near-misses are common and their default (drop) / opt-in-polish contract
-# is deliberate.
-_SPECIALISED_FORCE_REFINE: frozenset[str] = frozenset({"ikgeo.three_parallel"})
 
 
 def _render_specialised_solve_orchestrator(
@@ -722,7 +680,7 @@ def _render_specialised_solve_orchestrator(
         '''
     ).replace("fk_atol = policy.subproblem_numerical", f"fk_atol = {fk_atol_expr}")
     if force_refine:
-        # Always polish near-misses (see _SPECIALISED_FORCE_REFINE). Only rewrite
+        # Always polish near-misses (see SolverSpec.force_refine). Only rewrite
         # the gate when set, so non-forced artifacts stay byte-identical.
         template = template.replace(
             "if not allow_refinement:", "if not (allow_refinement or True):"
@@ -1137,35 +1095,6 @@ def _render_specialised_solve_orchestrator_7r() -> str:
             return solutions
         '''
     )
-
-
-# Per-solver registered composers. Solvers absent from this map fall back
-# to the thin-wrapper emitter. Add entries as composers land (#112 plan).
-from collections.abc import Callable  # noqa: E402
-
-# ``KinBody`` is in TYPE_CHECKING-only scope at module load; use a string
-# forward reference inside ``Callable``.
-ComposerFn = Callable[["KinBody"], str]
-
-
-def _import_composer(module_path: str, func_name: str) -> ComposerFn:
-
-    fn = getattr(import_module(module_path), func_name)
-    return fn  # type: ignore[no-any-return]
-
-
-_SPECIALISED_COMPOSERS: dict[str, ComposerFn] = {
-    "ikgeo.spherical_two_parallel": _import_composer(
-        "ssik.codegen._compose.spherical_two_parallel", "compose"
-    ),
-    "ikgeo.three_parallel": _import_composer("ssik.codegen._compose.three_parallel", "compose"),
-    "ikgeo.spherical_two_intersecting": _import_composer(
-        "ssik.codegen._compose.spherical_two_intersecting", "compose"
-    ),
-    "ikgeo.spherical": _import_composer("ssik.codegen._compose.spherical", "compose"),
-    "ikgeo.general_6r": _import_composer("ssik.codegen._compose.general_6r", "compose"),
-    "jointlock.seven_r": _import_composer("ssik.codegen._compose.seven_r", "compose"),
-}
 
 
 def _kb_digest(kb: KinBody) -> str:

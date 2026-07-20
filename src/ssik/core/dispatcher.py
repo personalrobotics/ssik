@@ -61,6 +61,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ssik._kinbody import KinBody
+from ssik.core.solver_registry import SOLVERS
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.predicates import (
     axes_meet_at_common_point,
@@ -109,22 +110,6 @@ class DispatchPlan:
 # Per-solver order-of-magnitude estimates measured on Apple M3 single-thread,
 # Python+numpy, post-#93 speed pass. These are the user-facing "expect ~Xms"
 # numbers; codegen also bakes them into the emitted artifact's docstring.
-_SOLVER_ESTIMATES: dict[str, tuple[int, float, int]] = {
-    # solver_name -> (tier, expected_ms_median, flop_budget)
-    "ikgeo.three_parallel": (0, 1.6, 2_519),
-    "ikgeo.spherical_two_parallel": (0, 1.2, 1_316),
-    "ikgeo.spherical_two_intersecting": (0, 1.3, 1_476),
-    "ikgeo.spherical": (0, 7.5, 10_312),
-    "ikgeo.two_parallel": (1, 261.0, 141_569),
-    "ikgeo.two_intersecting": (1, 1184.0, 2_650_681),
-    "ikgeo.general_6r": (2, 5.0, 30_000_000),
-    "husty_pfurner.general_6r": (2, 120.0, 50_000_000),
-    "seven_r.srs": (0, 8.5, 1_900),  # native SRS-class 7R, full sweep (16 swivel x 8 branches)
-    "seven_r.srs_polished": (0, 56.0, 80_000),  # approximate-SRS + batched LM polish (Gen3 et al.)
-    "seven_r.spherical_shoulder": (0, 17.0, 6_000),  # exact spherical-shoulder 7R (Franka/FR3)
-    "seven_r.spherical_shoulder_polished": (0, 8.0, 40_000),  # near-spherical + LM polish (xArm7)
-    "jointlock.seven_r": (1, 50.0, 30_274),  # 7R wrapper around inner 6R
-}
 
 
 def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) -> DispatchPlan:
@@ -162,7 +147,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "1989 algorithm, parameterised by elbow swivel angle.\n"
                     "Covers KUKA iiwa LBR (canonical strict-SRS)."
                 ),
-                needs_symbolic_precompute=False,
             )
             _LOG.info("dispatch: chose %s (tier 0, native SRS-7R)", plan.solver_name)
             return plan
@@ -185,7 +169,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "Faster than the jointlock sweep, machine precision, no\n"
                     "coverage gaps. Covers Franka Panda / FR3."
                 ),
-                needs_symbolic_precompute=False,
             )
             _LOG.info("dispatch: chose %s (tier 0, spherical-shoulder-7R)", plan.solver_name)
             return plan
@@ -207,7 +190,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "produces excellent seeds; LM polish against the true FK\n"
                     "recovers machine precision. Covers uFactory xArm7."
                 ),
-                needs_symbolic_precompute=False,
             )
             _LOG.info("dispatch: chose %s (tier 0, approx-spherical-7R)", plan.solver_name)
             return plan
@@ -230,7 +212,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "universal jointlock+HP fallback on small-drift arms.\n"
                     "Covers Kinova Gen3 (12 mm / 0.4 mm drift)."
                 ),
-                needs_symbolic_precompute=False,
             )
             _LOG.info("dispatch: chose %s (tier 0, approximate-SRS-7R)", plan.solver_name)
             return plan
@@ -245,7 +226,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                 "Covers Franka Panda, FR3, uFactory xArm7, and any other\n"
                 "non-SRS 7R revolute arm."
             ),
-            needs_symbolic_precompute=False,
         )
         _LOG.info("dispatch: chose %s (tier 1, 7R wrapper)", plan.solver_name)
         return plan
@@ -274,7 +254,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                 "UR-class structure (UR3 / UR5 / UR10).\n"
                 "Closed-form via SP6 (joints 0+4) + SP1 + SP3."
             ),
-            needs_symbolic_precompute=False,
         )
         _LOG.info("dispatch: chose %s (tier 0)", plan.solver_name)
         return plan
@@ -294,7 +273,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "parallel-shoulder solver is preferred for slightly tighter "
                     "elbow conditioning."
                 ),
-                needs_symbolic_precompute=False,
             )
         elif j12_parallel:
             plan = _make_plan(
@@ -305,7 +283,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "Closed-form via SP4 (shoulder) + SP3 (elbow) + SP1 (wrist). "
                     "Covers most industrial 6R arms (Puma, Fanuc LR/CR, KUKA KR)."
                 ),
-                needs_symbolic_precompute=False,
             )
         elif p1_on_axis:
             plan = _make_plan(
@@ -316,7 +293,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "Closed-form via SP3 + SP2 + SP4 + SP1. Compact-base arms "
                     "(IRB120-class, lite6/xArm6 subfamilies)."
                 ),
-                needs_symbolic_precompute=False,
             )
         else:
             plan = _make_plan(
@@ -328,7 +304,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                     "Generic spherical-wrist fallback; rarely matches "
                     "commercial geometry."
                 ),
-                needs_symbolic_precompute=False,
             )
         _LOG.info("dispatch: chose %s (tier 0)", plan.solver_name)
         return plan
@@ -362,26 +337,25 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
             "leftvar selection. Closes the EAIK coverage gap (Kinova JACO 2 "
             "classical, Agilex Piper, custom non-Pieper 6R)." + weak_block
         ),
-        needs_symbolic_precompute=True,
     )
     _LOG.info("dispatch: chose %s (tier 2)", plan.solver_name)
     return plan
 
 
-def _make_plan(solver_name: str, *, reason: str, needs_symbolic_precompute: bool) -> DispatchPlan:
-    """Assemble a :class:`DispatchPlan` from per-solver estimates + caller fields."""
-    tier, ms, flops = _SOLVER_ESTIMATES[solver_name]
+def _make_plan(solver_name: str, *, reason: str) -> DispatchPlan:
+    """Assemble a :class:`DispatchPlan` from the solver's :class:`SolverSpec`."""
+    spec = SOLVERS[solver_name]
     # Symbolic precompute time estimate -- only applies to tier-2 RR currently.
     # 150-300 s on JACO 2 today; report a single midpoint estimate for the
     # build CLI's ETA. Real per-arm time depends on linearity-joint search
     # hits and sympy version; the build pass measures it precisely.
-    precompute_s = 240.0 if needs_symbolic_precompute else None
+    precompute_s = 240.0 if spec.needs_symbolic_precompute else None
     return DispatchPlan(
         solver_name=solver_name,
-        tier=tier,
+        tier=spec.tier,
         reason=reason,
-        expected_ms_median=ms,
-        flop_budget=flops,
-        needs_symbolic_precompute=needs_symbolic_precompute,
+        expected_ms_median=spec.expected_ms,
+        flop_budget=spec.flop_budget,
+        needs_symbolic_precompute=spec.needs_symbolic_precompute,
         estimated_precompute_seconds=precompute_s,
     )
