@@ -61,7 +61,7 @@ class Manipulator:
         loader). Most users should use :meth:`from_urdf` instead.
     """
 
-    __slots__ = ("_kb", "_plan", "_solver_module", "_warned_cold_coverage")
+    __slots__ = ("_kb", "_plan", "_solver_module", "_solver_params", "_warned_cold_coverage")
 
     def __init__(
         self,
@@ -80,6 +80,11 @@ class Manipulator:
         self._plan: DispatchPlan = dispatch(kinbody, policy=policy)
         self._solver_module: ModuleType = importlib.import_module(
             SOLVERS[self._plan.solver_name].module_path
+        )
+        # The dispatched solver is fixed here, so its parameter set never changes;
+        # cache it once instead of re-inspecting the signature on every solve().
+        self._solver_params: frozenset[str] = frozenset(
+            inspect.signature(self._solver_module.solve).parameters
         )
         # Guards the one-time cold-coverage warning (#328).
         self._warned_cold_coverage: bool = False
@@ -338,11 +343,9 @@ class Manipulator:
 
         # Filter kwargs by the dispatched solver's signature so callers can
         # pass q_seed (or any other not-universally-supported kwarg) without
-        # tripping TypeError on solvers that don't accept it. The dispatch
-        # is determined at __init__ time, so the signature lookup is per-IK
-        # but cheap (~5 us).
-        sig = inspect.signature(self._solver_module.solve)
-        params = sig.parameters
+        # tripping TypeError on solvers that don't accept it. Cached at __init__
+        # (the dispatched solver is fixed there), so this is a set lookup per IK.
+        params = self._solver_params
         kwargs: dict[str, Any] = {"policy": policy}
         if "allow_refinement" in params:
             kwargs["allow_refinement"] = allow_refinement
