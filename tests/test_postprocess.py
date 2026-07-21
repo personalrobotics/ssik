@@ -472,7 +472,9 @@ def test_no_prebuilt_reinlines_the_pipeline() -> None:
 
     from ssik.prebuilt._manifest import load_manifest
 
-    prebuilt_dir = Path(importlib.import_module("ssik.prebuilt").__file__).parent
+    prebuilt_init = importlib.import_module("ssik.prebuilt").__file__
+    assert prebuilt_init is not None
+    prebuilt_dir = Path(prebuilt_init).parent
     checked = 0
     for arm in load_manifest():
         src_path = prebuilt_dir / f"{arm}.py"
