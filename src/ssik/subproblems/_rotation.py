@@ -42,12 +42,24 @@ def rotate(k: NDArray[np.float64], theta: float, v: NDArray[np.float64]) -> NDAr
 
     ``rotate(k, theta, v) = v cos(theta) + (k x v) sin(theta) + k (k . v) (1 - cos(theta))``
     """
+    # Scalarized Rodrigues (like ``rotation_matrix``): builds the 3-vector from
+    # float ops in a single allocation instead of ~5 numpy temporaries
+    # (``_cross3`` array + four element-wise products/sums). ``rotate`` is one of
+    # the hottest calls in the SP5/SP6 refine loops, so the per-call heap churn
+    # matters. Element order matches the vectorized form exactly (bit-identical).
     c = math.cos(theta)
     s = math.sin(theta)
-    kv = _dot3(k, v)
-    one_minus_c = 1.0 - c
-    out: NDArray[np.float64] = v * c + _cross3(k, v) * s + k * (kv * one_minus_c)
-    return out
+    kx, ky, kz = float(k[0]), float(k[1]), float(k[2])
+    vx, vy, vz = float(v[0]), float(v[1]), float(v[2])
+    m = (1.0 - c) * (kx * vx + ky * vy + kz * vz)
+    return np.array(
+        [
+            vx * c + (ky * vz - kz * vy) * s + kx * m,
+            vy * c + (kz * vx - kx * vz) * s + ky * m,
+            vz * c + (kx * vy - ky * vx) * s + kz * m,
+        ],
+        dtype=np.float64,
+    )
 
 
 @cython.ccall
