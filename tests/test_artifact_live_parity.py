@@ -12,11 +12,11 @@ and ``Manipulator(kb).solve`` (which dispatches the live solver) must return the
 same IK set on the same pose. If the emitted code ever diverges from the live
 solver, CI goes red here.
 
-Excluded from strict set-parity (compared FK-only instead): solvers whose live
-path runs a runtime symbolic derivation or a universal fallback that can differ
-from the baked artifact by design -- ``ikgeo.general_6r`` (cold Raghavan-Roth
-re-derivation) and ``jointlock.seven_r`` (cold Husty-Pfurner vs baked cached-RR,
-the documented #328 coverage gap).
+Scoping (each documented at its constant below): ``ikgeo.general_6r`` is compared
+FK-only (its cold Raghavan-Roth re-derivation is slightly less accurate than the
+baked artifact); ``jointlock.seven_r`` is skipped entirely (cold Husty-Pfurner vs
+baked cached-RR is the documented #328 gap, not codegen drift); and near-singular
+poses are skipped for strict set-parity by Jacobian condition number.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import importlib
 import numpy as np
 import pytest
 
+from ssik.core.solution import Solution
 from ssik.manipulator import Manipulator
 from ssik.prebuilt._manifest import load_manifest
 from ssik.refinement import kinbody_jacobian
@@ -71,7 +72,7 @@ def _prebuilts() -> list[str]:
 _DEGENERATE_GAP = 5e-2
 
 
-def _min_pairwise(sols: list) -> float:
+def _min_pairwise(sols: list[Solution]) -> float:
     qs = [np.asarray(s.q, dtype=np.float64) for s in sols]
     return min(
         (_wrap_linf(qs[i], qs[j]) for i in range(len(qs)) for j in range(i + 1, len(qs))),
@@ -79,7 +80,7 @@ def _min_pairwise(sols: list) -> float:
     )
 
 
-def _sets_match(art: list, live: list, tol: float) -> tuple[bool, str]:
+def _sets_match(art: list[Solution], live: list[Solution], tol: float) -> tuple[bool, str]:
     """Bijective nearest-match of two solution lists by wrap-to-pi L-infinity."""
     if len(art) != len(live):
         return False, f"solution count {len(art)} (artifact) vs {len(live)} (live)"
@@ -132,7 +133,7 @@ def test_artifact_matches_live_solver(arm: str) -> None:
         # from the baked artifact by design (#328); only the artifact is pinned.
         if fk_only:
             continue
-        live_sols = live.solve(t, **kw)
+        live_sols = live.solve(t, respect_limits=False, allow_rescue=False, allow_refinement=True)
         worst_live = max((float(np.max(np.abs(art.fk(s.q) - t))) for s in live_sols), default=0.0)
         assert worst_live < 1e-6, f"{arm}: live FK closure {worst_live:.2e}"
         # Strict set-parity only on well-conditioned poses: near a singularity
