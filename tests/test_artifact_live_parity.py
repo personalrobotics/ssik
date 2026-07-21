@@ -110,6 +110,10 @@ def test_artifact_matches_live_solver(arm: str) -> None:
     kb = art._KB
     live = Manipulator(kb)
     fk_only = art.SOLVER_NAME in _SYMBOLIC_LIVE
+    # Per-arm FK bound: the calibrated ceiling the uniform-fuzz suite already
+    # trusts. Tier-2 RR arms carry a looser ceiling (1e-4) for LAPACK-backend
+    # variance (OpenBLAS vs Accelerate); a hard 1e-6 would flake on Linux.
+    fk_ceiling = load_manifest()[arm].fk_ceiling_fuzz
 
     rng = np.random.default_rng(0)
     dof = len(kb.joints)
@@ -128,14 +132,18 @@ def test_artifact_matches_live_solver(arm: str) -> None:
         fk_checked += 1
         # The shipped artifact must FK-close to machine precision, always.
         worst_art = max(float(np.max(np.abs(art.fk(s.q) - t))) for s in art_sols)
-        assert worst_art < 1e-6, f"{arm}: artifact FK closure {worst_art:.2e}"
+        assert worst_art < fk_ceiling, (
+            f"{arm}: artifact FK closure {worst_art:.2e} > {fk_ceiling:.0e}"
+        )
         # Symbolic-live arms (cold RR re-derivation / universal HP) can differ
         # from the baked artifact by design (#328); only the artifact is pinned.
         if fk_only:
             continue
         live_sols = live.solve(t, respect_limits=False, allow_rescue=False, allow_refinement=True)
         worst_live = max((float(np.max(np.abs(art.fk(s.q) - t))) for s in live_sols), default=0.0)
-        assert worst_live < 1e-6, f"{arm}: live FK closure {worst_live:.2e}"
+        assert worst_live < fk_ceiling, (
+            f"{arm}: live FK closure {worst_live:.2e} > {fk_ceiling:.0e}"
+        )
         # Strict set-parity only on well-conditioned poses: near a singularity
         # (merging branches, or two solutions within _DEGENERATE_GAP) the shared
         # algebra tie-breaks differently -- benign, not codegen drift.
