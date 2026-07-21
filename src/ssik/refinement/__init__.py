@@ -427,15 +427,18 @@ def lm_refine(
     divergence_factor: float = 5.0,
     divergence_min_iters: int = 4,
 ) -> tuple[NDArray[np.float64], float, int] | None:
-    """Newton-Raphson polish on the SE(3) log residual.
+    """Newton-Raphson polish: SE(3)-log Newton steps, Frobenius convergence gate.
 
     For seeds within ~30 deg of a true solution, converges to machine
-    precision in 1-5 iterations.
+    precision in 1-5 iterations. Convergence is gated and the returned residual
+    reported on the **Frobenius** FK error ``||fk(q) - t_target||_F`` -- the
+    metric ``Solution.fk_residual`` carries and ``lm_refine_batch`` also uses;
+    the SE(3) log residual drives the Newton step direction only (#389 D2).
 
     :param q_seed: starting joint vector. Length matches ``fk_fn`` input.
     :param fk_fn: ``q -> 4x4`` forward kinematics callable.
     :param t_target: 4x4 target end-effector pose.
-    :param fk_atol: convergence threshold on ``||se3_log_residual||``.
+    :param fk_atol: convergence threshold on ``||fk(q) - t_target||_F``.
     :param max_iters: cap. If hit without convergence, returns ``None``.
     :param jacobian_fn: optional ``q -> 6xN`` spatial Jacobian callable.
         When ``None``, central-difference numeric Jacobian is used (slow).
@@ -466,23 +469,28 @@ def lm_refine(
     r_best: float = float("inf")
     for it in range(max_iters):
         t_q = fk_fn(q)
-        t_diff = t_target @ np.linalg.inv(t_q)
-        r = se3_log_residual(t_diff)
-        norm = float(np.linalg.norm(r))
-        if norm < fk_atol:
-            return (q, norm, it)
-        if norm < r_best:
-            r_best = norm
-        elif it >= divergence_min_iters and norm > divergence_factor * r_best:
+        # Gate + report on the Frobenius residual ||fk(q) - T||_F -- the metric
+        # Solution.fk_residual carries and every other ssik gate uses (and what
+        # lm_refine_batch already reports). The SE(3) log residual below is the
+        # Newton *step direction only*; gating on it accepts candidates ~1.4-3x
+        # above the Frobenius bound the rest of the stack measures against (#389
+        # D2). Frobenius needs no matrix inverse, so this also drops one per iter.
+        fro = float(np.linalg.norm(t_q - t_target))
+        if fro < fk_atol:
+            return (q, fro, it)
+        if fro < r_best:
+            r_best = fro
+        elif it >= divergence_min_iters and fro > divergence_factor * r_best:
             # Trajectory is clearly outside the basin of attraction.
             # See divergence_factor docstring for the rationale.
             return None
+        r = se3_log_residual(t_target @ np.linalg.inv(t_q))
         j_s = jacobian_fn(q) if jacobian_fn is not None else numerical_jacobian(q, fk_fn)
         try:
             dq = np.linalg.solve(j_s, r)
         except np.linalg.LinAlgError:
             # Singular Jacobian (kinematic singularity) -> Tikhonov-damped LSQ.
-            damping = max(1e-9, 1e-6 * norm)
+            damping = max(1e-9, 1e-6 * fro)
             n = j_s.shape[1]
             jtj = j_s.T @ j_s + damping * np.eye(n)
             dq = np.linalg.solve(jtj, j_s.T @ r)
@@ -490,10 +498,10 @@ def lm_refine(
         q = q + dq
     # Final convergence check after max_iters.
     t_check = fk_fn(q)
-    final_r = float(np.linalg.norm(se3_log_residual(t_target @ np.linalg.inv(t_check))))
-    if final_r > fk_atol:
+    final_fro = float(np.linalg.norm(t_check - t_target))
+    if final_fro > fk_atol:
         return None
-    return (q, final_r, max_iters)
+    return (q, final_fro, max_iters)
 
 
 def _se3_log_residual_batch(t_err: NDArray[np.float64]) -> NDArray[np.float64]:

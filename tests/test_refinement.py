@@ -302,3 +302,39 @@ def test_solution_dataclass_is_frozen() -> None:
     s = Solution(q=np.zeros(6), fk_residual=0.0)
     with pytest.raises((AttributeError, Exception)):  # FrozenInstanceError subclass
         s.q = np.ones(6)  # type: ignore[misc]
+
+
+def test_lm_refine_reports_frobenius_residual_not_log_389_d2() -> None:
+    """#389 D2: lm_refine gates + reports the Frobenius FK residual
+    ``||fk(q)-T||_F`` -- the metric ``Solution.fk_residual`` carries and
+    ``lm_refine_batch`` also uses -- not the SE(3) log residual (which can run
+    ~1.4-3x smaller, so a log-gated accept reported a candidate above the
+    Frobenius bound the rest of ssik measures against)."""
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+
+    kb = build_kinbody(franka_panda_specs())
+    rng = np.random.default_rng(1)
+    fk_atol = 1e-9
+    checked = 0
+    for _ in range(200):
+        q = rng.uniform(-2.0, 2.0, len(kb.joints))
+        target = poe_forward_kinematics(kb, q)
+        seed = q + rng.uniform(-0.06, 0.06, len(kb.joints))
+        result = lm_refine(
+            seed,
+            lambda x: poe_forward_kinematics(kb, x),
+            target,
+            jacobian_fn=lambda x: kinbody_jacobian(kb, x),
+            fk_atol=fk_atol,
+            max_iters=30,
+        )
+        if result is None:
+            continue
+        checked += 1
+        q_ref, residual, _ = result
+        frob = float(np.linalg.norm(poe_forward_kinematics(kb, q_ref) - target))
+        # The returned residual IS the Frobenius FK error (to the last ulp).
+        assert residual == pytest.approx(frob, abs=1e-15)
+        # An accepted candidate honestly clears the Frobenius gate.
+        assert frob < fk_atol
+    assert checked > 100
