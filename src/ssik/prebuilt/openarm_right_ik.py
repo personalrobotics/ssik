@@ -43,12 +43,7 @@ import numpy as np
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.postprocess import (
-    nearest_to_seed as _ps_nearest_to_seed,
-    respect_limits as _ps_respect_limits,
-    within_seed_tolerance as _ps_within_seed_tolerance,
-    wrap_to_limits as _ps_wrap_to_limits,
-)
+from ssik.postprocess import finalize_solutions as _ps_finalize
 import functools as _functools
 from ssik.refinement import kinbody_jacobian as _kinbody_jacobian
 from ssik.refinement import seeded_track as _seeded_track
@@ -234,13 +229,20 @@ def solve(
             np.asarray(T_target, dtype=np.float64),
         )
         if _tracked is not None:
-            _fast = [_tracked]
-            if respect_limits:
-                _fast = _ps_respect_limits(_ps_wrap_to_limits(_fast, _KB), _KB)
-            if _fast and seed_tolerance is not None:
-                _fast = _ps_within_seed_tolerance(_fast, q_seed, seed_tolerance)
+            # Same post-processing as the full path (no in-limits
+            # fallback: a tracked seed that fails limits/tolerance falls
+            # through to the full analytical solve below).
+            _fast = _ps_finalize(
+                [_tracked],
+                _KB,
+                respect_limits=respect_limits,
+                q_seed=q_seed,
+                seed_metric=seed_metric,
+                seed_tolerance=seed_tolerance,
+                max_solutions=1,
+            )
             if _fast:
-                return _fast[:1]
+                return _fast
     sols, _is_ls = _solver_solve(
         _KB,
         T_target,
@@ -273,23 +275,21 @@ def solve(
                 _T,
                 jacobian_fn=lambda _q: _kinbody_jacobian(_KB, _q),
             )
-    if respect_limits:
-        sols = _ps_wrap_to_limits(sols, _KB)
-        sols = _ps_respect_limits(sols, _KB)
-        if not sols:
-            # #359: the blind swivel sweep sampled no in-limits candidate
-            # even though a reachable in-limits solution exists (the
-            # in-limits swivel arc was narrower than the sampling). The
-            # feasible-swivel resolver computes the in-limits arcs exactly
-            # and returns solutions directly (no-op for non-SRS chains).
-            sols = _resolve_in_limits(_KB, T_target, policy=policy)
-    if q_seed is not None:
-        if seed_tolerance is not None:
-            sols = _ps_within_seed_tolerance(sols, q_seed, seed_tolerance)
-        sols = _ps_nearest_to_seed(sols, q_seed, metric=seed_metric)
-    if max_solutions is not None and len(sols) > max_solutions:
-        sols = sols[:max_solutions]
-    return sols
+    # Shared post-processing pipeline (limits -> seed -> truncate); the
+    # one definition lives in ssik.postprocess.finalize_solutions. The
+    # in-limits fallback (#359) recovers a reachable in-limits solution
+    # the coarse sweep missed via the solver-matched exact resolver
+    # (no-op for non-redundant chains).
+    return _ps_finalize(
+        sols,
+        _KB,
+        respect_limits=respect_limits,
+        q_seed=q_seed,
+        seed_metric=seed_metric,
+        seed_tolerance=seed_tolerance,
+        max_solutions=max_solutions,
+        in_limits_fallback=lambda: _resolve_in_limits(_KB, T_target, policy=policy),
+    )
 
 from ssik.kinematics.poe_fk import poe_forward_kinematics as _poe_fk
 

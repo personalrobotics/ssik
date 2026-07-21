@@ -22,6 +22,7 @@ import pytest
 from ssik._kinbody import JointSpec, KinBody, build_kinbody
 from ssik.core.solution import Solution
 from ssik.postprocess import (
+    finalize_solutions,
     nearest_to_seed,
     respect_limits,
     take_first,
@@ -401,3 +402,87 @@ def test_franka_pipeline_real_ik_output() -> None:
     # Truncate to top-1.
     sols = take_first(sols, k=1)
     assert len(sols) == 1
+
+
+# ---------------------------------------------------------------------------
+# finalize_solutions: the single shared post-processing pipeline (U2, #389)
+# ---------------------------------------------------------------------------
+
+
+def test_finalize_equals_manual_pipeline() -> None:
+    """finalize_solutions is exactly the hand-written limits->seed->truncate
+    pipeline it replaced across Manipulator + every emitted artifact."""
+    kb = _kb_with_limits([(-1.0, 1.0), (-1.0, 1.0)])
+    sols = [_sol([0.9, 0.1]), _sol([2.0, 0.0]), _sol([-0.5, 0.5]), _sol([0.2, -0.2])]
+    seed = np.array([0.0, 0.0])
+
+    manual = wrap_to_limits(sols, kb)
+    manual = respect_limits(manual, kb)
+    manual = nearest_to_seed(manual, seed, metric="wrap_linf")
+    manual = manual[:2]
+
+    got = finalize_solutions(
+        sols, kb, respect_limits=True, q_seed=seed, seed_metric="wrap_linf", max_solutions=2
+    )
+    assert [s.q.tolist() for s in got] == [s.q.tolist() for s in manual]
+
+
+def test_finalize_respect_limits_false_skips_limit_pass() -> None:
+    kb = _kb_with_limits([(-1.0, 1.0)])
+    sols = [_sol([5.0]), _sol([0.0])]
+    got = finalize_solutions(sols, kb, respect_limits=False)
+    assert len(got) == 2  # nothing dropped
+
+
+def test_finalize_in_limits_fallback_fires_when_empty() -> None:
+    """When the limit pass empties the set, the fallback recovers it (the #359
+    in-limits resolver hook)."""
+    kb = _kb_with_limits([(-1.0, 1.0)])
+    sols = [_sol([5.0])]  # out of range -> dropped
+    recovered = [_sol([0.5])]
+    got = finalize_solutions(sols, kb, respect_limits=True, in_limits_fallback=lambda: recovered)
+    assert [s.q.tolist() for s in got] == [[0.5]]
+
+
+def test_finalize_no_fallback_when_nonempty() -> None:
+    kb = _kb_with_limits([(-1.0, 1.0)])
+    sentinel = [_sol([0.5])]
+    got = finalize_solutions(
+        [_sol([0.2])], kb, respect_limits=True, in_limits_fallback=lambda: sentinel
+    )
+    assert [s.q.tolist() for s in got] == [[0.2]]  # fallback not used
+
+
+def test_finalize_populates_counts() -> None:
+    kb = _kb_with_limits([(-1.0, 1.0)])
+    sols = [_sol([0.1]), _sol([5.0]), _sol([0.3]), _sol([-0.2])]  # one out of range
+    counts: dict[str, int] = {}
+    got = finalize_solutions(sols, kb, respect_limits=True, max_solutions=1, counts=counts)
+    assert len(got) == 1
+    assert counts["dropped_by_limits"] == 1
+    assert counts["dropped_by_max_solutions"] == 2  # 3 in-limits -> truncate to 1
+
+
+def test_no_prebuilt_reinlines_the_pipeline() -> None:
+    """Structural guard (U2, #389): every emitted artifact routes post-processing
+    through finalize_solutions and must NOT hand-inline the raw
+    wrap->respect->nearest sequence, so the pipeline can't drift back into N copies."""
+    import importlib
+    from pathlib import Path
+
+    from ssik.prebuilt._manifest import load_manifest
+
+    prebuilt_dir = Path(importlib.import_module("ssik.prebuilt").__file__).parent
+    checked = 0
+    for arm in load_manifest():
+        src_path = prebuilt_dir / f"{arm}.py"
+        if not src_path.exists():
+            continue
+        src = src_path.read_text()
+        if "_ps_finalize" not in src and "finalize_solutions" not in src:
+            continue  # arm with no post-processing (none today, but be lenient)
+        checked += 1
+        # The old inlined pipeline calls must not reappear in emitted artifacts.
+        assert "_ps_wrap_to_limits(" not in src, f"{arm}: re-inlined wrap_to_limits"
+        assert "_ps_nearest_to_seed(" not in src, f"{arm}: re-inlined nearest_to_seed"
+    assert checked > 0, "no prebuilt artifacts found to check"

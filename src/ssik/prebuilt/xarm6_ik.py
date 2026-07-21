@@ -57,12 +57,7 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
 import functools as _functools
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
-from ssik.postprocess import (
-    nearest_to_seed as _ps_nearest_to_seed,
-    respect_limits as _ps_respect_limits,
-    within_seed_tolerance as _ps_within_seed_tolerance,
-    wrap_to_limits as _ps_wrap_to_limits,
-)
+from ssik.postprocess import finalize_solutions as _ps_finalize
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.general_6r"
@@ -1071,22 +1066,17 @@ def solve(
                 jacobian_fn=_spatial_jacobian,
             )
 
-    # Post-processing pass (#238 item 4). Order matters:
-    #   1. wrap_to_limits tries q +/- 2*pi per joint to bring
-    #      candidates into the URDF's limit range
-    #   2. respect_limits drops anything still outside
-    #   3. nearest_to_seed sorts by distance to q_seed (if given)
-    #   4. max_solutions truncates to the first k
-    if respect_limits:
-        solutions = _ps_wrap_to_limits(solutions, _KB)
-        solutions = _ps_respect_limits(solutions, _KB)
-    if q_seed is not None:
-        if seed_tolerance is not None:
-            solutions = _ps_within_seed_tolerance(solutions, q_seed, seed_tolerance)
-        solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
-    if max_solutions is not None and len(solutions) > max_solutions:
-        solutions = solutions[:max_solutions]
-    return solutions
+    # Shared post-processing pipeline (limits -> seed -> truncate); the
+    # one definition lives in ssik.postprocess.finalize_solutions.
+    return _ps_finalize(
+        solutions,
+        _KB,
+        respect_limits=respect_limits,
+        q_seed=q_seed,
+        seed_metric=seed_metric,
+        seed_tolerance=seed_tolerance,
+        max_solutions=max_solutions,
+    )
 
 fk = _fk
 

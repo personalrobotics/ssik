@@ -47,6 +47,7 @@ in Phase 4 (no per-arm specialisation, no symbolic precompute).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 
 import numpy as np
@@ -56,6 +57,7 @@ from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 
 __all__ = [
+    "finalize_solutions",
     "nearest_to_seed",
     "respect_limits",
     "take_first",
@@ -242,3 +244,58 @@ def take_first(sols: list[Solution], k: int) -> list[Solution]:
     :returns: ``sols[:max(k, 0)]``.
     """
     return list(sols[: max(k, 0)])
+
+
+# The ``respect_limits`` function is shadowed by the boolean parameter of the
+# same name inside :func:`finalize_solutions`; alias it so the pipeline can still
+# call it. (The kwarg name matches the public ``solve()`` API and shouldn't move.)
+_apply_limits = respect_limits
+
+
+def finalize_solutions(
+    sols: list[Solution],
+    kb: KinBody,
+    *,
+    respect_limits: bool = True,
+    q_seed: NDArray[np.float64] | None = None,
+    seed_metric: str = "wrap_linf",
+    seed_tolerance: float | None = None,
+    max_solutions: int | None = None,
+    in_limits_fallback: Callable[[], list[Solution]] | None = None,
+    counts: dict[str, int] | None = None,
+) -> list[Solution]:
+    """The shared IK post-processing pipeline: limits -> seed -> truncate.
+
+    This is the one definition of the tail that ``Manipulator.solve`` and every
+    emitted artifact ``solve()`` used to hand-duplicate (four copies, already
+    drifted). Order matters and is fixed: ``wrap_to_limits`` (try +/-2pi to bring
+    branches into range) then ``respect_limits`` (drop the rest); then, if a seed
+    is given, ``within_seed_tolerance`` (hard bound) then ``nearest_to_seed``
+    (rank); then truncate to ``max_solutions``.
+
+    :param respect_limits: when ``True`` apply the wrap+drop limit pass.
+    :param in_limits_fallback: optional zero-arg callable invoked when the limit
+        pass empties the set -- the redundant-7R exact in-limits resolver (#359),
+        which recovers a narrow in-limits arc the coarse sweep missed. ``None``
+        for callers without one (e.g. ``Manipulator``).
+    :param counts: optional dict; when given, populated with ``dropped_by_limits``
+        and ``dropped_by_max_solutions`` for the caller's diagnostics.
+    :returns: the post-processed solution list.
+    """
+    if respect_limits:
+        sols = wrap_to_limits(sols, kb)
+        pre_limit = len(sols)
+        sols = _apply_limits(sols, kb)
+        if counts is not None:
+            counts["dropped_by_limits"] = pre_limit - len(sols)
+        if not sols and in_limits_fallback is not None:
+            sols = in_limits_fallback()
+    if q_seed is not None:
+        if seed_tolerance is not None:
+            sols = within_seed_tolerance(sols, q_seed, seed_tolerance)
+        sols = nearest_to_seed(sols, q_seed, metric=seed_metric)
+    if max_solutions is not None and len(sols) > max_solutions:
+        if counts is not None:
+            counts["dropped_by_max_solutions"] = len(sols) - max_solutions
+        sols = sols[:max_solutions]
+    return sols

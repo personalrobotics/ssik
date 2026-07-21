@@ -321,10 +321,7 @@ class Manipulator:
         :raises ValueError: if ``T_target.shape != (4, 4)`` or
             ``len(q_seed) != dof`` when ``q_seed`` is given.
         """
-        from ssik.postprocess import nearest_to_seed as _ps_nearest_to_seed
-        from ssik.postprocess import respect_limits as _ps_respect_limits
-        from ssik.postprocess import within_seed_tolerance as _ps_within_seed_tolerance
-        from ssik.postprocess import wrap_to_limits as _ps_wrap_to_limits
+        from ssik.postprocess import finalize_solutions as _ps_finalize
 
         T = np.asarray(T_target, dtype=np.float64)
         if T.shape != (4, 4):
@@ -412,30 +409,23 @@ class Manipulator:
 
         raw_candidate_count = len(sols)
 
-        # Cross-arm postprocess pass: solvers that didn't honour kwargs
-        # natively get them applied here so the public API is uniform.
-        # Order: wrap_to_limits first (try +/- 2pi shift to bring branches
-        # into the URDF range), THEN respect_limits (drop anything still
-        # outside). Without the shift, IKs returned in [-2pi, 0] would
-        # erroneously be filtered on arms with limits in [0, 2pi]
-        # (the JACO 2 case).
-        if respect_limits:
-            sols = _ps_wrap_to_limits(sols, self._kb)
-            pre_limit_count = len(sols)
-            sols = _ps_respect_limits(sols, self._kb)
-            dropped_by_limits = pre_limit_count - len(sols)
-        else:
-            dropped_by_limits = 0
-        if q_seed_arr is not None:
-            if seed_tolerance is not None:
-                sols = _ps_within_seed_tolerance(sols, q_seed_arr, seed_tolerance)
-            sols = _ps_nearest_to_seed(sols, q_seed_arr, metric=seed_metric)
-        if max_solutions is not None and len(sols) > max_solutions:
-            dropped_by_max_solutions = len(sols) - max_solutions
-            sols = sols[:max_solutions]
-        else:
-            dropped_by_max_solutions = 0
-        result: list[Solution] = sols
+        # Cross-arm postprocess pass (the one shared pipeline -- see
+        # ssik.postprocess.finalize_solutions): solvers that didn't honour kwargs
+        # natively get limits + seed + truncate applied here so the public API is
+        # uniform. ``counts`` feeds the Diagnostic below.
+        counts = {"dropped_by_limits": 0, "dropped_by_max_solutions": 0}
+        result: list[Solution] = _ps_finalize(
+            sols,
+            self._kb,
+            respect_limits=respect_limits,
+            q_seed=q_seed_arr,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            counts=counts,
+        )
+        dropped_by_limits = counts["dropped_by_limits"]
+        dropped_by_max_solutions = counts["dropped_by_max_solutions"]
         if not explain:
             return result
 

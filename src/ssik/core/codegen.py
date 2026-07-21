@@ -148,12 +148,7 @@ def _render_thin_wrapper(
     buf.write("from ssik._kinbody import Joint, KinBody, Link\n")
     buf.write("from ssik.core.solution import Solution\n")
     buf.write("from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy\n")
-    buf.write("from ssik.postprocess import (\n")
-    buf.write("    nearest_to_seed as _ps_nearest_to_seed,\n")
-    buf.write("    respect_limits as _ps_respect_limits,\n")
-    buf.write("    within_seed_tolerance as _ps_within_seed_tolerance,\n")
-    buf.write("    wrap_to_limits as _ps_wrap_to_limits,\n")
-    buf.write(")\n")
+    buf.write("from ssik.postprocess import finalize_solutions as _ps_finalize\n")
     # Bulletproof rescue fallback (#319 / #358): thin-wrapper solvers (the
     # SRS family -- seven_r.srs / srs_polished) get the same T-perturbation
     # rescue the specialised orchestrators have, so a reachable-but-degenerate
@@ -245,12 +240,7 @@ def _render_specialised(
         "from ssik.refinement.rescue import "
         "rescue_via_T_perturbation as _rescue_via_T_perturbation\n"
     )
-    buf.write("from ssik.postprocess import (\n")
-    buf.write("    nearest_to_seed as _ps_nearest_to_seed,\n")
-    buf.write("    respect_limits as _ps_respect_limits,\n")
-    buf.write("    within_seed_tolerance as _ps_within_seed_tolerance,\n")
-    buf.write("    wrap_to_limits as _ps_wrap_to_limits,\n")
-    buf.write(")\n")
+    buf.write("from ssik.postprocess import finalize_solutions as _ps_finalize\n")
     buf.write("from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -661,22 +651,17 @@ def _render_specialised_solve_orchestrator(
                         jacobian_fn=_spatial_jacobian,
                     )
 
-            # Post-processing pass (#238 item 4). Order matters:
-            #   1. wrap_to_limits tries q +/- 2*pi per joint to bring
-            #      candidates into the URDF's limit range
-            #   2. respect_limits drops anything still outside
-            #   3. nearest_to_seed sorts by distance to q_seed (if given)
-            #   4. max_solutions truncates to the first k
-            if respect_limits:
-                solutions = _ps_wrap_to_limits(solutions, _KB)
-                solutions = _ps_respect_limits(solutions, _KB)
-            if q_seed is not None:
-                if seed_tolerance is not None:
-                    solutions = _ps_within_seed_tolerance(solutions, q_seed, seed_tolerance)
-                solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
-            if max_solutions is not None and len(solutions) > max_solutions:
-                solutions = solutions[:max_solutions]
-            return solutions
+            # Shared post-processing pipeline (limits -> seed -> truncate); the
+            # one definition lives in ssik.postprocess.finalize_solutions.
+            return _ps_finalize(
+                solutions,
+                _KB,
+                respect_limits=respect_limits,
+                q_seed=q_seed,
+                seed_metric=seed_metric,
+                seed_tolerance=seed_tolerance,
+                max_solutions=max_solutions,
+            )
         '''
     ).replace("fk_atol = policy.subproblem_numerical", f"fk_atol = {fk_atol_expr}")
     if force_refine:
@@ -1064,35 +1049,33 @@ def _render_specialised_solve_orchestrator_7r() -> str:
                         T,
                         jacobian_fn=_spatial_jacobian,
                     )
-                    if respect_limits:
-                        solutions = _ps_wrap_to_limits(solutions, _KB)
-                        solutions = _ps_respect_limits(solutions, _KB)
-                    if q_seed is not None:
-                        if seed_tolerance is not None:
-                            solutions = _ps_within_seed_tolerance(
-                                solutions, q_seed, seed_tolerance
-                            )
-                        solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
+                    # Rescued candidates were not limit-filtered; run the shared
+                    # pipeline (limits + seed) over them.
+                    solutions = _ps_finalize(
+                        solutions,
+                        _KB,
+                        respect_limits=respect_limits,
+                        q_seed=q_seed,
+                        seed_metric=seed_metric,
+                        seed_tolerance=seed_tolerance,
+                    )
 
-            # No orchestrator-level respect_limits pass on the analytical
-            # result: the inner ``_solve_algebraic`` already filtered in-flight
-            # when respect_limits=True, so candidates here are guaranteed
-            # in-limits.
-            #
-            # Seeded ranking (#331): the lock-sweep returns candidates from the
-            # window of lock samples nearest ``q_seed[lock_idx]`` (in seed
-            # order), but the genuinely-nearest config -- and the
-            # branch-continuous one for tracking -- needs an explicit rank by
-            # ``seed_metric`` (default L-infinity) over that window before the
-            # cap. Without this the cap would keep the nearest *lock samples*,
-            # not the nearest *configs*.
-            if q_seed is not None:
-                if seed_tolerance is not None:
-                    solutions = _ps_within_seed_tolerance(solutions, q_seed, seed_tolerance)
-                solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
-            if max_solutions is not None and len(solutions) > max_solutions:
-                solutions = solutions[:max_solutions]
-            return solutions
+            # No orchestrator-level respect_limits pass on the analytical result:
+            # the inner ``_solve_algebraic`` already filtered in-flight when
+            # respect_limits=True (hence respect_limits=False here). Seeded
+            # ranking (#331) still needs an explicit rank by ``seed_metric`` over
+            # the lock-sample window before the cap, so the cap keeps the nearest
+            # *configs*, not the nearest *lock samples*. Shared pipeline again;
+            # the seed re-rank is idempotent for the already-ranked rescue set.
+            return _ps_finalize(
+                solutions,
+                _KB,
+                respect_limits=False,
+                q_seed=q_seed,
+                seed_metric=seed_metric,
+                seed_tolerance=seed_tolerance,
+                max_solutions=max_solutions,
+            )
         '''
     )
 
@@ -1391,13 +1374,20 @@ def _render_solve_function(solver_short: str) -> str:
                     np.asarray(T_target, dtype=np.float64),
                 )
                 if _tracked is not None:
-                    _fast = [_tracked]
-                    if respect_limits:
-                        _fast = _ps_respect_limits(_ps_wrap_to_limits(_fast, _KB), _KB)
-                    if _fast and seed_tolerance is not None:
-                        _fast = _ps_within_seed_tolerance(_fast, q_seed, seed_tolerance)
+                    # Same post-processing as the full path (no in-limits
+                    # fallback: a tracked seed that fails limits/tolerance falls
+                    # through to the full analytical solve below).
+                    _fast = _ps_finalize(
+                        [_tracked],
+                        _KB,
+                        respect_limits=respect_limits,
+                        q_seed=q_seed,
+                        seed_metric=seed_metric,
+                        seed_tolerance=seed_tolerance,
+                        max_solutions=1,
+                    )
                     if _fast:
-                        return _fast[:1]
+                        return _fast
             sols, _is_ls = _solver_solve(
                 _KB,
                 T_target,
@@ -1430,23 +1420,21 @@ def _render_solve_function(solver_short: str) -> str:
                         _T,
                         jacobian_fn=lambda _q: _kinbody_jacobian(_KB, _q),
                     )
-            if respect_limits:
-                sols = _ps_wrap_to_limits(sols, _KB)
-                sols = _ps_respect_limits(sols, _KB)
-                if not sols:
-                    # #359: the blind swivel sweep sampled no in-limits candidate
-                    # even though a reachable in-limits solution exists (the
-                    # in-limits swivel arc was narrower than the sampling). The
-                    # feasible-swivel resolver computes the in-limits arcs exactly
-                    # and returns solutions directly (no-op for non-SRS chains).
-                    sols = _resolve_in_limits(_KB, T_target, policy=policy)
-            if q_seed is not None:
-                if seed_tolerance is not None:
-                    sols = _ps_within_seed_tolerance(sols, q_seed, seed_tolerance)
-                sols = _ps_nearest_to_seed(sols, q_seed, metric=seed_metric)
-            if max_solutions is not None and len(sols) > max_solutions:
-                sols = sols[:max_solutions]
-            return sols
+            # Shared post-processing pipeline (limits -> seed -> truncate); the
+            # one definition lives in ssik.postprocess.finalize_solutions. The
+            # in-limits fallback (#359) recovers a reachable in-limits solution
+            # the coarse sweep missed via the solver-matched exact resolver
+            # (no-op for non-redundant chains).
+            return _ps_finalize(
+                sols,
+                _KB,
+                respect_limits=respect_limits,
+                q_seed=q_seed,
+                seed_metric=seed_metric,
+                seed_tolerance=seed_tolerance,
+                max_solutions=max_solutions,
+                in_limits_fallback=lambda: _resolve_in_limits(_KB, T_target, policy=policy),
+            )
         """
     )
 
