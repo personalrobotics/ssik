@@ -327,6 +327,7 @@ def test_contributor_surface_via_ssik_internals() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.perf
 def test_ik_overhead_under_300us() -> None:
     """Manipulator.solve() should add < 300 us overhead vs the raw solver call.
     Overhead comes from signature inspection + the always-on postprocess

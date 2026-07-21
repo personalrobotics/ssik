@@ -202,60 +202,66 @@ def three_consecutive_intersecting(
         return None
     origins = joint_origins(joints)
     for i in range(len(joints) - 2):
-        a, b, c = joints[i].axis, joints[i + 1].axis, joints[i + 2].axis
-        oa, ob, oc = origins[i], origins[i + 1], origins[i + 2]
-
-        # Skip triples where any pair is parallel -- the spherical-wrist
-        # condition requires intersecting non-parallel axes. Parallel
-        # triples are the three_consecutive_parallel family, a separate case.
-        if axis_parallel(a, b, policy) or axis_parallel(b, c, policy):
+        # Relaxed concurrence: the three axes meet at a common point p (delegated
+        # -- pairwise-non-parallel + lstsq intersection + all-axes-through-p live
+        # once in axes_meet_at_common_point, scale-relative per #388).
+        p = axes_meet_at_common_point(joints, (i, i + 1, i + 2), policy)
+        if p is None:
             continue
 
-        # All three pairwise intersecting?
-        if not (
-            axis_intersect(a, oa, b, ob, policy)
-            and axis_intersect(b, ob, c, oc, policy)
-            and axis_intersect(a, oa, c, oc, policy)
-        ):
-            continue
-
-        # Common-point check: compute the (a, b) intersection via least-squares
-        # on the 3x2 linear system [a, -b] @ [t, s]^T = (ob - oa), then verify
-        # c passes through that point.
-        M = np.column_stack([a, -b])
-        sol, *_ = np.linalg.lstsq(M, ob - oa, rcond=None)
-        t = float(sol[0])
-        p = oa + t * a
-
-        delta = p - oc
-        perp = delta - _dot3(delta, c) * c
-        if _norm3(perp) >= policy.axis_intersect:
-            continue
-
-        # Strict consolidation check (#155): for the IK-Geo ``spherical``
-        # family setup ``p[3] = T_left[i] + T_left[i+1] + T_left[i+2]`` to
-        # correctly represent the offset from joint ``i-1`` to the wrist
-        # intersection, the **last two** wrist joint origins (``i+1`` and
-        # ``i+2``) must lie at the intersection point. Equivalently:
-        # ``T_left[i+1]`` and ``T_left[i+2]`` must contribute zero net
-        # displacement *off the axis intersection*, which is satisfied when
-        # joint ``i+1`` and ``i+2`` origins coincide with ``p``. Joint
-        # ``i``'s origin can be anywhere on its axis (the rotation
-        # ``R(axes[i], q_i)`` applies *before* consolidating).
-        #
-        # iiwa14 fails this check: wrist axes meet at z=1.18, but the
-        # MJCF places joint 5/6/7 origins at z=1.18, 1.261, 1.342 -- the
-        # 2nd and 3rd wrist origins drift off the intersection. Predicate
-        # used to silently mis-classify iiwa as spherical, sending it
-        # to a solver that hard-fails on its geometry.
-        if (
-            float(_norm3(ob - p)) >= policy.axis_intersect
-            or float(_norm3(oc - p)) >= policy.axis_intersect
-        ):
+        # Strict consolidation check (#155): for the IK-Geo ``spherical`` family
+        # setup ``p[3] = T_left[i] + T_left[i+1] + T_left[i+2]`` to correctly
+        # represent the offset from joint ``i-1`` to the wrist intersection, the
+        # **last two** wrist joint origins must lie at ``p``. Joint ``i``'s origin
+        # can be anywhere on its axis (its rotation applies *before* consolidating).
+        # iiwa14 fails this: its wrist axes meet but joints 5/6/7 origins drift
+        # off the intersection (z=1.18, 1.261, 1.342) -- so it is correctly
+        # rejected here rather than mis-routed to a solver its geometry breaks.
+        ob, oc = origins[i + 1], origins[i + 2]
+        tol = policy.axis_intersect * _char_length([origins[i], ob, oc])
+        if float(_norm3(ob - p)) >= tol or float(_norm3(oc - p)) >= tol:
             continue
 
         return (i, i + 1, i + 2)
     return None
+
+
+def _char_length(pts: list[NDArray[np.float64]]) -> float:
+    """Characteristic length of a joint cluster: the largest origin distance
+    from the base (floored at 1 m). Used to make the axis-intersection tolerance
+    scale-relative -- an absolute ``policy.axis_intersect`` (10 nm) is scale-blind
+    and mis-rejects a large arm whose axes are concurrent by design but drift by
+    the URDF's coordinate rounding, which grows with coordinate magnitude (#388).
+    """
+    return max(1.0, max((float(_norm3(p)) for p in pts), default=1.0))
+
+
+def _common_point_and_max_drift(
+    axes: list[NDArray[np.float64]],
+    pts: list[NDArray[np.float64]],
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+) -> tuple[NDArray[np.float64] | None, float]:
+    """Common point of the first two axis *lines* + the max perpendicular drift
+    of every axis from it. ``(None, inf)`` if any consecutive pair is parallel
+    (the intersection point is then ill-defined).
+
+    The one geometry kernel behind :func:`axes_meet_at_common_point`,
+    :func:`three_consecutive_intersecting`, and :func:`_max_axis_drift` (which
+    used to each carry a near-identical copy -- one with a hand-coded ``1e-9``
+    parallel guard that diverged from ``policy.axis_parallel``).
+    """
+    for k in range(len(axes) - 1):
+        if axis_parallel(axes[k], axes[k + 1], policy):
+            return None, float("inf")
+    m = np.column_stack([axes[0], -axes[1]])
+    sol, *_ = np.linalg.lstsq(m, pts[1] - pts[0], rcond=None)
+    common = pts[0] + float(sol[0]) * axes[0]
+    max_perp = 0.0
+    for k in range(len(axes)):
+        delta = common - pts[k]
+        perp = delta - _dot3(delta, axes[k]) * axes[k]
+        max_perp = max(max_perp, float(_norm3(perp)))
+    return common, max_perp
 
 
 def axes_meet_at_common_point(
@@ -286,25 +292,14 @@ def axes_meet_at_common_point(
     axes = [joints[i].axis for i in indices]
     pts = [origins[i] for i in indices]
 
-    # Pairwise non-parallel guard: a degenerate set with parallel axes
-    # has ill-defined "intersection point".
-    for k in range(len(indices) - 1):
-        if axis_parallel(axes[k], axes[k + 1], policy):
-            return None
-
-    # Solve for the common point of axes[0] and axes[1].
-    M = np.column_stack([axes[0], -axes[1]])
-    sol, *_ = np.linalg.lstsq(M, pts[1] - pts[0], rcond=None)
-    common = pts[0] + float(sol[0]) * axes[0]
-
-    # Verify every axis passes through that point (perpendicular component
-    # of (common - origin) relative to axis must be < tol).
-    for k in range(len(indices)):
-        delta = common - pts[k]
-        perp = delta - _dot3(delta, axes[k]) * axes[k]
-        if float(_norm3(perp)) >= policy.axis_intersect:
-            return None
-
+    common, max_drift = _common_point_and_max_drift(axes, pts, policy)
+    if common is None:  # a consecutive pair is parallel -- no intersection point
+        return None
+    # Scale-relative tolerance (#388): the axes are concurrent iff every axis
+    # passes through the common point within the URDF's coordinate-rounding
+    # floor, which grows with arm size.
+    if max_drift >= policy.axis_intersect * _char_length(pts):
+        return None
     return common
 
 
@@ -395,32 +390,23 @@ def is_srs_7r(
 
 
 def _max_axis_drift(
-    joints: list[Joint], indices: tuple[int, ...]
+    joints: list[Joint],
+    indices: tuple[int, ...],
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
 ) -> tuple[float, NDArray[np.float64] | None]:
-    """Best-fit common point + max perpendicular drift across the triple.
-
-    Always returns a numerical drift (does not refuse via tolerance).
-    Used by :func:`is_approximately_srs_7r` to gate on a user-supplied
-    drift budget.
+    """Max perpendicular drift of the triple's axes from their best-fit common
+    point (and that point). Always returns a numerical drift, ``inf`` if a pair
+    is parallel; used by :func:`is_approximately_srs_7r` to gate on a
+    user-supplied drift budget. Shares the geometry kernel with the concurrence
+    predicates (so its parallel guard now uses ``policy.axis_parallel``, not a
+    divergent hand-coded ``1e-9``).
     """
     if len(indices) < 2:
         return 0.0, None
     origins = joint_origins(joints)
     axes = [joints[i].axis for i in indices]
     pts = [origins[i] for i in indices]
-    # Pairwise non-parallel guard
-    for k in range(len(indices) - 1):
-        cross = _cross3(axes[k], axes[k + 1])
-        if float(_norm3(cross)) < 1e-9:
-            return float("inf"), None
-    M = np.column_stack([axes[0], -axes[1]])
-    sol, *_ = np.linalg.lstsq(M, pts[1] - pts[0], rcond=None)
-    common = pts[0] + float(sol[0]) * axes[0]
-    max_perp = 0.0
-    for k in range(len(indices)):
-        delta = common - pts[k]
-        perp = delta - _dot3(delta, axes[k]) * axes[k]
-        max_perp = max(max_perp, float(_norm3(perp)))
+    common, max_perp = _common_point_and_max_drift(axes, pts, policy)
     return max_perp, common
 
 
