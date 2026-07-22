@@ -78,6 +78,8 @@ def _emit_and_import(kb, tag: str):
     path = Path(tempfile.gettempdir()) / f"{name}.py"
     path.write_text(src, encoding="utf-8")
     spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    assert spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     try:
@@ -115,8 +117,7 @@ def test_emitted_artifact_matches_live_under_axis_gauge(tag: str, flip: tuple[in
         span = 0.5 if i % 2 == 0 else 2.0
         q = rng.uniform(-span, span, size=6)
         t = poe_forward_kinematics(kb, q)
-        kw = {"respect_limits": False, "allow_rescue": False, "allow_refinement": True}
-        art_sols = art.solve(t, **kw)
+        art_sols = art.solve(t, respect_limits=False, allow_rescue=False, allow_refinement=True)
         if not art_sols:
             continue
         checked += 1
@@ -125,7 +126,9 @@ def test_emitted_artifact_matches_live_under_axis_gauge(tag: str, flip: tuple[in
         assert worst_art < 1e-9, f"{tag}: artifact FK {worst_art:.2e} at q={q.tolist()}"
         # ...and it must find the same number of solutions as the live solver
         # (the un-flipped codegen dropped real branches / returned near-misses).
-        live_sols = live.solve(t, **kw)
+        live_sols = live.solve(
+            t, respect_limits=False, allow_rescue=False, allow_refinement=True
+        )
         assert len(art_sols) == len(live_sols), (
             f"{tag}: artifact {len(art_sols)} vs live {len(live_sols)} sols at q={q.tolist()}"
         )
