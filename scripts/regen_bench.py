@@ -33,6 +33,7 @@ is updated in place, preserving comments and hand-curated fields.
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import subprocess
 import sys
@@ -293,6 +294,74 @@ def update_manifest_eaik(name: str, eaik: dict[str, object]) -> None:
     MANIFEST.write_text("".join(lines))
 
 
+def _uncompiled_perf_extensions() -> list[str]:
+    """Return the Cython perf-target modules that are loaded as pure Python.
+
+    The compile targets are single-sourced from ``hatch_build.CYTHON_TARGETS``
+    (the same list the wheel build cythonizes), so this can't drift from what
+    ships. We parse the tuple out of ``hatch_build.py`` via AST rather than
+    importing it, because that module pulls in the build-only ``hatchling``
+    dependency. A module is "compiled" iff its ``__file__`` is the ``.so`` shim
+    rather than the ``.py`` source.
+    """
+    tree = ast.parse((REPO_ROOT / "hatch_build.py").read_text())
+    targets: tuple[str, ...] | None = None
+    for node in ast.walk(tree):
+        # CYTHON_TARGETS is annotated (``CYTHON_TARGETS: tuple[str, ...] = ...``),
+        # so it's an AnnAssign; handle a plain Assign too for robustness.
+        if isinstance(node, ast.AnnAssign):
+            named = isinstance(node.target, ast.Name) and node.target.id == "CYTHON_TARGETS"
+            value = node.value
+        elif isinstance(node, ast.Assign):
+            named = any(isinstance(t, ast.Name) and t.id == "CYTHON_TARGETS" for t in node.targets)
+            value = node.value
+        else:
+            continue
+        if named and value is not None:
+            targets = tuple(ast.literal_eval(value))
+    if targets is None:
+        raise RuntimeError("CYTHON_TARGETS not found in hatch_build.py")
+
+    uncompiled: list[str] = []
+    for target in targets:
+        # "src/ssik/refinement/__init__.py" -> "ssik.refinement"
+        modname = (
+            target.removeprefix("src/").removesuffix(".py").removesuffix("/__init__")
+        ).replace("/", ".")
+        mod = importlib.import_module(modname)
+        if not (mod.__file__ or "").endswith((".so", ".pyd")):
+            uncompiled.append(modname)
+    return uncompiled
+
+
+def _require_compiled_perf_extensions(*, allow_uncompiled: bool) -> None:
+    """Refuse to measure ssik timing against uncompiled perf extensions.
+
+    Bench numbers taken in this dev checkout used to be committed as
+    authoritative; when ``refinement`` was loaded in pure-Python mode (this
+    checkout built ``poe_fk.so`` but not ``refinement.so``) that silently
+    over-reported every refinement-heavy arm (gen3 51 vs 37 ms, piper 2.5 vs
+    1.1 ms). Timing is only meaningful against the compiled extensions the wheel
+    ships, so gate on it.
+    """
+    uncompiled = _uncompiled_perf_extensions()
+    if not uncompiled:
+        return
+    joined = ", ".join(uncompiled)
+    if allow_uncompiled:
+        print(f"WARNING: benching UNCOMPILED {joined} -- numbers will NOT match shipped wheels")
+        return
+    raise SystemExit(
+        f"regen_bench: refusing to measure timing -- perf extensions are NOT compiled: {joined}.\n"
+        "These ship as compiled .so (hatch_build.CYTHON_TARGETS); measuring them in pure-Python "
+        "mode over-reports solve time for every refinement-heavy arm (gen3, piper, ...).\n"
+        "Fix: reinstall to rebuild the extensions --\n"
+        "  uv pip install -e . --force-reinstall --no-deps\n"
+        "then re-run. Pass --allow-uncompiled to bench anyway (FK/branch counts are still valid; "
+        "timing is not)."
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arm", help="benchmark only this arm (e.g. xarm7_ik); default all")
@@ -305,7 +374,18 @@ def main() -> int:
         action="store_true",
         help="measure only EAIK (leave the ssik [bench] numbers untouched)",
     )
+    parser.add_argument(
+        "--allow-uncompiled",
+        action="store_true",
+        help="bench even if the Cython perf extensions are not compiled (timing "
+        "will not match shipped wheels; for FK/branch-count refreshes only)",
+    )
     args = parser.parse_args()
+
+    # ssik timing is only meaningful against the compiled perf extensions the
+    # wheel ships (see #248). EAIK-only refreshes don't touch ssik timing.
+    if not args.eaik_only:
+        _require_compiled_perf_extensions(allow_uncompiled=args.allow_uncompiled)
 
     manifest = load_manifest()
     names = [args.arm] if args.arm else list(manifest.keys())

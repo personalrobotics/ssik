@@ -159,6 +159,14 @@ test-requires = ["numpy>=2.0"]
 #     import surface in the package; if anything is import-broken, this
 #     fires.
 test-command = [
+    # 0. Perf extensions actually compiled in the wheel. The annotated .py
+    #    sources import fine in pure-Python mode, so a wheel that silently
+    #    failed to cythonize them would still pass every functional check
+    #    below -- but run refinement-heavy arms (gen3, piper) far slower than
+    #    advertised. Assert each hatch_build.CYTHON_TARGETS module loaded from a
+    #    compiled .so, not the .py source. (Keep this list in sync with
+    #    CYTHON_TARGETS; tests/test_perf_extensions.py fails if it drifts.)
+    'python -c "import ssik.refinement, ssik.kinematics.poe_fk as _p; assert ssik.refinement.__file__.endswith((\".so\", \".pyd\")), \"ssik.refinement not compiled in wheel\"; assert _p.__file__.endswith((\".so\", \".pyd\")), \"ssik.kinematics.poe_fk not compiled in wheel\""',
     'python -c "from ssik.prebuilt import iiwa14_ik; import numpy as np; q = np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]); T = iiwa14_ik.fk(q); sols = iiwa14_ik.solve(T); assert sols and max(s.fk_residual for s in sols) < 1e-9, \"iiwa14_ik smoke failed\""',
     'python -c "from ssik.prebuilt import franka_panda_ik; import numpy as np; T = franka_panda_ik.fk(np.array([0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5])); sols = franka_panda_ik.solve(T); assert sols, \"franka_panda_ik returned no IK\""',
     "ssik --help",
