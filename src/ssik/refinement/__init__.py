@@ -426,6 +426,7 @@ def lm_refine(
     step_clip: float = 0.5,
     divergence_factor: float = 5.0,
     divergence_min_iters: int = 4,
+    stall_patience: int = 5,
 ) -> tuple[NDArray[np.float64], float, int] | None:
     """Newton-Raphson polish: SE(3)-log Newton steps, Frobenius convergence gate.
 
@@ -456,6 +457,20 @@ def lm_refine(
         divergence check arms (default 4). Allows the first uphill
         step a converger sometimes takes (~30% bump on a hard seed)
         without triggering abort.
+    :param stall_patience: abort after this many consecutive iterations
+        with no improvement in the best-so-far residual (default 5). The
+        symmetric twin of the divergence guard: a Newton trajectory inside
+        the basin descends super-linearly, so its best residual keeps
+        improving; one that *plateaus* above ``fk_atol`` (an extraneous
+        algebraic root -- e.g. an SP6 root that is not a real IK branch)
+        never converges and would otherwise burn all ``max_iters``. This
+        gates on *convergence behaviour*, not residual magnitude, so it is
+        scale-free and solver-agnostic: a genuine candidate that starts far
+        but keeps descending (Raghavan-Roth arms rescue from ~0.1 FK) is
+        kept, while near-but-stalled junk is dropped. Set high to disable.
+        The default tolerates the ~3-iteration clip-induced stalls observed
+        on real rescues, with margin (validated: no solution-set change
+        across the prebuilt roster).
     :returns: ``(q_refined, fk_residual, iters)`` on convergence,
         ``None`` if ``max_iters`` was reached without ``||r|| < fk_atol``
         or the divergence guard fired.
@@ -467,6 +482,7 @@ def lm_refine(
     """
     q = q_seed.astype(np.float64).copy()
     r_best: float = float("inf")
+    stalled: int = 0
     for it in range(max_iters):
         t_q = fk_fn(q)
         # Gate + report on the Frobenius residual ||fk(q) - T||_F -- the metric
@@ -480,10 +496,17 @@ def lm_refine(
             return (q, fro, it)
         if fro < r_best:
             r_best = fro
-        elif it >= divergence_min_iters and fro > divergence_factor * r_best:
-            # Trajectory is clearly outside the basin of attraction.
-            # See divergence_factor docstring for the rationale.
-            return None
+            stalled = 0
+        else:
+            stalled += 1
+            if it >= divergence_min_iters and fro > divergence_factor * r_best:
+                # Trajectory is clearly outside the basin of attraction
+                # (residual grew). See divergence_factor docstring.
+                return None
+            if stalled >= stall_patience:
+                # Best residual plateaued above fk_atol: an extraneous root
+                # that will not converge. See stall_patience docstring.
+                return None
         r = se3_log_residual(t_target @ np.linalg.inv(t_q))
         j_s = jacobian_fn(q) if jacobian_fn is not None else numerical_jacobian(q, fk_fn)
         try:
