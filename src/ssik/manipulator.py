@@ -75,9 +75,7 @@ def _rotx(alpha: float) -> NDArray[np.float64]:
     return m
 
 
-def _coerce_limits(
-    limits: ArrayLike | None, n: int
-) -> list[tuple[float, float] | None]:
+def _coerce_limits(limits: ArrayLike | None, n: int) -> list[tuple[float, float] | None]:
     """Normalise an optional ``(N, 2)`` limits array to a per-joint list."""
     if limits is None:
         return [None] * n
