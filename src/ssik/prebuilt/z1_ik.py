@@ -413,7 +413,13 @@ def _spatial_jacobian(q):
         axis_unit = _JOINT_AXES[i] / np.linalg.norm(_JOINT_AXES[i])
         z_i = t_pre[:3, :3] @ axis_unit
         p_i = t_pre[:3, 3]
-        J[:3, i] = np.cross(p_i, z_i)
+        # Scalar cross product p_i x z_i: bit-identical to np.cross but
+        # ~11x faster for 3-vectors (np.cross's moveaxis / axis-normalize
+        # overhead dominates the LM-refine loop). Mirrors the live
+        # kinbody_jacobian, which is already scalar-inlined.
+        J[0, i] = p_i[1] * z_i[2] - p_i[2] * z_i[1]
+        J[1, i] = p_i[2] * z_i[0] - p_i[0] * z_i[2]
+        J[2, i] = p_i[0] * z_i[1] - p_i[1] * z_i[0]
         J[3:, i] = z_i
     return J
 
