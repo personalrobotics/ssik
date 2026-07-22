@@ -410,9 +410,9 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | OpenArm R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 14.54 ± 0.50 ms / FK 2e-15 / 128 sols |
 | R1 Pro L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.56 ± 0.05 ms / FK 3e-15 / 128 sols |
 | R1 Pro R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.52 ± 0.06 ms / FK 3e-15 / 128 sols |
-| Thor (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 3e0 / 2-8 sols | 8.43 ± 0.39 ms / FK 4e-12 / 1-4 sols |
+| Thor (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 8.43 ± 0.39 ms / FK 4e-12 / 1-4 sols |
 | Core (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 9e-16 / 2-6 sols | 8.40 ± 0.26 ms / FK 2e-12 / 1-4 sols |
-| Spark (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 3e0 / 2-8 sols | 7.27 ± 0.24 ms / FK 9e-13 / 1-4 sols |
+| Spark (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 7.27 ± 0.24 ms / FK 9e-13 / 1-4 sols |
 <!-- /AUTOGEN -->
 
 The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).

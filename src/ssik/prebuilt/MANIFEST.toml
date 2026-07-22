@@ -1032,13 +1032,8 @@ sols_min = 1
 sols_max = 4
 
 [arms.standardbots_thor_ik.eaik]
-supported = true
-family = "6R-THREE_INNER_PARALLEL"
-ms_mean = 0.00388687
-ms_ci95 = 0.000251363
-max_fk = 2.9e+00
-sols_min = 2
-sols_max = 8
+supported = false
+refusal = "classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)"
 [arms.standardbots_core_ik]
 display_name = "Standard Bots Core"
 short_name = "Core"
@@ -1104,10 +1099,5 @@ sols_min = 1
 sols_max = 4
 
 [arms.standardbots_spark_ik.eaik]
-supported = true
-family = "6R-THREE_INNER_PARALLEL"
-ms_mean = 0.00431398
-ms_ci95 = 0.000498009
-max_fk = 2.9e+00
-sols_min = 2
-sols_max = 8
+supported = false
+refusal = "classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)"
