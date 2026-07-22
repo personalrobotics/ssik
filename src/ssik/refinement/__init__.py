@@ -15,9 +15,12 @@ Design constraints (see GitHub #74):
   :func:`lm_refine` pass; the resulting :class:`~ssik.core.solution.Solution`
   reports ``refinement_used="lm"`` and ``refinement_iters``.
 - **FK-tolerance-driven termination.** Iterate until ``||r|| < fk_atol``
-  or ``max_iters`` hit. No divergence-abort heuristic: Newton trajectories
-  can be non-monotonic near saddles / under step-clipping, and aggressive
-  early termination misses real recoveries.
+  or ``max_iters`` hit. Two convergence guards abort a trajectory that is
+  clearly not going to reach ``fk_atol`` -- ``divergence_factor`` (the
+  best residual *grew*) and ``stall_patience`` (the best residual *stalled*)
+  -- both keyed on convergence behaviour, so a slow-but-descending recovery
+  is preserved (they only fire on trajectories that are diverging or
+  plateauing, not merely non-monotonic).
 - **Analytical Jacobian preferred.** Callers pass ``jacobian_fn`` when
   they have a closed-form spatial Jacobian (DH chain, POE chain). When
   ``None``, central-differences fallback. Analytical is ~50x faster.
