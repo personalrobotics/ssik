@@ -110,6 +110,23 @@ def solve(
     p = [kb.joints[i].T_left[:3, 3].copy() for i in range(6)]
     p.append(kb.joints[-1].T_right[:3, 3].copy())
 
+    # Parallel-trio sign normalization. The elbow algebra below collapses the
+    # trio (1, 2, 3) onto the single direction ``axes[1]`` -- it solves each
+    # trio angle *about axes[1]* and uses the signed total theta14 = q1+q2+q3+q4.
+    # A URDF may orient a trio joint's axis anti-parallel to axes[1] (both are
+    # "parallel" to the predicate, since +/-a are geometrically parallel); its
+    # angle then comes out in the axes[1] frame, negated from the physical joint.
+    # Flipping a revolute axis is a gauge freedom (R(-a, q) = R(a, -q)), so we
+    # recover the physical trio angles by negating the anti-parallel ones on the
+    # composed candidate. Without this an anti-parallel j2/j3 (e.g. Standard Bots
+    # core/spark) yields FK-failing candidates. See the axis-sign robustness test.
+    trio_flip = np.array(
+        [1.0, 1.0]
+        + [1.0 if float(np.dot(axes[i], axes[1])) >= 0.0 else -1.0 for i in (2, 3)]
+        + [1.0, 1.0],
+        dtype=np.float64,
+    )
+
     # Our POE's T_right[5] encodes a home-pose rotation after joint 5, so
     # FK(q) = [R_joints @ R_home, p; 0, 1]. IK-Geo's formulas assume the final
     # frame has identity home rotation (pure translation), so we strip
@@ -171,7 +188,9 @@ def solve(
             p2_rotated = p[2] + rotate(axes[1], q3, p[3])
             q2, _ = sp1.solve(axes[1], p2_rotated, d_inner, policy)
             q4 = _wrap_to_pi(theta14 - q2 - q3)
-            candidates.append(np.array([q1, q2, q3, q4, q5, q6]))
+            # Negate any anti-parallel trio joint back to its physical convention
+            # (see trio_flip above) before FK-verify on the original chain.
+            candidates.append(np.array([q1, q2, q3, q4, q5, q6]) * trio_flip)
 
     # Post-verify and dedup. SP6 has pre-sorted candidates by pre-GN
     # residual (cleanest Bezout-cluster representative first); the
