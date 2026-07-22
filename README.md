@@ -383,36 +383,36 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 <!-- AUTOGEN:readme_eaik_table -->
 | Arm (class) | EAIK | ssik |
 |---|---|---|
-| UR5 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 2-8 sols | 520 ± 10 µs / FK 6e-12 / 2-8 sols |
-| UR3e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 2-6 sols | 690 ± 50 µs / FK 1e-8 / 2-8 sols |
-| UR5e (Pieper 6R, three-parallel) | 4 ± 1 µs / FK 1e-15 / 4-8 sols | 570 ± 10 µs / FK 2e-9 / 2-8 sols |
-| UR10e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 2-8 sols | 560 ± 10 µs / FK 2e-9 / 2-8 sols |
-| UR16e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 610 ± 40 µs / FK 1e-8 / 2-8 sols |
-| UR20 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 590 ± 10 µs / FK 1e-8 / 2-8 sols |
-| UR30 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 2-8 sols | 580 ± 10 µs / FK 2e-9 / 2-8 sols |
-| Puma 560 (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 8 sols | 220 ± 0 µs / FK 8e-12 / 8 sols |
-| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 940 ± 30 µs / FK 8e-7 / 2-12 sols |
-| iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.66 ± 0.03 ms / FK 1e-13 / 128 sols |
-| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 40.65 ± 0.69 ms / FK 1e-12 / 11-92 sols |
-| Franka Panda (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 17.50 ± 1.00 ms / FK 1e-15 / 8-128 sols |
-| xArm7 (**approx spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 7.00 ± 0.50 ms / FK 1e-11 / 8-128 sols |
-| xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.02 ms / FK 3e-6 / 8-16 sols |
-| Z1 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 4-8 sols | 480 ± 10 µs / FK 3e-15 / 4-8 sols |
-| PiPER (**non-Pieper 6R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 3.06 ± 2.18 ms / FK 1e-5 / 2-8 sols |
-| Rizon 4 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.20 ± 0.19 ms / FK 3e-7 / 4-60 sols |
-| Kassow KR810 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.99 ± 0.18 ms / FK 5e-8 / 4-42 sols |
-| Rizon 10 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 15.78 ± 0.16 ms / FK 6e-8 / 6-64 sols |
-| CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.01 ms / FK 2e-6 / 4-12 sols |
-| YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.06 ± 0.01 ms / FK 3e-7 / 5-8 sols |
-| big_yam (**non-Pieper 6R**) | **refuses** ("Intersection point can't be calculated for two parallel axes") | 1.06 ± 0.01 ms / FK 7e-7 / 8 sols |
-| FR3 (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.70 ± 1.00 ms / FK 1e-15 / 8-128 sols |
-| OpenArm L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 14.59 ± 0.50 ms / FK 2e-15 / 128 sols |
-| OpenArm R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 14.54 ± 0.50 ms / FK 2e-15 / 128 sols |
-| R1 Pro L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.56 ± 0.05 ms / FK 3e-15 / 128 sols |
-| R1 Pro R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.52 ± 0.06 ms / FK 3e-15 / 128 sols |
-| Thor (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.64 ± 0.17 ms / FK 4e-12 / 1-4 sols |
-| Core (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 9e-16 / 2-6 sols | 2.55 ± 0.06 ms / FK 2e-12 / 1-4 sols |
-| Spark (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.51 ± 0.07 ms / FK 9e-13 / 1-4 sols |
+| UR5 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 2-8 sols | 1.89 ± 0.16 ms / FK 6e-12 / 2-8 sols |
+| UR3e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 2-6 sols | 2.04 ± 0.12 ms / FK 1e-8 / 2-8 sols |
+| UR5e (Pieper 6R, three-parallel) | 4 ± 1 µs / FK 1e-15 / 4-8 sols | 1.83 ± 0.13 ms / FK 2e-9 / 2-8 sols |
+| UR10e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 2-8 sols | 1.74 ± 0.13 ms / FK 2e-9 / 2-8 sols |
+| UR16e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 1.87 ± 0.13 ms / FK 1e-8 / 2-8 sols |
+| UR20 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 1.89 ± 0.15 ms / FK 1e-8 / 2-8 sols |
+| UR30 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 2-8 sols | 1.91 ± 0.13 ms / FK 2e-9 / 2-8 sols |
+| Puma 560 (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 8 sols | 210 ± 0 µs / FK 8e-12 / 8 sols |
+| JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 890 ± 20 µs / FK 8e-7 / 2-12 sols |
+| iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.53 ± 0.08 ms / FK 1e-13 / 128 sols |
+| Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 51.25 ± 0.97 ms / FK 1e-12 / 11-92 sols |
+| Franka Panda (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 3.04 ± 0.10 ms / FK 1e-11 / 32-132 sols |
+| xArm7 (**approx spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 8.87 ± 0.19 ms / FK 1e-10 / 53-96 sols |
+| xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.01 ms / FK 3e-6 / 8-16 sols |
+| Z1 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 4-8 sols | 1.50 ± 0.11 ms / FK 3e-15 / 4-8 sols |
+| PiPER (**non-Pieper 6R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 2.50 ± 1.64 ms / FK 1e-5 / 2-8 sols |
+| Rizon 4 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 15.94 ± 0.22 ms / FK 3e-7 / 4-60 sols |
+| Kassow KR810 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.69 ± 0.21 ms / FK 5e-8 / 4-42 sols |
+| Rizon 10 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 15.57 ± 0.22 ms / FK 6e-8 / 6-64 sols |
+| CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 970 ± 10 µs / FK 2e-6 / 4-12 sols |
+| YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.01 ms / FK 3e-7 / 5-8 sols |
+| big_yam (**non-Pieper 6R**) | **refuses** ("Intersection point can't be calculated for two parallel axes") | 1.01 ± 0.01 ms / FK 7e-7 / 8 sols |
+| FR3 (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 2.93 ± 0.08 ms / FK 1e-11 / 32-132 sols |
+| OpenArm L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.67 ± 0.07 ms / FK 3e-14 / 128 sols |
+| OpenArm R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.70 ± 0.15 ms / FK 4e-15 / 128 sols |
+| R1 Pro L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.73 ± 0.07 ms / FK 3e-15 / 128 sols |
+| R1 Pro R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.60 ± 0.09 ms / FK 3e-15 / 128 sols |
+| Thor (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.52 ± 0.09 ms / FK 4e-12 / 1-4 sols |
+| Core (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 9e-16 / 2-6 sols | 2.48 ± 0.06 ms / FK 2e-12 / 1-4 sols |
+| Spark (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.44 ± 0.07 ms / FK 9e-13 / 1-4 sols |
 <!-- /AUTOGEN -->
 
 The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
