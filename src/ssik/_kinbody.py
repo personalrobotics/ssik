@@ -51,7 +51,38 @@ __all__ = [
 # offset is treated as zero (a genuine spherical wrist meets to ~1e-15).
 _WRIST_PERP_ATOL = 1e-9
 
+# An axis vector shorter than this carries no usable direction (degenerate).
+_AXIS_MIN_NORM = 1e-9
+# An axis already this close to unit length is passed through unchanged, so a
+# clean (already-normalized) chain -- e.g. every URDF axis, which urchin unitizes
+# on load -- keeps its exact bytes and baked artifacts don't drift. Only a
+# meaningfully non-unit axis (a hand-built JointSpec / from_axes row) is scaled.
+_AXIS_UNIT_TOL = 1e-9
+
 JointType = Literal["revolute", "prismatic"]
+
+
+def _unit_axis(axis: NDArray[np.float64], i: int) -> NDArray[np.float64]:
+    """Return ``axis`` scaled to unit length.
+
+    A joint axis denotes only a *direction*: its magnitude is physically
+    meaningless, but the Rodrigues kernel (``rotate`` / ``rotation_matrix``) and
+    every predicate assume ``|axis| == 1`` (``predicates`` documents that a
+    non-unit axis silently misbehaves rather than raising). The URDF loader gets
+    unit axes for free from ``urchin``, but the direct constructors
+    (``from_axes`` / ``from_dh`` / ``from_transforms`` / raw ``JointSpec``) trust
+    the caller, so we normalize here -- the one construction chokepoint -- to
+    make all paths robust to the axis-length gauge. A near-zero axis has no
+    direction and is a construction error.
+    """
+    n = float(np.linalg.norm(axis))
+    if n < _AXIS_MIN_NORM:
+        raise ValueError(f"joint {i} axis is degenerate (norm {n:.2e}); it has no direction")
+    if abs(n - 1.0) <= _AXIS_UNIT_TOL:
+        # Already unit -- return the exact input (no float division), so a
+        # normalized chain stays bit-identical and baked artifacts don't shift.
+        return axis
+    return axis / n
 
 
 @dataclass(frozen=True)
@@ -293,6 +324,9 @@ def build_kinbody(
         axis_local = np.ascontiguousarray(spec.axis, dtype=np.float64)
         if axis_local.shape != (3,):
             raise ValueError(f"spec[{i}].axis must be shape (3,), got {axis_local.shape}")
+        # Normalize to unit -- the Rodrigues kernel + predicates assume |axis|=1.
+        # R_cum below is a rotation (norm-preserving), so axis_world stays unit.
+        axis_local = _unit_axis(axis_local, i)
 
         # Advance through T_left's rotation + translation.
         pos_cum = pos_cum + R_cum @ T_left[:3, 3]
@@ -383,6 +417,9 @@ def build_poe_kinbody(
     links = [Link(name=name) for name in link_names]
     joints: list[Joint] = []
     for i, (name, joint_type, axis_base, p_offset, limits) in enumerate(records):
+        # Normalize to unit (urchin already does for URDF; belt-and-suspenders
+        # for any other record source). Rodrigues + predicates assume |axis|=1.
+        axis_base = _unit_axis(np.ascontiguousarray(axis_base, dtype=np.float64), i)
         t_left = np.eye(4, dtype=np.float64)
         t_left[:3, 3] = p_offset
         t_right = final_t_right if i == n - 1 else np.eye(4, dtype=np.float64)

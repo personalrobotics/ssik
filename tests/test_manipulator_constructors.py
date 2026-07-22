@@ -191,3 +191,35 @@ def test_constructor_limits_are_applied() -> None:
     limits = np.array([[-1.0, 1.0]] * 6)
     m = Manipulator.from_axes(_H, _P, limits=limits)
     assert [j.limits for j in m.kinbody.joints] == [(-1.0, 1.0)] * 6
+
+
+# ---------------------------------------------------------------------------
+# axis-length gauge: a joint axis denotes only a direction, so a non-unit axis
+# must build the identical arm (the Rodrigues kernel + predicates assume unit
+# length; the URDF loader normalizes for free, the direct constructors must too)
+# ---------------------------------------------------------------------------
+
+
+def test_non_unit_axis_is_normalized_and_fk_identical() -> None:
+    """Scaling any ``from_axes`` H-row (a non-unit axis) must yield an arm that
+    is FK-identical to the unit version -- not a silently different robot."""
+    m_unit = Manipulator.from_axes(_H, _P)
+    h_scaled = _H.copy()
+    h_scaled[1] *= 2.0
+    h_scaled[3] *= 0.5
+    m_scaled = Manipulator.from_axes(h_scaled, _P)
+    rng = np.random.default_rng(11)
+    worst = max(
+        float(np.max(np.abs(m_unit.fk(q) - m_scaled.fk(q)))) for q in rng.uniform(-3, 3, (200, 6))
+    )
+    assert worst == 0.0, f"non-unit axis changed FK by {worst:.2e} (not normalized)"
+    # And the scaled-axis arm still solves against itself at machine precision.
+    assert _roundtrip_worst(m_scaled, seed=12) < 1e-9
+
+
+def test_degenerate_axis_is_rejected() -> None:
+    """A near-zero axis carries no direction and is a construction error."""
+    h_bad = _H.copy()
+    h_bad[2] = 0.0
+    with pytest.raises(ValueError, match="degenerate"):
+        Manipulator.from_axes(h_bad, _P)
