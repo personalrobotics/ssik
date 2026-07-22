@@ -126,9 +126,7 @@ def test_emitted_artifact_matches_live_under_axis_gauge(tag: str, flip: tuple[in
         assert worst_art < 1e-9, f"{tag}: artifact FK {worst_art:.2e} at q={q.tolist()}"
         # ...and it must find the same number of solutions as the live solver
         # (the un-flipped codegen dropped real branches / returned near-misses).
-        live_sols = live.solve(
-            t, respect_limits=False, allow_rescue=False, allow_refinement=True
-        )
+        live_sols = live.solve(t, respect_limits=False, allow_rescue=False, allow_refinement=True)
         assert len(art_sols) == len(live_sols), (
             f"{tag}: artifact {len(art_sols)} vs live {len(live_sols)} sols at q={q.tolist()}"
         )
