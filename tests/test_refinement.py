@@ -162,6 +162,76 @@ def test_lm_refine_returns_none_on_hopeless_seed(ur5_kb: KinBody) -> None:
 
 
 # ---------------------------------------------------------------------------
+# stagnation guard (stall_patience): abort trajectories whose best residual
+# plateaus above fk_atol -- extraneous algebraic roots that never converge.
+# The convergence-based twin of the divergence guard; gates on behaviour, not
+# residual magnitude, so it is scale-free and does not drop far-but-converging
+# rescues (the property a residual band could not preserve for RR arms).
+# ---------------------------------------------------------------------------
+
+
+def test_stall_guard_aborts_non_converging_seed(ur5_kb: KinBody) -> None:
+    """An unreachable target has no IK, so Newton plateaus above ``fk_atol``; the
+    guard abandons it in ~``stall_patience`` iterations rather than the full
+    ``max_iters`` -- proven by counting FK evaluations."""
+    # A pose translated far beyond the ~0.85 m UR5 reach: no q gets close.
+    T_target = np.eye(4)
+    T_target[:3, 3] = (5.0, 5.0, 5.0)
+    q_seed = np.zeros(6)
+    jac = lambda q: kinbody_jacobian(ur5_kb, q)  # noqa: E731
+
+    calls = {"n": 0}
+
+    def fk(q):
+        calls["n"] += 1
+        return _fk_poe(ur5_kb, q)
+
+    # With the guard disabled the trajectory runs the full budget; with it on
+    # (default patience 5) it aborts far sooner.
+    calls["n"] = 0
+    lm_refine(
+        q_seed, fk, T_target, fk_atol=1e-12, max_iters=60, jacobian_fn=jac, stall_patience=999
+    )
+    calls_ungated = calls["n"]
+    calls["n"] = 0
+    refined = lm_refine(q_seed, fk, T_target, fk_atol=1e-12, max_iters=60, jacobian_fn=jac)
+    calls_gated = calls["n"]
+
+    assert refined is None, "unreachable target must not report a false convergence"
+    assert calls_gated < calls_ungated, "guard did not shorten the stalled trajectory"
+    assert calls_gated <= 12, f"guard should abort quickly, took {calls_gated} FK evals"
+
+
+def test_stall_guard_keeps_far_but_converging_rescue() -> None:
+    """A candidate that starts far but descends super-linearly (e.g. a
+    Raghavan-Roth branch that rescues from ~0.1 FK) must still be rescued with
+    the default guard -- the guard keys on convergence, not distance. This is
+    the property a residual-magnitude band could not preserve."""
+    jaco2 = pytest.importorskip("ssik.prebuilt.jaco2_ik")
+    rng = np.random.default_rng(0)
+    kept_default = 0
+    kept_ungated = 0
+    for _ in range(120):
+        q = rng.uniform(-0.5, 0.5, size=jaco2.DOF)
+        t = jaco2.fk(q)
+        for c in jaco2._solve_algebraic(t):
+            c = np.asarray(c, dtype=np.float64)
+            if float(np.linalg.norm(jaco2.fk(c) - t)) <= 1e-7:
+                continue  # already a solution, not a rescue
+            jac = jaco2._spatial_jacobian
+            gated = lm_refine(c, jaco2.fk, t, fk_atol=1e-7, jacobian_fn=jac)
+            ungated = lm_refine(c, jaco2.fk, t, fk_atol=1e-7, jacobian_fn=jac, stall_patience=999)
+            kept_default += gated is not None
+            kept_ungated += ungated is not None
+    # Every rescue the un-gated refiner finds, the default guard also finds:
+    # the guard never sacrifices a genuine far-but-converging solution.
+    assert kept_ungated > 0, "expected some far rescues on this RR arm"
+    assert kept_default == kept_ungated, (
+        f"stall guard dropped rescues: {kept_default} vs {kept_ungated} (ungated)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # kinbody_jacobian
 # ---------------------------------------------------------------------------
 
