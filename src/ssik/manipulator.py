@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from ssik._kinbody import KinBody
+from ssik._kinbody import JointSpec, KinBody, build_kinbody
 from ssik.core.diagnostic import Diagnostic
 from ssik.core.dispatcher import DispatchPlan, dispatch
 from ssik.core.solution import Solution
@@ -45,6 +45,46 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 __all__ = ["Manipulator"]
+
+
+def _trans(v: NDArray[np.float64]) -> NDArray[np.float64]:
+    m = np.eye(4)
+    m[:3, 3] = v
+    return m
+
+
+def _transx(a: float) -> NDArray[np.float64]:
+    m = np.eye(4)
+    m[0, 3] = a
+    return m
+
+
+def _transz(d: float) -> NDArray[np.float64]:
+    m = np.eye(4)
+    m[2, 3] = d
+    return m
+
+
+def _rotx(alpha: float) -> NDArray[np.float64]:
+    c, s = np.cos(alpha), np.sin(alpha)
+    m = np.eye(4)
+    m[1, 1] = c
+    m[1, 2] = -s
+    m[2, 1] = s
+    m[2, 2] = c
+    return m
+
+
+def _coerce_limits(
+    limits: ArrayLike | None, n: int
+) -> list[tuple[float, float] | None]:
+    """Normalise an optional ``(N, 2)`` limits array to a per-joint list."""
+    if limits is None:
+        return [None] * n
+    arr = np.asarray(limits, dtype=np.float64)
+    if arr.shape != (n, 2):
+        raise ValueError(f"limits must be (N, 2) for N={n}; got {arr.shape}")
+    return [(float(lo), float(hi)) for lo, hi in arr]
 
 
 class Manipulator:
@@ -139,6 +179,133 @@ class Manipulator:
 
         kb = load_urdf_kinbody_normalized(path, base, ee, xacro_args=xacro_args)
         return cls(kb, policy=policy)
+
+    @classmethod
+    def from_axes(
+        cls,
+        joint_axes: ArrayLike,
+        offsets: ArrayLike,
+        *,
+        limits: ArrayLike | None = None,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    ) -> Manipulator:
+        """Build from ik-geo / EAIK product-of-exponentials ``H, P`` parameters.
+
+        :param joint_axes: ``(N, 3)`` unit rotation axes in the base frame at
+            zero configuration (ik-geo ``H``).
+        :param offsets: ``(N + 1, 3)`` inter-joint translation vectors in the
+            base frame at zero (ik-geo ``P``): ``offsets[0]`` is base -> joint 0,
+            ``offsets[i]`` is joint ``i-1`` -> joint ``i``, and ``offsets[N]`` is
+            joint ``N-1`` -> end-effector.
+        :param limits: optional ``(N, 2)`` per-joint ``(lower, upper)`` ranges.
+        :param policy: tolerance policy for the dispatcher.
+
+        Reproduces ``FK = prod_i [Trans(P[i]) Rot(H[i], q_i)] . Trans(P[N])`` --
+        the same convention as :class:`eaik.HPRobot`.
+        """
+        h = np.asarray(joint_axes, dtype=np.float64)
+        p = np.asarray(offsets, dtype=np.float64)
+        n = h.shape[0]
+        if h.shape != (n, 3):
+            raise ValueError(f"joint_axes must be (N, 3); got {h.shape}")
+        if p.shape != (n + 1, 3):
+            raise ValueError(f"offsets must be (N + 1, 3) for N={n}; got {p.shape}")
+        lim = _coerce_limits(limits, n)
+        specs = [
+            JointSpec(
+                parent_link_T=_trans(p[i]),
+                axis=h[i],
+                joint_type="revolute",
+                child_link_T=_trans(p[n]) if i == n - 1 else None,
+                limits=lim[i],
+            )
+            for i in range(n)
+        ]
+        return cls(build_kinbody(specs), policy=policy)
+
+    @classmethod
+    def from_transforms(
+        cls,
+        joint_trafos: ArrayLike,
+        joint_axis: ArrayLike = (0.0, 0.0, 1.0),
+        *,
+        limits: ArrayLike | None = None,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    ) -> Manipulator:
+        """Build from per-joint zero-pose homogeneous transforms (EAIK
+        ``HomogeneousRobot``).
+
+        :param joint_trafos: ``(N + 1, 4, 4)`` relative zero-pose transforms:
+            ``joint_trafos[i]`` maps frame ``i-1`` to frame ``i`` (``[0]`` is
+            base -> joint 0), and ``joint_trafos[N]`` maps joint ``N-1`` -> EE.
+        :param joint_axis: rotation axis in each joint's local frame (default Z).
+        :param limits: optional ``(N, 2)`` per-joint ``(lower, upper)`` ranges.
+        :param policy: tolerance policy for the dispatcher.
+        """
+        t = np.asarray(joint_trafos, dtype=np.float64)
+        if t.ndim != 3 or t.shape[1:] != (4, 4):
+            raise ValueError(f"joint_trafos must be (N + 1, 4, 4); got {t.shape}")
+        n = t.shape[0] - 1
+        axis = np.asarray(joint_axis, dtype=np.float64)
+        lim = _coerce_limits(limits, n)
+        specs = [
+            JointSpec(
+                parent_link_T=t[i],
+                axis=axis,
+                joint_type="revolute",
+                child_link_T=t[n] if i == n - 1 else None,
+                limits=lim[i],
+            )
+            for i in range(n)
+        ]
+        return cls(build_kinbody(specs), policy=policy)
+
+    @classmethod
+    def from_dh(
+        cls,
+        dh_alpha: ArrayLike,
+        dh_a: ArrayLike,
+        dh_d: ArrayLike,
+        *,
+        limits: ArrayLike | None = None,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    ) -> Manipulator:
+        """Build from standard (distal) Denavit-Hartenberg parameters (EAIK
+        ``DhRobot``). All joints revolute; the joint variable is the Z rotation.
+
+        Per-joint link transform is the classic
+        ``Rot_z(theta_i) . Trans_z(d_i) . Trans_x(a_i) . Rot_x(alpha_i)``.
+
+        :param dh_alpha: ``(N,)`` link twists (rad).
+        :param dh_a: ``(N,)`` link lengths (m).
+        :param dh_d: ``(N,)`` link offsets (m).
+        :param limits: optional ``(N, 2)`` per-joint ``(lower, upper)`` ranges.
+        :param policy: tolerance policy for the dispatcher.
+        """
+        alpha = np.asarray(dh_alpha, dtype=np.float64)
+        a = np.asarray(dh_a, dtype=np.float64)
+        d = np.asarray(dh_d, dtype=np.float64)
+        n = alpha.shape[0]
+        if not (alpha.shape == (n,) and a.shape == (n,) and d.shape == (n,)):
+            raise ValueError(
+                f"dh_alpha / dh_a / dh_d must be equal-length 1-D; got "
+                f"{alpha.shape}, {a.shape}, {d.shape}"
+            )
+        lim = _coerce_limits(limits, n)
+        z_axis = np.array([0.0, 0.0, 1.0])
+        specs = [
+            JointSpec(
+                parent_link_T=np.eye(4),
+                axis=z_axis,
+                joint_type="revolute",
+                # theta (the joint's Z rotation) is applied first; the fixed
+                # remainder of the standard-DH link transform is the child T.
+                child_link_T=_transz(float(d[i])) @ _transx(float(a[i])) @ _rotx(float(alpha[i])),
+                limits=lim[i],
+            )
+            for i in range(n)
+        ]
+        return cls(build_kinbody(specs), policy=policy)
 
     # ------------------------------------------------------------------
     # Introspection
