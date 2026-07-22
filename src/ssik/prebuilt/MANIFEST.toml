@@ -999,3 +999,105 @@ sols_max = 128
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
+# --- Standard Bots (RO1 family reach variants: Thor / Core / Spark). All three
+# are three-parallel 6R (joints 1,2,3 parallel). Thor and Spark author the trio
+# with joint 3 anti-parallel to the trio reference axis -- the exact case the
+# three_parallel axis-sign fix (#398) covers; pre-fix they returned 0 solutions.
+[arms.standardbots_thor_ik]
+display_name = "Standard Bots Thor"
+short_name = "Thor"
+fixture = "standardbots_thor.urdf"
+fixture_kind = "urdf"
+fixture_source = "standardbots / ros2-realtime-api (robot_urdfs/thor.urdf)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 26
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.standardbots_thor_ik.bench]
+ms_mean = 8.43
+ms_ci95 = 0.39
+max_fk = 3.5e-12
+sols_min = 1
+sols_max = 4
+
+[arms.standardbots_thor_ik.eaik]
+supported = false
+refusal = "classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)"
+[arms.standardbots_core_ik]
+display_name = "Standard Bots Core"
+short_name = "Core"
+fixture = "standardbots_core.urdf"
+fixture_kind = "urdf"
+fixture_source = "standardbots / ros2-realtime-api (robot_urdfs/core.urdf)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 26
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.standardbots_core_ik.bench]
+ms_mean = 8.40
+ms_ci95 = 0.26
+max_fk = 2.4e-12
+sols_min = 1
+sols_max = 4
+
+[arms.standardbots_core_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00368185
+ms_ci95 = 4.33799e-05
+max_fk = 8.9e-16
+sols_min = 2
+sols_max = 6
+[arms.standardbots_spark_ik]
+display_name = "Standard Bots Spark"
+short_name = "Spark"
+fixture = "standardbots_spark.urdf"
+fixture_kind = "urdf"
+fixture_source = "standardbots / ros2-realtime-api (robot_urdfs/spark.urdf)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 26
+sample_q = [0.3, -0.5, 0.7, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.standardbots_spark_ik.bench]
+ms_mean = 7.27
+ms_ci95 = 0.24
+max_fk = 8.8e-13
+sols_min = 1
+sols_max = 4
+
+[arms.standardbots_spark_ik.eaik]
+supported = false
+refusal = "classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)"

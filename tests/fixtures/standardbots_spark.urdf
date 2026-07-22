@@ -1,0 +1,216 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="sbot">
+  <link name="world" />
+  <link name="base_link">
+    </link>
+  <link name="shoulder_link">
+    </link>
+  <link name="upper_arm_link">
+    </link>
+  <link name="forearm_link">
+    </link>
+  <link name="wrist_1_link">
+    </link>
+  <link name="wrist_2_link">
+    </link>
+  <link name="wrist_3_link">
+    </link>
+  <link name="wrist_3_cable_link">
+    </link>
+  <link name="tool0" />
+  <link name="base" />
+  <link name="flange" />
+  <joint name="base_joint" type="fixed">
+    <origin rpy="0 0 -1.5707963267948966" xyz="0 0 0" />
+    <parent link="world" />
+    <child link="base_link" />
+  </joint>
+  <joint name="joint0" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.11325" />
+    <parent link="base_link" />
+    <child link="shoulder_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="346.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="4.71238898038469" />
+  </joint>
+  <joint name="joint1" type="revolute">
+    <origin rpy="0 0 0" xyz="0.1569 0 0" />
+    <parent link="shoulder_link" />
+    <child link="upper_arm_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="346.0" lower="-2.356194490192345" upper="2.356194490192345" velocity="4.71238898038469" />
+  </joint>
+  <joint name="joint2" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.126 0 0.477" />
+    <parent link="upper_arm_link" />
+    <child link="forearm_link" />
+    <axis xyz="1 0 0" />
+    <limit effort="163.0" lower="-2.8797932657906435" upper="2.8797932657906435" velocity="5.026548245743669" />
+  </joint>
+  <joint name="joint3" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.12275 0 0.3495" />
+    <parent link="forearm_link" />
+    <child link="wrist_1_link" />
+    <axis xyz="-1 0 0" />
+    <limit effort="63.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="6.806784082777885" />
+  </joint>
+  <joint name="joint4" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.12275" />
+    <parent link="wrist_1_link" />
+    <child link="wrist_2_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="63.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="6.806784082777885" />
+  </joint>
+  <joint name="joint5" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.1343 0 0" />
+    <parent link="wrist_2_link" />
+    <child link="wrist_3_link" />
+    <axis xyz="-1 0 0" />
+    <limit effort="63.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="6.806784082777885" />
+  </joint>
+  <joint name="joint5-tool0" type="fixed">
+    <parent link="wrist_3_link" />
+    <child link="tool0" />
+    <origin rpy="1.5707963267948966 0 -1.5707963267948966" xyz="0 0 0" />
+  </joint>
+  <joint name="joint5_cable" type="fixed">
+    <parent link="wrist_3_link" />
+    <child link="wrist_3_cable_link" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <joint name="base_link-base_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <joint name="tool0-flange_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="tool0" />
+    <child link="flange" />
+  </joint>
+  <link name="eef_collision">
+    </link>
+  <joint name="tool0-eef_collision" type="fixed">
+    <parent link="tool0" />
+    <child link="eef_collision" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+  <ros2_control name="sbot" type="system">
+    <hardware>
+      <plugin>standard_bots_hardware_interface/SbotHW</plugin>
+      <param name="initial_speed_scaling_factor">1.0</param>
+    </hardware>
+    <joint name="joint0">
+      <command_interface name="position">
+        <param name="min">-6.28</param>
+        <param name="max">6.28</param>
+      </command_interface>
+      <command_interface name="velocity" />
+      <command_interface name="acceleration" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="acceleration" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint1">
+      <command_interface name="position">
+        <param name="min">-2.35</param>
+        <param name="max">2.35</param>
+      </command_interface>
+      <command_interface name="velocity" />
+      <command_interface name="acceleration" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="acceleration" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint2">
+      <command_interface name="position">
+        <param name="min">-3.14</param>
+        <param name="max">3.14</param>
+      </command_interface>
+      <command_interface name="velocity" />
+      <command_interface name="acceleration" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="acceleration" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint3">
+      <command_interface name="position">
+        <param name="min">-6.28</param>
+        <param name="max">6.28</param>
+      </command_interface>
+      <command_interface name="velocity" />
+      <command_interface name="acceleration" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="acceleration" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint4">
+      <command_interface name="position">
+        <param name="min">-6.28</param>
+        <param name="max">6.28</param>
+      </command_interface>
+      <command_interface name="velocity" />
+      <command_interface name="acceleration" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="acceleration" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint5">
+      <command_interface name="position">
+        <param name="min">-6.28</param>
+        <param name="max">6.28</param>
+      </command_interface>
+      <command_interface name="velocity" />
+      <command_interface name="acceleration" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="acceleration" />
+      <state_interface name="effort" />
+    </joint>
+    <sensor name="tcp_fts_sensor">
+      <state_interface name="force.x" />
+      <state_interface name="force.y" />
+      <state_interface name="force.z" />
+      <state_interface name="torque.x" />
+      <state_interface name="torque.y" />
+      <state_interface name="torque.z" />
+      <param name="frame_id">tool0</param>
+      <param name="min_fx">-100</param>
+      <param name="max_fx">100</param>
+      <param name="min_fy">-100</param>
+      <param name="max_fy">100</param>
+      <param name="min_fz">-200</param>
+      <param name="max_fz">200</param>
+      <param name="min_tx">-10</param>
+      <param name="max_tx">10</param>
+      <param name="min_ty">-10</param>
+      <param name="max_ty">10</param>
+      <param name="min_tz">-15</param>
+      <param name="max_tz">15</param>
+    </sensor>
+  </ros2_control>
+  <link name="scene_environment">
+    </link>
+  <joint name="base_to_scene" type="fixed">
+    <parent link="base_link" />
+    <child link="scene_environment" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+</robot>

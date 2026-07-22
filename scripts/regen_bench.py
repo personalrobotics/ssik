@@ -50,6 +50,12 @@ from ssik.prebuilt._manifest import load_manifest  # noqa: E402
 
 _N_TIMED = 200
 _N_WARMUP = 10
+# A comparison solver that returns a solution it marks *exact* (not least-squares)
+# must actually satisfy FK. Above this Frobenius residual the "solution" is wrong,
+# so we record the arm as not-solved with a correctness verdict rather than as a
+# fast solve -- otherwise the table advertises a µs timing for a garbage answer.
+# EAIK's genuinely-correct solves close to ~1e-15; 1e-6 flags real failures only.
+_EAIK_FK_CORRECT_ATOL = 1e-6
 
 
 def _gen_poses(mod: object, n: int, rng: np.random.Generator) -> list[NDArray[np.float64]]:
@@ -178,13 +184,31 @@ def bench_eaik(arm: object, poses: list[NDArray[np.float64]]) -> dict[str, objec
                 max(float(np.linalg.norm(robot.fwdKin(np.asarray(q)) - T)) for q in exact)  # type: ignore[attr-defined]
             )
 
+    family = str(robot.getKinematicFamily())  # type: ignore[attr-defined]
+    max_fk = max(fk_residuals) if fk_residuals else float("nan")
+
+    # EAIK can classify an arm as decomposable, return non-LS ("exact")
+    # solutions, and yet have those solutions violate FK -- a silent-wrong
+    # result. Observed on anti-parallel-trio arms (Standard Bots thor/spark):
+    # EAIK collapses the parallel trio with a signed sum and mishandles a joint
+    # whose axis opposes the trio reference, the same bug class ssik's
+    # three_parallel guards against. Record it as not-solved with a correctness
+    # verdict, so the table doesn't advertise a µs timing for a garbage answer.
+    if fk_residuals and max_fk > _EAIK_FK_CORRECT_ATOL:
+        return {
+            "supported": False,
+            "refusal": (
+                f"classifies as {family} but returns FK-incorrect solutions (max FK {max_fk:.0e})"
+            ),
+        }
+
     mu, half = _mean_ci95(np.array(times))
     return {
         "supported": True,
-        "family": str(robot.getKinematicFamily()),  # type: ignore[attr-defined]
+        "family": family,
         "ms_mean": mu,
         "ms_ci95": half,
-        "max_fk": max(fk_residuals) if fk_residuals else float("nan"),
+        "max_fk": max_fk,
         "sols_min": min(sol_counts) if sol_counts else 0,
         "sols_max": max(sol_counts) if sol_counts else 0,
     }

@@ -45,6 +45,7 @@ from ssik.codegen._compose.spherical_two_parallel import (
 )
 from ssik.codegen._symbolic.sp1 import sp1_theta_sym
 from ssik.codegen._symbolic.sp3 import sp3_branches_sym
+from ssik.solvers.ikgeo.three_parallel import trio_reference_signs
 
 __all__ = ["compose", "render_constants_header"]
 
@@ -190,6 +191,7 @@ def compose(kb: KinBody) -> str:
         d_inner_lines=d_inner_lines,
         q3_lines=q3_lines,
         q2_lines=q2_lines,
+        trio_flip=trio_reference_signs(axes),
     )
 
 
@@ -228,8 +230,15 @@ def _assemble_three_parallel(
     d_inner_lines: list[str],
     q3_lines: list[str],
     q2_lines: list[str],
+    trio_flip: tuple[int, int],
 ) -> str:
     """Stitch the three_parallel composer's blocks into ``_solve_algebraic``."""
+    f2, f3 = trio_flip
+    # Physical convention for the two non-reference trio joints: negate any that
+    # were authored anti-parallel to axes[1]. Aligned joints (the common case)
+    # emit unchanged, so non-flipped arms (UR, etc.) stay byte-identical.
+    q3_out = "q3" if f2 > 0 else "-q3"
+    q4_out = "q4" if f3 > 0 else "-q4"
     parts = [
         "def _solve_algebraic(T_target):",
         '    """Algebraic IK candidates. Calls runtime SP6 for (q1, q5);',
@@ -265,7 +274,7 @@ def _assemble_three_parallel(
         "            c3 = math.cos(q3)",
         _indent(q2_lines, 12),
         "            q4 = ((theta14 - q2 - q3 + math.pi) % (2.0 * math.pi)) - math.pi",
-        "            candidates.append([q1, q2, q3, q4, q5, q6])",
+        f"            candidates.append([q1, q2, {q3_out}, {q4_out}, q5, q6])",
         "    return candidates",
         "",
     ]

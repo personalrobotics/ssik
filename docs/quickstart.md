@@ -54,6 +54,9 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `openarm_right_ik` | Enactic OpenArm v2.0 (right) | SRS 7R (non-Z*Z) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
 | `r1pro_left_ik` | Galaxea R1 Pro (left) | SRS 7R (non-Z*Z) | `left_arm_base_link` | `left_arm_link7` |
 | `r1pro_right_ik` | Galaxea R1 Pro (right) | SRS 7R (non-Z*Z) | `right_arm_base_link` | `right_arm_link7` |
+| `standardbots_thor_ik` | Standard Bots Thor | three-parallel 6R | `base_link` | `tool0` |
+| `standardbots_core_ik` | Standard Bots Core | three-parallel 6R | `base_link` | `tool0` |
+| `standardbots_spark_ik` | Standard Bots Spark | three-parallel 6R | `base_link` | `tool0` |
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:
