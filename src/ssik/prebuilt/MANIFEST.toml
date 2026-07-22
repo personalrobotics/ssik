@@ -1025,8 +1025,8 @@ fk_ceiling_fuzz = 1e-7
 platform_drift = false
 
 [arms.standardbots_thor_ik.bench]
-ms_mean = 8.43
-ms_ci95 = 0.39
+ms_mean = 2.64
+ms_ci95 = 0.17
 max_fk = 3.5e-12
 sols_min = 1
 sols_max = 4
@@ -1056,8 +1056,8 @@ fk_ceiling_fuzz = 1e-7
 platform_drift = false
 
 [arms.standardbots_core_ik.bench]
-ms_mean = 8.40
-ms_ci95 = 0.26
+ms_mean = 2.55
+ms_ci95 = 0.06
 max_fk = 2.4e-12
 sols_min = 1
 sols_max = 4
@@ -1092,8 +1092,8 @@ fk_ceiling_fuzz = 1e-7
 platform_drift = false
 
 [arms.standardbots_spark_ik.bench]
-ms_mean = 7.27
-ms_ci95 = 0.24
+ms_mean = 2.51
+ms_ci95 = 0.07
 max_fk = 8.8e-13
 sols_min = 1
 sols_max = 4
