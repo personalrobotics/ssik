@@ -114,6 +114,9 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 | `openarm_right_ik` | Enactic OpenArm v2.0 (right) | SRS 7R (non-Z*Z) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
 | `r1pro_left_ik` | Galaxea R1 Pro (left) | SRS 7R (non-Z*Z) | `left_arm_base_link` | `left_arm_link7` |
 | `r1pro_right_ik` | Galaxea R1 Pro (right) | SRS 7R (non-Z*Z) | `right_arm_base_link` | `right_arm_link7` |
+| `standardbots_thor_ik` | Standard Bots Thor | three-parallel 6R | `base_link` | `tool0` |
+| `standardbots_core_ik` | Standard Bots Core | three-parallel 6R | `base_link` | `tool0` |
+| `standardbots_spark_ik` | Standard Bots Spark | three-parallel 6R | `base_link` | `tool0` |
 <!-- /AUTOGEN -->
 
 ```python
@@ -155,6 +158,9 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `openarm_right_ik` | enactic / openarm_description |
 | `r1pro_left_ik` | OpenGalaxea / GalaxeaManipSim (Apache-2.0) |
 | `r1pro_right_ik` | OpenGalaxea / GalaxeaManipSim (Apache-2.0) |
+| `standardbots_thor_ik` | standardbots / ros2-realtime-api (robot_urdfs/thor.urdf) |
+| `standardbots_core_ik` | standardbots / ros2-realtime-api (robot_urdfs/core.urdf) |
+| `standardbots_spark_ik` | standardbots / ros2-realtime-api (robot_urdfs/spark.urdf) |
 <!-- /AUTOGEN -->
 
 Every prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, and `T_HOME` (the 4×4 home pose, FK at `q = np.zeros(DOF)`) as module constants. Use them to verify the baked geometry matches your robot:
@@ -404,6 +410,9 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | OpenArm R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 14.54 ± 0.50 ms / FK 2e-15 / 128 sols |
 | R1 Pro L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.56 ± 0.05 ms / FK 3e-15 / 128 sols |
 | R1 Pro R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 13.52 ± 0.06 ms / FK 3e-15 / 128 sols |
+| Thor (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 3e0 / 2-8 sols | 8.43 ± 0.39 ms / FK 4e-12 / 1-4 sols |
+| Core (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 9e-16 / 2-6 sols | 8.40 ± 0.26 ms / FK 2e-12 / 1-4 sols |
+| Spark (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 3e0 / 2-8 sols | 7.27 ± 0.24 ms / FK 9e-13 / 1-4 sols |
 <!-- /AUTOGEN -->
 
 The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).

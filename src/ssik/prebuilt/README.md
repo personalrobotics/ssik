@@ -63,6 +63,9 @@ preprocessing) and cleaner to ship in production stacks.
 | `openarm_right_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `r1pro_left_ik` | `seven_r.srs` | <1 s | ~12 KB |
 | `r1pro_right_ik` | `seven_r.srs` | <1 s | ~12 KB |
+| `standardbots_thor_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+| `standardbots_core_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+| `standardbots_spark_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached
