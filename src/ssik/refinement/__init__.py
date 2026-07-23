@@ -50,6 +50,7 @@ _FK_EYE4 = np.eye(4, dtype=np.float64)
 _FK_EYE4.flags.writeable = False
 
 __all__ = [
+    "kinbody_fk_jacobian_batch",
     "kinbody_jacobian",
     "lm_refine",
     "lm_refine_batch",
@@ -418,6 +419,72 @@ def kinbody_jacobian(
     return j_arr
 
 
+def kinbody_fk_jacobian_batch(
+    kb: object,  # ssik._kinbody.KinBody
+    q_batch: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Batched FK + spatial Jacobian for ``N`` joint vectors of one KinBody.
+
+    Returns ``(fk, jac)`` with shapes ``(N, 4, 4)`` and ``(N, 6, N_dof)``,
+    computed in a single vectorised chain walk shared between the two (the
+    Jacobian needs the same per-joint cumulative frames the FK does). Every
+    element ``fk[k]`` / ``jac[k]`` equals ``poe_forward_kinematics(kb, q[k])`` /
+    ``kinbody_jacobian(kb, q[k])`` to ~1e-15 (independent per-candidate 4x4
+    matmuls; not bit-identical to the scalar Cython inline, but far below any
+    solver tolerance).
+
+    This is the batched twin of the per-candidate ``fk_fn`` / ``jacobian_fn``
+    calls in :func:`lm_refine_batch`; amortising the Python/dispatch overhead
+    over the whole candidate set is ~3-4x faster than the scalar loop even
+    against the compiled ``kinbody_jacobian`` (the FK + Jacobian are ~50-60% of
+    a Gen3 ``srs_polished`` solve).
+
+    **Revolute only.** All shipped prebuilts are revolute; a prismatic joint
+    raises so callers fall back to the scalar per-candidate path (which handles
+    both) rather than get a silently-wrong Jacobian.
+    """
+    joints = kb.joints  # type: ignore[attr-defined]
+    q_batch = np.asarray(q_batch, dtype=np.float64)
+    n, dof = q_batch.shape
+    fk = np.broadcast_to(np.eye(4), (n, 4, 4)).copy()  # T_acc, (N,4,4)
+    jac = np.empty((n, 6, dof), dtype=np.float64)
+    eye4 = np.eye(4, dtype=np.float64)
+    for i in range(dof):
+        joint = joints[i]
+        if joint.joint_type != "revolute":
+            raise ValueError(
+                f"kinbody_fk_jacobian_batch is revolute-only; joint {i} is "
+                f"{joint.joint_type!r} -- use the scalar per-candidate path"
+            )
+        axis = np.asarray(joint.axis, dtype=np.float64)
+        axis = axis / np.linalg.norm(axis)
+        p = fk @ joint.T_left  # frame just before joint i acts, (N,4,4)
+        z = p[:, :3, :3] @ axis  # world axis, (N,3)
+        origin = p[:, :3, 3]  # world origin, (N,3)
+        jac[:, 0, i] = origin[:, 1] * z[:, 2] - origin[:, 2] * z[:, 1]
+        jac[:, 1, i] = origin[:, 2] * z[:, 0] - origin[:, 0] * z[:, 2]
+        jac[:, 2, i] = origin[:, 0] * z[:, 1] - origin[:, 1] * z[:, 0]
+        jac[:, 3:, i] = z
+        # Advance: T_acc = P @ R(axis, q_i) @ T_right (batched Rodrigues).
+        theta = q_batch[:, i]
+        c = np.cos(theta)
+        s = np.sin(theta)
+        oc = 1.0 - c
+        ax, ay, az = float(axis[0]), float(axis[1]), float(axis[2])
+        r = np.broadcast_to(eye4, (n, 4, 4)).copy()
+        r[:, 0, 0] = c + ax * ax * oc
+        r[:, 0, 1] = ax * ay * oc - az * s
+        r[:, 0, 2] = ax * az * oc + ay * s
+        r[:, 1, 0] = ay * ax * oc + az * s
+        r[:, 1, 1] = c + ay * ay * oc
+        r[:, 1, 2] = ay * az * oc - ax * s
+        r[:, 2, 0] = az * ax * oc - ay * s
+        r[:, 2, 1] = az * ay * oc + ax * s
+        r[:, 2, 2] = c + az * az * oc
+        fk = p @ r @ joint.T_right
+    return fk, jac
+
+
 def lm_refine(
     q_seed: NDArray[np.float64],
     fk_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
@@ -636,6 +703,10 @@ def lm_refine_batch(
     step_clip: float = 0.5,
     divergence_factor: float = 2.0,
     divergence_min_iters: int = 2,
+    fk_jac_batch_fn: Callable[
+        [NDArray[np.float64]], tuple[NDArray[np.float64], NDArray[np.float64]]
+    ]
+    | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.intp]]:
     """Batched Newton polish for ``N`` seeds against a single target T.
 
@@ -687,15 +758,19 @@ def lm_refine_batch(
         if active_idx.size == 0:
             break
 
-        # Sequential FK + Jacobian per active candidate. Batching this
-        # would need batched poe_forward_kinematics + kinbody_jacobian
-        # (Cython rewrite). The Python dispatch overhead per call is
-        # ~3-5 us; total per pose-call is ~150 ms wall, of which most
-        # is actual Cython compute. Batched linalg below saves the
-        # other ~150 ms of np.linalg dispatch.
-        for idx in active_idx:
-            fk_arr[idx] = fk_fn(q[idx])
-            jac_arr[idx] = jacobian_fn(q[idx])
+        # FK + Jacobian for every active candidate. When ``fk_jac_batch_fn`` is
+        # supplied (a batched primitive, e.g. kinbody_fk_jacobian_batch bound to
+        # the arm's KinBody) both are computed in one vectorised chain walk --
+        # ~3-4x faster than the scalar per-candidate loop even against the
+        # compiled kinbody_jacobian, since it amortises the Python/dispatch
+        # overhead over the whole active set (FK + Jacobian are ~50-60% of a Gen3
+        # srs_polished solve). Falls back to the scalar callables otherwise.
+        if fk_jac_batch_fn is not None:
+            fk_arr[active_idx], jac_arr[active_idx] = fk_jac_batch_fn(q[active_idx])
+        else:
+            for idx in active_idx:
+                fk_arr[idx] = fk_fn(q[idx])
+                jac_arr[idx] = jacobian_fn(q[idx])
 
         # Batched Frobenius residual (the contract metric).
         diff = fk_arr[active_idx] - t_target

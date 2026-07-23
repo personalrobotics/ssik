@@ -19,11 +19,14 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from ssik._kinbody import KinBody, build_kinbody
+from ssik._kinbody import JointSpec, KinBody, build_kinbody
 from ssik.core.solution import Solution
+from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.refinement import (
+    kinbody_fk_jacobian_batch,
     kinbody_jacobian,
     lm_refine,
+    lm_refine_batch,
     numerical_jacobian,
     se3_log_residual,
     verify_candidates,
@@ -408,3 +411,83 @@ def test_lm_refine_reports_frobenius_residual_not_log_389_d2() -> None:
         # An accepted candidate honestly clears the Frobenius gate.
         assert frob < fk_atol
     assert checked > 100
+
+
+# ---------------------------------------------------------------------------
+# kinbody_fk_jacobian_batch: batched FK + spatial Jacobian in one chain walk.
+# Must equal the scalar poe_forward_kinematics / kinbody_jacobian per candidate
+# (so the batched refine path preserves the solution set), and reject prismatic
+# joints so a caller can't get a silently-wrong Jacobian.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kb_name", ["ur5", "franka"])
+def test_fk_jacobian_batch_matches_scalar(
+    kb_name: str, ur5_kb: KinBody, franka_kb: KinBody
+) -> None:
+    """Every (fk[k], jac[k]) equals the scalar per-candidate result to ~1e-13,
+    across a 6R and a 7R arm -- the invariant the batched refine relies on."""
+    kb = ur5_kb if kb_name == "ur5" else franka_kb
+    dof = len(kb.joints)
+    rng = np.random.default_rng(0)
+    q_batch = rng.uniform(-2.5, 2.5, size=(64, dof))
+    fk_batch, jac_batch = kinbody_fk_jacobian_batch(kb, q_batch)
+    assert fk_batch.shape == (64, 4, 4)
+    assert jac_batch.shape == (64, 6, dof)
+    worst_fk = 0.0
+    worst_jac = 0.0
+    for k in range(64):
+        worst_fk = max(
+            worst_fk, float(np.max(np.abs(fk_batch[k] - poe_forward_kinematics(kb, q_batch[k]))))
+        )
+        worst_jac = max(
+            worst_jac, float(np.max(np.abs(jac_batch[k] - kinbody_jacobian(kb, q_batch[k]))))
+        )
+    assert worst_fk < 1e-12, f"{kb_name}: batched FK differs from scalar by {worst_fk:.2e}"
+    assert worst_jac < 1e-12, f"{kb_name}: batched Jacobian differs from scalar by {worst_jac:.2e}"
+
+
+def test_fk_jacobian_batch_rejects_prismatic() -> None:
+    """A prismatic joint raises (revolute-only primitive), so callers fall back
+    to the scalar path rather than compute a wrong Jacobian."""
+    specs = [
+        JointSpec(parent_link_T=np.eye(4), axis=np.array([0.0, 0.0, 1.0]), joint_type="revolute"),
+        JointSpec(parent_link_T=np.eye(4), axis=np.array([1.0, 0.0, 0.0]), joint_type="prismatic"),
+    ]
+    kb = build_kinbody(specs)
+    with pytest.raises(ValueError, match="revolute-only"):
+        kinbody_fk_jacobian_batch(kb, np.zeros((3, 2)))
+
+
+def test_lm_refine_batch_batched_equals_scalar(ur5_kb: KinBody) -> None:
+    """lm_refine_batch with the batched primitive must produce the same polished
+    q + residuals as the scalar per-candidate path -- the batched inner loop is
+    a pure speedup, not a behaviour change."""
+    rng = np.random.default_rng(1)
+    q_true = rng.uniform(-1.0, 1.0, size=6)
+    t = poe_forward_kinematics(ur5_kb, q_true)
+    seeds = q_true + rng.uniform(-0.2, 0.2, size=(20, 6))
+
+    def fk(q):
+        return poe_forward_kinematics(ur5_kb, q)
+
+    def jac(q):
+        return kinbody_jacobian(ur5_kb, q)
+
+    q_s, r_s, _ = lm_refine_batch(seeds, fk, jac, t, fk_atol=1e-12)
+    q_b, r_b, _ = lm_refine_batch(
+        seeds,
+        fk,
+        jac,
+        t,
+        fk_atol=1e-12,
+        fk_jac_batch_fn=lambda Q: kinbody_fk_jacobian_batch(ur5_kb, Q),
+    )
+    # Same seeds converge (the ~1e-15 Jacobian difference cannot flip convergence).
+    conv_s = r_s < 1e-9
+    assert np.array_equal(conv_s, r_b < 1e-9), "batched path converged a different seed set"
+    # Each converged seed lands on the same root (Newton amplifies the tiny
+    # Jacobian difference, so allow 1e-6 in q -- both still FK-close exactly).
+    for k in np.flatnonzero(conv_s):
+        assert np.max(np.abs(q_b[k] - q_s[k])) < 1e-6
+        assert np.max(np.abs(poe_forward_kinematics(ur5_kb, q_b[k]) - t)) < 1e-9

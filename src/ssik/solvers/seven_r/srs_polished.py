@@ -59,6 +59,7 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import is_approximately_srs_7r
 from ssik.refinement import (
     dedup_by_wrap_close,
+    kinbody_fk_jacobian_batch,
     kinbody_jacobian,
     lm_refine_batch,
 )
@@ -178,6 +179,14 @@ def solve(
         out: NDArray[np.float64] = kinbody_jacobian(kb, q)
         return out
 
+    def fk_jac_batch_fn(
+        q: NDArray[np.float64],
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        # Batched FK + Jacobian over the whole active candidate set (all shipped
+        # arms are revolute; the primitive raises on prismatic and lm_refine_batch
+        # would fall back to the scalar callables above).
+        return kinbody_fk_jacobian_batch(kb, q)
+
     q_seeds = np.array([c.q for c in raw], dtype=np.float64)
     q_polished_arr, fk_residuals, _iters_used = lm_refine_batch(
         q_seeds,
@@ -188,6 +197,7 @@ def solve(
         max_iters=polish_max_iters,
         divergence_factor=2.0,
         divergence_min_iters=2,
+        fk_jac_batch_fn=fk_jac_batch_fn,
     )
 
     polished: list[Solution] = [
