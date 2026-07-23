@@ -35,7 +35,7 @@ Design intent:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -187,6 +187,7 @@ def rescue_via_T_perturbation(
         # per-candidate tight-then-loose double pass (the #319 rescue was O(16
         # perturbations x ~90 candidates x 2 refines); on Gen3 that was ~1.1 s).
         q_seeds = np.array([sol.q for sol in pert_sols], dtype=np.float64)
+        polished: Iterable[tuple[NDArray[np.float64], float]]
         if jacobian_fn is not None:
             q_polished, fk_resids, _iters = lm_refine_batch(
                 q_seeds,
