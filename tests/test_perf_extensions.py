@@ -29,7 +29,7 @@ import pytest
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "scripts"))
 
-import regen_bench  # noqa: E402
+import regen_bench  # type: ignore[import-not-found]  # noqa: E402
 
 
 def _cython_target_modules() -> list[str]:
