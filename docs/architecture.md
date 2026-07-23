@@ -8,7 +8,7 @@ ssik dispatches to one of 11 analytical solvers based on the arm's kinematic top
 |---|---|---|---|
 | 0 — closed-form 6R | `three_parallel`, `spherical_two_parallel`, `spherical_two_intersecting`, `spherical` | ~1 ms | SP1–SP6 composition; one branch per Pieper specialisation |
 | 0 — closed-form 7R (SRS) | `seven_r.srs` | ~5 ms full sweep | Singh-Kreutz 1989 parameterised by elbow swivel angle; 8 branches × 16 swivel samples = 128 IKs (vectorised inner loop, [#217](https://github.com/personalrobotics/ssik/issues/217)). Per-candidate FK verify deferred to post-dedup (#246). |
-| 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~40 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + batched LM polish to machine precision against the original URDF FK |
+| 0 — approximate SRS + LM polish | `seven_r.srs_polished` | ~13 ms full sweep | Relaxed Singh-Kreutz (small-drift arms) + batched LM polish (batched FK+Jacobian over the candidate set) to machine precision against the original URDF FK |
 | 1 — univariate search | `two_parallel`, `two_intersecting` | ~100 ms – 2 s | tan-half-angle reduction + 200-sample search + Newton polish |
 | 1 — 7R joint-lock wrapper | `jointlock.seven_r` | ~5-30 ms tier-0 inner; **~17 ms with cached-RR ([#210](https://github.com/personalrobotics/ssik/issues/210))** when artifact-built | lock one joint, dispatch inner 6R, sweep 16 lock samples; Raghavan-Roth pre-baked at codegen for non-Pieper sub-chains |
 | 2 — Raghavan–Roth + Manocha–Canny | `ikgeo.general_6r` | ~0.6-5 ms | numeric RR resultant with AE-3 leftvar selection; **production tier-2** |

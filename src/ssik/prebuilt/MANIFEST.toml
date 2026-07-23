@@ -442,8 +442,8 @@ drift_markers = [
 ]
 
 [arms.gen3_ik.bench]
-ms_mean = 40.75
-ms_ci95 = 0.91
+ms_mean = 12.87
+ms_ci95 = 0.27
 max_fk = 9.9e-13
 sols_min = 11
 sols_max = 92
