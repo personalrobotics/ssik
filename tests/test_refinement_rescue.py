@@ -229,3 +229,34 @@ def test_rescue_polishes_well_conditioned_to_machine_precision_384() -> None:
         f"rescue left a branch under-polished at {worst:.2e} (> gen3 1e-9 ceiling); "
         f"the tight polish should reach machine precision on this well-conditioned pose"
     )
+
+
+def test_batched_rescue_recovers_full_set_piper_ridge() -> None:
+    """Regression: the batched rescue (#405) must recover the SAME solution set
+    as the per-candidate rescue it replaced.
+
+    lm_refine_batch defaults to a tight divergence tolerance (2.0 / 2, tuned for
+    srs_polished #203); the per-candidate lm_refine rescue used the loose 5.0 / 4.
+    Inheriting the tight default aborted rescuable perturbed candidates whose
+    trajectory dips before converging, dropping valid solutions -- this piper
+    ridge pose (normal solve returns 0) recovered 6 distinct machine-precision
+    IKs at v3.2.0 but only 3 after #405 until the rescue passed 5.0 / 4 through.
+    """
+    piper = pytest.importorskip("ssik.prebuilt.piper_ik")
+    q = np.array(
+        [0.6062325102, 0.4261052819, -0.0456657578, 0.398668829, -0.6750285024, -0.5471984045]
+    )
+    t = piper.fk(q)
+    assert not piper.solve(t, respect_limits=False, allow_rescue=False), (
+        "expected an empty analytical solve (a genuine rescue pose)"
+    )
+    sols = piper.solve(t, respect_limits=False)
+    assert len(sols) >= 6, f"batched rescue recovered {len(sols)} sols, expected the full 6"
+    # Every recovered solution FK-closes and they are distinct.
+    for s in sols:
+        assert float(np.max(np.abs(piper.fk(s.q) - t))) < 1e-6
+    qs = [s.q for s in sols]
+    for i in range(len(qs)):
+        for j in range(i + 1, len(qs)):
+            gap = float(np.max(np.abs((qs[i] - qs[j] + np.pi) % (2.0 * np.pi) - np.pi)))
+            assert gap > 1e-3, "rescue returned duplicate solutions"

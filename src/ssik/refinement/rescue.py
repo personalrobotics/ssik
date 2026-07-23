@@ -196,6 +196,15 @@ def rescue_via_T_perturbation(
                 T_target,
                 fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
                 max_iters=refinement_max_iters,
+                # Match the loose divergence tolerance the per-candidate lm_refine
+                # rescue used (5.0 / 4). lm_refine_batch defaults to the tight
+                # 2.0 / 2 tuned for srs_polished (#203); that tighter guard aborts
+                # rescuable perturbed candidates whose trajectory dips before
+                # converging, dropping valid solutions (piper lost 3 of 6 on a
+                # ridge pose). Rescue seeds land off-ridge and genuinely converge,
+                # so the loose tolerance recovers the full set.
+                divergence_factor=5.0,
+                divergence_min_iters=4,
             )
             polished = zip(q_polished, fk_resids, strict=True)
         else:
