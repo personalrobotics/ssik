@@ -35,13 +35,13 @@ Design intent:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
-from ssik.refinement import lm_refine
+from ssik.refinement import lm_refine, lm_refine_batch
 
 # Tight polish target tried before the loose acceptability gate. A rescue whose
 # perturbation landed off-ridge (the common case) is well-conditioned and
@@ -174,32 +174,58 @@ def rescue_via_T_perturbation(
             # (extremely rare in shipping artifacts but worth handling).
             pert_sols = solve_fn(T_pert)
 
-        for sol in pert_sols:
-            q_seed = np.asarray(sol.q, dtype=np.float64)
-            # Polish as tightly as the pose allows: aim for machine precision
-            # first so a well-conditioned rescue returns its exact solution, and
-            # fall back to the loose acceptability target only when the tight
-            # polish can't converge (a genuinely rank-deficient ridge, #319).
-            result = lm_refine(
-                q_seed,
+        if not pert_sols:
+            continue
+
+        # Polish every perturbed candidate back to the original T_target. Aim
+        # for machine precision (``_TIGHT_POLISH_FK_ATOL``) so a well-conditioned
+        # rescue returns its exact solution; candidates that only reach the loose
+        # ``fk_atol`` (a genuinely rank-deficient ridge, #319) still pass the gate
+        # below. Most perturbed candidates are swivel solutions to T_pert that do
+        # NOT converge back to a ridge T_target -- the batch refiner's divergence
+        # + stall guards abort those in a few iterations instead of the full
+        # per-candidate tight-then-loose double pass (the #319 rescue was O(16
+        # perturbations x ~90 candidates x 2 refines); on Gen3 that was ~1.1 s).
+        q_seeds = np.array([sol.q for sol in pert_sols], dtype=np.float64)
+        polished: Iterable[tuple[NDArray[np.float64], float]]
+        if jacobian_fn is not None:
+            q_polished, fk_resids, _iters = lm_refine_batch(
+                q_seeds,
                 fk_fn,
+                jacobian_fn,
                 T_target,
                 fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
                 max_iters=refinement_max_iters,
-                jacobian_fn=jacobian_fn,
             )
-            if result is None:
-                result = lm_refine(
-                    q_seed,
+            polished = zip(q_polished, fk_resids, strict=True)
+        else:
+            # No analytical Jacobian: per-candidate tight-then-loose refine
+            # (lm_refine returns None unless it reaches its fk_atol, so the loose
+            # retry is needed to keep candidates that stall just above tight).
+            results = []
+            for q in q_seeds:
+                r = lm_refine(
+                    q,
                     fk_fn,
                     T_target,
-                    fk_atol=fk_atol,
+                    fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
                     max_iters=refinement_max_iters,
-                    jacobian_fn=jacobian_fn,
+                    jacobian_fn=None,
                 )
-            if result is None:
-                continue
-            q_ref, fk_resid, _iters = result
+                if r is None:
+                    r = lm_refine(
+                        q,
+                        fk_fn,
+                        T_target,
+                        fk_atol=fk_atol,
+                        max_iters=refinement_max_iters,
+                        jacobian_fn=None,
+                    )
+                if r is not None:
+                    results.append((r[0], r[1]))
+            polished = results
+
+        for q_ref, fk_resid in polished:
             if fk_resid > fk_atol:
                 continue
 
