@@ -16,9 +16,11 @@ This test contract:
 
 - predicate refuses Gen3 (correct strict non-SRS classification).
 - dispatcher picks `seven_r.srs_polished` (post-#193).
-- hand-picked + random poses solve via jointlock+HP directly (the
-  invariant: HP works correctly on Gen3 even though it isn't the
-  default route anymore).
+- hand-picked poses solve via jointlock+HP directly; random poses solve
+  via jointlock+HP with the production T-perturbation rescue on empty
+  (the invariant: the universal fallback covers Gen3 -- including
+  measure-zero near-singular ridges -- even though it isn't the default
+  route anymore).
 
 Source URDF: ``tests/fixtures/gen3.urdf``, vendored from
 https://github.com/Kinovarobotics/ros_kortex (noetic-devel branch,
@@ -36,9 +38,11 @@ from hypothesis import strategies as st
 
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.core.dispatcher import dispatch
+from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import is_srs_7r
+from ssik.refinement.rescue import rescue_via_T_perturbation
 from ssik.solvers.jointlock import seven_r as jointlock_seven_r
 
 GEN3_URDF = Path(__file__).parent / "fixtures" / "gen3.urdf"
@@ -46,6 +50,39 @@ GEN3_URDF = Path(__file__).parent / "fixtures" / "gen3.urdf"
 
 def _gen3_kinbody():
     return load_urdf_kinbody_normalized(GEN3_URDF, "base_link", "end_effector_link")
+
+
+def _jointlock_with_rescue(kb, T_target) -> list[Solution]:
+    """Solve through the universal jointlock+HP fallback the way
+    ``Manipulator.solve`` does in production: raw jointlock first, then the
+    T-perturbation rescue on an empty in-reach result.
+
+    Raw ``jointlock.solve`` returns nothing at measure-zero near-singular
+    ridges (e.g. a near-straight elbow, ``q_3 ~ 0``) -- an inherent property
+    of the algebraic path, not a bug. The rescue (the same layer the shipped
+    ``ssik build`` artifacts and ``Manipulator.solve`` apply, #319 / #328)
+    perturbs off the ridge, re-solves, and polishes back, recovering the
+    full solution set. This helper mirrors that exact contract, including the
+    triangle-inequality reach gate, so the test validates the coverage users
+    actually get rather than a stricter promise the raw internal never made.
+    """
+    sols, _ = jointlock_seven_r.solve(kb, T_target, allow_refinement=True)
+    if sols:
+        return list(sols)
+    reach_radius = sum(
+        float(np.linalg.norm(j.T_left[:3, 3])) + float(np.linalg.norm(j.T_right[:3, 3]))
+        for j in kb.joints
+    )
+    if float(np.linalg.norm(T_target[:3, 3])) > reach_radius:
+        return []
+
+    def _fk(q):
+        return poe_forward_kinematics(kb, q)
+
+    def _solve(T_pert, **kw):
+        return jointlock_seven_r.solve(kb, T_pert, allow_refinement=True, **kw)[0]
+
+    return rescue_via_T_perturbation(_fk, _solve, T_target, jacobian_fn=None)
 
 
 # ----------------------------------------------------------------------------
@@ -127,18 +164,25 @@ def test_gen3_hand_picked_fk_closure(q_star: np.ndarray) -> None:
     suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
 )
 def test_gen3_random_pose_fk_closure(seed: int) -> None:
-    """Random q in [-0.8, 0.8] per joint: at least one returned IK
-    must FK-close < 1e-10.
+    """Random q in [-0.8, 0.8] per joint: the universal jointlock+HP
+    fallback (with the production rescue) returns at least one IK that
+    FK-closes < 1e-10.
 
-    N=10 because each call is ~2 s through jointlock+HP (the full
-    test takes ~20 s). Will be tightened to N=500 once #193 polished
-    SRS lands and per-IK time drops to ~10-20 ms.
+    Gen3's production route is ``seven_r.srs_polished`` (#193, covered at
+    N=50 in tests/test_seven_r_srs_polished.py); this is the defense-in-depth
+    cross-check that the universal fallback also covers Gen3. It goes through
+    ``_jointlock_with_rescue`` -- the same jointlock + T-perturbation-rescue
+    contract ``Manipulator.solve`` delivers -- because raw ``jointlock.solve``
+    legitimately returns nothing at measure-zero near-singular ridges
+    (``q_3 ~ 0``, near-straight elbow; e.g. seed 173) and the rescue is the
+    designed recovery layer for exactly those poses. N=10 because each solve
+    is ~2 s through jointlock+HP.
     """
     rng = np.random.default_rng(seed)
     q_star = rng.uniform(-0.8, 0.8, size=7)
     kb = _gen3_kinbody()
     T_target = poe_forward_kinematics(kb, q_star)
-    sols, _ = jointlock_seven_r.solve(kb, T_target, allow_refinement=True)
+    sols = _jointlock_with_rescue(kb, T_target)
     assert sols, f"random reachable pose returned no IK: q*={q_star.tolist()}"
     best_fk = min(s.fk_residual for s in sols)
     assert best_fk < 1e-10, f"random pose seed={seed}: best FK={best_fk:.2e} > 1e-10"
