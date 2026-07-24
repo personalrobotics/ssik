@@ -11,7 +11,10 @@ See ``MANIFEST.toml`` itself for the schema reference.
 
 from __future__ import annotations
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11 (best-effort support, see #366)
+    import tomli as tomllib
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path

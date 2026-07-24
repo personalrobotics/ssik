@@ -22,6 +22,10 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.26",
+    # ``ssik.prebuilt._manifest`` parses the arm manifest with ``tomllib``,
+    # which is stdlib only on Python 3.11+. On the best-effort 3.10 floor
+    # (see #366) it falls back to the ``tomli`` backport, so pull it in there.
+    "tomli>=1.1.0; python_version < '3.11'",
     # scipy.linalg / scipy.signal are imported at module top in
     # ``ssik._pencil`` and ``ssik.solvers.husty_pfurner._eliminate``; HP backs
     # every non-SRS 7R prebuilt (Franka, Rizon, Kassow). Without scipy a
@@ -188,7 +192,7 @@ archs = ["arm64", "x86_64"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py310"
 src = ["src", "tests"]
 extend-exclude = [
     # Generated reference artifacts. Not subject to lint rules; their format
