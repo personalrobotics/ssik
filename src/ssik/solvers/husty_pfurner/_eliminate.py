@@ -1020,9 +1020,23 @@ def eliminate_uw_pairs(
             )
             if residue < accept_tol:
                 refined.append((u_ref, w_ref))
-    if not refined and last_error is not None:
-        raise last_error
     if not refined:
+        # Every drop index hit a singular Cramer/pencil matrix (or produced
+        # no accepted candidate). This is a degenerate pose for HP's
+        # interpolation-based elimination, not an error to propagate: the
+        # correct solver contract is "no HP-extractable solution here"
+        # (is_ls=True upstream), never an unhandled ``LinAlgError``. Such
+        # poses are a known HP coverage gap on general (non-locked) 6R
+        # geometries -- ``ikgeo.general_6r`` (Raghavan-Roth) is the tier-2
+        # solver for those; HP is only dispatched on locked-7R sub-chains,
+        # where this path does not trigger. Surface the cause at debug level
+        # for diagnosis without crashing the caller.
+        if last_error is not None:
+            _LOG.debug(
+                "HP elimination: all drops %s singular (%s); returning no candidates",
+                drop_indices,
+                type(last_error).__name__,
+            )
         return np.empty((0, 2), dtype=np.float64)
     # Cluster-merge in (u, w) Euclidean space. Multiplicity-k splits and
     # duplicates from different drops cluster within sqrt(eps); two

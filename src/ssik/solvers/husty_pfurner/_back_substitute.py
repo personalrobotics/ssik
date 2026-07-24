@@ -443,26 +443,35 @@ def solve_ik(
     skip_chain_check = fk_tol >= 0.1
 
     for u, w in pairs:
-        candidates = back_substitute_one(
-            pre,
-            sigma_E_arr,
-            float(u),
-            float(w),
-            a_1=a_1,
-            l_1=l_1,
-            d_2=d_2,
-            a_2=a_2,
-            l_2=l_2,
-            d_3=d_3,
-            a_3=a_3,
-            l_3=l_3,
-            d_4=d_4,
-            a_4=a_4,
-            l_4=l_4,
-            d_5=d_5,
-            a_5=a_5,
-            l_5=l_5,
-        )
+        try:
+            candidates = back_substitute_one(
+                pre,
+                sigma_E_arr,
+                float(u),
+                float(w),
+                a_1=a_1,
+                l_1=l_1,
+                d_2=d_2,
+                a_2=a_2,
+                l_2=l_2,
+                d_3=d_3,
+                a_3=a_3,
+                l_3=l_3,
+                d_4=d_4,
+                a_4=a_4,
+                l_4=l_4,
+                d_5=d_5,
+                a_5=a_5,
+                l_5=l_5,
+            )
+        except np.linalg.LinAlgError:
+            # Singular Cramer matrix at this (u, w): the back-substitution
+            # is degenerate for this root, so skip it like a candidate that
+            # fails FK closure. One degenerate root must never crash the
+            # whole solve -- the remaining well-conditioned roots still
+            # yield valid IK. (Mirrors the elimination-stage guard in
+            # ``eliminate_uw_pairs``.)
+            continue
         for v_1, v_2, v_3, v_4, v_5, v_6 in candidates:
             if skip_chain_check:
                 out.append([v_1, v_2, v_3, v_4, v_5, v_6])
