@@ -46,8 +46,9 @@ Both paths emit up to 8 candidates per swivel; FK closure filters
 spurious, cluster-merge (wrap-to-π) deduplicates across swivels.
 
 Per-arm cold-cache cost: ~0 (no symbolic precompute). Pure-Python;
-canonical path is sub-millisecond, the general path ~13 ms on the full
-16-swivel sweep (sub-millisecond for ``max_solutions=1``).
+canonical path is sub-millisecond, the general path ~4-5 ms on the full
+16-swivel sweep (vectorized over the swivel batch, #368; sub-millisecond
+for ``max_solutions=1``).
 
 References:
 
