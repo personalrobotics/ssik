@@ -38,6 +38,8 @@ diagnostics::
 """
 
 import logging as _logging
+import sys as _sys
+import warnings as _warnings
 
 from ssik._version import __version__
 from ssik.core.diagnostic import Diagnostic
@@ -55,9 +57,6 @@ _logging.getLogger(__name__).addHandler(_logging.NullHandler())
 # (https://scientific-python.org/specs/spec-0000/, which recommends dropping
 # Python 3 years and numpy 2 years after release). We allow them on a
 # best-effort, untested basis and warn once so users know. See #366.
-import sys as _sys
-import warnings as _warnings
-
 if _sys.version_info < (3, 11):
     _warnings.warn(
         f"ssik is running on Python {_sys.version_info.major}."
