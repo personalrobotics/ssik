@@ -423,6 +423,59 @@ The algorithmic ingredients are not novel — Raghavan–Roth (1990), Manocha–
 
 Cython hot loops cover the leaf primitives (POE forward kinematics, the Levenberg–Marquardt polish and analytical Jacobian); the rest is pure Python so it stays inspectable.
 
+### How a solver is picked
+
+`dispatch()` classifies the POE-normalized chain by kinematic topology and returns the fastest solver whose structural predicate matches — closed-form specialisations first, the numeric Raghavan–Roth path last. Predicates are tried top to bottom and the first match wins; the same classifier runs whether you load a URDF with `Manipulator.from_urdf` or bake an artifact with `ssik build`.
+
+```mermaid
+flowchart TD
+    START(["T_target<br/>POE-normalized chain"]) --> DOF{"6R or 7R?"}
+
+    %% 7R: concurrent-shoulder closed-form by family, else jointlock
+    DOF -->|7R| SH{"shoulder axes<br/>concurrent?<br/>within drift"}
+    SH -->|yes| WR{"wrist axes<br/>concurrent?"}
+    WR -->|"yes · SRS"| A0["seven_r.srs<br/>+ srs_polished for drift<br/>KUKA iiwa · Kinova Gen3"]:::cf
+    WR -->|"no · offset wrist"| A1["seven_r.spherical_shoulder<br/>+ polished for drift<br/>Franka / FR3 · xArm7"]:::cf
+    SH -->|no| JL["jointlock.seven_r<br/>lock 1 joint · sweep 16 · inner 6R"]:::fb
+    JL --> BUILT{"artifact built?"}
+    BUILT -->|"yes · ssik build"| CRR["cached Raghavan–Roth<br/>~17 ms · Rizon · Kassow"]:::rr
+    BUILT -->|"no · from_urdf"| HP["Husty–Pfurner backstop<br/>symmetric-DH safe · slower"]:::fb
+
+    %% 6R: Pieper-class closed-form, else Raghavan–Roth
+    DOF -->|6R| P3{"3 parallel axes<br/>at joints 1·2·3?"}
+    P3 -->|yes| B0["ikgeo.three_parallel<br/>UR3 / UR5 / UR10"]:::cf
+    P3 -->|no| WM{"spherical wrist?<br/>axes 3·4·5 meet"}
+    WM -->|yes| B1["ikgeo.spherical_*<br/>shoulder specialisation picks the variant<br/>Puma · Fanuc · IRB120 · xArm6"]:::cf
+    WM -->|no| B4["ikgeo.general_6r<br/>Raghavan–Roth + AE-3<br/>JACO 2 · Piper"]:::rr
+
+    classDef cf fill:#d3f9d8,stroke:#2f9e44,color:#0b2e13;
+    classDef rr fill:#dbe4ff,stroke:#4263eb,color:#0b1a40;
+    classDef fb fill:#ffe8cc,stroke:#e8590c,color:#3d1900;
+```
+
+Every solver returns algebraic candidates that pass through one shared tail: an optional Levenberg–Marquardt polish, an empty-result rescue, then limit / seed / truncate finalisation.
+
+```mermaid
+flowchart LR
+    C["algebraic IK<br/>candidates"] --> R{"allow_refinement<br/>or *_polished solver?"}
+    R -->|yes| LM["lm_refine<br/>LM on spatial Jacobian<br/>to FK tolerance"]:::post
+    R -->|no| E{"empty<br/>result?"}
+    LM --> E
+    E -->|"yes · allow_rescue"| RS["T-perturbation<br/>rescue + LM polish"]:::post
+    E -->|no| F["finalize_solutions<br/>limits → seed-sort → truncate"]:::post
+    RS --> F
+    F --> OUT(["list of Solution"])
+
+    classDef post fill:#e7f5ff,stroke:#1c7ed6,color:#08324f;
+```
+
+The tree folds a few details for readability:
+
+- **Exact vs `_polished`.** The `_polished` 7R solvers cover arms whose shoulder or wrist axes only *nearly* meet (Kinova Gen3's 12 mm / 0.4 mm drift, xArm7's near-concurrent wrist): the exact recipe seeds candidates, then LM polish recovers machine precision against the true FK. Exact solvers require true concurrence; the split is a drift threshold (≤ 40 mm for the SRS family).
+- **The three 6R spherical-wrist variants.** `ikgeo.spherical_*` is one of `spherical_two_parallel` (axes 1 ∥ 2 — Puma / Fanuc / KUKA KR), `spherical_two_intersecting` (‖p₁‖ ≈ 0, shared shoulder origin — ABB IRB120 / xArm6), or plain `spherical` (generic). All are closed-form; the shoulder geometry picks the tightest-conditioned one.
+- **Tier-1 search solvers.** `two_parallel` / `two_intersecting` are importable but never auto-dispatched — Raghavan–Roth handles the same chains 50–200× faster.
+- **When `lm_refine` runs.** `_polished` solvers (and the T-perturbation rescue) run it unconditionally as part of their algorithm; every other solver runs it only under `allow_refinement=True`, and only on candidates that miss the FK tolerance.
+
 **Bulletproof testing**: every solver lands with N-way cross-solver agreement on shared fixtures, FK closure ≤ 1e-10 on every retained IK, 500+ Hypothesis-fuzzed random poses per fixture, and an explicit speed bench that has to clear a regression gate. The current suite has **1300+ tests across 11 fixture arms**. Negative-result spikes (a Cython estimate that misses by 2-5×, a codegen-bake on a part that's 0.3% of runtime) are published as closed issues with profile data so the next contributor doesn't repeat the path.
 
 ## Documentation
