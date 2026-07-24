@@ -1,9 +1,9 @@
 """Validation harness for the Husty-Pfurner solver (Phase 5a of #158).
 
-The harness encodes the seven correctness oracles from #158 / #162 as
+The harness encodes the correctness oracles from #158 / #162 as
 parametrised test functions. The HP solver has landed (#184 / #185), so
-these run as live checks; a couple remain ``xfail(strict=False)`` for
-documented coverage gaps (oracles 3/4/6, tracked in #82 / #176 / #183).
+these run as live checks; one remains ``xfail(strict=False)`` for a
+documented coverage gap (oracle 6, tracked in #183).
 
 Oracles (per #158):
 
@@ -14,11 +14,6 @@ Oracles (per #158):
    robust to LAPACK-backend numeric drift). (A direct EAIK cross-check needs
    joint-convention reconciliation; the EAIK timing / coverage comparison
    lives in ``examples/04_compare_vs_eaik.py``.)
-3. **Raghavan-Roth solution-count parity** -- HP must not return fewer
-   solutions than RR on reachable poses (cross-checks two universal-6R
-   algebras).
-4. **JACO 2 RR composer cross-check** -- two independent algorithms on
-   the same 6R arm produce the same q-set within wrap-to-pi at 1e-8.
 5. **Hypothesis fuzz over random 6R chains** -- FK closure on every
    returned ``q`` (slow; opt-in).
 6. **Numerical-stability sweep** -- near-parallel-axis tangencies and
@@ -27,11 +22,21 @@ Oracles (per #158):
 7. **Determinism** -- byte-equal solution lists across runs for fixed
    inputs.
 
-Run the fast harness (oracles 1, 2, 4, 6, 7 with small inputs)::
+Oracles 3 and 4 (HP-vs-RR solution-count parity on JACO 2) were retired:
+#409 established HP and Raghavan-Roth are *complementary*, not competing,
+universal-6R solvers -- RR is the tier-2 general-6R path, HP is the
+locked-7R backstop. HP returning fewer branches than RR on a non-Pieper
+arm like JACO 2 (~90/100 poses) is expected, not a defect, so a parity
+assertion there tracked no real contract. HP's coverage is validated on
+its actual domain by ``test_husty_pfurner_locked_7r``; HP FK-closure on
+JACO 2 is covered by oracle 1; the meaningful HP-vs-RR cross-check lives
+in oracle 2 on UR5, an arm both solvers fully cover.
+
+Run the fast harness (oracles 1, 2, 6, 7 with small inputs)::
 
     uv run pytest tests/test_husty_pfurner_oracles.py
 
-Run the full validation (oracles 3, 5 included; minutes)::
+Run the full validation (oracle 5 included; minutes)::
 
     uv run pytest tests/test_husty_pfurner_oracles.py -m slow
 """
@@ -90,37 +95,6 @@ def _fk_closure_oracle(
     return sols, T
 
 
-def _q_set_match_oracle(
-    sols_a: list[Solution],
-    sols_b: list[Solution],
-    *,
-    atol: float = 1e-6,
-) -> None:
-    """Helper for oracles 2 + 4: assert two solver outputs produce the same
-    q-set modulo wrap-to-pi within ``atol`` per joint.
-
-    Comparison is order-independent: each ``sols_a`` candidate is matched
-    to its nearest ``sols_b`` neighbour by per-joint wrap-to-pi distance.
-    """
-    assert len(sols_a) == len(sols_b), f"solution counts differ: {len(sols_a)} vs {len(sols_b)}"
-    qs_b = [s.q for s in sols_b]
-    matched = [False] * len(qs_b)
-    for sa in sols_a:
-        best_idx = -1
-        best_d = float("inf")
-        for j, qb in enumerate(qs_b):
-            if matched[j]:
-                continue
-            wrapped = (sa.q - qb + np.pi) % (2 * np.pi) - np.pi
-            d = float(np.max(np.abs(wrapped)))
-            if d < best_d:
-                best_d = d
-                best_idx = j
-        assert best_idx >= 0, f"no candidate to match against sa.q={sa.q}"
-        assert best_d < atol, f"no q-match within {atol}: sa.q={sa.q}, closest_d={best_d:.2e}"
-        matched[best_idx] = True
-
-
 def _determinism_oracle(kb: KinBody, q_star: np.ndarray) -> None:
     """Oracle 7: two consecutive ``solve`` calls return byte-equal q vectors.
 
@@ -163,8 +137,10 @@ def test_oracle1_fk_closure_ur5() -> None:
 # ----------------------------------------------------------------------------
 # Oracle 2: cross-solver agreement on UR5 -- HP vs Raghavan-Roth, two
 # independent universal-6R algebras. UR5 is a clean spherical-wrist arm both
-# solve fully, so they must return the SAME solution set (unlike the JACO 2
-# oracles 3/4, where spurious-root filters legitimately disagree).
+# solve fully, so they must return the SAME solution set (unlike a non-Pieper
+# arm such as JACO 2, where the two solvers' spurious-root filters legitimately
+# disagree and HP -- the locked-7R backstop, #409 -- returns fewer branches
+# than the tier-2 RR path it isn't competing with).
 #
 # (An EAIK cross-check was the original intent here, but EAIK's URDF/DH frame
 # and per-joint sign/offset conventions differ from ssik's POE, so a correct
@@ -205,73 +181,6 @@ def test_oracle2_hp_rr_cross_check_ur5() -> None:
             assert _nearest_wrap(q, rr_q) < same_branch
         for q in rr_q:
             assert _nearest_wrap(q, hp_q) < same_branch
-
-
-# ----------------------------------------------------------------------------
-# Oracle 3: solution-count parity vs Raghavan-Roth (the other universal-6R
-# tier-2 algebra). HP and RR use independent algebraic systems; cross-
-# checking them catches missing IK branches in either solver.
-# ----------------------------------------------------------------------------
-
-
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "HP and Raghavan-Roth may return different solution counts when "
-        "their algebraic spurious-root filters disagree on edge cases. "
-        "Both produce FK-correct IKs; this oracle catches MISSING branches "
-        "where one returns 0 sols and the other returns >0. Tracked via "
-        "#82 (RR coverage) and #176 (HP coverage)."
-    ),
-)
-def test_oracle3_rr_parity_jaco2() -> None:
-    """HP must not return fewer solutions than RR on a reachable JACO 2
-    pose. Two independent universal-6R algebras on the same arm.
-    """
-    from ssik.solvers.ikgeo import general_6r as rr_general_6r
-
-    kb = build_kinbody(jaco2_specs())
-    rng = np.random.default_rng(0)
-    q_star = rng.uniform(-1.0, 1.0, size=6)
-    T = poe_forward_kinematics(kb, q_star)
-    hp_sols, _ = hp_solve(kb, T, allow_refinement=True)
-    rr_sols, _ = rr_general_6r.solve(kb, T)
-    assert len(hp_sols) >= len(rr_sols), (
-        f"HP returned {len(hp_sols)} solutions but RR found "
-        f"{len(rr_sols)} -- HP is missing solutions."
-    )
-
-
-# ----------------------------------------------------------------------------
-# Oracle 4: JACO 2 RR composer cross-check
-# ----------------------------------------------------------------------------
-
-
-@pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "HP and Raghavan-Roth may return different solution counts on "
-        "non-Pieper 6R arms when the algebraic systems have different "
-        "spurious-root filtering. Both produce FK-correct IKs but may "
-        "miss/include different branches. Tracked via #82 (RR coverage) "
-        "and #176 (HP coverage)."
-    ),
-)
-def test_oracle4_jaco2_rr_composer_cross_check() -> None:
-    """HP and ``ssik.solvers.ikgeo.general_6r`` (the Raghavan-Roth composer)
-    must agree on JACO 2 q-sets within 1e-8 wrap-to-pi. Two independent
-    algorithms on the same arm.
-    """
-    from ssik.solvers.ikgeo import general_6r as rr_general_6r
-
-    kb = build_kinbody(jaco2_specs())
-    rng = np.random.default_rng(0)
-    q_star = rng.uniform(-1.0, 1.0, size=6)
-    T = poe_forward_kinematics(kb, q_star)
-    hp_sols, hp_is_ls = hp_solve(kb, T, allow_refinement=True)
-    rr_sols, rr_is_ls = rr_general_6r.solve(kb, T)
-    assert hp_is_ls == rr_is_ls
-    _q_set_match_oracle(hp_sols, rr_sols, atol=1e-8)
 
 
 # ----------------------------------------------------------------------------
