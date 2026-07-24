@@ -296,6 +296,36 @@ def _min_rotation(u: NDArray[np.float64], v: NDArray[np.float64]) -> NDArray[np.
     return _axis_angle_matrix(axis / _norm3(axis), float(np.arccos(c)))
 
 
+def _sp4_branches(
+    h: NDArray[np.float64], k: NDArray[np.float64], p: NDArray[np.float64], delta: float
+) -> tuple[float, ...]:
+    """Subproblem 4: solve ``h . (Rot(k, q) p) == delta`` for ``q``.
+
+    ``A cos q + B sin q == C`` with ``A = h.p - (h.k)(k.p)``,
+    ``B = h.(k x p)``, ``C = delta - (h.k)(k.p)`` -- up to two roots
+    ``atan2(B, A) +/- arccos(C / |A,B|)`` (the elbow-up / elbow-down pair).
+    Empty when the projection is unreachable (``|C| > |A,B|``).
+
+    Scalar per-swivel form retained alongside :func:`_sp4_branches_batch`
+    for the exact in-limits swivel resolver (``_swivel_limits``, #369),
+    which walks candidate swivels one at a time rather than as a batch.
+    """
+    h_dot_k = float(h @ k)
+    k_dot_p = float(k @ p)
+    a_coef = float(h @ p) - h_dot_k * k_dot_p
+    b_coef = float(h @ _cross3(k, p))
+    c_const = delta - h_dot_k * k_dot_p
+    amplitude = float(np.hypot(a_coef, b_coef))
+    if amplitude < 1e-12:
+        return ()
+    ratio = c_const / amplitude
+    if abs(ratio) > 1.0 + 1e-9:
+        return ()
+    base = float(np.arctan2(b_coef, a_coef))
+    off = float(np.arccos(np.clip(ratio, -1.0, 1.0)))
+    return (base + off,) if off < 1e-12 else (base + off, base - off)
+
+
 def _verify_fk(
     sols: list[Solution],
     kb: KinBody,
