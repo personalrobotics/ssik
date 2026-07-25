@@ -245,20 +245,36 @@ def poe_to_dh(kb: KinBody) -> DhWithOffset:
         origins.append(foot_curr)
 
     # Frame n = tool flange. z_n from T_home[:3, 2], origin from T_home[:3, 3].
-    # x_n: project x_{n-1} onto plane perpendicular to z_n.
+    # x_n must satisfy the DH constraint x_n ⟂ z_{n-1} so the terminal transform
+    # A_n is a valid single DH step; t_post then absorbs the fixed offset from
+    # this DH frame n to the true flange.
+    #
+    # When z_{n-1} ∦ z_n (a *skew* wrist -- joint n's axis not parallel to the
+    # flange z), x_n is forced to ±(z_{n-1} x z_n), which is ⟂ both. The old
+    # code instead projected x_{n-1} onto ⟂z_n; that is ⟂z_{n-1} only in the
+    # parallel case, and it degenerates to an arbitrary reference direction when
+    # x_{n-1} ∥ z_n -- exactly the FANUC CRX non-/L geometry (joint 6 ⟂ flange,
+    # flange origin on joint 6's axis), where it silently produced alpha[n-1]=0
+    # instead of ±pi/2 and broke the FK_POE = T_pre @ FK_DH @ T_post invariant
+    # by O(1) (#418). Parallel/anti-parallel wrists (all currently shipped RR
+    # arms) keep the historical projection, so their DH is unchanged.
     z_n = t_home[:3, 2]
     o_n = t_home[:3, 3]
     z_axes.append(z_n)
-    x_prev = x_axes[-1]
-    x_proj = x_prev - _dot3(x_prev, z_n) * z_n
-    x_proj_norm = _norm3(x_proj)
-    if x_proj_norm < 1e-9:
-        ref = np.array([1.0, 0.0, 0.0])
-        if abs(_dot3(ref, z_n)) > 0.99:
-            ref = np.array([0.0, 1.0, 0.0])
-        x_proj = ref - _dot3(ref, z_n) * z_n
+    if abs(_dot3(z_axes[n - 1], z_n)) < 1.0 - 1e-9:
+        cross = _cross3(z_axes[n - 1], z_n)
+        x_axes.append(cross / _norm3(cross))
+    else:
+        x_prev = x_axes[-1]
+        x_proj = x_prev - _dot3(x_prev, z_n) * z_n
         x_proj_norm = _norm3(x_proj)
-    x_axes.append(x_proj / x_proj_norm)
+        if x_proj_norm < 1e-9:
+            ref = np.array([1.0, 0.0, 0.0])
+            if abs(_dot3(ref, z_n)) > 0.99:
+                ref = np.array([0.0, 1.0, 0.0])
+            x_proj = ref - _dot3(ref, z_n) * z_n
+            x_proj_norm = _norm3(x_proj)
+        x_axes.append(x_proj / x_proj_norm)
     origins.append(o_n)
 
     # Compute (alpha_i, a_i, d_i, theta_offset_i) for i=1..n, transitioning
