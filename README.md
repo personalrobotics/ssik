@@ -106,6 +106,12 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 | `rizon4_ik` | Flexiv Rizon 4 | **non-SRS 7R** | `base_link` | `flange` |
 | `kassow_kr810_ik` | Kassow KR810 | **non-SRS 7R** | `base` | `end_effector` |
 | `rizon10_ik` | Flexiv Rizon 10 | **non-SRS 7R** (~1.4 m reach) | `base_link` | `flange` |
+| `fanuc_crx3ia_ik` | FANUC CRX-3iA | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx5ia_ik` | FANUC CRX-5iA | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx10ia_ik` | FANUC CRX-10iA | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx10ialp_ik` | FANUC CRX-10iA/LP | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx20ial_ik` | FANUC CRX-20iA/L | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx30ia_ik` | FANUC CRX-30iA | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
 | `fanuc_crx10ial_ik` | FANUC CRX-10iA/L | **non-Pieper 6R** (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
 | `yam_ik` | I2RT YAM | **non-Pieper 6R** | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | **non-Pieper 6R** | `base` | `gripper` |
@@ -150,6 +156,12 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `rizon4_ik` | robot_descriptions / rizon4_description |
 | `kassow_kr810_ik` | Kassow KR810 URDF (vendor-supplied) |
 | `rizon10_ik` | Flexiv Rizon 10 URDF (vendor-supplied) |
+| `fanuc_crx3ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `fanuc_crx5ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `fanuc_crx10ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `fanuc_crx10ialp_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `fanuc_crx20ial_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `fanuc_crx30ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
 | `fanuc_crx10ial_ik` | ros-industrial / fanuc_crx10ia_support |
 | `yam_ik` | robot_descriptions / yam_description |
 | `big_yam_ik` | i2rt-robotics / i2rt |
@@ -402,6 +414,12 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | Rizon 4 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.55 ± 0.55 ms / FK 3e-7 / 4-60 sols |
 | Kassow KR810 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.52 ± 0.23 ms / FK 5e-8 / 4-42 sols |
 | Rizon 10 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 15.13 ± 0.20 ms / FK 6e-8 / 6-64 sols |
+| CRX-3iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 670 ± 10 µs / FK 1e-7 / 8-12 sols |
+| CRX-5iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 830 ± 100 µs / FK 3e-7 / 8-12 sols |
+| CRX-10iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 910 ± 60 µs / FK 8e-6 / 7-12 sols |
+| CRX-10iA/LP (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.01 ± 0.08 ms / FK 4e-6 / 4-12 sols |
+| CRX-20iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 710 ± 20 µs / FK 9e-7 / 4-12 sols |
+| CRX-30iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.07 ± 0.11 ms / FK 5e-6 / 4-12 sols |
 | CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 960 ± 10 µs / FK 2e-6 / 4-12 sols |
 | YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.01 ms / FK 3e-7 / 5-8 sols |
 | big_yam (**non-Pieper 6R**) | **refuses** ("Intersection point can't be calculated for two parallel axes") | 1.01 ± 0.01 ms / FK 7e-7 / 8 sols |

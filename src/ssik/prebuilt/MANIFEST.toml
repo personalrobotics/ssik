@@ -727,6 +727,228 @@ sols_max = 64
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
+[arms.fanuc_crx3ia_ik]
+display_name = "FANUC CRX-3iA"
+short_name = "CRX-3iA"
+fixture = "fanuc_crx3ia.urdf"
+fixture_kind = "urdf"
+fixture_source = "FANUC-CORPORATION/fanuc_description (Apache-2.0)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (non-spherical wrist)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 28
+artifact_size_kb = 63
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.fanuc_crx3ia_ik.bench]
+ms_mean = 0.67
+ms_ci95 = 0.01
+max_fk = 1.5e-07
+sols_min = 8
+sols_max = 12
+
+[arms.fanuc_crx3ia_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
+[arms.fanuc_crx5ia_ik]
+display_name = "FANUC CRX-5iA"
+short_name = "CRX-5iA"
+fixture = "fanuc_crx5ia.urdf"
+fixture_kind = "urdf"
+fixture_source = "FANUC-CORPORATION/fanuc_description (Apache-2.0)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (non-spherical wrist)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 24
+artifact_size_kb = 61
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.fanuc_crx5ia_ik.bench]
+ms_mean = 0.83
+ms_ci95 = 0.1
+max_fk = 3.4e-07
+sols_min = 8
+sols_max = 12
+
+[arms.fanuc_crx5ia_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
+[arms.fanuc_crx10ia_ik]
+display_name = "FANUC CRX-10iA"
+short_name = "CRX-10iA"
+fixture = "fanuc_crx10ia.urdf"
+fixture_kind = "urdf"
+fixture_source = "FANUC-CORPORATION/fanuc_description (Apache-2.0)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (non-spherical wrist)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 28
+artifact_size_kb = 61
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.fanuc_crx10ia_ik.bench]
+ms_mean = 0.91
+ms_ci95 = 0.06
+max_fk = 7.8e-06
+sols_min = 7
+sols_max = 12
+
+[arms.fanuc_crx10ia_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
+[arms.fanuc_crx10ialp_ik]
+display_name = "FANUC CRX-10iA/LP"
+short_name = "CRX-10iA/LP"
+fixture = "fanuc_crx10ialp.urdf"
+fixture_kind = "urdf"
+fixture_source = "FANUC-CORPORATION/fanuc_description (Apache-2.0)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (non-spherical wrist)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 26
+artifact_size_kb = 61
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.fanuc_crx10ialp_ik.bench]
+ms_mean = 1.01
+ms_ci95 = 0.08
+max_fk = 4.1e-06
+sols_min = 4
+sols_max = 12
+
+[arms.fanuc_crx10ialp_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
+[arms.fanuc_crx20ial_ik]
+display_name = "FANUC CRX-20iA/L"
+short_name = "CRX-20iA/L"
+fixture = "fanuc_crx20ial.urdf"
+fixture_kind = "urdf"
+fixture_source = "FANUC-CORPORATION/fanuc_description (Apache-2.0)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (non-spherical wrist)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 26
+artifact_size_kb = 61
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.fanuc_crx20ial_ik.bench]
+ms_mean = 0.71
+ms_ci95 = 0.02
+max_fk = 8.7e-07
+sols_min = 4
+sols_max = 12
+
+[arms.fanuc_crx20ial_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
+[arms.fanuc_crx30ia_ik]
+display_name = "FANUC CRX-30iA"
+short_name = "CRX-30iA"
+fixture = "fanuc_crx30ia.urdf"
+fixture_kind = "urdf"
+fixture_source = "FANUC-CORPORATION/fanuc_description (Apache-2.0)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R (non-spherical wrist)"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 31
+artifact_size_kb = 63
+sample_q = [0.3, 1.0, -0.8, 0.2, 0.4, -0.1]
+fk_ceiling_fuzz = 1e-4
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.fanuc_crx30ia_ik.bench]
+ms_mean = 1.07
+ms_ci95 = 0.11
+max_fk = 5.0e-06
+sols_min = 4
+sols_max = 12
+
+[arms.fanuc_crx30ia_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
 [arms.fanuc_crx10ial_ik]
 display_name = "FANUC CRX-10iA/L"
 short_name = "CRX-10iA/L"

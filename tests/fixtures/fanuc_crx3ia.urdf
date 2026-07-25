@@ -1,0 +1,89 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="crx3ia">
+  <link name="world" />
+  <link name="base_link">
+    </link>
+  <link name="J1_link">
+    </link>
+  <link name="J2_link">
+    </link>
+  <link name="J3_link">
+    </link>
+  <link name="J4_link">
+    </link>
+  <link name="J5_link">
+    </link>
+  <link name="J6_link">
+    </link>
+  <joint name="J1" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0  0  .161" />
+    <parent link="base_link" />
+    <child link="J1_link" />
+    <axis xyz=" 0  0  1" />
+    <limit effort="200" lower="-3.490658503988659" upper="3.490658503988659" velocity="2.2689280275926285" />
+  </joint>
+  <joint name="J2" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0  0  0" />
+    <parent link="J1_link" />
+    <child link="J2_link" />
+    <axis xyz=" 0  1  0" />
+    <limit effort="200" lower="-3.141575200297273" upper="3.141575200297273" velocity="2.2689280275926285" />
+  </joint>
+  <joint name="J3" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0  0  .28" />
+    <parent link="J2_link" />
+    <child link="J3_link" />
+    <axis xyz=" 0 -1  0" />
+    <limit effort="100" lower="-1.0943214410004447" upper="4.235914094590238" velocity="3.141592653589793" />
+  </joint>
+  <joint name="J4" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0  0  0" />
+    <parent link="J3_link" />
+    <child link="J4_link" />
+    <axis xyz="-1  0  0" />
+    <limit effort="80" lower="-3.3161255787892263" upper="3.3161255787892263" velocity="3.9269908169872414" />
+  </joint>
+  <joint name="J5" type="revolute">
+    <origin rpy="0 0 0" xyz=" .28  0  0" />
+    <parent link="J4_link" />
+    <child link="J5_link" />
+    <axis xyz=" 0 -1  0" />
+    <limit effort="60" lower="-3.141575200297273" upper="3.141575200297273" velocity="6.283185307179586" />
+  </joint>
+  <joint name="J6" type="revolute">
+    <origin rpy="0 0 0" xyz=" 0 -.111  0" />
+    <parent link="J5_link" />
+    <child link="J6_link" />
+    <axis xyz="-1  0  0" />
+    <limit effort="50" lower="-3.9269908169872414" upper="3.9269908169872414" velocity="6.283185307179586" />
+  </joint>
+  <link name="wbase" />
+  <joint name="base_link-wbase" type="fixed">
+    <origin rpy="0 0 0" xyz=" 0  0  .161" />
+    <parent link="base_link" />
+    <child link="wbase" />
+  </joint>
+  <link name="flange" />
+  <joint name="J6-flange" type="fixed">
+    <origin rpy="0 0 0" xyz=" .123  0  0" />
+    <parent link="J6_link" />
+    <child link="flange" />
+  </joint>
+  <link name="fanuc_flange" />
+  <joint name="flange-fanuc_flange" type="fixed">
+    <origin rpy="3.141592653589793 -1.5707963267948966 0.0" xyz="0 0 0" />
+    <parent link="flange" />
+    <child link="fanuc_flange" />
+  </joint>
+  <joint name="base_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="world" />
+    <child link="base_link" />
+  </joint>
+  <joint name="child_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="flange" />
+    <child link="tool0" />
+  </joint>
+  <link name="tool0" />
+</robot>

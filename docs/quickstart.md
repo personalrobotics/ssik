@@ -46,6 +46,12 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `rizon4_ik` | Flexiv Rizon 4 | non-SRS 7R | `base_link` | `flange` |
 | `kassow_kr810_ik` | Kassow KR810 | non-SRS 7R | `base` | `end_effector` |
 | `rizon10_ik` | Flexiv Rizon 10 | non-SRS 7R (~1.4 m reach) | `base_link` | `flange` |
+| `fanuc_crx3ia_ik` | FANUC CRX-3iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx5ia_ik` | FANUC CRX-5iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx10ia_ik` | FANUC CRX-10iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx10ialp_ik` | FANUC CRX-10iA/LP | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx20ial_ik` | FANUC CRX-20iA/L | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `fanuc_crx30ia_ik` | FANUC CRX-30iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
 | `fanuc_crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
 | `yam_ik` | I2RT YAM | non-Pieper 6R | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | non-Pieper 6R | `base` | `gripper` |

@@ -55,6 +55,12 @@ preprocessing) and cleaner to ship in production stacks.
 | `rizon4_ik` | `jointlock.seven_r` + cached-RR | ~8 min | ~1052 KB |
 | `kassow_kr810_ik` | `jointlock.seven_r` + cached-RR | ~4 min | ~729 KB |
 | `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~8 min | ~992 KB |
+| `fanuc_crx3ia_ik` | `ikgeo.general_6r` | ~28 s | ~63 KB |
+| `fanuc_crx5ia_ik` | `ikgeo.general_6r` | ~24 s | ~61 KB |
+| `fanuc_crx10ia_ik` | `ikgeo.general_6r` | ~28 s | ~61 KB |
+| `fanuc_crx10ialp_ik` | `ikgeo.general_6r` | ~26 s | ~61 KB |
+| `fanuc_crx20ial_ik` | `ikgeo.general_6r` | ~26 s | ~61 KB |
+| `fanuc_crx30ia_ik` | `ikgeo.general_6r` | ~31 s | ~63 KB |
 | `fanuc_crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
 | `yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 | `big_yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
