@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships 19 ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->36<!-- /AUTOGEN --> ready-to-import artifacts. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 | Module | Arm | Class | base_link | ee_link |
@@ -129,6 +129,19 @@ The wheel ships 19 ready-to-import artifacts. Each was built against a specific 
 from ssik.prebuilt import iiwa14_ik
 sols = iiwa14_ik.solve(T_target)
 ```
+
+Artifacts are organized by vendor, and the flat import above always works as an alias:
+
+```python
+import ssik
+ssik.list_arms()                             # discover everything, imports nothing
+ssik.list_arms(vendor="universal_robots")    # filter by vendor
+
+from ssik.prebuilt.universal_robots import ur5_ik   # vendor path (preferred)
+from ssik.prebuilt import ur5_ik                     # flat alias (still supported)
+```
+
+`import ssik`, `import ssik.prebuilt`, and `import ssik.prebuilt.<vendor>` load **zero** arm artifacts — only importing a specific `<arm>_ik` module builds anything.
 
 #### Where each fixture comes from
 

@@ -154,6 +154,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     add_arm_parser.add_argument(
+        "--vendor",
+        required=True,
+        help=(
+            "Vendor/brand subpackage the artifact ships under (#421): "
+            "ssik.prebuilt.<vendor>.<model>_ik. Lowercase manufacturer slug, "
+            "e.g. 'universal_robots', 'kuka', 'abb', 'fanuc' (use an existing "
+            "one where possible; 'misc' only for a genuine one-off)."
+        ),
+    )
+    add_arm_parser.add_argument(
         "--repo-root",
         type=Path,
         default=None,
@@ -496,7 +506,7 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     print("[ssik add-arm] Add this stanza to src/ssik/prebuilt/MANIFEST.toml")
     print("[ssik add-arm] (TODO fields need your judgement; the rest is derived):")
     print()
-    print(_render_manifest_stanza(args.name, args.base, args.ee, len(kb.joints), plan))
+    print(_render_manifest_stanza(args.name, args.base, args.ee, len(kb.joints), plan, args.vendor))
     print()
     print("[ssik add-arm] ✓ Then finish (build artifact, then one-click bench+docs):")
     print(f"[ssik add-arm]     uv run pytest {test_dest.relative_to(repo_root)} -v")
@@ -505,7 +515,9 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     return 0
 
 
-def _render_manifest_stanza(name: str, base: str, ee: str, dof: int, plan: DispatchPlan) -> str:
+def _render_manifest_stanza(
+    name: str, base: str, ee: str, dof: int, plan: DispatchPlan, vendor: str
+) -> str:
     """A ready-to-paste MANIFEST.toml stanza: derived fields filled, curated
     fields left as ``TODO`` for human judgement. ``regen_bench.py`` fills the
     ``[bench]`` block."""
@@ -515,6 +527,7 @@ def _render_manifest_stanza(name: str, base: str, ee: str, dof: int, plan: Dispa
             f"[arms.{name}]",
             'display_name = "TODO"',
             'short_name = "TODO"',
+            f'vendor = "{vendor}"',
             f'fixture = "{name}.urdf"',
             'fixture_kind = "urdf"',
             'fixture_source = "TODO (e.g. robot_descriptions / <pkg>)"',

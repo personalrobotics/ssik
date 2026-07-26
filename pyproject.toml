@@ -173,6 +173,9 @@ test-command = [
     'python -c "import ssik.refinement, ssik.kinematics.poe_fk as _p; assert ssik.refinement.__file__.endswith((\".so\", \".pyd\")), \"ssik.refinement not compiled in wheel\"; assert _p.__file__.endswith((\".so\", \".pyd\")), \"ssik.kinematics.poe_fk not compiled in wheel\""',
     'python -c "from ssik.prebuilt import iiwa14_ik; import numpy as np; q = np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]); T = iiwa14_ik.fk(q); sols = iiwa14_ik.solve(T); assert sols and max(s.fk_residual for s in sols) < 1e-9, \"iiwa14_ik smoke failed\""',
     'python -c "from ssik.prebuilt import franka_panda_ik; import numpy as np; T = franka_panda_ik.fk(np.array([0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5])); sols = franka_panda_ik.solve(T); assert sols, \"franka_panda_ik returned no IK\""',
+    # Vendor subpackages are in the wheel + the catalog works + the hierarchical
+    # import path resolves (#421); the flat aliases above cover backward-compat.
+    'python -c "import ssik; assert len(ssik.list_arms()) >= 36, \"catalog empty\"; from ssik.prebuilt.universal_robots import ur5_ik; import numpy as np; assert ur5_ik.solve(ur5_ik.fk(np.zeros(6))), \"hierarchical ur5 import/solve failed\""',
     "ssik --help",
 ]
 

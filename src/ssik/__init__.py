@@ -46,6 +46,7 @@ from ssik.core.diagnostic import Diagnostic
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.manipulator import Manipulator
+from ssik.prebuilt import list_arms  # catalog of shipped arms; imports no artifact (#421)
 
 # Library best practice: prevent "No handlers could be found" warnings and
 # avoid emitting any log records unless the consuming application configures
@@ -74,4 +75,5 @@ __all__ = [
     "Solution",
     "TolerancePolicy",
     "__version__",
+    "list_arms",
 ]

@@ -59,7 +59,7 @@ def _jointlock_arms_with_eligible_inner() -> list[str]:
         # Inspect the artifact's _DISPATCH_CACHE to determine if it has
         # at least one eligible inner solver. We just text-scan since the
         # tuple is emitted at codegen time.
-        text = (PREBUILT_DIR / f"{arm.name}.py").read_text()
+        text = (PREBUILT_DIR / arm.vendor / f"{arm.module_basename}.py").read_text()
         # extract the dispatch tuple region cheaply
         start = text.find("_DISPATCH_CACHE = (")
         end = text.find(")", start)
@@ -83,7 +83,8 @@ def test_artifact_ships_aot_block_not_blob(arm_name: str) -> None:
     """AOT-baked artifacts contain ``_AOT_PRIME_DATA``; blob-primed
     artifacts contained ``_RR_PRIME_BLOBS_B85``. The post-#320 codegen
     only emits the former."""
-    text = (PREBUILT_DIR / f"{arm_name}.py").read_text()
+    arm = load_manifest()[arm_name]
+    text = (PREBUILT_DIR / arm.vendor / f"{arm.module_basename}.py").read_text()
     assert "_AOT_PRIME_DATA" in text, f"{arm_name}: expected post-#320 AOT prime block; not found"
     assert "_RR_PRIME_BLOBS_B85" not in text, (
         f"{arm_name}: legacy blob-prime block present; regen the artifact"
@@ -110,7 +111,12 @@ def test_import_does_not_call_sympy_lambdify(arm_name: str) -> None:
     # mutation doesn't leak into later arms' solves.
     import sys
 
-    mod_path = f"ssik.prebuilt.{arm_name}"
+    # Evict BOTH the legacy flat alias and the real vendor module (#421): the
+    # flat name is an alias into the vendor subpackage, so popping only the
+    # flat name leaves the real module cached and its AOT-prime never re-runs.
+    arm = load_manifest()[arm_name]
+    mod_path = arm.hier_module
+    sys.modules.pop(f"ssik.prebuilt.{arm_name}", None)
     sys.modules.pop(mod_path, None)
     rr_mod._DERIVATION_CACHE.clear()
     rr_mod._PRIMED_LINEARITY_MAP.clear()

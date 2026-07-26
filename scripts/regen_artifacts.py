@@ -66,8 +66,28 @@ def main() -> int:
             continue
         _emit_arm(arm)
 
+    _regen_prebuilt_init(manifest)
     print("done.")
     return 0
+
+
+def _regen_prebuilt_init(manifest: dict[str, Arm]) -> None:
+    """Regenerate the ``_LEGACY_ALIASES`` map in ``prebuilt/__init__.py`` from
+    the full manifest (#421) -- keeps the flat-import alias finder in sync with
+    the vendor layout. Runs on every regen, slow arms included, so the map is
+    complete even when ``--include-slow`` is off."""
+    import re
+
+    init = ARTIFACTS / "__init__.py"
+    rows = ",\n".join(
+        f'    "{a.name}": "{a.vendor}.{a.module_basename}"' for a in manifest.values()
+    )
+    new_block = "_LEGACY_ALIASES: dict[str, str] = {\n" + rows + ",\n}"
+    text = init.read_text()
+    text = re.sub(
+        r"_LEGACY_ALIASES: dict\[str, str\] = \{.*?\n\}", new_block, text, count=1, flags=re.S
+    )
+    init.write_text(text)
 
 
 def _emit_arm(arm: Arm) -> None:
@@ -86,7 +106,11 @@ def _emit_arm(arm: Arm) -> None:
             ee_link_name=arm.ee_link,
         )
     plan = dispatch(kb)
-    out = ARTIFACTS / f"{arm.name}.py"
+    # Vendor subpackage layout (#421): src/ssik/prebuilt/<vendor>/<basename>.py
+    vendor_dir = ARTIFACTS / arm.vendor
+    vendor_dir.mkdir(exist_ok=True)
+    (vendor_dir / "__init__.py").touch()
+    out = vendor_dir / f"{arm.module_basename}.py"
     emit_artifact(
         kb=kb,
         plan=plan,

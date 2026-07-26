@@ -476,8 +476,8 @@ def test_no_prebuilt_reinlines_the_pipeline() -> None:
     assert prebuilt_init is not None
     prebuilt_dir = Path(prebuilt_init).parent
     checked = 0
-    for arm in load_manifest():
-        src_path = prebuilt_dir / f"{arm}.py"
+    for arm in load_manifest().values():
+        src_path = prebuilt_dir / arm.vendor / f"{arm.module_basename}.py"
         if not src_path.exists():
             continue
         src = src_path.read_text()

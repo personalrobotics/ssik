@@ -60,6 +60,8 @@ def test_add_arm_generates_files(workspace: Path) -> None:
         "flange",
         "--name",
         "rizon4_addarm_test",
+        "--vendor",
+        "flexiv",
         "--repo-root",
         str(workspace),
     )
@@ -103,6 +105,8 @@ def test_add_arm_refuses_overwrite_without_force(workspace: Path) -> None:
         "flange",
         "--name",
         "preexisting_arm",
+        "--vendor",
+        "flexiv",
         "--repo-root",
         str(workspace),
     )
@@ -127,6 +131,8 @@ def test_add_arm_force_overwrites(workspace: Path) -> None:
         "flange",
         "--name",
         "force_test",
+        "--vendor",
+        "flexiv",
         "--repo-root",
         str(workspace),
         "--force",
@@ -148,6 +154,8 @@ def test_add_arm_generated_test_is_valid_python(workspace: Path) -> None:
         "flange",
         "--name",
         "compile_test",
+        "--vendor",
+        "flexiv",
         "--repo-root",
         str(workspace),
     )
@@ -176,6 +184,8 @@ def test_add_arm_generated_test_runs_passes(workspace: Path, monkeypatch) -> Non
         "flange",
         "--name",
         name,
+        "--vendor",
+        "flexiv",
         "--repo-root",
         str(REPO_ROOT),
         "--force",
@@ -214,6 +224,8 @@ def test_add_arm_missing_urdf_errors_cleanly(workspace: Path) -> None:
         "ee",
         "--name",
         "ghost_arm",
+        "--vendor",
+        "flexiv",
         "--repo-root",
         str(workspace),
     )

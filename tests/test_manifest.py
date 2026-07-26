@@ -47,21 +47,23 @@ def test_every_shipped_prebuilt_has_a_manifest_entry(manifest: dict[str, Arm]) -
     pkg = importlib.import_module("ssik.prebuilt")
     assert pkg.__file__ is not None
     prebuilt_dir = Path(pkg.__file__).parent
+    # Artifacts live under vendor subpackages: <vendor>/<basename>_ik.py (#421).
+    # Compare (vendor, basename) tuples against the manifest's declared layout.
     on_disk = {
-        p.stem
-        for p in prebuilt_dir.glob("*_ik.py")
-        if not p.stem.startswith("_") and p.stem != "__init__"
+        (p.parent.name, p.stem)
+        for p in prebuilt_dir.glob("*/*_ik.py")
+        if not p.stem.startswith("_")
     }
-    in_manifest = set(manifest.keys())
+    in_manifest = {(a.vendor, a.module_basename) for a in manifest.values()}
     missing_from_manifest = on_disk - in_manifest
     missing_from_disk = in_manifest - on_disk
     assert not missing_from_manifest, (
         f"these prebuilt artifacts are on disk but absent from "
-        f"MANIFEST.toml: {sorted(missing_from_manifest)}"
+        f"MANIFEST.toml (vendor, module): {sorted(missing_from_manifest)}"
     )
     assert not missing_from_disk, (
         f"these manifest entries have no corresponding prebuilt artifact "
-        f"on disk: {sorted(missing_from_disk)} (regenerate with "
+        f"on disk (vendor, module): {sorted(missing_from_disk)} (regenerate with "
         f"`uv run python scripts/regen_artifacts.py` and `--include-slow` "
         f"if any are slow_build = true)"
     )

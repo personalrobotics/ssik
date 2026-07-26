@@ -97,9 +97,39 @@ class Arm:
     # their real hardware. Surfaced in the README's prebuilt table.
     # Required for every arm (#311); empty string forbidden.
     fixture_source: str = ""
+    # Vendor/brand slug -- the subpackage this arm's artifact lives under,
+    # ``ssik.prebuilt.<vendor>.<module>`` (#421). Defaults to ``"misc"``.
+    vendor: str = "misc"
     bench: ArmBench | None = None
     eaik: ArmEaik | None = None
     known_gaps: ArmKnownGap | None = None
+
+    @property
+    def module_basename(self) -> str:
+        """Artifact module name under the vendor package, with the redundant
+        vendor prefix stripped (``fanuc_crx10ia_ik`` -> ``crx10ia_ik``)."""
+        pfx = _VENDOR_STRIP_PREFIX.get(self.vendor)
+        if pfx and self.name.startswith(pfx):
+            return self.name[len(pfx) :]
+        return self.name
+
+    @property
+    def hier_module(self) -> str:
+        """Full dotted import path: ``ssik.prebuilt.<vendor>.<basename>``."""
+        return f"ssik.prebuilt.{self.vendor}.{self.module_basename}"
+
+
+# Vendor slug -> leading module-name token to strip for the hierarchical
+# artifact name, so e.g. ``fanuc_crx10ia_ik`` becomes ``fanuc.crx10ia_ik``
+# rather than ``fanuc.fanuc_crx10ia_ik``. Vendors absent here keep the full
+# ``name`` (``universal_robots.ur5_ik``, ``kinova.gen3_ik``).
+_VENDOR_STRIP_PREFIX: dict[str, str] = {
+    "fanuc": "fanuc_",
+    "standard_bots": "standardbots_",
+    "franka": "franka_",
+    "openarm": "openarm_",
+    "kassow": "kassow_",
+}
 
 
 def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
@@ -173,10 +203,25 @@ def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
         platform_drift=bool(body["platform_drift"]),
         drift_markers=tuple(str(m) for m in body.get("drift_markers", [])),  # type: ignore[arg-type]
         fixture_source=_required_fixture_source(name, body),
+        vendor=_required_vendor(name, body),
         bench=bench,
         eaik=eaik,
         known_gaps=known_gaps,
     )
+
+
+def _required_vendor(name: str, body: dict[str, object]) -> str:
+    """Every arm must declare a ``vendor`` subpackage slug (#421) so its
+    artifact lands under ``ssik.prebuilt.<vendor>.<model>_ik`` and new arms
+    always use the hierarchical layout. Use ``"misc"`` explicitly for genuine
+    one-offs; the empty/absent case is rejected so it can't slip through."""
+    v = body.get("vendor")
+    if not isinstance(v, str) or not v.strip():
+        raise ValueError(
+            f"arm {name!r}: ``vendor`` is required (#421); set a subpackage slug "
+            'like vendor = "universal_robots" (or "misc" for a genuine one-off)'
+        )
+    return v.strip()
 
 
 def _required_fixture_source(name: str, body: dict[str, object]) -> str:

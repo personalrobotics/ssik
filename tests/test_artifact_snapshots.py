@@ -134,7 +134,7 @@ def test_committed_artifact_matches_regeneration(arm_name: str) -> None:
     """
     arm = _MANIFEST[arm_name]
     rendered = _emit(arm)
-    committed_path = ARTIFACTS / f"{arm_name}.py"
+    committed_path = ARTIFACTS / arm.vendor / f"{arm.module_basename}.py"
     assert committed_path.exists(), (
         f"committed artifact {committed_path.relative_to(Path(__file__).parent.parent)} "
         f"is missing -- run `uv run python scripts/regen_artifacts.py` to create it."
