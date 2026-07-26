@@ -26,7 +26,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 
 <!-- AUTOGEN:quickstart_prebuilt_table -->
 <details>
-<summary><b>Universal Robots</b> &mdash; <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -41,7 +41,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Unimation</b> &mdash; <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
+<summary><b>Unimation</b>: <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -50,7 +50,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Kinova</b> &mdash; <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -60,7 +60,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>KUKA</b> &mdash; <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -69,7 +69,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Franka</b> &mdash; <code>ssik.prebuilt.franka</code> (2 arms)</summary>
+<summary><b>Franka</b>: <code>ssik.prebuilt.franka</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -79,7 +79,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>UFactory</b> &mdash; <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
+<summary><b>UFactory</b>: <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -89,7 +89,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Unitree</b> &mdash; <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
+<summary><b>Unitree</b>: <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -98,7 +98,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>AgileX</b> &mdash; <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
+<summary><b>AgileX</b>: <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -107,7 +107,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Flexiv</b> &mdash; <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
+<summary><b>Flexiv</b>: <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -117,7 +117,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Kassow</b> &mdash; <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
+<summary><b>Kassow</b>: <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -126,7 +126,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>FANUC</b> &mdash; <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -141,7 +141,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>I2RT</b> &mdash; <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
+<summary><b>I2RT</b>: <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -151,7 +151,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Enactic OpenArm</b> &mdash; <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
+<summary><b>Enactic OpenArm</b>: <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -161,7 +161,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Galaxea</b> &mdash; <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
+<summary><b>Galaxea</b>: <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -171,7 +171,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Standard Bots</b> &mdash; <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
+<summary><b>Standard Bots</b>: <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|

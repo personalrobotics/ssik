@@ -1,10 +1,10 @@
 # `ssik.prebuilt`
 
 Pre-built `ssik` IK modules for popular robot arms, shipped with the wheel.
-Each `.py` file is a self-contained artifact emitted by `ssik build` — it
+Each `.py` file is a self-contained artifact emitted by `ssik build`. It
 bakes the per-arm KinBody constants, dispatched solver choice, and any cached
 symbolic preprocessing into a single Python module. **No URDF parsing, no
-`urchin` dependency, no cold-cache work at import time** — just a `solve(T)`
+`urchin` dependency, no cold-cache work at import time**: just a `solve(T)`
 function.
 
 ## Usage
@@ -35,7 +35,7 @@ preprocessing) and cleaner to ship in production stacks.
 
 <!-- AUTOGEN:prebuilt_readme_table -->
 <details>
-<summary><b>Universal Robots</b> &mdash; <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -50,7 +50,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Unimation</b> &mdash; <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
+<summary><b>Unimation</b>: <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -59,7 +59,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Kinova</b> &mdash; <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -69,7 +69,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>KUKA</b> &mdash; <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -78,7 +78,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Franka</b> &mdash; <code>ssik.prebuilt.franka</code> (2 arms)</summary>
+<summary><b>Franka</b>: <code>ssik.prebuilt.franka</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -88,7 +88,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>UFactory</b> &mdash; <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
+<summary><b>UFactory</b>: <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -98,7 +98,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Unitree</b> &mdash; <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
+<summary><b>Unitree</b>: <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -107,7 +107,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>AgileX</b> &mdash; <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
+<summary><b>AgileX</b>: <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -116,7 +116,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Flexiv</b> &mdash; <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
+<summary><b>Flexiv</b>: <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -126,7 +126,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Kassow</b> &mdash; <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
+<summary><b>Kassow</b>: <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -135,7 +135,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>FANUC</b> &mdash; <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -150,7 +150,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>I2RT</b> &mdash; <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
+<summary><b>I2RT</b>: <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -160,7 +160,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Enactic OpenArm</b> &mdash; <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
+<summary><b>Enactic OpenArm</b>: <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -170,7 +170,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Galaxea</b> &mdash; <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
+<summary><b>Galaxea</b>: <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -180,7 +180,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Standard Bots</b> &mdash; <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
+<summary><b>Standard Bots</b>: <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -200,15 +200,15 @@ every IK call hits warm-cache speed.
 
 See [`examples/`](../../../examples/) for runnable scripts:
 
-- `01_ur5_quickstart.py` — basic API tour using `ur5_ik`
-- `02_jaco2_non_pieper.py` — non-Pieper 6R using `jaco2_ik`
-- `03_gen3_polished_srs.py` — approximate-SRS using `gen3_ik`
-- `04_compare_vs_eaik.py` — measured benchmark vs EAIK over 100 random poses
+- `01_ur5_quickstart.py`: basic API tour using `ur5_ik`
+- `02_jaco2_non_pieper.py`: non-Pieper 6R using `jaco2_ik`
+- `03_gen3_polished_srs.py`: approximate-SRS using `gen3_ik`
+- `04_compare_vs_eaik.py`: measured benchmark vs EAIK over 100 random poses
 
 ## Regenerating
 
 These files are committed to the repo and act as **codegen-drift snapshot
-tests** — `tests/test_artifact_snapshots.py` re-emits them and asserts
+tests**: `tests/test_artifact_snapshots.py` re-emits them and asserts
 byte-equal against the committed copy.
 
 If you change `ssik.core.codegen` or any solver's dispatch reasoning, the

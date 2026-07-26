@@ -7,6 +7,7 @@ regions in:
   docs/quickstart.md            prebuilt table
   docs/index.md                 arm count + roster (inline prose anchors)
   docs/setting_up_your_robot.md arm count (inline prose anchors)
+  docs/arm_coverage.md          fixture-provenance table
   src/ssik/prebuilt/README.md   build-time / artifact-size table
   CITATION.cff                  abstract arm count + roster (regex, not anchors --
                                 YAML can't carry HTML-comment anchors)
@@ -305,7 +306,7 @@ def _grouped_by_vendor(arms: dict[str, Arm], header: str, row_fn: Callable[[Arm]
         rows = "\n".join(row_fn(arm) for arm in group)
         n = len(group)
         summary = (
-            f"<summary><b>{_vendor_label(vendor)}</b> &mdash; "
+            f"<summary><b>{_vendor_label(vendor)}</b>: "
             f"<code>ssik.prebuilt.{vendor}</code> "
             f"({n} arm{'s' if n != 1 else ''})</summary>"
         )
@@ -326,7 +327,7 @@ def _render(arms: dict[str, Arm], anchor: str) -> str | None:
     if anchor == "prebuilt_readme_table":
         header = "| Arm | Solver | Build time | Artifact size |\n|---|---|:---:|:---:|"
         return _grouped_by_vendor(arms, header, _row_prebuilt_readme)
-    if anchor == "readme_fixture_source_table":
+    if anchor == "fixture_source_table":
         header = "| Module | Fixture provenance |\n|---|---|"
         return _grouped_by_vendor(arms, header, _row_fixture_source)
     if anchor == "arm_count":
@@ -341,6 +342,7 @@ _FILES: list[Path] = [
     REPO_ROOT / "docs" / "quickstart.md",
     REPO_ROOT / "docs" / "index.md",
     REPO_ROOT / "docs" / "setting_up_your_robot.md",
+    REPO_ROOT / "docs" / "arm_coverage.md",
     REPO_ROOT / "src" / "ssik" / "prebuilt" / "README.md",
 ]
 
