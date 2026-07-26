@@ -590,21 +590,15 @@ The fields are named for *why* they exist so log messages can say `"SP6 sign bra
 
 The default `subproblem_numerical = 1e-5` is intentionally pragmatic — **already two orders below what any physical robot can mechanically repeat**, but cheap enough that all prebuilts hit it without LM polish. Most control / planning users want exactly this default.
 
-**To get machine precision** (RL training, differentiable IK, sample-based planning, math validation), opt in:
+**To get machine precision** (RL training, differentiable IK, sample-based planning, math validation), tighten the one field that gates FK closure and opt into LM polish:
 
 ```python
-from ssik import TolerancePolicy
-from ssik.prebuilt import franka_panda_ik
+from dataclasses import replace
+from ssik import DEFAULT_TOLERANCE_POLICY
+from ssik.prebuilt.franka import panda_ik
 
-tight = TolerancePolicy(
-    axis_parallel=1e-8,
-    axis_intersect=1e-8,
-    subproblem_feasibility=1e-9,
-    subproblem_numerical=1e-9,         # ← 4 orders tighter
-    subproblem_degeneracy=1e-12,
-    subproblem_dedup=1e-3,
-)
-sols = franka_panda_ik.solve(T_target, policy=tight, allow_refinement=True)
+tight = replace(DEFAULT_TOLERANCE_POLICY, subproblem_numerical=1e-9)  # 4 orders tighter
+sols = panda_ik.solve(T_target, policy=tight, allow_refinement=True)
 # every returned IK FK-closes ~3e-10 (~0.3 nm position error)
 ```
 
@@ -635,7 +629,7 @@ Out of scope: collision filtering (use FCL or similar at the application layer) 
 
 ## How it compares
 
-Numerical-IK libraries take a seed, run damped least-squares to a **single** converged configuration, and stop. ssik returns **every analytical branch** — with FK closure well below typical robot repeatability by default, tightenable to machine precision (see [Tuning knobs](#tuning-knobs) below). Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
+Numerical-IK libraries take a seed, run damped least-squares to a **single** converged configuration, and stop. ssik returns **every analytical branch**. Branch enumeration matters for motion planning (try every branch, pick the one with best clearance), for dexterity analysis (the manipulability ellipsoid is per-branch), and for trajectory continuation across kinematic singularities.
 
 EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-decomposition solvers. It's analytical on the kinematic families it recognises and refuses everything else. The table below is **measured automatically** by [`scripts/regen_bench.py`](scripts/regen_bench.py) (both libraries over the same 200 random reachable poses per arm, Apple M3 single-thread, mean ± 95% CI via 1000-resample bootstrap) and stored in the manifest, so it refreshes when an arm is added — no hand-maintained numbers. FK residual is the Frobenius norm `‖FK(q) − T‖`. Each library is fed the same manufacturer fixture as-is (no manual joint-locking), so an arm whose URDF bundles gripper/extra joints can exceed EAIK's 6R limit.
 
@@ -797,7 +791,9 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 <!-- /AUTOGEN -->
 
-The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).
+The **sols** column is the range of branch counts across the reachable poses: constant for Pieper-class arms (Puma → 8), variable for non-Pieper 6R (spurious roots of the degree-8 Sylvester resultant fall complex at some poses), and the discretised redundancy-manifold sample × algebraic-branch product for 7R (iiwa14: 16-sample swivel × 8 = 128).
+
+EAIK is ~100× faster on Pieper-class 6R — its native sweet spot, which ssik doesn't try to compete on. The point is the **refuses** rows: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm — the geometries ssik exists for. Refusal strings are EAIK's own errors, captured verbatim from its loader. A numerical-IK comparison (MINK) is tracked in [#236](https://github.com/personalrobotics/ssik/issues/236).
 
 ## Under the hood
 
