@@ -50,15 +50,14 @@ def _cross3(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float6
     irrelevant to a single 3-vector."""
     a0, a1, a2 = a[0], a[1], a[2]
     b0, b1, b2 = b[0], b[1], b[2]
-    return np.array(
-        [a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0], dtype=np.float64
-    )
+    return np.array([a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0], dtype=np.float64)
 
 
 def _norm3(a: NDArray[np.float64]) -> float:
     """Euclidean norm of a 3-vector. ~2x faster than ``np.linalg.norm``,
     which pays for ravel + complex-type checks + dispatcher."""
     return math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
+
 
 # Below this the b-sinusoid amplitude sqrt(A^2 + B^2) is ~0: the three axes are
 # (near-)collinear and no general decomposition exists. SRS shoulder/wrist
@@ -184,9 +183,7 @@ def _rodrigues_axis_batch(
     k = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]], dtype=np.float64)
     k2 = k @ k
     return (
-        _EYE3[None, :, :]
-        + s[:, None, None] * k[None, :, :]
-        + omc[:, None, None] * k2[None, :, :]
+        _EYE3[None, :, :] + s[:, None, None] * k[None, :, :] + omc[:, None, None] * k2[None, :, :]
     )
 
 
@@ -207,7 +204,7 @@ def _angle_about_batch(
     nf = np.linalg.norm(vf, axis=1)
     nt = np.linalg.norm(vt, axis=1)
     out[(nf < _GIMBAL_EPS) | (nt < _GIMBAL_EPS)] = 0.0
-    return out
+    return np.asarray(out, dtype=np.float64)
 
 
 def decompose_3axis_batch(
@@ -250,7 +247,7 @@ def decompose_3axis_batch(
     rt_n1 = np.einsum("nij,i->nj", R, u1)  # R^T u1, (N, 3)
     ref = _unit_perp(u3)  # (3,), constant
 
-    branches: list[tuple[NDArray, NDArray, NDArray]] = []
+    branches: list[tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]] = []
     for b in (phi + delta, phi - delta):  # each (N,)
         rb = _rodrigues_axis_batch(u2, b)  # (N, 3, 3)
         vf = np.einsum("nij,j->ni", rb, u3)  # (N, 3)

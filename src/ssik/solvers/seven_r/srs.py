@@ -205,11 +205,7 @@ def _rodrigues_axes_batch(
     K[:, 2, 0] = -ay
     K[:, 2, 1] = ax
     K2 = K @ K
-    return (
-        np.eye(3)[None, :, :]
-        + s[:, None, None] * K
-        + omc[:, None, None] * K2
-    )
+    return np.eye(3)[None, :, :] + s[:, None, None] * K + omc[:, None, None] * K2
 
 
 def _min_rotation_batch(
