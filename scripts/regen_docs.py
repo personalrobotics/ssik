@@ -131,7 +131,8 @@ def _row_readme_prebuilt(arm: Arm) -> str:
             cls = f"**{head}** ({paren}"
         else:
             cls = f"**{cls}**"
-    return f"| `{arm.name}` | {arm.table_name} | {cls} | `{arm.base_link}` | `{arm.ee_link}` |"
+    mod = arm.module_basename
+    return f"| `{mod}` | {arm.table_name} | {cls} | `{arm.base_link}` | `{arm.ee_link}` |"
 
 
 def _row_readme_eaik(arm: Arm) -> str:
@@ -199,7 +200,8 @@ def _row_quickstart_prebuilt(arm: Arm) -> str:
     skim-reference, not the marketing comparison.
     """
     cls = arm.kinematic_class.replace("**", "")
-    return f"| `{arm.name}` | {arm.table_name} | {cls} | `{arm.base_link}` | `{arm.ee_link}` |"
+    mod = arm.module_basename
+    return f"| `{mod}` | {arm.table_name} | {cls} | `{arm.base_link}` | `{arm.ee_link}` |"
 
 
 def _row_prebuilt_readme(arm: Arm) -> str:
@@ -263,20 +265,64 @@ def _rewrite_anchors(text: str, renderer: Callable[[str], str | None]) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Human-facing vendor labels for the collapsible-table summaries. The slug
+# (subpackage name) is the source of truth; this only prettifies acronym /
+# multi-word brands that title-casing would mangle. Unlisted vendors fall
+# back to ``slug.replace("_", " ").title()`` -- correct for most brands, so a
+# newly-onboarded vendor renders reasonably even before it's added here.
+_VENDOR_LABELS: dict[str, str] = {
+    "universal_robots": "Universal Robots",
+    "fanuc": "FANUC",
+    "ufactory": "UFactory",
+    "i2rt": "I2RT",
+    "kuka": "KUKA",
+    "agilex": "AgileX",
+    "openarm": "Enactic OpenArm",
+    "standard_bots": "Standard Bots",
+    "misc": "Other",
+}
+
+
+def _vendor_label(slug: str) -> str:
+    return _VENDOR_LABELS.get(slug, slug.replace("_", " ").title())
+
+
+def _grouped_by_vendor(arms: dict[str, Arm], header: str, row_fn: Callable[[Arm], str]) -> str:
+    """Render one collapsible ``<details>`` block per vendor, each holding a
+    markdown table built with ``row_fn``. Keeps the prebuilt tables navigable
+    as the roster scales toward 100 arms instead of one 100-row wall.
+
+    Vendors appear in first-occurrence order; arms keep manifest order within
+    a vendor. The blank lines around the table are required for GitHub /
+    PyPI to render markdown inside the HTML block.
+    """
+    groups: dict[str, list[Arm]] = {}
+    for arm in arms.values():
+        groups.setdefault(arm.vendor, []).append(arm)
+    blocks = []
+    for vendor, group in groups.items():
+        rows = "\n".join(row_fn(arm) for arm in group)
+        n = len(group)
+        summary = (
+            f"<summary><b>{_vendor_label(vendor)}</b> &mdash; "
+            f"<code>ssik.prebuilt.{vendor}</code> "
+            f"({n} arm{'s' if n != 1 else ''})</summary>"
+        )
+        blocks.append(f"<details>\n{summary}\n\n{header}\n{rows}\n\n</details>")
+    return "\n\n".join(blocks)
+
+
 def _render(arms: dict[str, Arm], anchor: str) -> str | None:
     """Return the body for one anchor, or ``None`` if unknown."""
+    module_table_header = "| Module | Arm | Class | base_link | ee_link |\n|---|---|---|---|---|"
     if anchor == "readme_prebuilt_table":
-        rows = [_row_readme_prebuilt(arm) for arm in arms.values()]
-        header = "| Module | Arm | Class | base_link | ee_link |\n|---|---|---|---|---|"
-        return header + "\n" + "\n".join(rows)
+        return _grouped_by_vendor(arms, module_table_header, _row_readme_prebuilt)
     if anchor == "readme_eaik_table":
         rows = [_row_readme_eaik(arm) for arm in arms.values()]
         header = "| Arm (class) | EAIK | ssik |\n|---|---|---|"
         return header + "\n" + "\n".join(rows)
     if anchor == "quickstart_prebuilt_table":
-        rows = [_row_quickstart_prebuilt(arm) for arm in arms.values()]
-        header = "| Module | Arm | Class | base_link | ee_link |\n|---|---|---|---|---|"
-        return header + "\n" + "\n".join(rows)
+        return _grouped_by_vendor(arms, module_table_header, _row_quickstart_prebuilt)
     if anchor == "prebuilt_readme_table":
         rows = [_row_prebuilt_readme(arm) for arm in arms.values()]
         header = "| Arm | Solver | Build time | Artifact size |\n|---|---|:---:|:---:|"

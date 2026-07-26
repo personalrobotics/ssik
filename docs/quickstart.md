@@ -25,6 +25,9 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 ### Shipped prebuilts
 
 <!-- AUTOGEN:quickstart_prebuilt_table -->
+<details>
+<summary><b>Universal Robots</b> &mdash; <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `ur5_ik` | Universal Robots UR5 | three-parallel 6R | `base_link` | `ee_link` |
@@ -34,35 +37,149 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `ur16e_ik` | Universal Robots UR16e | three-parallel 6R | `base_link` | `tool0` |
 | `ur20_ik` | Universal Robots UR20 | three-parallel 6R | `base_link` | `tool0` |
 | `ur30_ik` | Universal Robots UR30 | three-parallel 6R | `base_link` | `tool0` |
+
+</details>
+
+<details>
+<summary><b>Unimation</b> &mdash; <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `puma560_ik` | KUKA Puma 560 | Pieper 6R (spherical wrist) | `base_link` | `wrist_3_link` |
+
+</details>
+
+<details>
+<summary><b>Kinova</b> &mdash; <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `jaco2_ik` | Kinova JACO 2 | non-Pieper 6R | `base_link` | `ee_link` |
-| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
-| `franka_panda_ik` | Franka Panda | spherical-shoulder + offset-wrist 7R | `panda_link0` | `panda_link8` |
+
+</details>
+
+<details>
+<summary><b>KUKA</b> &mdash; <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
+
+</details>
+
+<details>
+<summary><b>Franka</b> &mdash; <code>ssik.prebuilt.franka</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `panda_ik` | Franka Panda | spherical-shoulder + offset-wrist 7R | `panda_link0` | `panda_link8` |
+| `fr3_ik` | Franka Research 3 | spherical-shoulder + offset-wrist 7R (Panda successor) | `fr3_link0` | `fr3_link8` |
+
+</details>
+
+<details>
+<summary><b>UFactory</b> &mdash; <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `xarm7_ik` | UFactory xArm7 | approximately-spherical-shoulder 7R | `link_base` | `link7` |
 | `xarm6_ik` | UFactory xArm6 | non-Pieper 6R (joint 6 y-offset) | `link_base` | `link_eef` |
+
+</details>
+
+<details>
+<summary><b>Unitree</b> &mdash; <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `z1_ik` | Unitree Z1 | three-parallel 6R (UR-class) | `link00` | `link06` |
+
+</details>
+
+<details>
+<summary><b>AgileX</b> &mdash; <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `piper_ik` | AgileX PiPER | non-Pieper 6R (joints 4 & 6 tilted axis) | `base_link` | `link6` |
+
+</details>
+
+<details>
+<summary><b>Flexiv</b> &mdash; <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `rizon4_ik` | Flexiv Rizon 4 | non-SRS 7R | `base_link` | `flange` |
-| `kassow_kr810_ik` | Kassow KR810 | non-SRS 7R | `base` | `end_effector` |
 | `rizon10_ik` | Flexiv Rizon 10 | non-SRS 7R (~1.4 m reach) | `base_link` | `flange` |
-| `fanuc_crx3ia_ik` | FANUC CRX-3iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
-| `fanuc_crx5ia_ik` | FANUC CRX-5iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
-| `fanuc_crx10ia_ik` | FANUC CRX-10iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
-| `fanuc_crx10ialp_ik` | FANUC CRX-10iA/LP | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
-| `fanuc_crx20ial_ik` | FANUC CRX-20iA/L | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
-| `fanuc_crx30ia_ik` | FANUC CRX-30iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
-| `fanuc_crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
+
+</details>
+
+<details>
+<summary><b>Kassow</b> &mdash; <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `kr810_ik` | Kassow KR810 | non-SRS 7R | `base` | `end_effector` |
+
+</details>
+
+<details>
+<summary><b>FANUC</b> &mdash; <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `crx3ia_ik` | FANUC CRX-3iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `crx5ia_ik` | FANUC CRX-5iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `crx10ia_ik` | FANUC CRX-10iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `crx10ialp_ik` | FANUC CRX-10iA/LP | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `crx20ial_ik` | FANUC CRX-20iA/L | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `crx30ia_ik` | FANUC CRX-30iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
+| `crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
+
+</details>
+
+<details>
+<summary><b>I2RT</b> &mdash; <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `yam_ik` | I2RT YAM | non-Pieper 6R | `base_link` | `link_6` |
 | `big_yam_ik` | I2RT big_yam | non-Pieper 6R | `base` | `gripper` |
-| `fr3_ik` | Franka Research 3 | spherical-shoulder + offset-wrist 7R (Panda successor) | `fr3_link0` | `fr3_link8` |
-| `openarm_left_ik` | Enactic OpenArm v2.0 (left) | SRS 7R (non-Z*Z) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
-| `openarm_right_ik` | Enactic OpenArm v2.0 (right) | SRS 7R (non-Z*Z) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
+
+</details>
+
+<details>
+<summary><b>Enactic OpenArm</b> &mdash; <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `left_ik` | Enactic OpenArm v2.0 (left) | SRS 7R (non-Z*Z) | `openarm_left_base_link` | `openarm_left_ee_base_link` |
+| `right_ik` | Enactic OpenArm v2.0 (right) | SRS 7R (non-Z*Z) | `openarm_right_base_link` | `openarm_right_ee_base_link` |
+
+</details>
+
+<details>
+<summary><b>Galaxea</b> &mdash; <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
 | `r1pro_left_ik` | Galaxea R1 Pro (left) | SRS 7R (non-Z*Z) | `left_arm_base_link` | `left_arm_link7` |
 | `r1pro_right_ik` | Galaxea R1 Pro (right) | SRS 7R (non-Z*Z) | `right_arm_base_link` | `right_arm_link7` |
-| `standardbots_thor_ik` | Standard Bots Thor | three-parallel 6R | `base_link` | `tool0` |
-| `standardbots_core_ik` | Standard Bots Core | three-parallel 6R | `base_link` | `tool0` |
-| `standardbots_spark_ik` | Standard Bots Spark | three-parallel 6R | `base_link` | `tool0` |
+
+</details>
+
+<details>
+<summary><b>Standard Bots</b> &mdash; <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `thor_ik` | Standard Bots Thor | three-parallel 6R | `base_link` | `tool0` |
+| `core_ik` | Standard Bots Core | three-parallel 6R | `base_link` | `tool0` |
+| `spark_ik` | Standard Bots Spark | three-parallel 6R | `base_link` | `tool0` |
+
+</details>
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:
