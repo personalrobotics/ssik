@@ -104,7 +104,7 @@ def _row_fixture_source(arm: Arm) -> str:
     prebuilt can audit whether ssik solves the same chain their
     manufacturer ships against their real hardware.
     """
-    return f"| `{arm.name}` | {arm.fixture_source} |"
+    return f"| `{arm.module_basename}` | {arm.fixture_source} |"
 
 
 def _row_readme_prebuilt(arm: Arm) -> str:
@@ -220,7 +220,8 @@ def _row_prebuilt_readme(arm: Arm) -> str:
         solver_label = f"`{solver_label}` + cached-RR"
     else:
         solver_label = f"`{solver_label}`"
-    return f"| `{arm.name}` | {solver_label} | {build_time} | ~{arm.artifact_size_kb} KB |"
+    mod = arm.module_basename
+    return f"| `{mod}` | {solver_label} | {build_time} | ~{arm.artifact_size_kb} KB |"
 
 
 # ---------------------------------------------------------------------------
@@ -318,19 +319,16 @@ def _render(arms: dict[str, Arm], anchor: str) -> str | None:
     if anchor == "readme_prebuilt_table":
         return _grouped_by_vendor(arms, module_table_header, _row_readme_prebuilt)
     if anchor == "readme_eaik_table":
-        rows = [_row_readme_eaik(arm) for arm in arms.values()]
         header = "| Arm (class) | EAIK | ssik |\n|---|---|---|"
-        return header + "\n" + "\n".join(rows)
+        return _grouped_by_vendor(arms, header, _row_readme_eaik)
     if anchor == "quickstart_prebuilt_table":
         return _grouped_by_vendor(arms, module_table_header, _row_quickstart_prebuilt)
     if anchor == "prebuilt_readme_table":
-        rows = [_row_prebuilt_readme(arm) for arm in arms.values()]
         header = "| Arm | Solver | Build time | Artifact size |\n|---|---|:---:|:---:|"
-        return header + "\n" + "\n".join(rows)
+        return _grouped_by_vendor(arms, header, _row_prebuilt_readme)
     if anchor == "readme_fixture_source_table":
-        rows = [_row_fixture_source(arm) for arm in arms.values()]
         header = "| Module | Fixture provenance |\n|---|---|"
-        return header + "\n" + "\n".join(rows)
+        return _grouped_by_vendor(arms, header, _row_fixture_source)
     if anchor == "arm_count":
         return str(len(arms))
     if anchor == "arm_roster":

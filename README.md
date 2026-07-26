@@ -265,6 +265,9 @@ from ssik.prebuilt import ur5_ik                     # flat alias (still support
 Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, for legacy DH arms, the published parameter set). The IK promise — "the q-vector lands a real arm at the target" — only holds when ssik's chain matches the manufacturer's. We lock this in with [`tests/test_prebuilt_fixture_parity.py`](tests/test_prebuilt_fixture_parity.py): for every arm whose source is reachable via `robot_descriptions`, it asserts `module.fk(q) == upstream.fk(q)` to machine precision.
 
 <!-- AUTOGEN:readme_fixture_source_table -->
+<details>
+<summary><b>Universal Robots</b> &mdash; <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+
 | Module | Fixture provenance |
 |---|---|
 | `ur5_ik` | robot_descriptions / ur5_description |
@@ -274,35 +277,149 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `ur16e_ik` | robot_descriptions / ur16e_description (ur.urdf.xacro, ur_type:=ur16e) |
 | `ur20_ik` | robot_descriptions / ur20_description (ur.urdf.xacro, ur_type:=ur20) |
 | `ur30_ik` | robot_descriptions / ur30_description (ur.urdf.xacro, ur_type:=ur30) |
+
+</details>
+
+<details>
+<summary><b>Unimation</b> &mdash; <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `puma560_ik` | classical DH (Lee, Asada & Slotine 1986) |
+
+</details>
+
+<details>
+<summary><b>Kinova</b> &mdash; <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `jaco2_ik` | Kinova j2n6s200 DH (kinova-ros / kinova_description) |
-| `iiwa14_ik` | robot_descriptions / iiwa14_description |
 | `gen3_ik` | Kinovarobotics / ros_kortex (kortex_description / gen3.xacro) |
-| `franka_panda_ik` | robot_descriptions / panda_description |
+
+</details>
+
+<details>
+<summary><b>KUKA</b> &mdash; <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `iiwa14_ik` | robot_descriptions / iiwa14_description |
+
+</details>
+
+<details>
+<summary><b>Franka</b> &mdash; <code>ssik.prebuilt.franka</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `panda_ik` | robot_descriptions / panda_description |
+| `fr3_ik` | robot_descriptions / fr3_description |
+
+</details>
+
+<details>
+<summary><b>UFactory</b> &mdash; <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `xarm7_ik` | robot_descriptions / xarm7_description |
 | `xarm6_ik` | robot_descriptions / xarm6_description |
+
+</details>
+
+<details>
+<summary><b>Unitree</b> &mdash; <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `z1_ik` | robot_descriptions / z1_description |
+
+</details>
+
+<details>
+<summary><b>AgileX</b> &mdash; <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `piper_ik` | robot_descriptions / piper_description |
+
+</details>
+
+<details>
+<summary><b>Flexiv</b> &mdash; <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `rizon4_ik` | robot_descriptions / rizon4_description |
-| `kassow_kr810_ik` | Kassow KR810 URDF (vendor-supplied) |
 | `rizon10_ik` | Flexiv Rizon 10 URDF (vendor-supplied) |
-| `fanuc_crx3ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
-| `fanuc_crx5ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
-| `fanuc_crx10ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
-| `fanuc_crx10ialp_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
-| `fanuc_crx20ial_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
-| `fanuc_crx30ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
-| `fanuc_crx10ial_ik` | ros-industrial / fanuc_crx10ia_support |
+
+</details>
+
+<details>
+<summary><b>Kassow</b> &mdash; <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `kr810_ik` | Kassow KR810 URDF (vendor-supplied) |
+
+</details>
+
+<details>
+<summary><b>FANUC</b> &mdash; <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `crx3ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `crx5ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `crx10ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `crx10ialp_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `crx20ial_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `crx30ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
+| `crx10ial_ik` | ros-industrial / fanuc_crx10ia_support |
+
+</details>
+
+<details>
+<summary><b>I2RT</b> &mdash; <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `yam_ik` | robot_descriptions / yam_description |
 | `big_yam_ik` | i2rt-robotics / i2rt |
-| `fr3_ik` | robot_descriptions / fr3_description |
-| `openarm_left_ik` | enactic / openarm_description |
-| `openarm_right_ik` | enactic / openarm_description |
+
+</details>
+
+<details>
+<summary><b>Enactic OpenArm</b> &mdash; <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `left_ik` | enactic / openarm_description |
+| `right_ik` | enactic / openarm_description |
+
+</details>
+
+<details>
+<summary><b>Galaxea</b> &mdash; <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
 | `r1pro_left_ik` | OpenGalaxea / GalaxeaManipSim (Apache-2.0) |
 | `r1pro_right_ik` | OpenGalaxea / GalaxeaManipSim (Apache-2.0) |
-| `standardbots_thor_ik` | standardbots / ros2-realtime-api (robot_urdfs/thor.urdf) |
-| `standardbots_core_ik` | standardbots / ros2-realtime-api (robot_urdfs/core.urdf) |
-| `standardbots_spark_ik` | standardbots / ros2-realtime-api (robot_urdfs/spark.urdf) |
+
+</details>
+
+<details>
+<summary><b>Standard Bots</b> &mdash; <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `thor_ik` | standardbots / ros2-realtime-api (robot_urdfs/thor.urdf) |
+| `core_ik` | standardbots / ros2-realtime-api (robot_urdfs/core.urdf) |
+| `spark_ik` | standardbots / ros2-realtime-api (robot_urdfs/spark.urdf) |
+
+</details>
 <!-- /AUTOGEN -->
 
 Every prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, and `T_HOME` (the 4×4 home pose, FK at `q = np.zeros(DOF)`) as module constants. Use them to verify the baked geometry matches your robot:
@@ -523,6 +640,9 @@ Numerical-IK libraries take a seed, run damped least-squares to a **single** con
 EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-decomposition solvers. It's analytical on the kinematic families it recognises and refuses everything else. The table below is **measured automatically** by [`scripts/regen_bench.py`](scripts/regen_bench.py) (both libraries over the same 200 random reachable poses per arm, Apple M3 single-thread, mean ± 95% CI via 1000-resample bootstrap) and stored in the manifest, so it refreshes when an arm is added — no hand-maintained numbers. FK residual is the Frobenius norm `‖FK(q) − T‖`. Each library is fed the same manufacturer fixture as-is (no manual joint-locking), so an arm whose URDF bundles gripper/extra joints can exceed EAIK's 6R limit.
 
 <!-- AUTOGEN:readme_eaik_table -->
+<details>
+<summary><b>Universal Robots</b> &mdash; <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | UR5 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 2-8 sols | 1.77 ± 0.13 ms / FK 6e-12 / 2-8 sols |
@@ -532,18 +652,99 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | UR16e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 1.89 ± 0.13 ms / FK 1e-8 / 2-8 sols |
 | UR20 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 1.80 ± 0.13 ms / FK 1e-8 / 2-8 sols |
 | UR30 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 2-8 sols | 1.93 ± 0.13 ms / FK 2e-9 / 2-8 sols |
+
+</details>
+
+<details>
+<summary><b>Unimation</b> &mdash; <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | Puma 560 (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 8 sols | 220 ± 0 µs / FK 8e-12 / 8 sols |
+
+</details>
+
+<details>
+<summary><b>Kinova</b> &mdash; <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 870 ± 20 µs / FK 8e-7 / 2-12 sols |
-| iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.84 ± 0.02 ms / FK 1e-13 / 128 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.87 ± 0.27 ms / FK 1e-12 / 11-92 sols |
+
+</details>
+
+<details>
+<summary><b>KUKA</b> &mdash; <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.84 ± 0.02 ms / FK 1e-13 / 128 sols |
+
+</details>
+
+<details>
+<summary><b>Franka</b> &mdash; <code>ssik.prebuilt.franka</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | Franka Panda (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 3.00 ± 0.11 ms / FK 1e-11 / 32-132 sols |
+| FR3 (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 2.83 ± 0.08 ms / FK 1e-11 / 32-132 sols |
+
+</details>
+
+<details>
+<summary><b>UFactory</b> &mdash; <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | xArm7 (**approx spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 6.87 ± 0.15 ms / FK 1e-10 / 53-96 sols |
 | xArm6 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.04 ± 0.02 ms / FK 3e-6 / 8-16 sols |
+
+</details>
+
+<details>
+<summary><b>Unitree</b> &mdash; <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | Z1 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 4-8 sols | 1.52 ± 0.11 ms / FK 3e-15 / 4-8 sols |
+
+</details>
+
+<details>
+<summary><b>AgileX</b> &mdash; <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | PiPER (**non-Pieper 6R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 2.01 ± 1.01 ms / FK 1e-5 / 2-8 sols |
+
+</details>
+
+<details>
+<summary><b>Flexiv</b> &mdash; <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | Rizon 4 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.55 ± 0.55 ms / FK 3e-7 / 4-60 sols |
-| Kassow KR810 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.52 ± 0.23 ms / FK 5e-8 / 4-42 sols |
 | Rizon 10 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 15.13 ± 0.20 ms / FK 6e-8 / 6-64 sols |
+
+</details>
+
+<details>
+<summary><b>Kassow</b> &mdash; <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| Kassow KR810 (**non-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 16.52 ± 0.23 ms / FK 5e-8 / 4-42 sols |
+
+</details>
+
+<details>
+<summary><b>FANUC</b> &mdash; <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | CRX-3iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 670 ± 10 µs / FK 1e-7 / 8-12 sols |
 | CRX-5iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 830 ± 100 µs / FK 3e-7 / 8-12 sols |
 | CRX-10iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 910 ± 60 µs / FK 8e-6 / 7-12 sols |
@@ -551,16 +752,49 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | CRX-20iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 710 ± 20 µs / FK 9e-7 / 4-12 sols |
 | CRX-30iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.07 ± 0.11 ms / FK 5e-6 / 4-12 sols |
 | CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 960 ± 10 µs / FK 2e-6 / 4-12 sols |
+
+</details>
+
+<details>
+<summary><b>I2RT</b> &mdash; <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | YAM (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.02 ± 0.01 ms / FK 3e-7 / 5-8 sols |
 | big_yam (**non-Pieper 6R**) | **refuses** ("Intersection point can't be calculated for two parallel axes") | 1.01 ± 0.01 ms / FK 7e-7 / 8 sols |
-| FR3 (**spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 2.83 ± 0.08 ms / FK 1e-11 / 32-132 sols |
+
+</details>
+
+<details>
+<summary><b>Enactic OpenArm</b> &mdash; <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | OpenArm L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.54 ± 0.29 ms / FK 3e-14 / 128 sols |
 | OpenArm R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.25 ± 0.04 ms / FK 4e-15 / 128 sols |
+
+</details>
+
+<details>
+<summary><b>Galaxea</b> &mdash; <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | R1 Pro L (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.39 ± 0.29 ms / FK 3e-15 / 128 sols |
 | R1 Pro R (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.36 ± 0.21 ms / FK 3e-15 / 128 sols |
+
+</details>
+
+<details>
+<summary><b>Standard Bots</b> &mdash; <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
 | Thor (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.44 ± 0.06 ms / FK 4e-12 / 1-4 sols |
 | Core (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 9e-16 / 2-6 sols | 2.47 ± 0.06 ms / FK 2e-12 / 1-4 sols |
 | Spark (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.46 ± 0.06 ms / FK 9e-13 / 1-4 sols |
+
+</details>
 <!-- /AUTOGEN -->
 
 The "sols" column shows the **range of branch counts across the 100 reachable poses**. For Pieper-class arms (Puma) the count is constant (8); for non-Pieper 6R the count varies because spurious roots of the degree-8 Sylvester resultant fall complex at some poses. For 7R arms the count is the **discretised redundancy-manifold sample × algebraic-branch product** — e.g. iiwa14's 16-sample swivel × 8 branches per sample = 128 sols. EAIK is ~100× faster than ssik on Pieper-class 6R — that is its native sweet spot, and ssik does not try to compete there. The interesting cells are the **refuses** ones: non-Pieper 6R (JACO 2, xArm6, PiPER) and every 7R arm. Those are the geometries ssik exists for. The "refuses (...)" strings: quoted ones (`"only 1-6R"`) are EAIK's actual error captured verbatim from its URDF loader; `(no 7R DH path...)` rows are spec-only fixtures whose 7-joint chain can't pass through our DH-extraction adapter into EAIK's `IK_DH` API — EAIK refuses the same arms either way (its URDF loader returns "only 1-6R" on every 7R input). A numerical-IK comparison (MINK) is tracked separately in [#236](https://github.com/personalrobotics/ssik/issues/236).

@@ -34,6 +34,9 @@ preprocessing) and cleaner to ship in production stacks.
 ## What's included
 
 <!-- AUTOGEN:prebuilt_readme_table -->
+<details>
+<summary><b>Universal Robots</b> &mdash; <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `ur5_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
@@ -43,35 +46,149 @@ preprocessing) and cleaner to ship in production stacks.
 | `ur16e_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
 | `ur20_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
 | `ur30_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
+
+</details>
+
+<details>
+<summary><b>Unimation</b> &mdash; <code>ssik.prebuilt.unimation</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `puma560_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
+
+</details>
+
+<details>
+<summary><b>Kinova</b> &mdash; <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `jaco2_ik` | `ikgeo.general_6r` | ~25 s | ~73 KB |
-| `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `gen3_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
-| `franka_panda_ik` | `seven_r.spherical_shoulder` | <1 s | ~22 KB |
+
+</details>
+
+<details>
+<summary><b>KUKA</b> &mdash; <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |
+
+</details>
+
+<details>
+<summary><b>Franka</b> &mdash; <code>ssik.prebuilt.franka</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `panda_ik` | `seven_r.spherical_shoulder` | <1 s | ~22 KB |
+| `fr3_ik` | `seven_r.spherical_shoulder` | <1 s | ~22 KB |
+
+</details>
+
+<details>
+<summary><b>UFactory</b> &mdash; <code>ssik.prebuilt.ufactory</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `xarm7_ik` | `seven_r.spherical_shoulder_polished` | <1 s | ~22 KB |
 | `xarm6_ik` | `ikgeo.general_6r` | ~15 s | ~70 KB |
+
+</details>
+
+<details>
+<summary><b>Unitree</b> &mdash; <code>ssik.prebuilt.unitree</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `z1_ik` | `ikgeo.three_parallel` | <1 s | ~23 KB |
+
+</details>
+
+<details>
+<summary><b>AgileX</b> &mdash; <code>ssik.prebuilt.agilex</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `piper_ik` | `ikgeo.general_6r` | ~25 s | ~88 KB |
+
+</details>
+
+<details>
+<summary><b>Flexiv</b> &mdash; <code>ssik.prebuilt.flexiv</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `rizon4_ik` | `jointlock.seven_r` + cached-RR | ~8 min | ~1052 KB |
-| `kassow_kr810_ik` | `jointlock.seven_r` + cached-RR | ~4 min | ~729 KB |
 | `rizon10_ik` | `jointlock.seven_r` + cached-RR | ~8 min | ~992 KB |
-| `fanuc_crx3ia_ik` | `ikgeo.general_6r` | ~28 s | ~63 KB |
-| `fanuc_crx5ia_ik` | `ikgeo.general_6r` | ~24 s | ~61 KB |
-| `fanuc_crx10ia_ik` | `ikgeo.general_6r` | ~28 s | ~61 KB |
-| `fanuc_crx10ialp_ik` | `ikgeo.general_6r` | ~26 s | ~61 KB |
-| `fanuc_crx20ial_ik` | `ikgeo.general_6r` | ~26 s | ~61 KB |
-| `fanuc_crx30ia_ik` | `ikgeo.general_6r` | ~31 s | ~63 KB |
-| `fanuc_crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
+
+</details>
+
+<details>
+<summary><b>Kassow</b> &mdash; <code>ssik.prebuilt.kassow</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `kr810_ik` | `jointlock.seven_r` + cached-RR | ~4 min | ~729 KB |
+
+</details>
+
+<details>
+<summary><b>FANUC</b> &mdash; <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `crx3ia_ik` | `ikgeo.general_6r` | ~28 s | ~63 KB |
+| `crx5ia_ik` | `ikgeo.general_6r` | ~24 s | ~61 KB |
+| `crx10ia_ik` | `ikgeo.general_6r` | ~28 s | ~61 KB |
+| `crx10ialp_ik` | `ikgeo.general_6r` | ~26 s | ~61 KB |
+| `crx20ial_ik` | `ikgeo.general_6r` | ~26 s | ~61 KB |
+| `crx30ia_ik` | `ikgeo.general_6r` | ~31 s | ~63 KB |
+| `crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
+
+</details>
+
+<details>
+<summary><b>I2RT</b> &mdash; <code>ssik.prebuilt.i2rt</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
 | `big_yam_ik` | `ikgeo.general_6r` | ~36 s | ~106 KB |
-| `fr3_ik` | `seven_r.spherical_shoulder` | <1 s | ~22 KB |
-| `openarm_left_ik` | `seven_r.srs` | <1 s | ~9 KB |
-| `openarm_right_ik` | `seven_r.srs` | <1 s | ~9 KB |
+
+</details>
+
+<details>
+<summary><b>Enactic OpenArm</b> &mdash; <code>ssik.prebuilt.openarm</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `left_ik` | `seven_r.srs` | <1 s | ~9 KB |
+| `right_ik` | `seven_r.srs` | <1 s | ~9 KB |
+
+</details>
+
+<details>
+<summary><b>Galaxea</b> &mdash; <code>ssik.prebuilt.galaxea</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
 | `r1pro_left_ik` | `seven_r.srs` | <1 s | ~12 KB |
 | `r1pro_right_ik` | `seven_r.srs` | <1 s | ~12 KB |
-| `standardbots_thor_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
-| `standardbots_core_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
-| `standardbots_spark_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+
+</details>
+
+<details>
+<summary><b>Standard Bots</b> &mdash; <code>ssik.prebuilt.standard_bots</code> (3 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `thor_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+| `core_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+| `spark_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+
+</details>
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached
