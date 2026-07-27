@@ -141,7 +141,13 @@ def test_fixture_matches_upstream_urdf(arm_name, description, arm) -> None:
         for i, n in enumerate(ik_names):
             cfg[n] = float(q[i])
         urdf.update_cfg(cfg)
-        T_urdf = np.asarray(urdf.get_transform(arm.ee_link))
+        # Compare in the arm's BASE frame, not the URDF root/world frame:
+        # ssik.fk is base_link -> ee_link, so the upstream pose must be
+        # taken relative to base_link too. For arms whose base_link is not
+        # the URDF root (e.g. YuMi's ``yumi_body``, offset from ``world``),
+        # ``get_transform(ee)`` alone is world->ee and drifts by the
+        # world->base offset -- a false failure.
+        T_urdf = np.asarray(urdf.get_transform(arm.ee_link, arm.base_link))
 
         pos_drift = float(np.linalg.norm(T_urdf[:3, 3] - T_ssik[:3, 3]))
         R_rel = T_urdf[:3, :3] @ T_ssik[:3, :3].T

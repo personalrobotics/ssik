@@ -29,7 +29,12 @@ from pathlib import Path
 
 import numpy as np
 
-from ssik._urdf import _as_plain_urdf, load_urdf_kinbody_normalized, strip_urdf_to_fixture
+from ssik._urdf import (
+    _as_plain_urdf,
+    load_urdf_kinbody_normalized,
+    needs_xacro_expansion,
+    strip_urdf_to_fixture,
+)
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import DispatchPlan, dispatch
 from ssik.subproblems._rotation import rotation_matrix
@@ -472,23 +477,26 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     if not args.urdf.is_file():
         print(f"[ssik add-arm] ERROR: {args.urdf} not found.")
         return 1
-    # Resolve xacro -> plain URDF once, then load + vendor from the same source
-    # (vendoring a self-contained, expanded URDF, never the raw xacro).
-    with _as_plain_urdf(args.urdf, _parse_xacro_args(args)) as plain_urdf:
-        kb = load_urdf_kinbody_normalized(plain_urdf, args.base, args.ee)
-        print(
-            f"[ssik add-arm]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK"
-        )
-
-        print("[ssik add-arm] Classifying topology")
-        plan = dispatch(kb)
-        _print_dispatch_summary(plan)
-
-        rel = urdf_dest.relative_to(repo_root)
-        print(f"[ssik add-arm] Vendoring URDF (kinematics-only) -> {rel}")
-        n_links, n_joints = strip_urdf_to_fixture(plain_urdf, urdf_dest)
+    # Vendor a mesh-free, kinematics-only fixture FIRST, then load + classify
+    # from THAT (never the mesh-laden source). Stripping meshes up front drops
+    # every ``package://`` reference, so vendor URDFs that declare xmlns:xacro
+    # but reference meshes by ROS package (ABB YuMi, FANUC) load without a ROS
+    # workspace. Only genuinely-macro'd xacro is expanded first.
+    rel = urdf_dest.relative_to(repo_root)
+    print(f"[ssik add-arm] Vendoring URDF (kinematics-only) -> {rel}")
+    if needs_xacro_expansion(args.urdf):
+        with _as_plain_urdf(args.urdf, _parse_xacro_args(args)) as plain_urdf:
+            n_links, n_joints = strip_urdf_to_fixture(plain_urdf, urdf_dest)
+    else:
+        n_links, n_joints = strip_urdf_to_fixture(args.urdf, urdf_dest)
     kb_bytes = urdf_dest.stat().st_size
     print(f"[ssik add-arm]   stripped to {n_links} links, {n_joints} joints, {kb_bytes:,} bytes")
+
+    kb = load_urdf_kinbody_normalized(urdf_dest, args.base, args.ee)
+    print(f"[ssik add-arm]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK")
+    print("[ssik add-arm] Classifying topology")
+    plan = dispatch(kb)
+    _print_dispatch_summary(plan)
 
     print(f"[ssik add-arm] Generating test scaffold -> {test_dest.relative_to(repo_root)}")
     test_source = _render_test_scaffold(

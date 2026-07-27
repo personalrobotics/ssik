@@ -114,6 +114,27 @@ def _is_xacro(path: Path) -> bool:
     return "xmlns:xacro" in head or "<xacro:" in head
 
 
+def needs_xacro_expansion(path: Path) -> bool:
+    """True if ``path`` actually requires xacro *expansion* -- macro/property
+    tags (``<xacro:...>``) or ``${...}`` / ``$(...)`` substitutions -- as
+    opposed to merely declaring ``xmlns:xacro`` on an already-expanded URDF.
+
+    Many vendor URDFs (ABB YuMi, FANUC) declare the xacro namespace but have
+    no unexpanded macros; running them through the xacro processor there is
+    both unnecessary and harmful -- it forces ROS ``package://`` mesh
+    resolution that fails outside a ROS workspace. Such files can be parsed
+    (and mesh-stripped) as plain XML directly. Only files that return True
+    here need :func:`process_xacro`.
+    """
+    if path.name.lower().endswith(".xacro"):
+        return True
+    try:
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return False
+    return "<xacro:" in text or "${" in text or "$(" in text
+
+
 def process_xacro(source: str | Path, subargs: dict[str, str] | None = None) -> str:
     """Expand a xacro description to a flat URDF string via ``xacrodoc``
     (resolving ``<xacro:include>``, macros, and substitution args).
