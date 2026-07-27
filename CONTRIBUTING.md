@@ -135,7 +135,8 @@ The metadata for a shipped arm lives in `MANIFEST.toml`. The flow is now mostly 
 3. **Emit the artifact:**
 
    ```bash
-   uv run python scripts/regen_artifacts.py [--include-slow]   # emits src/ssik/prebuilt/<name>_ik.py
+   uv run python scripts/regen_artifacts.py --arm <name>_ik    # build just this arm (fast; also refreshes the flat-alias map)
+   # or: uv run python scripts/regen_artifacts.py [--include-slow]   # rebuild the whole roster
    ```
 
 4. **Bench + regenerate all docs — one click** (#341):
@@ -160,7 +161,7 @@ The metadata for a shipped arm lives in `MANIFEST.toml`. The flow is now mostly 
 ssik add-arm path/to/arm.urdf --base base_link --ee flange --name my_arm
 ```
 
-Strips the source URDF to a kinematics-only `tests/fixtures/my_arm.urdf` (no meshes), generates `tests/test_my_arm.py` with FK-closure assertions on hand-picked + Hypothesis-fuzzed reachable poses (asserting dispatcher routing + FK ≤ 1e-10 on every retained IK), and **prints a ready-to-paste `MANIFEST.toml` stanza**. It does **not** build or bench the arm — to ship it as a prebuilt, paste the stanza and continue from step 3 of "Adding a new prebuilt arm" above.
+Strips the source URDF to a kinematics-only `tests/fixtures/my_arm.urdf` (no meshes), and generates a **coverage-gated** `tests/test_my_arm.py` (auto-formatted with `ruff`). The scaffold asserts, against the **shipped artifact** (`module.solve` / `module.fk`, not the raw solver): topology + dispatcher routing, a **coverage floor** (≥ `_MIN_COVERAGE` of poses sampled across the arm's real joint limits return ≥ 1 IK — the gate a broken/degenerate arm fails, since "FK ≤ tol on every retained IK" is vacuously true at zero coverage), and FK closure within `_FK_CEILING`. It also **prints a ready-to-paste `MANIFEST.toml` stanza**. It does **not** build or bench the arm — to ship it as a prebuilt, paste the stanza, build with `regen_artifacts.py --arm <name>_ik`, and continue from step 3 of "Adding a new prebuilt arm" above.
 
 ## Adding a new solver
 

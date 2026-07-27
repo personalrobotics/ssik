@@ -53,6 +53,18 @@ def main() -> int:
             "(Rizon 4 / Rizon 10 ~7 min each, Kassow KR810 ~20 min)."
         ),
     )
+    parser.add_argument(
+        "--arm",
+        action="append",
+        metavar="NAME",
+        help=(
+            "Build only this arm (e.g. ``--arm ur7e_ik``; repeatable). "
+            "Rebuilds just the named artifact(s) instead of the whole "
+            "roster -- fast when adding a single arm. The legacy-alias map "
+            "is still regenerated from the full manifest so flat imports "
+            "and regen_bench keep working."
+        ),
+    )
     args = parser.parse_args()
 
     ARTIFACTS.mkdir(exist_ok=True)
@@ -61,11 +73,22 @@ def main() -> int:
     manifest = load_manifest()
     sys.path.insert(0, str(FIXTURES))
 
-    for arm in manifest.values():
-        if arm.slow_build and not args.include_slow:
-            continue
+    if args.arm:
+        unknown = [name for name in args.arm if name not in manifest]
+        if unknown:
+            parser.error(f"unknown arm(s): {', '.join(unknown)} (not in MANIFEST.toml)")
+        targets = [manifest[name] for name in args.arm]
+    else:
+        targets = [
+            arm for arm in manifest.values() if not (arm.slow_build and not args.include_slow)
+        ]
+
+    for arm in targets:
         _emit_arm(arm)
 
+    # Always regenerate the alias map from the FULL manifest -- a partial
+    # build (``--arm``) must not leave the flat-import alias map stale, or
+    # ``ssik.prebuilt.<arm>_ik`` and regen_bench break with ModuleNotFoundError.
     _regen_prebuilt_init(manifest)
     print("done.")
     return 0
