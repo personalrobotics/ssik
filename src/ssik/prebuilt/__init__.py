@@ -69,8 +69,6 @@ _LEGACY_ALIASES: dict[str, str] = {
     "standardbots_thor_ik": "standard_bots.thor_ik",
     "standardbots_core_ik": "standard_bots.core_ik",
     "standardbots_spark_ik": "standard_bots.spark_ik",
-    "yumi_left_ik": "abb.yumi_left_ik",
-    "yumi_right_ik": "abb.yumi_right_ik",
     "gen3_lite_ik": "kinova.gen3_lite_ik",
     "ur7e_ik": "universal_robots.ur7e_ik",
     "ur12e_ik": "universal_robots.ur12e_ik",
