@@ -699,25 +699,13 @@ def test_{arm_name}_coverage_and_fk_closure() -> None:
         "ssik.prebuilt.{arm_name}",
         reason="build the artifact first: regen_artifacts.py --arm {arm_name}",
     )
+    from ssik._validation import assert_solve_coverage
 
-    lo, hi = _joint_bounds()
-    rng = np.random.default_rng(0)
-    covered = 0
-    worst_fk = 0.0
-    for _ in range(_N_COVERAGE_POSES):
-        q = rng.uniform(lo, hi)
-        sols = art.solve(art.fk(q))
-        if sols:
-            covered += 1
-            worst_fk = max(worst_fk, max(float(s.fk_residual) for s in sols))
-    coverage = covered / _N_COVERAGE_POSES
-    assert coverage >= _MIN_COVERAGE, (
-        f"{arm_name}: coverage {{coverage:.0%}} < {{_MIN_COVERAGE:.0%}} "
-        f"({{covered}}/{{_N_COVERAGE_POSES}} reachable poses returned an IK). "
-        f"A broken or degenerate arm returns few/no solutions."
-    )
-    assert worst_fk < _FK_CEILING, (
-        f"{arm_name}: worst FK {{worst_fk:.2e}} > {{_FK_CEILING:.0e}} ceiling"
+    assert_solve_coverage(
+        art,
+        min_coverage=_MIN_COVERAGE,
+        fk_ceiling=_FK_CEILING,
+        n_poses=_N_COVERAGE_POSES,
     )
 
 
