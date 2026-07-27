@@ -34,6 +34,7 @@ from ssik._urdf import (
     load_urdf_kinbody_normalized,
     needs_xacro_expansion,
     strip_urdf_to_fixture,
+    suggest_base_ee,
 )
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import DispatchPlan, dispatch
@@ -194,13 +195,20 @@ def _add_common_kinbody_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("urdf", type=Path, help="Path to the URDF or xacro file.")
     parser.add_argument(
         "--base",
-        required=True,
-        help="Link name to treat as the base of the kinematic chain.",
+        default=None,
+        help=(
+            "Link name to treat as the base of the kinematic chain. "
+            "Auto-detected (parent of the first actuated joint) when omitted."
+        ),
     )
     parser.add_argument(
         "--ee",
-        required=True,
-        help="Link name to treat as the end-effector of the kinematic chain.",
+        default=None,
+        help=(
+            "Link name to treat as the end-effector of the kinematic chain. "
+            "Auto-detected (the actuated flange of the longest chain) when omitted. "
+            "The onboarding gate (fixture parity + coverage) catches a wrong pick."
+        ),
     )
     parser.add_argument(
         "--xacro-arg",
@@ -213,6 +221,25 @@ def _add_common_kinbody_args(parser: argparse.ArgumentParser) -> None:
             "e.g. --xacro-arg ur_type:=ur10e. Ignored for plain URDFs."
         ),
     )
+
+
+def _resolve_base_ee(args: argparse.Namespace) -> None:
+    """Fill ``args.base`` / ``args.ee`` by auto-detection when omitted, and
+    print what was chosen plus any alternatives. A wrong guess is caught by the
+    onboarding gate (fixture parity + coverage), so this is a convenience, not a
+    correctness risk."""
+    if args.base and args.ee:
+        return
+    base, ee, notes = suggest_base_ee(args.urdf, _parse_xacro_args(args))
+    if not args.base:
+        args.base = base
+        print(f"[ssik]   auto-detected --base {base}")
+    if not args.ee:
+        args.ee = ee
+        print(f"[ssik]   auto-detected --ee {ee}")
+    for note in notes:
+        print(f"[ssik]   note: {note}")
+    print("[ssik]   verify these against your robot; the gate catches a wrong ee.")
 
 
 def _parse_xacro_args(args: argparse.Namespace) -> dict[str, str] | None:
@@ -261,6 +288,7 @@ def _configure_logging(verbose_count: int) -> None:
 
 def _run_classify(args: argparse.Namespace) -> int:
     print(f"[ssik] Loading {args.urdf}")
+    _resolve_base_ee(args)
     kb = load_urdf_kinbody_normalized(
         args.urdf, args.base, args.ee, xacro_args=_parse_xacro_args(args)
     )
@@ -277,6 +305,7 @@ def _run_classify(args: argparse.Namespace) -> int:
 
 def _run_build(args: argparse.Namespace) -> int:
     print(f"[ssik] Loading {args.urdf}")
+    _resolve_base_ee(args)
     kb = load_urdf_kinbody_normalized(
         args.urdf, args.base, args.ee, xacro_args=_parse_xacro_args(args)
     )
@@ -477,6 +506,7 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     if not args.urdf.is_file():
         print(f"[ssik add-arm] ERROR: {args.urdf} not found.")
         return 1
+    _resolve_base_ee(args)
     # Vendor a mesh-free, kinematics-only fixture FIRST, then load + classify
     # from THAT (never the mesh-laden source). Stripping meshes up front drops
     # every ``package://`` reference, so vendor URDFs that declare xmlns:xacro

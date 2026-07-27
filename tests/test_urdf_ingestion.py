@@ -74,3 +74,50 @@ def test_package_mesh_urdf_strips_and_loads() -> None:
         assert "package://" not in dest.read_text()
         kb = load_urdf_kinbody_normalized(dest, "base", "link2")
         assert len(kb.joints) == 2
+
+
+# ---------------------------------------------------------------------------
+# base/ee auto-detection (suggest_base_ee)
+# ---------------------------------------------------------------------------
+
+
+def _rev(name: str, parent: str, child: str) -> str:
+    return (
+        f'<joint name="{name}" type="revolute">'
+        f'<parent link="{parent}"/><child link="{child}"/>'
+        '<origin xyz="0.2 0 0"/><axis xyz="0 0 1"/>'
+        '<limit lower="-3" upper="3" effort="1" velocity="1"/></joint>'
+    )
+
+
+# world -> base_link (fixed) -> l1 -> l2 -> wrist (3R), then a gripper with two
+# revolute fingers branching off ``gripper_base`` past the wrist.
+_ARM_WITH_GRIPPER = f"""<?xml version="1.0"?>
+<robot name="arm">
+  <link name="world"/><link name="base_link"/>
+  <link name="l1"/><link name="l2"/><link name="wrist"/>
+  <link name="gripper_base"/><link name="finger_left"/><link name="finger_right"/>
+  <joint name="fixed_world" type="fixed">
+    <parent link="world"/><child link="base_link"/><origin xyz="0 0 0.05"/></joint>
+  {_rev("j1", "base_link", "l1")}
+  {_rev("j2", "l1", "l2")}
+  {_rev("j3", "l2", "wrist")}
+  <joint name="wrist_to_gripper" type="fixed">
+    <parent link="wrist"/><child link="gripper_base"/><origin xyz="0.05 0 0"/></joint>
+  {_rev("fl", "gripper_base", "finger_left")}
+  {_rev("fr", "gripper_base", "finger_right")}
+</robot>
+"""
+
+
+def test_suggest_base_ee_skips_leading_fixed_and_gripper() -> None:
+    """base folds past ``world->base_link``; ee backs off the gripper fingers
+    to the wrist flange."""
+    from ssik._urdf import suggest_base_ee
+
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "arm.urdf"
+        src.write_text(_ARM_WITH_GRIPPER)
+        base, ee, _ = suggest_base_ee(src)
+        assert base == "base_link"
+        assert ee == "wrist"

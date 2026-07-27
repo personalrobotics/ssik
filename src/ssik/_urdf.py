@@ -36,6 +36,7 @@ __all__ = [
     "load_urdf_kinbody_normalized",
     "process_xacro",
     "strip_urdf_to_fixture",
+    "suggest_base_ee",
 ]
 
 # Non-kinematic elements stripped when vendoring a URDF as a test fixture:
@@ -74,6 +75,123 @@ def strip_urdf_to_fixture(source: Path, dest: Path) -> tuple[int, int]:
     dest.parent.mkdir(parents=True, exist_ok=True)
     tree.write(dest, encoding="unicode", xml_declaration=True)
     return len(root.findall("link")), len(root.findall("joint"))
+
+
+_ACTIVE_URDF_JOINTS = ("revolute", "continuous", "prismatic")
+# Substrings marking end-effector/gripper links, so ``suggest_base_ee`` backs
+# the EE up from a finger to the kinematic flange.
+_GRIPPER_HINTS = (
+    "finger",
+    "gripper",
+    "knuckle",
+    "tip",
+    "hand",
+    "jaw",
+    "pad",
+    "suction",
+    "tool",
+    "flange",
+)
+
+
+def suggest_base_ee(
+    source: str | Path, xacro_args: dict[str, str] | None = None
+) -> tuple[str, str, list[str]]:
+    """Suggest ``(base_link, ee_link)`` for the longest actuated chain in a
+    URDF/xacro, plus human-readable notes about alternatives.
+
+    ``base_link`` is the parent of the first active joint (leading fixed joints,
+    e.g. ``world -> robot_base``, fold into the base). ``ee_link`` is the child
+    of the last active joint (the kinematic flange; trailing fixed ``tool0`` /
+    gripper frames are reported as alternatives, not chosen). For multi-arm
+    robots (ABB YuMi) the other arm's tip is reported so the caller can pass an
+    explicit ``--ee``.
+
+    :returns: ``(base_link, ee_link, notes)`` where ``notes`` are strings to
+        show the user (empty for an unambiguous single-chain arm).
+    """
+    src = Path(source)
+    if needs_xacro_expansion(src):
+        with _as_plain_urdf(src, xacro_args) as plain:
+            root = ET.parse(plain).getroot()
+    else:
+        root = ET.parse(src).getroot()
+
+    links = [n for el in root.findall("link") if (n := el.get("name")) is not None]
+    joints: list[tuple[str, str, str]] = []
+    for j in root.findall("joint"):
+        parent, child = j.find("parent"), j.find("child")
+        if parent is None or child is None:
+            continue
+        p, c = parent.get("link"), child.get("link")
+        if p is None or c is None:
+            continue
+        joints.append((j.get("type") or "fixed", p, c))
+
+    children = {c for _, _, c in joints}
+    parents = {p for _, p, _ in joints}
+    child_edges: dict[str, list[tuple[str, str]]] = {}
+    for jtype, p, c in joints:
+        child_edges.setdefault(p, []).append((c, jtype))
+    roots = [ln for ln in links if ln not in children]
+
+    # Longest chain by number of ACTIVE joints, over every root.
+    best: tuple[int, list[str], list[str]] | None = None
+
+    def walk(link: str, path_links: list[str], path_types: list[str]) -> None:
+        nonlocal best
+        n_active = sum(1 for t in path_types if t in _ACTIVE_URDF_JOINTS)
+        if best is None or n_active > best[0]:
+            best = (n_active, list(path_links), list(path_types))
+        for c, jtype in child_edges.get(link, []):
+            walk(c, [*path_links, c], [*path_types, jtype])
+
+    for r in roots:
+        walk(r, [r], [])
+
+    if best is None or best[0] == 0:
+        raise ValueError("suggest_base_ee: no actuated joints found in URDF")
+
+    n_active, chain_links, chain_types = best
+    active_idx = [i for i, t in enumerate(chain_types) if t in _ACTIVE_URDF_JOINTS]
+    base_link = chain_links[active_idx[0]]
+    ee_idx = active_idx[-1] + 1
+
+    # Gripper joints (fingers) are active too, so the longest actuated chain
+    # runs past the wrist into a finger. Back the EE up to the last link that
+    # isn't gripper-named -- the kinematic flange.
+    while ee_idx > active_idx[0] and any(
+        hint in chain_links[ee_idx].lower() for hint in _GRIPPER_HINTS
+    ):
+        ee_idx -= 1
+    ee_link = chain_links[ee_idx]
+
+    notes: list[str] = []
+    # Trailing fixed frames past the flange (tool0, gripper mounts).
+    trailing = [
+        ln
+        for ln in chain_links[ee_idx + 1 :]
+        if not any(hint in ln.lower() for hint in _GRIPPER_HINTS)
+    ]
+    if trailing:
+        notes.append(f"flange frames past {ee_link!r}: {trailing} (pass --ee to use one)")
+    # Other arm tips (multi-arm robots) with a comparably long actuated chain.
+    tips = [ln for ln in links if ln not in parents and ln != ee_link]
+    other_arms: list[tuple[int, str]] = []
+    for r in roots:
+        stack = [(r, 0)]
+        while stack:
+            link, depth = stack.pop()
+            for c, jtype in child_edges.get(link, []):
+                nd = depth + (1 if jtype in _ACTIVE_URDF_JOINTS else 0)
+                if c in tips and nd >= n_active - 1 and c not in [t for _, t in other_arms]:
+                    other_arms.append((nd, c))
+                stack.append((c, nd))
+    names = sorted({c for _, c in other_arms if not any(h in c.lower() for h in _GRIPPER_HINTS)})
+    if names:
+        notes.append(f"other actuated chain tip(s): {names} (pass --ee to pick one)")
+
+    return base_link, ee_link, notes
 
 
 _IDENTITY: NDArray[np.float64] = np.eye(4, dtype=np.float64)
