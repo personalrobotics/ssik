@@ -194,6 +194,16 @@ preprocessing) and cleaner to ship in production stacks.
 | `spark_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
 
 </details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `yumi_left_ik` | `seven_r.srs_polished` | <1 s | ~14 KB |
+| `yumi_right_ik` | `seven_r.srs_polished` | <1 s | ~14 KB |
+
+</details>
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached

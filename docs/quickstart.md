@@ -185,6 +185,16 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `spark_ik` | Standard Bots Spark | three-parallel 6R | `base_link` | `tool0` |
 
 </details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `yumi_left_ik` | ABB YuMi (IRB 14000) left | approximate-SRS 7R | `yumi_body` | `yumi_link_7_l` |
+| `yumi_right_ik` | ABB YuMi (IRB 14000) right | approximate-SRS 7R | `yumi_body` | `yumi_link_7_r` |
+
+</details>
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:

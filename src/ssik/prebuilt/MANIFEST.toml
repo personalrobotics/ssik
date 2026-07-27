@@ -1554,3 +1554,78 @@ max_fk = 1.5e-15
 sols_min = 2
 sols_max = 8
 
+
+[arms.yumi_left_ik]
+display_name = "ABB YuMi (IRB 14000) left"
+short_name = "YuMi L"
+vendor = "abb"
+fixture = "yumi_left_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / yumi_description"
+base_link = "yumi_body"
+ee_link = "yumi_link_7_l"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R"
+short_class = "approximate-SRS 7R"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 14
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-9
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.yumi_left_ik.bench]
+ms_mean = 20.35
+ms_ci95 = 1.75
+max_fk = 1.0e-12
+sols_min = 26
+sols_max = 70
+
+[arms.yumi_left_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+[arms.yumi_right_ik]
+display_name = "ABB YuMi (IRB 14000) right"
+short_name = "YuMi R"
+vendor = "abb"
+fixture = "yumi_right_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / yumi_description"
+base_link = "yumi_body"
+ee_link = "yumi_link_7_r"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R"
+short_class = "approximate-SRS 7R"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 14
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-9
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.yumi_right_ik.bench]
+ms_mean = 19.43
+ms_ci95 = 1.38
+max_fk = 1.0e-12
+sols_min = 24
+sols_max = 79
+
+[arms.yumi_right_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"

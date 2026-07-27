@@ -271,4 +271,14 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `spark_ik` | standardbots / ros2-realtime-api (robot_urdfs/spark.urdf) |
 
 </details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `yumi_left_ik` | robot_descriptions / yumi_description |
+| `yumi_right_ik` | robot_descriptions / yumi_description |
+
+</details>
 <!-- /AUTOGEN -->
