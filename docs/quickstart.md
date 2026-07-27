@@ -26,7 +26,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 
 <!-- AUTOGEN:quickstart_prebuilt_table -->
 <details>
-<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (11 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -37,6 +37,10 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `ur16e_ik` | Universal Robots UR16e | three-parallel 6R | `base_link` | `tool0` |
 | `ur20_ik` | Universal Robots UR20 | three-parallel 6R | `base_link` | `tool0` |
 | `ur30_ik` | Universal Robots UR30 | three-parallel 6R | `base_link` | `tool0` |
+| `ur7e_ik` | Universal Robots UR7E | three-parallel 6R | `base_link` | `tool0` |
+| `ur12e_ik` | Universal Robots UR12E | three-parallel 6R | `base_link` | `tool0` |
+| `ur15_ik` | Universal Robots UR15 | three-parallel 6R | `base_link` | `tool0` |
+| `ur18_ik` | Universal Robots UR18 | three-parallel 6R | `base_link` | `tool0` |
 
 </details>
 
@@ -50,12 +54,13 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `jaco2_ik` | Kinova JACO 2 | non-Pieper 6R | `base_link` | `ee_link` |
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
+| `gen3_lite_ik` | Kinova Gen3 Lite | non-Pieper 6R | `base_link` | `end_effector_link` |
 
 </details>
 
@@ -178,6 +183,16 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `thor_ik` | Standard Bots Thor | three-parallel 6R | `base_link` | `tool0` |
 | `core_ik` | Standard Bots Core | three-parallel 6R | `base_link` | `tool0` |
 | `spark_ik` | Standard Bots Spark | three-parallel 6R | `base_link` | `tool0` |
+
+</details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `yumi_left_ik` | ABB YuMi (IRB 14000) left | approximate-SRS 7R | `yumi_body` | `yumi_link_7_l` |
+| `yumi_right_ik` | ABB YuMi (IRB 14000) right | approximate-SRS 7R | `yumi_body` | `yumi_link_7_r` |
 
 </details>
 <!-- /AUTOGEN -->

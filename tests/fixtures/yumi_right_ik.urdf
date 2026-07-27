@@ -1,0 +1,213 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="yumi">
+  <link name="yumi_base_link" />
+  <joint name="yumi_base_link_to_body" type="fixed">
+    <parent link="yumi_base_link" />
+    <child link="yumi_body" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+  <link name="yumi_body">
+    </link>
+  <joint name="yumi_joint_1_r" type="revolute">
+    <parent link="yumi_body" />
+    <child link="yumi_link_1_r" />
+    <origin rpy="-0.9795   -0.5682   -2.3155" xyz="0.05355 -0.0725 0.41492" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.94087978961" upper="2.94087978961" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_1_r">
+    </link>
+  <joint name="yumi_joint_2_r" type="revolute">
+    <parent link="yumi_link_1_r" />
+    <child link="yumi_link_2_r" />
+    <origin rpy="1.57079632679 0.0 0.0" xyz="0.03 0.0 0.1" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.50454747661" upper="0.759218224618" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_2_r">
+    </link>
+  <joint name="yumi_joint_7_r" type="revolute">
+    <parent link="yumi_link_2_r" />
+    <child link="yumi_link_3_r" />
+    <origin rpy="-1.57079632679 0.0 0.0" xyz="-0.03 0.17283 0.0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.94087978961" upper="2.94087978961" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_3_r">
+    </link>
+  <joint name="yumi_joint_3_r" type="revolute">
+    <parent link="yumi_link_3_r" />
+    <child link="yumi_link_4_r" />
+    <origin rpy="1.57079632679 -1.57079632679 0.0" xyz="-0.04188 0.0 0.07873" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.15548162621" upper="1.3962634016" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_4_r">
+    </link>
+  <joint name="yumi_joint_4_r" type="revolute">
+    <parent link="yumi_link_4_r" />
+    <child link="yumi_link_5_r" />
+    <origin rpy="-1.57079632679 0.0 0.0" xyz="0.0405 0.16461 0.0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-5.06145483078" upper="5.06145483078" velocity="6.98131700798" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_5_r">
+    </link>
+  <joint name="yumi_joint_5_r" type="revolute">
+    <parent link="yumi_link_5_r" />
+    <child link="yumi_link_6_r" />
+    <origin rpy="1.57079632679 0.0 0.0" xyz="-0.027 0 0.10039" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-1.53588974176" upper="2.40855436775" velocity="6.98131700798" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_6_r">
+    </link>
+  <joint name="yumi_joint_6_r" type="revolute">
+    <parent link="yumi_link_6_r" />
+    <child link="yumi_link_7_r" />
+    <origin rpy="-1.57079632679 0.0 0.0" xyz="0.027 0.029 0.0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-3.99680398707" upper="3.99680398707" velocity="6.98131700798" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_7_r">
+    </link>
+  <joint name="yumi_joint_1_l" type="revolute">
+    <parent link="yumi_body" />
+    <child link="yumi_link_1_l" />
+    <origin rpy="0.9781 -0.5716 2.3180" xyz="0.05355 0.07250 0.41492" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.94087978961" upper="2.94087978961" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_1_l">
+    </link>
+  <joint name="yumi_joint_2_l" type="revolute">
+    <parent link="yumi_link_1_l" />
+    <child link="yumi_link_2_l" />
+    <origin rpy="1.57079632679 0.0 0.0" xyz="0.03 0.0 0.1" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.50454747661" upper="0.759218224618" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_2_l">
+    </link>
+  <joint name="yumi_joint_7_l" type="revolute">
+    <parent link="yumi_link_2_l" />
+    <child link="yumi_link_3_l" />
+    <origin rpy="-1.57079632679 0.0 0.0" xyz="-0.03 0.17283 0.0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.94087978961" upper="2.94087978961" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_3_l">
+    </link>
+  <joint name="yumi_joint_3_l" type="revolute">
+    <parent link="yumi_link_3_l" />
+    <child link="yumi_link_4_l" />
+    <origin rpy="1.57079632679 -1.57079632679 0.0" xyz="-0.04188 0.0 0.07873" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.15548162621" upper="1.3962634016" velocity="3.14159265359" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_4_l">
+    </link>
+  <joint name="yumi_joint_4_l" type="revolute">
+    <parent link="yumi_link_4_l" />
+    <child link="yumi_link_5_l" />
+    <origin rpy="-1.57079632679 0.0 0.0" xyz="0.0405 0.16461 0.0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-5.06145483078" upper="5.06145483078" velocity="6.98131700798" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_5_l">
+    </link>
+  <joint name="yumi_joint_5_l" type="revolute">
+    <parent link="yumi_link_5_l" />
+    <child link="yumi_link_6_l" />
+    <origin rpy="1.57079632679 0.0 0.0" xyz="-0.027 0 0.10039" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-1.53588974176" upper="2.40855436775" velocity="6.98131700798" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_6_l">
+    </link>
+  <joint name="yumi_joint_6_l" type="revolute">
+    <parent link="yumi_link_6_l" />
+    <child link="yumi_link_7_l" />
+    <origin rpy="-1.57079632679 0.0 0.0" xyz="0.027 0.029 0.0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-3.99680398707" upper="3.99680398707" velocity="6.98131700798" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="yumi_link_7_l">
+    </link>
+  <joint name="yumi_link_7_r_joint" type="fixed">
+    <origin rpy="0 0 3.14159265359" xyz="0 0 0.007" />
+    <parent link="yumi_link_7_r" />
+    <child link="gripper_r_base" />
+  </joint>
+  <link name="gripper_r_base">
+    </link>
+  <joint name="gripper_r_joint" type="prismatic">
+    <parent link="gripper_r_base" />
+    <child link="gripper_r_finger_r" />
+    <origin rpy="0 0 0" xyz="0 -0.0065 0.0837" />
+    <axis xyz="-1 0 0" />
+    <limit effort="20" lower="0" upper="0.025" velocity="2" />
+    <dynamics damping="1.0" />
+  </joint>
+  <link name="gripper_r_finger_r">
+    </link>
+  <joint name="gripper_r_joint_m" type="prismatic">
+    <parent link="gripper_r_base" />
+    <child link="gripper_r_finger_l" />
+    <origin rpy="0 0 3.14159265359" xyz="0 0.0065 0.0837" />
+    <axis xyz="-1 0 0" />
+    <limit effort="20" lower="0" upper="0.025" velocity="2" />
+    <dynamics damping="1.0" />
+    <mimic joint="gripper_r_joint" />
+  </joint>
+  <link name="gripper_r_finger_l">
+    </link>
+  <joint name="yumi_link_7_l_joint" type="fixed">
+    <origin rpy="0 0 3.14159265359" xyz="0 0 0.007" />
+    <parent link="yumi_link_7_l" />
+    <child link="gripper_l_base" />
+  </joint>
+  <link name="gripper_l_base">
+    </link>
+  <joint name="gripper_l_joint" type="prismatic">
+    <parent link="gripper_l_base" />
+    <child link="gripper_l_finger_r" />
+    <origin rpy="0 0 0" xyz="0 -0.0065 0.0837" />
+    <axis xyz="-1 0 0" />
+    <limit effort="20" lower="0" upper="0.025" velocity="2" />
+    <dynamics damping="1.0" />
+  </joint>
+  <link name="gripper_l_finger_r">
+    </link>
+  <joint name="gripper_l_joint_m" type="prismatic">
+    <parent link="gripper_l_base" />
+    <child link="gripper_l_finger_l" />
+    <origin rpy="0 0 3.14159265359" xyz="0 0.0065 0.0837" />
+    <axis xyz="-1 0 0" />
+    <limit effort="20" lower="0" upper="0.025" velocity="2" />
+    <dynamics damping="1.0" />
+    <mimic joint="gripper_l_joint" />
+  </joint>
+  <link name="gripper_l_finger_l">
+    </link>
+  <link name="world" />
+  <joint name="world_joint" type="fixed">
+    <parent link="world" />
+    <child link="yumi_base_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.1" />
+  </joint>
+</robot>

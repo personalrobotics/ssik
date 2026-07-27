@@ -35,7 +35,7 @@ preprocessing) and cleaner to ship in production stacks.
 
 <!-- AUTOGEN:prebuilt_readme_table -->
 <details>
-<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (11 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -46,6 +46,10 @@ preprocessing) and cleaner to ship in production stacks.
 | `ur16e_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
 | `ur20_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
 | `ur30_ik` | `ikgeo.three_parallel` | <1 s | ~33 KB |
+| `ur7e_ik` | `ikgeo.three_parallel` | <1 s | ~10 KB |
+| `ur12e_ik` | `ikgeo.three_parallel` | <1 s | ~10 KB |
+| `ur15_ik` | `ikgeo.three_parallel` | <1 s | ~10 KB |
+| `ur18_ik` | `ikgeo.three_parallel` | <1 s | ~10 KB |
 
 </details>
 
@@ -59,12 +63,13 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `jaco2_ik` | `ikgeo.general_6r` | ~25 s | ~73 KB |
 | `gen3_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
+| `gen3_lite_ik` | `ikgeo.general_6r` | <1 s | ~10 KB |
 
 </details>
 
@@ -187,6 +192,16 @@ preprocessing) and cleaner to ship in production stacks.
 | `thor_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
 | `core_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
 | `spark_ik` | `ikgeo.three_parallel` | <1 s | ~26 KB |
+
+</details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `yumi_left_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
+| `yumi_right_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
 
 </details>
 <!-- /AUTOGEN -->

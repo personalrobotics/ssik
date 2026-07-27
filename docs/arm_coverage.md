@@ -112,7 +112,7 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 
 <!-- AUTOGEN:fixture_source_table -->
 <details>
-<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (11 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
@@ -123,6 +123,10 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `ur16e_ik` | robot_descriptions / ur16e_description (ur.urdf.xacro, ur_type:=ur16e) |
 | `ur20_ik` | robot_descriptions / ur20_description (ur.urdf.xacro, ur_type:=ur20) |
 | `ur30_ik` | robot_descriptions / ur30_description (ur.urdf.xacro, ur_type:=ur30) |
+| `ur7e_ik` | robot_descriptions / ur7e_description (ur.urdf.xacro, ur_type:=ur7e) |
+| `ur12e_ik` | robot_descriptions / ur12e_description (ur.urdf.xacro, ur_type:=ur12e) |
+| `ur15_ik` | robot_descriptions / ur15_description (ur.urdf.xacro, ur_type:=ur15) |
+| `ur18_ik` | robot_descriptions / ur18_description (ur.urdf.xacro, ur_type:=ur18) |
 
 </details>
 
@@ -136,12 +140,13 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `jaco2_ik` | Kinova j2n6s200 DH (kinova-ros / kinova_description) |
 | `gen3_ik` | Kinovarobotics / ros_kortex (kortex_description / gen3.xacro) |
+| `gen3_lite_ik` | robot_descriptions / gen3_lite_description |
 
 </details>
 
@@ -264,6 +269,16 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `thor_ik` | standardbots / ros2-realtime-api (robot_urdfs/thor.urdf) |
 | `core_ik` | standardbots / ros2-realtime-api (robot_urdfs/core.urdf) |
 | `spark_ik` | standardbots / ros2-realtime-api (robot_urdfs/spark.urdf) |
+
+</details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `yumi_left_ik` | robot_descriptions / yumi_description |
+| `yumi_right_ik` | robot_descriptions / yumi_description |
 
 </details>
 <!-- /AUTOGEN -->

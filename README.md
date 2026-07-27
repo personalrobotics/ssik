@@ -82,11 +82,11 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->36<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->43<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
-<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (11 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -97,6 +97,10 @@ The wheel ships <!-- AUTOGEN:arm_count -->36<!-- /AUTOGEN --> ready-to-import ar
 | `ur16e_ik` | Universal Robots UR16e | three-parallel 6R | `base_link` | `tool0` |
 | `ur20_ik` | Universal Robots UR20 | three-parallel 6R | `base_link` | `tool0` |
 | `ur30_ik` | Universal Robots UR30 | three-parallel 6R | `base_link` | `tool0` |
+| `ur7e_ik` | Universal Robots UR7E | three-parallel 6R | `base_link` | `tool0` |
+| `ur12e_ik` | Universal Robots UR12E | three-parallel 6R | `base_link` | `tool0` |
+| `ur15_ik` | Universal Robots UR15 | three-parallel 6R | `base_link` | `tool0` |
+| `ur18_ik` | Universal Robots UR18 | three-parallel 6R | `base_link` | `tool0` |
 
 </details>
 
@@ -110,12 +114,13 @@ The wheel ships <!-- AUTOGEN:arm_count -->36<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** | `base_link` | `ee_link` |
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
+| `gen3_lite_ik` | Kinova Gen3 Lite | **non-Pieper 6R** | `base_link` | `end_effector_link` |
 
 </details>
 
@@ -238,6 +243,16 @@ The wheel ships <!-- AUTOGEN:arm_count -->36<!-- /AUTOGEN --> ready-to-import ar
 | `thor_ik` | Standard Bots Thor | three-parallel 6R | `base_link` | `tool0` |
 | `core_ik` | Standard Bots Core | three-parallel 6R | `base_link` | `tool0` |
 | `spark_ik` | Standard Bots Spark | three-parallel 6R | `base_link` | `tool0` |
+
+</details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `yumi_left_ik` | ABB YuMi (IRB 14000) left | **approximate-SRS 7R** | `yumi_body` | `yumi_link_7_l` |
+| `yumi_right_ik` | ABB YuMi (IRB 14000) right | **approximate-SRS 7R** | `yumi_body` | `yumi_link_7_r` |
 
 </details>
 <!-- /AUTOGEN -->
@@ -477,7 +492,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 
 <!-- AUTOGEN:readme_eaik_table -->
 <details>
-<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (7 arms)</summary>
+<summary><b>Universal Robots</b>: <code>ssik.prebuilt.universal_robots</code> (11 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
@@ -488,6 +503,10 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | UR16e (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 1.89 ± 0.13 ms / FK 1e-8 / 2-8 sols |
 | UR20 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 1e-15 / 4-8 sols | 1.80 ± 0.13 ms / FK 1e-8 / 2-8 sols |
 | UR30 (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 2e-15 / 2-8 sols | 1.93 ± 0.13 ms / FK 2e-9 / 2-8 sols |
+| UR7E (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 2.48 ± 0.23 ms / FK 2e-9 / 2-8 sols |
+| UR12E (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 1.88 ± 0.13 ms / FK 2e-9 / 2-8 sols |
+| UR15 (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 2.92 ± 0.59 ms / FK 2e-9 / 2-8 sols |
+| UR18 (Pieper 6R, three-parallel) | _(no EAIK bench cell yet)_ | 2.40 ± 0.19 ms / FK 2e-9 / 2-8 sols |
 
 </details>
 
@@ -501,12 +520,13 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (2 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 870 ± 20 µs / FK 8e-7 / 2-12 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.87 ± 0.27 ms / FK 1e-12 / 11-92 sols |
+| Gen3 Lite (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.61 ± 0.50 ms / FK 1e-8 / 1-12 sols |
 
 </details>
 
@@ -629,6 +649,16 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | Thor (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.44 ± 0.06 ms / FK 4e-12 / 1-4 sols |
 | Core (Pieper 6R, three-parallel) | 4 ± 0 µs / FK 9e-16 / 2-6 sols | 2.47 ± 0.06 ms / FK 2e-12 / 1-4 sols |
 | Spark (Pieper 6R, three-parallel) | **refuses** ("classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)") | 2.46 ± 0.06 ms / FK 9e-13 / 1-4 sols |
+
+</details>
+
+<details>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| YuMi L (**approximate-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 19.06 ± 1.30 ms / FK 1e-12 / 26-70 sols |
+| YuMi R (**approximate-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 19.64 ± 1.36 ms / FK 1e-12 / 24-79 sols |
 
 </details>
 <!-- /AUTOGEN -->

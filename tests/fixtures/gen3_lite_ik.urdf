@@ -1,0 +1,214 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="gen3_lite">
+  <link name="world" />
+  <ros2_control name="KortexMultiInterfaceHardware" type="system">
+    <hardware>
+      <plugin>kortex_driver/KortexMultiInterfaceHardware</plugin>
+      <param name="robot_ip">192.168.11.11</param>
+      <param name="username">admin</param>
+      <param name="password">admin</param>
+      <param name="port">10000</param>
+      <param name="port_realtime">10001</param>
+      <param name="session_inactivity_timeout_ms">60000</param>
+      <param name="connection_inactivity_timeout_ms">2000</param>
+      <param name="tf_prefix" />
+      <param name="use_internal_bus_gripper_comm">False</param>
+      <param name="gripper_joint_name">finger_joint</param>
+      <param name="gripper_max_velocity">100.0</param>
+      <param name="gripper_max_force">100.0</param>
+    </hardware>
+    <joint name="joint_1">
+      <command_interface name="position">
+        <param name="min">-2.69</param>
+        <param name="max">2.69</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_2">
+      <command_interface name="position">
+        <param name="min">-2.69</param>
+        <param name="max">2.36</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_3">
+      <command_interface name="position">
+        <param name="min">-2.69</param>
+        <param name="max">2.69</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_4">
+      <command_interface name="position">
+        <param name="min">-2.59</param>
+        <param name="max">2.59</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_5">
+      <command_interface name="position">
+        <param name="min">-2.57</param>
+        <param name="max">2.57</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_6">
+      <command_interface name="position">
+        <param name="min">-2.59</param>
+        <param name="max">2.59</param>
+      </command_interface>
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="right_finger_bottom_joint">
+      <command_interface name="position" />
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+    </joint>
+  </ros2_control>
+  <joint name="base_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="world" />
+    <child link="base_link" />
+  </joint>
+  <link name="base_link">
+    </link>
+  <link name="shoulder_link">
+    </link>
+  <joint name="joint_1" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.12825" />
+    <parent link="base_link" />
+    <child link="shoulder_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" lower="-2.69" upper="2.69" velocity="1.6" />
+  </joint>
+  <link name="arm_link">
+    </link>
+  <joint name="joint_2" type="revolute">
+    <origin rpy="1.5708 0 0" xyz="0 -0.03 0.115" />
+    <parent link="shoulder_link" />
+    <child link="arm_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="14" lower="-2.69" upper="2.69" velocity="1.6" />
+  </joint>
+  <link name="forearm_link">
+    </link>
+  <joint name="joint_3" type="revolute">
+    <origin rpy="-3.1416 0 0" xyz="0 0.28 0" />
+    <parent link="arm_link" />
+    <child link="forearm_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="10" lower="-2.69" upper="2.69" velocity="1.6" />
+  </joint>
+  <link name="lower_wrist_link">
+    </link>
+  <joint name="joint_4" type="revolute">
+    <origin rpy="1.5708 0 0" xyz="0 -0.14 0.02" />
+    <parent link="forearm_link" />
+    <child link="lower_wrist_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="7" lower="-2.59" upper="2.59" velocity="1.6" />
+  </joint>
+  <link name="upper_wrist_link">
+    </link>
+  <joint name="joint_5" type="revolute">
+    <origin rpy="0 1.5708 0" xyz="0.0285 0 0.105" />
+    <parent link="lower_wrist_link" />
+    <child link="upper_wrist_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="7" lower="-2.57" upper="2.57" velocity="1.6" />
+  </joint>
+  <link name="end_effector_link" />
+  <joint name="joint_6" type="revolute">
+    <origin rpy="0 -1.5708 0" xyz="-0.105 0 0.0285" />
+    <parent link="upper_wrist_link" />
+    <child link="end_effector_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="7" lower="-2.59" upper="2.59" velocity="3.2" />
+  </joint>
+  <link name="dummy_link" />
+  <joint name="end_effector" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="end_effector_link" />
+    <child link="dummy_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="0" upper="0" velocity="0" />
+  </joint>
+  <link name="tool_frame" />
+  <joint name="tool_frame_joint" type="fixed">
+    <origin rpy="0 0 1.57079632679" xyz="0 0 0.130" />
+    <parent link="dummy_link" />
+    <child link="tool_frame" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <joint name="gripper_base_joint" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="dummy_link" />
+    <child link="gripper_base_link" />
+    <axis xyz="0 0 0" />
+  </joint>
+  <link name="gripper_base_link">
+    </link>
+  <link name="right_finger_prox_link">
+    </link>
+  <joint name="right_finger_bottom_joint" type="revolute">
+    <origin rpy="1.571 0.611 1.571" xyz="0 -0.030501 0.070003" />
+    <parent link="gripper_base_link" />
+    <child link="right_finger_prox_link" />
+    <axis xyz="0 0 -1" />
+    <limit effort="50" lower="0.0" upper="0.85" velocity="0.6" />
+  </joint>
+  <link name="right_finger_dist_link">
+    </link>
+  <joint name="right_finger_tip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.045636 0.020423 0" />
+    <parent link="right_finger_prox_link" />
+    <child link="right_finger_dist_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="-0.50" upper="0.21" velocity="1000" />
+    <mimic joint="right_finger_bottom_joint" multiplier="-0.676" offset="0.149" />
+  </joint>
+  <link name="left_finger_prox_link">
+    </link>
+  <joint name="left_finger_bottom_joint" type="revolute">
+    <origin rpy="-1.571 0.611 -1.571" xyz="0 0.0305 0.070003" />
+    <parent link="gripper_base_link" />
+    <child link="left_finger_prox_link" />
+    <axis xyz="0 0 1" />
+    <limit effort="1000" lower="0.0" upper="0.85" velocity="1000" />
+    <mimic joint="right_finger_bottom_joint" multiplier="1.0" offset="0.0" />
+  </joint>
+  <link name="left_finger_dist_link">
+    </link>
+  <joint name="left_finger_tip_joint" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.045636 -0.020423 6.9901E-05" />
+    <parent link="left_finger_prox_link" />
+    <child link="left_finger_dist_link" />
+    <axis xyz="0 0 -1" />
+    <limit effort="1000" lower="-0.50" upper="0.21" velocity="1000" />
+    <mimic joint="right_finger_bottom_joint" multiplier="-0.676" offset="0.149" />
+  </joint>
+</robot>

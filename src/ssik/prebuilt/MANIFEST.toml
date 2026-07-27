@@ -1364,3 +1364,233 @@ sols_max = 4
 [arms.standardbots_spark_ik.eaik]
 supported = false
 refusal = "classifies as 6R-THREE_INNER_PARALLEL but returns FK-incorrect solutions (max FK 3e+00)"
+
+[arms.yumi_left_ik]
+display_name = "ABB YuMi (IRB 14000) left"
+short_name = "YuMi L"
+vendor = "abb"
+fixture = "yumi_left_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / yumi_description"
+base_link = "yumi_body"
+ee_link = "yumi_link_7_l"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R"
+short_class = "approximate-SRS 7R"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-09
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.yumi_left_ik.bench]
+ms_mean = 19.06
+ms_ci95 = 1.30
+max_fk = 1.0e-12
+sols_min = 26
+sols_max = 70
+
+[arms.yumi_left_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
+[arms.yumi_right_ik]
+display_name = "ABB YuMi (IRB 14000) right"
+short_name = "YuMi R"
+vendor = "abb"
+fixture = "yumi_right_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / yumi_description"
+base_link = "yumi_body"
+ee_link = "yumi_link_7_r"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R"
+short_class = "approximate-SRS 7R"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-09
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.yumi_right_ik.bench]
+ms_mean = 19.64
+ms_ci95 = 1.36
+max_fk = 1.0e-12
+sols_min = 24
+sols_max = 79
+
+[arms.yumi_right_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
+[arms.gen3_lite_ik]
+display_name = "Kinova Gen3 Lite"
+short_name = "Gen3 Lite"
+vendor = "kinova"
+fixture = "gen3_lite_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / gen3_lite_description"
+base_link = "base_link"
+ee_link = "end_effector_link"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.2, 0.3, -0.4, 0.5, -0.2, 0.3]
+fk_ceiling_fuzz = 0.0001
+platform_drift = true
+drift_markers = [
+    "_solve_algebraic",
+    "_build_pq_matrices",
+    'SOLVER_NAME = "ikgeo.general_6r"',
+]
+
+[arms.gen3_lite_ik.bench]
+ms_mean = 1.61
+ms_ci95 = 0.50
+max_fk = 1.5e-08
+sols_min = 1
+sols_max = 12
+
+[arms.gen3_lite_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+
+[arms.ur7e_ik]
+display_name = "Universal Robots UR7E"
+short_name = "UR7E"
+vendor = "universal_robots"
+fixture = "ur7e_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur7e_description (ur.urdf.xacro, ur_type:=ur7e)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.2, 0.3, -0.4, 0.5, -0.2, 0.3]
+fk_ceiling_fuzz = 1e-07
+platform_drift = false
+
+[arms.ur7e_ik.bench]
+ms_mean = 2.48
+ms_ci95 = 0.23
+max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
+
+[arms.ur12e_ik]
+display_name = "Universal Robots UR12E"
+short_name = "UR12E"
+vendor = "universal_robots"
+fixture = "ur12e_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur12e_description (ur.urdf.xacro, ur_type:=ur12e)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.2, 0.3, -0.4, 0.5, -0.2, 0.3]
+fk_ceiling_fuzz = 1e-07
+platform_drift = false
+
+[arms.ur12e_ik.bench]
+ms_mean = 1.88
+ms_ci95 = 0.13
+max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
+
+[arms.ur15_ik]
+display_name = "Universal Robots UR15"
+short_name = "UR15"
+vendor = "universal_robots"
+fixture = "ur15_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur15_description (ur.urdf.xacro, ur_type:=ur15)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.2, 0.3, -0.4, 0.5, -0.2, 0.3]
+fk_ceiling_fuzz = 1e-07
+platform_drift = false
+
+[arms.ur15_ik.bench]
+ms_mean = 2.92
+ms_ci95 = 0.59
+max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
+
+[arms.ur18_ik]
+display_name = "Universal Robots UR18"
+short_name = "UR18"
+vendor = "universal_robots"
+fixture = "ur18_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / ur18_description (ur.urdf.xacro, ur_type:=ur18)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R"
+short_class = "Pieper 6R, three-parallel"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 10
+sample_q = [0.2, 0.3, -0.4, 0.5, -0.2, 0.3]
+fk_ceiling_fuzz = 1e-07
+platform_drift = false
+
+[arms.ur18_ik.bench]
+ms_mean = 2.40
+ms_ci95 = 0.19
+max_fk = 2.0e-09
+sols_min = 2
+sols_max = 8
