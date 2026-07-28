@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 from _perf import best_call_ms
 from kuka_iiwa14 import kuka_iiwa14_specs
 
-from ssik._kinbody import build_kinbody
+from ssik._kinbody import KinBody, build_kinbody
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.solvers.seven_r.srs import solve as srs_solve
 
@@ -268,7 +268,7 @@ def test_dispatcher_routes_franka_to_spherical_shoulder_not_srs() -> None:
 _IIWA7_URDF = Path(__file__).parent / "fixtures" / "kuka_iiwa7.urdf"
 
 
-def _iiwa7_kb() -> object:
+def _iiwa7_kb() -> KinBody:
     from ssik._urdf import load_urdf_kinbody_normalized
 
     return load_urdf_kinbody_normalized(_IIWA7_URDF, "iiwa_link_0", "iiwa_link_ee")
@@ -281,12 +281,13 @@ def test_iiwa7_is_offset_wrist_srs() -> None:
     fixture that exposed the canonical fast-path's offset-free-wrist assumption
     (#424): iiwa14 (offset-free) does not."""
     from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as POL
-    from ssik.kinematics.predicates import is_srs_7r
-    from ssik.solvers.seven_r.srs import _arm_constants, _classify_srs_7r_geometric
+    from ssik.kinematics.predicates import _classify_srs_7r_geometric, is_srs_7r
+    from ssik.solvers.seven_r.srs import _arm_constants
 
     kb = _iiwa7_kb()
     assert is_srs_7r(kb, POL), "iiwa7 must classify as SRS (concurrent wrist axes)"
     cls = _classify_srs_7r_geometric(kb, POL)
+    assert cls is not None
     _, _, _, origins = _arm_constants(kb, cls)
     # Joint 5's origin is NOT at the wrist pivot -- this is what makes the
     # canonical fast-path invalid and forces the general path.
