@@ -259,3 +259,75 @@ def test_dispatcher_routes_franka_to_spherical_shoulder_not_srs() -> None:
     kb = build_kinbody(franka_panda_specs())
     plan = dispatch(kb)
     assert plan.solver_name == "seven_r.spherical_shoulder"
+
+
+# ----------------------------------------------------------------------------
+# Offset-wrist SRS (#424): concurrent axes but a laterally-offset wrist
+# ----------------------------------------------------------------------------
+
+_IIWA7_URDF = Path(__file__).parent / "fixtures" / "kuka_iiwa7.urdf"
+
+
+def _iiwa7_kb() -> object:
+    from ssik._urdf import load_urdf_kinbody_normalized
+
+    return load_urdf_kinbody_normalized(_IIWA7_URDF, "iiwa_link_0", "iiwa_link_ee")
+
+
+def test_iiwa7_is_offset_wrist_srs() -> None:
+    """iiwa7 (differentiable-robot-model) is genuinely SRS-class (wrist axes
+    4/5/6 concurrent) but has intermediate lateral offsets at joints 5/6 that
+    displace joint 5's origin from the wrist-concurrency point. This is the
+    fixture that exposed the canonical fast-path's offset-free-wrist assumption
+    (#424): iiwa14 (offset-free) does not."""
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as POL
+    from ssik.kinematics.predicates import is_srs_7r
+    from ssik.solvers.seven_r.srs import _arm_constants, _classify_srs_7r_geometric
+
+    kb = _iiwa7_kb()
+    assert is_srs_7r(kb, POL), "iiwa7 must classify as SRS (concurrent wrist axes)"
+    cls = _classify_srs_7r_geometric(kb, POL)
+    _, _, _, origins = _arm_constants(kb, cls)
+    # Joint 5's origin is NOT at the wrist pivot -- this is what makes the
+    # canonical fast-path invalid and forces the general path.
+    offset = float(np.linalg.norm(origins[5] - cls.wrist_pivot))
+    assert offset > 1e-2, f"expected an offset wrist; joint5 offset={offset:.4f}"
+
+
+@pytest.mark.parametrize("q_star", _HAND_PICKED_Q)
+def test_iiwa7_offset_wrist_fk_closure_hand_picked(q_star: np.ndarray) -> None:
+    """Every IK returned at a reachable iiwa7 pose FK-closes <= 1e-10.
+
+    Regression for #424: the canonical ZYZ fast-path used joint 5's frame as
+    the wrist-pivot reference, so on an offset wrist it placed the wrong point
+    at the target and *every* candidate missed FK closure by ~the offset
+    (~4-6 cm on iiwa7) -> zero solutions. The offset-free-wrist guard routes
+    iiwa7 to the general path, which closes to machine precision.
+    """
+    kb = _iiwa7_kb()
+    T_target = poe_forward_kinematics(kb, q_star)
+    sols, is_ls = srs_solve(kb, T_target)
+    assert sols, f"SRS returned no IK for reachable iiwa7 pose q={q_star}"
+    assert not is_ls
+    for sol in sols:
+        fk_err = float(np.linalg.norm(poe_forward_kinematics(kb, sol.q) - T_target))
+        assert fk_err < 1e-10, f"FK closure failed: q={sol.q}, fk_err={fk_err:.2e}"
+
+
+@given(seed=st.integers(min_value=0, max_value=2**31 - 1))
+@settings(
+    max_examples=100,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
+)
+def test_iiwa7_offset_wrist_random_pose_fk_closure(seed: int) -> None:
+    """100 random reachable iiwa7 poses: at least one returned IK FK-closes."""
+    kb = _iiwa7_kb()
+    rng = np.random.default_rng(seed)
+    q_star = rng.uniform(-0.8, 0.8, size=7)
+    T_target = poe_forward_kinematics(kb, q_star)
+    sols, _ = srs_solve(kb, T_target)
+    assert sols, f"no IK for reachable iiwa7 pose (seed={seed})"
+    assert any(
+        float(np.linalg.norm(poe_forward_kinematics(kb, s.q) - T_target)) < 1e-8 for s in sols
+    ), f"no FK-closing IK among {len(sols)} for seed={seed}"

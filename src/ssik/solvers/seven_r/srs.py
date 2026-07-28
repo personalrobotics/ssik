@@ -443,13 +443,24 @@ def solve(
         and np.allclose(j[5].axis, _EY)
         and np.allclose(j[6].axis, _EZ)
     )
+    # The canonical fast-path also assumes an OFFSET-FREE wrist: it uses joint
+    # 5's frame origin as the wrist-pivot reference for the q_2 SP1 (mapping it
+    # onto the target wrist pivot). That is only valid when joint 5's origin
+    # coincides with the axis-concurrency point. iiwa7-class wrists have
+    # intermediate lateral offsets (j5/j6 origins ±e off the pivot, cancelling
+    # at the pivot itself) that keep axes 4/5/6 concurrent but displace joint
+    # 5's origin, so the canonical mapping targets the wrong point and every
+    # candidate misses FK closure by ~e (4-6 cm on iiwa7). Route those to the
+    # general path (#354), which references the wrist pivot explicitly and
+    # solves them to machine precision.
+    wrist_offset_free = bool(np.allclose(origins[5], cls.wrist_pivot, atol=policy.axis_intersect))
     # Approximate-SRS callers (``reach_slack > 0``; only ``srs_polished``,
     # which is Z*Z-gated so the arm is canonical z-y-z up to its small pivot
-    # drift) keep the canonical path: it is the ZYZ warm-start factory their
-    # LM polish + near-singular q_2-sweep (#223) were tuned against. The
-    # general path targets exact concurrent-axis arms (reach_slack == 0) and
-    # carries no reach-slack / elbow-singular handling.
-    use_canonical = canonical_zyz or reach_slack > 0.0
+    # drift, with an offset-free wrist) keep the canonical path: it is the ZYZ
+    # warm-start factory their LM polish + near-singular q_2-sweep (#223) were
+    # tuned against. The general path targets exact concurrent-axis arms
+    # (reach_slack == 0) and carries no reach-slack / elbow-singular handling.
+    use_canonical = (canonical_zyz and wrist_offset_free) or reach_slack > 0.0
 
     t_target = np.asarray(T_target, dtype=np.float64)
     R_target = t_target[:3, :3]

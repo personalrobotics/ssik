@@ -1,0 +1,95 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="iiwa7">
+  <link name="iiwa_link_0">
+    <self_collision_checking>
+      <origin rpy="0 0 0" xyz="0 0 0" />
+      <geometry>
+        <cylinder length="0.25" radius="0.15" />
+      </geometry>
+    </self_collision_checking>
+  </link>
+  <joint name="iiwa_joint_1" type="revolute">
+    <parent link="iiwa_link_0" />
+    <child link="iiwa_link_1" />
+    <origin rpy="0 0 0" xyz="0 0 0.15" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.9670597283903604" upper="2.9670597283903604" velocity="10" />
+    <safety_controller k_position="100" k_velocity="2" soft_lower_limit="-2.9321531433504737" soft_upper_limit="2.9321531433504737" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="iiwa_link_1">
+    </link>
+  <joint name="iiwa_joint_2" type="revolute">
+    <parent link="iiwa_link_1" />
+    <child link="iiwa_link_2" />
+    <origin rpy="1.5707963267948966   0 3.141592653589793" xyz="0 0 0.19" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.0943951023931953" upper="2.0943951023931953" velocity="10" />
+    <safety_controller k_position="100" k_velocity="2" soft_lower_limit="-2.0594885173533086" soft_upper_limit="2.0594885173533086" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="iiwa_link_2">
+    </link>
+  <joint name="iiwa_joint_3" type="revolute">
+    <parent link="iiwa_link_2" />
+    <child link="iiwa_link_3" />
+    <origin rpy="1.5707963267948966 0 3.141592653589793" xyz="0 0.21 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.9670597283903604" upper="2.9670597283903604" velocity="10" />
+    <safety_controller k_position="100" k_velocity="2" soft_lower_limit="-2.9321531433504737" soft_upper_limit="2.9321531433504737" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="iiwa_link_3">
+    </link>
+  <joint name="iiwa_joint_4" type="revolute">
+    <parent link="iiwa_link_3" />
+    <child link="iiwa_link_4" />
+    <origin rpy="1.5707963267948966 0 0" xyz="0 0 0.19" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.0943951023931953" upper="2.0943951023931953" velocity="10" />
+    <safety_controller k_position="100" k_velocity="2" soft_lower_limit="-2.0594885173533086" soft_upper_limit="2.0594885173533086" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="iiwa_link_4">
+    </link>
+  <joint name="iiwa_joint_5" type="revolute">
+    <parent link="iiwa_link_4" />
+    <child link="iiwa_link_5" />
+    <origin rpy="-1.5707963267948966 3.141592653589793 0" xyz="0 0.21 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.9670597283903604" upper="2.9670597283903604" velocity="10" />
+    <safety_controller k_position="100" k_velocity="2" soft_lower_limit="-2.9321531433504737" soft_upper_limit="2.9321531433504737" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="iiwa_link_5">
+    </link>
+  <joint name="iiwa_joint_6" type="revolute">
+    <parent link="iiwa_link_5" />
+    <child link="iiwa_link_6" />
+    <origin rpy="1.5707963267948966 0 0" xyz="0 0.06070 0.19" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-2.0943951023931953" upper="2.0943951023931953" velocity="10" />
+    <safety_controller k_position="100" k_velocity="2" soft_lower_limit="-2.0594885173533086" soft_upper_limit="2.0594885173533086" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="iiwa_link_6">
+    </link>
+  <joint name="iiwa_joint_7" type="revolute">
+    <parent link="iiwa_link_6" />
+    <child link="iiwa_link_7" />
+    <origin rpy="-1.5707963267948966 3.141592653589793 0" xyz="0 0.081 0.06070" />
+    <axis xyz="0 0 1" />
+    <limit effort="300" lower="-3.0543261909900763" upper="3.0543261909900763" velocity="10" />
+    <safety_controller k_position="100" k_velocity="2" soft_lower_limit="-3.01941960595019" soft_upper_limit="3.01941960595019" />
+    <dynamics damping="0.5" />
+  </joint>
+  <link name="iiwa_link_7">
+    </link>
+  <joint name="iiwa_joint_ee" type="fixed">
+    <parent link="iiwa_link_7" />
+    <child link="iiwa_link_ee" />
+    <origin rpy="0 0 0" xyz="0 0 0.045" />
+  </joint>
+  <link name="iiwa_link_ee">
+    </link>
+</robot>
