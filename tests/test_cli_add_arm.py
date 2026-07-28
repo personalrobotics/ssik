@@ -244,6 +244,85 @@ def test_add_arm_generated_test_runs_passes(workspace: Path, monkeypatch) -> Non
             urdf_dest.unlink()
 
 
+def _seed_manifest(workspace: Path) -> Path:
+    """Create a minimal MANIFEST.toml under the workspace repo-root."""
+    mf = workspace / "src" / "ssik" / "prebuilt" / "MANIFEST.toml"
+    mf.parent.mkdir(parents=True, exist_ok=True)
+    mf.write_text(
+        "# manifest\n\n[arms.existing_ik]\ndof = 6\n\n[arms.existing_ik.bench]\nms_mean = 0.1\n",
+        encoding="utf-8",
+    )
+    return mf
+
+
+def test_add_arm_write_manifest_appends_stanza(workspace: Path) -> None:
+    """``--write-manifest`` appends the derived stanza to MANIFEST.toml (valid
+    TOML, existing entries preserved)."""
+    import tomllib
+
+    mf = _seed_manifest(workspace)
+    result = _run_cli(
+        "add-arm",
+        "--no-validate",
+        "--write-manifest",
+        str(REPO_ROOT / "tests" / "fixtures" / "ur5.urdf"),
+        "--base",
+        "base_link",
+        "--ee",
+        "ee_link",
+        "--name",
+        "ur5_wm_test",
+        "--vendor",
+        "universal_robots",
+        "--repo-root",
+        str(workspace),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Appended [arms.ur5_wm_test]" in result.stdout
+    data = tomllib.loads(mf.read_text())
+    assert "ur5_wm_test" in data["arms"], "new stanza not written"
+    assert "existing_ik" in data["arms"], "existing entry clobbered"
+    assert data["arms"]["ur5_wm_test"]["dof"] == 6
+
+
+def test_add_arm_write_manifest_refuses_duplicate(workspace: Path) -> None:
+    """``--write-manifest`` refuses to append a second entry for the same arm
+    without ``--force`` (and doesn't duplicate)."""
+    import tomllib
+
+    mf = _seed_manifest(workspace)
+    args = [
+        "add-arm",
+        "--no-validate",
+        "--write-manifest",
+        str(REPO_ROOT / "tests" / "fixtures" / "ur5.urdf"),
+        "--base",
+        "base_link",
+        "--ee",
+        "ee_link",
+        "--name",
+        "ur5_dup_test",
+        "--vendor",
+        "universal_robots",
+        "--repo-root",
+        str(workspace),
+    ]
+    assert _run_cli(*args).returncode == 0
+    # Second time: fixture/test exist, so --force is needed for those; but the
+    # manifest refusal is the point -- add --force so we reach the manifest step
+    # and confirm the entry is replaced (not duplicated).
+    second = _run_cli(*args, "--force")
+    assert second.returncode == 0
+    text = mf.read_text()
+    # Exactly one header table (with closing bracket; the .bench sub-table has a dot).
+    assert text.count("[arms.ur5_dup_test]") == 1, "force re-add duplicated the entry"
+    tomllib.loads(text)  # still valid TOML (raises on duplicate keys)
+    # And without --force on an existing manifest entry, it errors.
+    third = _run_cli(*args)
+    assert third.returncode != 0
+    assert "already exists" in third.stdout
+
+
 def test_add_arm_missing_urdf_errors_cleanly(workspace: Path) -> None:
     """Pointing at a non-existent URDF errors instead of silently writing."""
     result = _run_cli(

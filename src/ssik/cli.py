@@ -197,6 +197,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "slow-build (cached-RR 7R) arms where the inline build takes minutes."
         ),
     )
+    add_arm_parser.add_argument(
+        "--write-manifest",
+        action="store_true",
+        help=(
+            "Append the derived stanza to <repo-root>/src/ssik/prebuilt/"
+            "MANIFEST.toml instead of only printing it. Refuses if an entry for "
+            "this arm already exists (use --force to overwrite it). Curated TODO "
+            "fields (kinematic_class, class_tags, ...) still need your values."
+        ),
+    )
     return parser
 
 
@@ -554,15 +564,24 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     if not args.no_validate:
         worst_fk = _build_and_validate(args, kb, plan)
 
-    print()
-    print("[ssik add-arm] Add this stanza to src/ssik/prebuilt/MANIFEST.toml")
-    print("[ssik add-arm] (TODO fields need your judgement; the rest is derived):")
-    print()
-    print(
-        _render_manifest_stanza(
-            args.name, args.base, args.ee, len(kb.joints), plan, args.vendor, worst_fk
-        )
+    stanza = _render_manifest_stanza(
+        args.name, args.base, args.ee, len(kb.joints), plan, args.vendor, worst_fk
     )
+    print()
+    if args.write_manifest:
+        manifest_path = repo_root / "src" / "ssik" / "prebuilt" / "MANIFEST.toml"
+        rc = _append_manifest_stanza(manifest_path, args.name, stanza, force=args.force)
+        if rc != 0:
+            return rc
+        rel_manifest = manifest_path.relative_to(repo_root)
+        print(f"[ssik add-arm] Appended [arms.{args.name}] to {rel_manifest}")
+        print("[ssik add-arm]   Fill the TODO fields (kinematic_class, class_tags, ...) by hand.")
+    else:
+        print("[ssik add-arm] Add this stanza to src/ssik/prebuilt/MANIFEST.toml")
+        print("[ssik add-arm] (TODO fields need your judgement; the rest is derived):")
+        print("[ssik add-arm] (or re-run with --write-manifest to append it automatically)")
+        print()
+        print(stanza)
     print()
     print("[ssik add-arm] ✓ Then finish (build artifact, then one-click bench+docs):")
     print(f"[ssik add-arm]     uv run pytest {test_dest.relative_to(repo_root)} -v")
@@ -623,6 +642,49 @@ def _build_and_validate(args: argparse.Namespace, kb: KinBody, plan: DispatchPla
         return None
     print(f"[ssik add-arm] ✓ VALIDATED: coverage {coverage:.0%}, worst FK {worst_fk:.1e}")
     return worst_fk
+
+
+def _append_manifest_stanza(manifest_path: Path, name: str, stanza: str, *, force: bool) -> int:
+    """Append ``stanza`` (a rendered ``[arms.<name>]`` block) to ``manifest_path``.
+
+    Refuses (returns 1) if the manifest is missing or already defines
+    ``[arms.<name>]``, unless ``force`` is set (in which case the existing
+    entry, including its ``.bench`` / ``.eaik`` sub-tables, is removed first).
+    Returns 0 on success.
+    """
+    if not manifest_path.is_file():
+        print(f"[ssik add-arm] ERROR: manifest not found at {manifest_path}.")
+        print("[ssik add-arm]   Run from the repo root, or pass --repo-root.")
+        return 1
+    text = manifest_path.read_text(encoding="utf-8")
+    header = f"[arms.{name}]"
+    if header in text:
+        if not force:
+            print(f"[ssik add-arm] ERROR: {header} already exists in {manifest_path.name}.")
+            print("[ssik add-arm]   Pass --force to replace it.")
+            return 1
+        text = _strip_manifest_entry(text, name)
+    # Append after a single blank-line separator, keeping a trailing newline.
+    body = text.rstrip("\n")
+    manifest_path.write_text(f"{body}\n\n{stanza.rstrip(chr(10))}\n", encoding="utf-8")
+    return 0
+
+
+def _strip_manifest_entry(text: str, name: str) -> str:
+    """Remove ``[arms.<name>]`` and its ``.bench`` / ``.eaik`` sub-tables from a
+    manifest string, so a ``--force`` re-add replaces rather than duplicates."""
+    lines = text.splitlines()
+    prefixes = (f"[arms.{name}]", f"[arms.{name}.")
+    out: list[str] = []
+    skipping = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("["):
+            # A new table header decides whether we keep skipping.
+            skipping = any(stripped.startswith(p) for p in prefixes)
+        if not skipping:
+            out.append(line)
+    return "\n".join(out).rstrip("\n") + "\n"
 
 
 def _render_manifest_stanza(

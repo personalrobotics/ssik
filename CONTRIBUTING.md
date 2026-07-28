@@ -130,7 +130,7 @@ The metadata for a shipped arm lives in `MANIFEST.toml`. The flow is now mostly 
 
    (Spec-transcribed arms still use a Python `*_specs()` builder + `fixture_kind = "specs"`. Xacro: expand to plain URDF first — modular-URDF support is #327.)
 
-2. **Paste the stanza into `MANIFEST.toml`** and fill the `TODO` fields (copy a same-class neighbour for `kinematic_class` / `class_tags`).
+2. **Paste the stanza into `MANIFEST.toml`** and fill the `TODO` fields (copy a same-class neighbour for `kinematic_class` / `class_tags`). Or pass `--write-manifest` to `add-arm` to append the stanza automatically (it refuses to clobber an existing entry unless `--force`); you still fill the curated `TODO` fields by hand.
 
 3. **Emit the artifact:**
 
