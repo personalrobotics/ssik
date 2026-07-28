@@ -563,6 +563,8 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     worst_fk: float | None = None
     if not args.no_validate:
         worst_fk = _build_and_validate(args, kb, plan)
+    else:
+        _live_smoke(kb, args.name)
 
     stanza = _render_manifest_stanza(
         args.name, args.base, args.ee, len(kb.joints), plan, args.vendor, worst_fk
@@ -642,6 +644,45 @@ def _build_and_validate(args: argparse.Namespace, kb: KinBody, plan: DispatchPla
         return None
     print(f"[ssik add-arm] ✓ VALIDATED: coverage {coverage:.0%}, worst FK {worst_fk:.1e}")
     return worst_fk
+
+
+def _live_smoke(kb: KinBody, name: str, *, n_poses: int = 8) -> None:
+    """Live-solver coverage smoke for a ``--no-validate`` (slow-build) arm.
+
+    ``--no-validate`` skips the minutes-long artifact build + coverage gate, and
+    used to skip onboarding validation entirely -- so a broken slow-build arm
+    (0 IK / ``[0,0]``-locked limits / wrong ee) scaffolded green (#445). This
+    runs a bounded live-solver smoke instead: no artifact build, ~seconds even on
+    HP-fallback 7R arms, enough to rule OUT catastrophic breakage. It is NOT a
+    coverage certification (7R arms run the slower HP fallback here, with reduced
+    coverage vs the built cached-RR artifact), so it always prints a loud
+    UNVALIDATED reminder to build + run the full gate before shipping."""
+    import numpy as np
+
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+    from ssik.manipulator import Manipulator
+
+    print("[ssik add-arm] --no-validate: skipping the artifact build + coverage gate.")
+    print(f"[ssik add-arm] Running a live-solver smoke instead ({n_poses} in-limits poses):")
+    arm = Manipulator(kb)
+    rng = np.random.default_rng(0)
+    limits = [(j.limits if j.limits is not None else (-np.pi, np.pi)) for j in kb.joints]
+    covered = 0
+    for _ in range(n_poses):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in limits])
+        if arm.solve(poe_forward_kinematics(kb, q)):
+            covered += 1
+
+    if covered == 0:
+        print(f"[ssik add-arm] ✗ LIKELY BROKEN: live solver returned no IK on any of {n_poses}")
+        print("[ssik add-arm]   reachable poses. Check --base/--ee, joint limits ([0,0] locks the")
+        print("[ssik add-arm]   arm), and wrist gauge BEFORE shipping.")
+    else:
+        print(f"[ssik add-arm] ~ live smoke: {covered}/{n_poses} poses solved (catastrophic-only")
+        print("[ssik add-arm]   check; 7R arms use the slower HP fallback here, reduced coverage).")
+    print("[ssik add-arm] ⚠ UNVALIDATED artifact -- before shipping, build + run the full gate:")
+    print(f"[ssik add-arm]     uv run python scripts/regen_artifacts.py --arm {name}")
+    print(f"[ssik add-arm]     uv run pytest tests/test_{name}.py")
 
 
 def _append_manifest_stanza(manifest_path: Path, name: str, stanza: str, *, force: bool) -> int:

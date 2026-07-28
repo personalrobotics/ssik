@@ -323,6 +323,33 @@ def test_add_arm_write_manifest_refuses_duplicate(workspace: Path) -> None:
     assert "already exists" in third.stdout
 
 
+def test_add_arm_no_validate_runs_live_smoke(workspace: Path) -> None:
+    """``--no-validate`` no longer silently skips onboarding validation (#445):
+    it runs a bounded live-solver smoke and prints a loud UNVALIDATED reminder
+    with the build + full-gate commands, so a broken slow-build arm can't
+    scaffold green unnoticed. Uses UR5 (fast) to exercise the path."""
+    result = _run_cli(
+        "add-arm",
+        "--no-validate",
+        str(REPO_ROOT / "tests" / "fixtures" / "ur5.urdf"),
+        "--base",
+        "base_link",
+        "--ee",
+        "ee_link",
+        "--name",
+        "ur5_smoke_test",
+        "--vendor",
+        "universal_robots",
+        "--repo-root",
+        str(workspace),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "live-solver smoke" in result.stdout
+    assert "8/8 poses solved" in result.stdout  # UR5 is fully covered
+    assert "UNVALIDATED" in result.stdout
+    assert "regen_artifacts.py --arm ur5_smoke_test" in result.stdout
+
+
 def test_add_arm_missing_urdf_errors_cleanly(workspace: Path) -> None:
     """Pointing at a non-existent URDF errors instead of silently writing."""
     result = _run_cli(
