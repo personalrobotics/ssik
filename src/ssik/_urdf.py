@@ -34,6 +34,7 @@ if TYPE_CHECKING:  # pragma: no cover — typing only
 __all__ = [
     "load_urdf_kinbody",
     "load_urdf_kinbody_normalized",
+    "load_urdf_kinbody_robust",
     "process_xacro",
     "strip_urdf_to_fixture",
     "suggest_base_ee",
@@ -538,3 +539,34 @@ def load_urdf_kinbody_normalized(
     final_t_right = final_t_right @ final_rotation
 
     return build_poe_kinbody(records, final_t_right, base_link, ee_link)
+
+
+def load_urdf_kinbody_robust(
+    source: str | Path,
+    base_link: str,
+    ee_link: str,
+    *,
+    xacro_args: dict[str, str] | None = None,
+) -> KinBody:
+    """Load a POE-normalized :class:`KinBody`, tolerant of vendor URDFs.
+
+    Same result as :func:`load_urdf_kinbody_normalized` (FK-identical), but
+    strips the source to a mesh-free, kinematics-only temp copy *first*, so a
+    URDF that references meshes by an unresolvable ``package://`` path (most
+    vendor URDFs: ABB, FANUC, ...) loads without a ROS workspace on disk.
+    Genuinely-macro'd xacro is expanded before stripping. This mirrors the
+    ``ssik add-arm`` ingestion path (#428) so the public
+    :meth:`ssik.Manipulator.from_urdf` entry point is as robust as the CLI.
+
+    :param xacro_args: substitution args for parametrized xacro descriptions
+        (see :func:`process_xacro`); ignored for plain URDFs.
+    """
+    src = Path(source)
+    with tempfile.TemporaryDirectory() as tmp:
+        stripped = Path(tmp) / "kinematics.urdf"
+        if needs_xacro_expansion(src):
+            with _as_plain_urdf(src, xacro_args) as plain:
+                strip_urdf_to_fixture(plain, stripped)
+        else:
+            strip_urdf_to_fixture(src, stripped)
+        return load_urdf_kinbody_normalized(stripped, base_link, ee_link)

@@ -136,8 +136,8 @@ class Manipulator:
         cls,
         path: str | Path,
         *,
-        base: str,
-        ee: str,
+        base: str | None = None,
+        ee: str | None = None,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         xacro_args: dict[str, str] | None = None,
     ) -> Manipulator:
@@ -145,29 +145,35 @@ class Manipulator:
         between ``base`` and ``ee``.
 
         The kinematic chain is POE-normalised internally so the dispatcher
-        can match the arm's topology against the solver roster. Mesh loading
-        is lazy (the URDF parser does not load STL files unless asked).
+        can match the arm's topology against the solver roster.
 
-        Xacro descriptions (``.xacro`` / ``*.urdf.xacro``, or a ``.urdf`` with a
-        xacro namespace) are expanded automatically via ``xacrodoc``
-        (``pip install ssik[xacro]``).
+        Ingestion mirrors ``ssik add-arm``: the URDF is stripped to a
+        mesh-free, kinematics-only copy before loading, so vendor URDFs that
+        reference meshes by an unresolvable ``package://`` path (ABB, FANUC,
+        ...) load without a ROS workspace on disk. Xacro descriptions
+        (``.xacro`` / ``*.urdf.xacro``, or a ``.urdf`` with a xacro namespace)
+        are expanded automatically via ``xacrodoc`` (``pip install ssik[xacro]``).
 
         :param path: path to the URDF or xacro file.
-        :param base: name of the base link in the URDF.
-        :param ee: name of the end-effector link in the URDF.
+        :param base: name of the base link in the URDF. When omitted, the base
+            of the longest actuated chain is auto-detected.
+        :param ee: name of the end-effector link in the URDF. When omitted, the
+            kinematic flange of the longest actuated chain is auto-detected
+            (trailing fixed ``tool0`` / gripper frames are skipped).
         :param policy: tolerance policy. Defaults to
             :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
         :param xacro_args: substitution args for parametrized xacro descriptions
             (e.g. ``{"ur_type": "ur10e"}``); ignored for plain URDFs.
 
         :raises FileNotFoundError: if ``path`` doesn't exist.
-        :raises ValueError: if ``base`` or ``ee`` are not link names in the URDF.
+        :raises ValueError: if ``base`` or ``ee`` are not link names in the URDF,
+            or (when auto-detecting) if the URDF has no actuated joints.
         :raises ImportError: if the optional dependency ``urchin`` is not
             installed (``pip install ssik[urdf]``).
         """
         # Imported lazily so the urchin dependency is only required when
         # from_urdf is actually called (it's an optional extra).
-        from ssik._urdf import load_urdf_kinbody_normalized
+        from ssik._urdf import load_urdf_kinbody_robust, suggest_base_ee
 
         # urchin raises ValueError on missing files; rewrite to the more
         # idiomatic FileNotFoundError for the public API contract.
@@ -175,7 +181,14 @@ class Manipulator:
         if not path_obj.exists():
             raise FileNotFoundError(f"URDF file not found: {path_obj}")
 
-        kb = load_urdf_kinbody_normalized(path, base, ee, xacro_args=xacro_args)
+        # Auto-detect base/ee (longest actuated chain) when not given, so the
+        # library entry point is as one-click as ``ssik add-arm``.
+        if base is None or ee is None:
+            det_base, det_ee, _notes = suggest_base_ee(path, xacro_args)
+            base = base if base is not None else det_base
+            ee = ee if ee is not None else det_ee
+
+        kb = load_urdf_kinbody_robust(path, base, ee, xacro_args=xacro_args)
         return cls(kb, policy=policy)
 
     @classmethod
