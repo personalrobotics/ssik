@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<robot name="multipkg_arm" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find shared_resources)/common.xacro"/>
+  <link name="base_link"/>
+  <link name="tool"/>
+  <joint name="j1" type="revolute">
+    <parent link="base_link"/><child link="tool"/>
+    <origin xyz="0 0 ${link_len}" rpy="0 0 0"/><axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="1" velocity="1"/>
+  </joint>
+</robot>

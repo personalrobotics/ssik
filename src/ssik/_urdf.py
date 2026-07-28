@@ -254,15 +254,50 @@ def needs_xacro_expansion(path: Path) -> bool:
     return "<xacro:" in text or "${" in text or "$(" in text
 
 
-def process_xacro(source: str | Path, subargs: dict[str, str] | None = None) -> str:
+def _discover_package_roots(source: Path) -> list[Path]:
+    """Directories to register with xacrodoc so ``$(find <pkg>)`` in a
+    multi-package ROS xacro resolves.
+
+    Industrial vendor descriptions (ABB, KUKA, FANUC via ros-industrial) split a
+    robot across sibling ROS packages -- e.g. ``irb120_3_58.xacro`` in
+    ``abb_irb120_support`` does ``$(find abb_resources)`` for shared materials.
+    xacrodoc can't find ``abb_resources`` unless told where sibling packages
+    live. Walk up from the source to the nearest ancestor that *contains* a
+    ``package.xml`` (the source's own ROS package), and return that package's
+    parent -- the workspace/repo root that holds all the siblings. xacrodoc's
+    ``look_in`` then recursively discovers every package under it.
+    """
+    src = source.resolve()
+    for parent in src.parents:
+        if (parent / "package.xml").is_file():
+            return [parent.parent]
+    return []
+
+
+def process_xacro(
+    source: str | Path,
+    subargs: dict[str, str] | None = None,
+    package_paths: list[str | Path] | None = None,
+) -> str:
     """Expand a xacro description to a flat URDF string via ``xacrodoc``
     (resolving ``<xacro:include>``, macros, and substitution args).
 
     :param subargs: xacro substitution args (e.g. ``{"ur_type": "ur10e"}``) for
         parametrized descriptions.
+    :param package_paths: extra directories to search for ROS packages
+        referenced by ``$(find <pkg>)``. The source's own workspace root is
+        auto-discovered; pass this only when the referenced packages live
+        elsewhere (a separate checkout).
     """
     xacrodoc = _import_xacrodoc()
-    doc = xacrodoc.XacroDoc.from_file(str(source), subargs=subargs or {})  # type: ignore[attr-defined]
+    src = Path(source)
+    # Register the source's workspace root + any explicit paths so sibling-package
+    # ``$(find ...)`` references resolve (multi-package vendor descriptions).
+    roots = _discover_package_roots(src) + [Path(p) for p in (package_paths or [])]
+    for root in roots:
+        if root.is_dir():
+            xacrodoc.packages.look_in([str(root)])  # type: ignore[attr-defined]
+    doc = xacrodoc.XacroDoc.from_file(str(src), subargs=subargs or {})  # type: ignore[attr-defined]
     return str(doc.to_urdf_string())
 
 
