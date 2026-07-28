@@ -50,33 +50,26 @@ _ROT_ATOL = 1e-7  # ~6e-6 degrees -- looser than position because some upstream
 
 
 def _arms_with_upstream():
-    """Yield ``(arm_name, description_name, prebuilt_module)`` for every
-    arm whose ``fixture_source`` line names a ``robot_descriptions``
-    entry."""
+    """Yield ``(arm_name, description_name, arm)`` for every arm that declares
+    an ``upstream_description`` (its ``robot_descriptions`` module name).
+
+    Reads the dedicated ``upstream_description`` field, NOT the human
+    ``fixture_source`` prose (#444): a typo or annotation in the prose can no
+    longer silently drop an arm from parity or crash the loader. ``None`` means
+    "no programmatic URDF upstream" -- a deliberate, reviewed choice that this
+    test skips visibly."""
     for name, arm in load_manifest().items():
-        # Parse the convention: "robot_descriptions / <name> (...)" -- the
-        # second whitespace-separated token after the slash is the
-        # description module name. We keep the parse intentionally
-        # narrow so any deviation surfaces as a clear test-collection
-        # error rather than a silent skip.
-        src = arm.fixture_source
-        marker = "robot_descriptions / "
-        if marker not in src:
-            continue
-        # Take the substring after the marker, split on whitespace + "(".
-        tail = src.split(marker, 1)[1]
-        # description name runs until the first whitespace or "(".
-        desc = ""
-        for ch in tail:
-            if ch.isspace() or ch == "(":
-                break
-            desc += ch
-        if not desc:
-            continue
-        yield name, desc, arm
+        if arm.upstream_description is not None:
+            yield name, arm.upstream_description, arm
 
 
 _PARAM_SETS = list(_arms_with_upstream())
+
+# Floor on parity coverage: if a manifest edit silently drops arms from parity
+# (a broken migration, a bulk field removal), the count regresses below this and
+# CI fails. Bump when the roster grows. As of the #444 migration: 26 arms carry
+# an upstream_description.
+_MIN_UPSTREAM_ARMS = 24
 
 
 def _rng(seed: int) -> np.random.Generator:
@@ -114,7 +107,18 @@ def test_fixture_matches_upstream_urdf(arm_name, description, arm) -> None:
         pytest.skip("`robot_descriptions` not installed")
 
     module = import_module(f"ssik.prebuilt.{arm_name}")
-    urdf = load_robot_description(description)
+    # ``upstream_description`` is authoritative (not parsed from prose), so a
+    # load failure here means the field names a wrong/absent robot_descriptions
+    # module -- fail loudly with that diagnosis rather than a raw traceback (#444).
+    try:
+        urdf = load_robot_description(description)
+    except Exception as err:  # surface any loader failure clearly
+        pytest.fail(
+            f"{arm_name}: upstream_description={description!r} did not load a URDF "
+            f"({type(err).__name__}: {err}). Fix the manifest's upstream_description "
+            f"(it must name a robot_descriptions module that exposes a URDF), or set "
+            f"it to nothing if the arm has no programmatic URDF upstream."
+        )
     urdf_actuated = [
         j.name for j in urdf.robot.joints if j.type in ("revolute", "continuous", "prismatic")
     ]
@@ -190,15 +194,15 @@ def test_every_arm_has_eaik_comparison() -> None:
             assert e.refusal, f"arm {name!r}: refused EAIK block must carry a refusal string"
 
 
-def test_at_least_one_arm_has_upstream_parity_coverage() -> None:
-    """At least one arm in the manifest must have a
-    ``robot_descriptions / <name>`` provenance line, so the parametrised
-    parity test above is actually checking something. Catches the
-    degenerate case where someone strips parity coverage from every
-    entry."""
-    assert _PARAM_SETS, (
-        "No arms parametrised for upstream-URDF parity. Either "
-        "``robot_descriptions`` is unavailable or every manifest entry "
-        "has been edited to remove its ``robot_descriptions /`` "
-        "provenance line."
+def test_upstream_parity_coverage_above_floor() -> None:
+    """The number of arms with upstream-URDF parity coverage must not silently
+    regress below ``_MIN_UPSTREAM_ARMS``. A per-arm count floor (not just
+    "at least one") catches a broken migration or a bulk removal of
+    ``upstream_description`` fields that would quietly gut parity coverage while
+    leaving one arm to keep the suite green (#444)."""
+    n = len(_PARAM_SETS)
+    assert n >= _MIN_UPSTREAM_ARMS, (
+        f"only {n} arms carry an upstream_description (floor {_MIN_UPSTREAM_ARMS}); "
+        f"parity coverage regressed. Check for a broken manifest migration or "
+        f"removed upstream_description fields."
     )

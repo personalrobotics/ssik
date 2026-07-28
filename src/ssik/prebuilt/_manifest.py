@@ -97,6 +97,14 @@ class Arm:
     # their real hardware. Surfaced in the README's prebuilt table.
     # Required for every arm (#311); empty string forbidden.
     fixture_source: str = ""
+    # Machine-parsed ``robot_descriptions`` module name for the upstream FK-parity
+    # test (``test_prebuilt_fixture_parity``), e.g. ``"ur5_description"``. Kept as
+    # a dedicated field -- NOT re-parsed from the human ``fixture_source`` prose --
+    # so a typo or annotation in the prose can't silently disable or crash the
+    # parity check (#444). ``None`` means "no programmatic URDF upstream" (a
+    # deliberate, reviewed choice: vendor-only URDF, DH-authored, or MJCF-only
+    # upstream), which the parity test skips visibly rather than by accident.
+    upstream_description: str | None = None
     # Vendor/brand slug -- the subpackage this arm's artifact lives under,
     # ``ssik.prebuilt.<vendor>.<module>`` (#421). Defaults to ``"misc"``.
     vendor: str = "misc"
@@ -203,6 +211,9 @@ def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
         platform_drift=bool(body["platform_drift"]),
         drift_markers=tuple(str(m) for m in body.get("drift_markers", [])),  # type: ignore[arg-type]
         fixture_source=_required_fixture_source(name, body),
+        upstream_description=(
+            str(u) if (u := body.get("upstream_description")) is not None else None
+        ),
         vendor=_required_vendor(name, body),
         bench=bench,
         eaik=eaik,
