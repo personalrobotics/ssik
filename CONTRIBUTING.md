@@ -147,6 +147,14 @@ The metadata for a shipped arm lives in `MANIFEST.toml`. The flow is now mostly 
 
    `regen_bench.py` measures the prebuilt's `solve()` (time / FK / branch count, examples/04 methodology) and writes the `[arms.<name>_ik.bench]` block in place, then runs `regen_docs.py`. Run it on the reference machine (timing is machine-dependent; FK/sols are not). Omit `--arm` to re-bench every arm.
 
+   Then refresh the perf-regression baseline (a new arm without one fails `test_perf_regression.py::test_baseline_covers_benched_arms`):
+
+   ```bash
+   uv run python scripts/regen_perf_baseline.py   # writes tests/_perf_baseline.json (solve time relative to ur5)
+   ```
+
+   The baseline stores each arm's solve time *relative to ur5* (machine-independent), so the perf gate holds across CI runners. Regenerate it on the reference machine only when a solver change legitimately alters timing, never to silence a gate failure you don't understand.
+
 5. **Set `fk_ceiling_fuzz`** to ~10× the worst FK residual in a 50-pose smoke test. If a pose returns no IK (coverage gap), add a `[arms.<name>_ik.known_gaps]` block with an `xfail_reason` and file an issue. Then run the gates:
 
    ```bash
