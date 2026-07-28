@@ -54,7 +54,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (5 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -62,15 +62,17 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
 | `gen3_lite_ik` | Kinova Gen3 Lite | non-Pieper 6R | `base_link` | `end_effector_link` |
 | `j2s6s300_ik` | Kinova JACO j2s6s300 | Pieper 6R (spherical wrist) | `j2s6s300_link_base` | `j2s6s300_end_effector` |
+| `j2s7s300_ik` | Kinova JACO j2s7s300 | approximate-SRS 7R (spherical wrist) | `j2s7s300_link_base` | `j2s7s300_link_7` |
 
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
+| `iiwa7_ik` | KUKA iiwa LBR 7 | SRS 7R (offset wrist) | `iiwa_link_0` | `iiwa_link_ee` |
 
 </details>
 

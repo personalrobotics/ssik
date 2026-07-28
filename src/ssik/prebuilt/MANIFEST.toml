@@ -1701,3 +1701,72 @@ sols_max = 8
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
 
+[arms.iiwa7_ik]
+display_name = "KUKA iiwa LBR 7"
+short_name = "iiwa7"
+vendor = "kuka"
+fixture = "kuka_iiwa7.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / iiwa7_description"
+base_link = "iiwa_link_0"
+ee_link = "iiwa_link_ee"
+dof = 7
+solver = "seven_r.srs"
+tier = 0
+kinematic_class = "SRS 7R (offset wrist)"
+short_class = "SRS 7R, offset wrist"
+class_tags = ["SRS", "7R", "offset-wrist"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 14
+sample_q = [0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.iiwa7_ik.bench]
+ms_mean = 5.83
+ms_ci95 = 0.59
+max_fk = 5.1e-14
+sols_min = 128
+sols_max = 128
+
+[arms.iiwa7_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+[arms.j2s7s300_ik]
+display_name = "Kinova JACO j2s7s300"
+short_name = "JACO j2s7s300"
+vendor = "kinova"
+fixture = "j2s7s300.urdf"
+fixture_kind = "urdf"
+fixture_source = "kinova-ros (kinova_description / j2s7s300_standalone.xacro)"
+base_link = "j2s7s300_link_base"
+ee_link = "j2s7s300_link_7"
+dof = 7
+solver = "seven_r.srs_polished"
+tier = 0
+kinematic_class = "approximate-SRS 7R (spherical wrist)"
+short_class = "approximate-SRS 7R, 1.6 mm offset"
+class_tags = ["approximate-SRS", "7R"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 14
+sample_q = [0.3, 2.0, -0.5, 3.0, 0.2, 3.0, 0.4]
+fk_ceiling_fuzz = 1e-9
+platform_drift = true
+drift_markers = [
+    "_solver_solve",
+    'SOLVER_NAME = "seven_r.srs_polished"',
+    "def fk(q):",
+]
+
+[arms.j2s7s300_ik.bench]
+ms_mean = 17.50
+ms_ci95 = 0.98
+max_fk = 9.9e-13
+sols_min = 2
+sols_max = 66
+
+[arms.j2s7s300_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"

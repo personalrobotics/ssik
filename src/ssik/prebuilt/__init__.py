@@ -78,6 +78,8 @@ _LEGACY_ALIASES: dict[str, str] = {
     "yumi_right_ik": "abb.yumi_right_ik",
     "fanuc_m710ic_ik": "fanuc.m710ic_ik",
     "j2s6s300_ik": "kinova.j2s6s300_ik",
+    "iiwa7_ik": "kuka.iiwa7_ik",
+    "j2s7s300_ik": "kinova.j2s7s300_ik",
 }
 
 _PKG = __name__  # "ssik.prebuilt"

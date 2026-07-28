@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->45<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->47<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -114,7 +114,7 @@ The wheel ships <!-- AUTOGEN:arm_count -->45<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (5 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -122,15 +122,17 @@ The wheel ships <!-- AUTOGEN:arm_count -->45<!-- /AUTOGEN --> ready-to-import ar
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
 | `gen3_lite_ik` | Kinova Gen3 Lite | **non-Pieper 6R** | `base_link` | `end_effector_link` |
 | `j2s6s300_ik` | Kinova JACO j2s6s300 | Pieper 6R (spherical wrist) | `j2s6s300_link_base` | `j2s6s300_end_effector` |
+| `j2s7s300_ik` | Kinova JACO j2s7s300 | **approximate-SRS 7R** (spherical wrist) | `j2s7s300_link_base` | `j2s7s300_link_7` |
 
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
+| `iiwa7_ik` | KUKA iiwa LBR 7 | SRS 7R (offset wrist) | `iiwa_link_0` | `iiwa_link_ee` |
 
 </details>
 
@@ -522,7 +524,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (5 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
@@ -530,15 +532,17 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.87 ± 0.27 ms / FK 1e-12 / 11-92 sols |
 | Gen3 Lite (**non-Pieper 6R**) | **refuses** ("Intersection point can't be calculated for two parallel axes") | 1.35 ± 0.08 ms / FK 1e-8 / 1-12 sols |
 | JACO j2s6s300 (Pieper 6R, spherical wrist) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 380 ± 10 µs / FK 4e-8 / 6-8 sols |
+| JACO j2s7s300 (**approximate-SRS 7R**, 1.6 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 17.50 ± 0.98 ms / FK 1e-12 / 2-66 sols |
 
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.84 ± 0.02 ms / FK 1e-13 / 128 sols |
+| iiwa7 (SRS 7R, offset wrist) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 5.83 ± 0.59 ms / FK 5e-14 / 128 sols |
 
 </details>
 

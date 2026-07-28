@@ -140,7 +140,7 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (5 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
@@ -148,15 +148,17 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `gen3_ik` | Kinovarobotics / ros_kortex (kortex_description / gen3.xacro) |
 | `gen3_lite_ik` | robot_descriptions / gen3_lite_description |
 | `j2s6s300_ik` | robot_descriptions / j2s6s300_description |
+| `j2s7s300_ik` | kinova-ros (kinova_description / j2s7s300_standalone.xacro) |
 
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `iiwa14_ik` | robot_descriptions / iiwa14_description |
+| `iiwa7_ik` | robot_descriptions / iiwa7_description |
 
 </details>
 

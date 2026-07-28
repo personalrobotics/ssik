@@ -63,7 +63,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (5 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -71,15 +71,17 @@ preprocessing) and cleaner to ship in production stacks.
 | `gen3_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
 | `gen3_lite_ik` | `ikgeo.general_6r` | <1 s | ~10 KB |
 | `j2s6s300_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
+| `j2s7s300_ik` | `seven_r.srs_polished` | <1 s | ~14 KB |
 
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (1 arm)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |
+| `iiwa7_ik` | `seven_r.srs` | <1 s | ~14 KB |
 
 </details>
 
