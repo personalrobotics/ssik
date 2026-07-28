@@ -29,6 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ssik._kinbody import KinBody
 from ssik._urdf import (
     _as_plain_urdf,
     load_urdf_kinbody_normalized,
@@ -186,6 +187,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Overwrite existing fixture/test files for this arm. By default, "
             "the command refuses if either file already exists."
+        ),
+    )
+    add_arm_parser.add_argument(
+        "--no-validate",
+        action="store_true",
+        help=(
+            "Skip building + coverage-validating the emitted artifact. Use for "
+            "slow-build (cached-RR 7R) arms where the inline build takes minutes."
         ),
     )
     return parser
@@ -541,11 +550,19 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     _ruff_format(test_dest)  # so the scaffold passes CI's ``ruff format --check``
     print(f"[ssik add-arm]   wrote {len(test_source):,} bytes ({test_source.count(chr(10))} lines)")
 
+    worst_fk: float | None = None
+    if not args.no_validate:
+        worst_fk = _build_and_validate(args, kb, plan)
+
     print()
     print("[ssik add-arm] Add this stanza to src/ssik/prebuilt/MANIFEST.toml")
     print("[ssik add-arm] (TODO fields need your judgement; the rest is derived):")
     print()
-    print(_render_manifest_stanza(args.name, args.base, args.ee, len(kb.joints), plan, args.vendor))
+    print(
+        _render_manifest_stanza(
+            args.name, args.base, args.ee, len(kb.joints), plan, args.vendor, worst_fk
+        )
+    )
     print()
     print("[ssik add-arm] ✓ Then finish (build artifact, then one-click bench+docs):")
     print(f"[ssik add-arm]     uv run pytest {test_dest.relative_to(repo_root)} -v")
@@ -554,44 +571,119 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     return 0
 
 
+# Solvers whose baked constants drift in float last-digits across platforms
+# (heavy sympy/RR preprocessing). Their artifacts get platform_drift = true so
+# the snapshot test uses structural markers off-macOS instead of byte equality.
+_DRIFT_PRONE_SOLVERS = frozenset(
+    {"ikgeo.general_6r", "seven_r.srs_polished", "seven_r.spherical_shoulder_polished"}
+)
+
+
+def _fk_ceiling_from_worst(worst_fk: float) -> float:
+    """A clean power-of-ten FK ceiling one decade above the measured worst-case
+    residual, floored at 1e-9 (no ceiling tighter than closed-form 6R needs)."""
+    import math
+
+    if worst_fk <= 0:
+        return 1e-9
+    return float(max(1e-9, 10 ** math.ceil(math.log10(worst_fk) + 1)))
+
+
+def _build_and_validate(args: argparse.Namespace, kb: KinBody, plan: DispatchPlan) -> float | None:
+    """Emit the artifact to a temp module, import it, and run the coverage gate
+    against the SHIPPED ``module.solve``. Prints a PASS/FAIL verdict and returns
+    the worst-case FK residual (for the stanza's ``fk_ceiling_fuzz``), or ``None``
+    if coverage is too low to ship."""
+    import importlib.util as ilu
+    import tempfile
+
+    from ssik._validation import check_solve_coverage
+
+    print("[ssik add-arm] Building + validating the emitted artifact (coverage gate)")
+    with tempfile.TemporaryDirectory() as d:
+        art = Path(d) / f"{args.name}.py"
+        emit_artifact(
+            kb=kb, plan=plan, module_name=args.name, output_path=str(art), arm_label=args.name
+        )
+        spec = ilu.spec_from_file_location(args.name, art)
+        if spec is None or spec.loader is None:  # pragma: no cover -- defensive
+            print("[ssik add-arm]   could not import the emitted artifact; skipping validation")
+            return None
+        mod = ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        coverage, worst_fk = check_solve_coverage(mod, n_poses=64)
+
+    if coverage < 0.9:
+        print(
+            f"[ssik add-arm] ✗ VALIDATION FAILED: coverage {coverage:.0%} (worst FK {worst_fk:.1e})"
+        )
+        print("[ssik add-arm]   The emitted artifact returns few/no IK on reachable poses -- do")
+        print("[ssik add-arm]   NOT ship as-is. Check --base/--ee, joint limits ([0,0] locks the")
+        print("[ssik add-arm]   arm), and wrist-gauge. The fixture/test/stanza were still written.")
+        return None
+    print(f"[ssik add-arm] ✓ VALIDATED: coverage {coverage:.0%}, worst FK {worst_fk:.1e}")
+    return worst_fk
+
+
 def _render_manifest_stanza(
-    name: str, base: str, ee: str, dof: int, plan: DispatchPlan, vendor: str
+    name: str,
+    base: str,
+    ee: str,
+    dof: int,
+    plan: DispatchPlan,
+    vendor: str,
+    worst_fk: float | None = None,
 ) -> str:
-    """A ready-to-paste MANIFEST.toml stanza: derived fields filled, curated
-    fields left as ``TODO`` for human judgement. ``regen_bench.py`` fills the
-    ``[bench]`` block."""
+    """A ready-to-paste MANIFEST.toml stanza: derived fields filled (solver,
+    tier, dof, platform_drift, fk_ceiling from the validation smoke), curated
+    fields left as ``TODO``. ``regen_bench.py`` fills ``[bench]`` and ``[eaik]``."""
     sample = ", ".join("0.1" for _ in range(dof))
-    return "\n".join(
-        [
-            f"[arms.{name}]",
-            'display_name = "TODO"',
-            'short_name = "TODO"',
-            f'vendor = "{vendor}"',
-            f'fixture = "{name}.urdf"',
-            'fixture_kind = "urdf"',
-            'fixture_source = "TODO (e.g. robot_descriptions / <pkg>)"',
-            f'base_link = "{base}"',
-            f'ee_link = "{ee}"',
-            f"dof = {dof}",
-            f'solver = "{plan.solver_name}"',
-            f"tier = {plan.tier}",
-            'kinematic_class = "TODO"',
-            'short_class = "TODO"',
-            'class_tags = ["TODO"]',
-            "slow_build = false  # set true if the build is minutes (cached-RR 7R)",
-            "build_time_sec = 0  # update after building",
-            "artifact_size_kb = 0  # update after building",
-            f"sample_q = [{sample}]",
-            "fk_ceiling_fuzz = 1e-4",
-            "",
-            f"[arms.{name}.bench]  # filled by scripts/regen_bench.py",
-            "ms_mean = 0.0",
-            "ms_ci95 = 0.0",
-            "max_fk = 0.0",
-            "sols_min = 0",
-            "sols_max = 0",
+    drift = plan.solver_name in _DRIFT_PRONE_SOLVERS
+    fk_ceiling = _fk_ceiling_from_worst(worst_fk) if worst_fk is not None else 1e-4
+    lines = [
+        f"[arms.{name}]",
+        'display_name = "TODO"',
+        'short_name = "TODO"',
+        f'vendor = "{vendor}"',
+        f'fixture = "{name}.urdf"',
+        'fixture_kind = "urdf"',
+        'fixture_source = "TODO (e.g. robot_descriptions / <pkg>)"',
+        f'base_link = "{base}"',
+        f'ee_link = "{ee}"',
+        f"dof = {dof}",
+        f'solver = "{plan.solver_name}"',
+        f"tier = {plan.tier}",
+        'kinematic_class = "TODO"',
+        'short_class = "TODO"',
+        'class_tags = ["TODO"]',
+        "slow_build = false  # set true if the build is minutes (cached-RR 7R)",
+        "build_time_sec = 1",
+        "artifact_size_kb = 20",
+        f"sample_q = [{sample}]",
+        f"fk_ceiling_fuzz = {fk_ceiling:.0e}  # from the validation smoke (~10x worst FK)",
+        f"platform_drift = {'true' if drift else 'false'}",
+    ]
+    if drift:
+        lines += [
+            "drift_markers = [",
+            f"    'SOLVER_NAME = \"{plan.solver_name}\"',",
+            '    "def fk(q):",',
+            "]",
         ]
-    )
+    lines += [
+        "",
+        f"[arms.{name}.bench]  # filled by scripts/regen_bench.py",
+        "ms_mean = 0.0",
+        "ms_ci95 = 0.0",
+        "max_fk = 0.0",
+        "sols_min = 0",
+        "sols_max = 0",
+        "",
+        f"[arms.{name}.eaik]  # filled by scripts/regen_bench.py (needs EAIK installed)",
+        "supported = false",
+        'refusal = "TODO (regen_bench fills this; or set supported=true + numbers)"',
+    ]
+    return "\n".join(lines)
 
 
 def _render_test_scaffold(

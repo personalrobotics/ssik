@@ -49,10 +49,37 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_add_arm_builds_and_validates(workspace: Path) -> None:
+    """Default (no ``--no-validate``): add-arm builds the emitted artifact and
+    runs the coverage gate locally, reporting a verdict, and the printed stanza
+    carries derived ``fk_ceiling_fuzz`` / ``platform_drift`` (not placeholders).
+    Uses UR5 (fast three-parallel build)."""
+    result = _run_cli(
+        "add-arm",
+        str(REPO_ROOT / "tests" / "fixtures" / "ur5.urdf"),
+        "--base",
+        "base_link",
+        "--ee",
+        "ee_link",
+        "--name",
+        "ur5_validate_test",
+        "--vendor",
+        "universal_robots",
+        "--repo-root",
+        str(workspace),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "VALIDATED" in result.stdout, f"no validation verdict:\n{result.stdout}"
+    assert "platform_drift = false" in result.stdout
+    # fk_ceiling came from the smoke, not the 1e-4 placeholder.
+    assert "fk_ceiling_fuzz = 1e-04" not in result.stdout
+
+
 def test_add_arm_generates_files(workspace: Path) -> None:
     """``ssik add-arm`` vendors the URDF and emits a test scaffold."""
     result = _run_cli(
         "add-arm",
+        "--no-validate",
         str(REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"),
         "--base",
         "base_link",
@@ -98,6 +125,7 @@ def test_add_arm_refuses_overwrite_without_force(workspace: Path) -> None:
     target.write_text("<robot/>")
     result = _run_cli(
         "add-arm",
+        "--no-validate",
         str(REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"),
         "--base",
         "base_link",
@@ -124,6 +152,7 @@ def test_add_arm_force_overwrites(workspace: Path) -> None:
     target_test.write_text("# stale")
     result = _run_cli(
         "add-arm",
+        "--no-validate",
         str(REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"),
         "--base",
         "base_link",
@@ -147,6 +176,7 @@ def test_add_arm_generated_test_is_valid_python(workspace: Path) -> None:
     """The generated test file imports cleanly (compile check)."""
     result = _run_cli(
         "add-arm",
+        "--no-validate",
         str(REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"),
         "--base",
         "base_link",
@@ -177,6 +207,7 @@ def test_add_arm_generated_test_runs_passes(workspace: Path, monkeypatch) -> Non
     name = "addarm_runtest"
     result = _run_cli(
         "add-arm",
+        "--no-validate",
         str(REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"),
         "--base",
         "base_link",
@@ -217,6 +248,7 @@ def test_add_arm_missing_urdf_errors_cleanly(workspace: Path) -> None:
     """Pointing at a non-existent URDF errors instead of silently writing."""
     result = _run_cli(
         "add-arm",
+        "--no-validate",
         str(workspace / "nonexistent.urdf"),
         "--base",
         "base",
