@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import sympy as sp
 
-from ssik._kinbody import KinBody
+from ssik._kinbody import KinBody, canonicalize_spherical_wrist
 from ssik.codegen._compose._target import TargetSymbols, make_target_symbols
 from ssik.codegen._symbolic.sp1 import sp1_theta_sym
 from ssik.codegen._symbolic.sp3 import sp3_branches_sym
@@ -81,6 +81,16 @@ def compose(kb: KinBody) -> str:
         a ``list[list[float]]`` of up to 8 candidate joint vectors;
         verify + dedup happen in the artifact's outer ``solve()`` orchestrator.
     """
+    # Mirror the live solver (ikgeo.spherical_two_parallel.solve): re-gauge a
+    # URDF flange offset onto the wrist intersection so the ``p[3]``
+    # consolidation below is correct. FK-identical and a no-op for
+    # already-canonical wrists (Puma 560), but load-bearing for arms with a
+    # flange offset (FANUC M-710iC, Kinova j2s6s300). Without it the composer
+    # bakes the wrong shoulder-to-wrist offset and every emitted candidate
+    # FK-fails -- the codegen<->live divergence that shipped 0-solution
+    # prebuilts (#424).
+    kb = canonicalize_spherical_wrist(kb)
+
     target = make_target_symbols()
 
     axes = [j.axis for j in kb.joints]

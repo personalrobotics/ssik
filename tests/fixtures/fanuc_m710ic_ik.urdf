@@ -1,0 +1,77 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="m710ic70">
+  <link name="base_link">
+      </link>
+  <link name="link_1">
+      </link>
+  <link name="link_2">
+      </link>
+  <link name="link_3">
+      </link>
+  <link name="link_4">
+      </link>
+  <link name="link_5">
+      </link>
+  <link name="link_6">
+      </link>
+  <joint name="joint_1" type="revolute">
+    <origin xyz="0 0 0.565" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="link_1" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-3.1415" upper="3.1415" velocity="3.0543" />
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <origin xyz="0.150 0 0" rpy="0 0 0" />
+    <parent link="link_1" />
+    <child link="link_2" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" lower="-1.5707" upper="2.3561" velocity="3.0543" />
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <origin xyz="0 0 0.870" rpy="0 0 0" />
+    <parent link="link_2" />
+    <child link="link_3" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0" lower="-2.7925" upper="4.8869" velocity="3.0543" />
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <origin xyz="0 0 0.170" rpy="0 0 0" />
+    <parent link="link_3" />
+    <child link="link_4" />
+    <axis xyz="-1 0 0" />
+    <limit effort="0" lower="-6.2830" upper="6.2830" velocity="4.3633" />
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <origin xyz="1.016 0 0" rpy="0 0 0" />
+    <parent link="link_4" />
+    <child link="link_5" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0" lower="-2.1816" upper="2.1816" velocity="4.3633" />
+  </joint>
+  <joint name="joint_6" type="revolute">
+    <origin xyz="0.175 0 0" rpy="0 0 0" />
+    <parent link="link_5" />
+    <child link="link_6" />
+    <axis xyz="-1 0 0" />
+    <limit effort="0" lower="-6.2831" upper="6.2831" velocity="6.1959" />
+  </joint>
+  <link name="base" />
+  <joint name="base_link-base" type="fixed">
+    <origin xyz="0 0 0.565" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <link name="flange" />
+  <joint name="joint_6-flange" type="fixed">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="link_6" />
+    <child link="flange" />
+  </joint>
+  <link name="tool0" />
+  <joint name="link_6-tool0" type="fixed">
+    <origin xyz="0 0 0" rpy="3.14159 -1.570795 0" />
+    <parent link="flange" />
+    <child link="tool0" />
+  </joint>
+</robot>

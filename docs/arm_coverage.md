@@ -140,13 +140,14 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `jaco2_ik` | Kinova j2n6s200 DH (kinova-ros / kinova_description) |
 | `gen3_ik` | Kinovarobotics / ros_kortex (kortex_description / gen3.xacro) |
 | `gen3_lite_ik` | robot_descriptions / gen3_lite_description |
+| `j2s6s300_ik` | robot_descriptions / j2s6s300_description |
 
 </details>
 
@@ -217,7 +218,7 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
@@ -228,6 +229,7 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `crx20ial_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
 | `crx30ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
 | `crx10ial_ik` | ros-industrial / fanuc_crx10ia_support |
+| `m710ic_ik` | robot_descriptions / fanuc_m710ic_description |
 
 </details>
 

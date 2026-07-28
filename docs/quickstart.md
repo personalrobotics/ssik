@@ -54,13 +54,14 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `jaco2_ik` | Kinova JACO 2 | non-Pieper 6R | `base_link` | `ee_link` |
 | `gen3_ik` | Kinova Gen3 7-DOF | approximate-SRS 7R | `base_link` | `end_effector_link` |
 | `gen3_lite_ik` | Kinova Gen3 Lite | non-Pieper 6R | `base_link` | `end_effector_link` |
+| `j2s6s300_ik` | Kinova JACO j2s6s300 | Pieper 6R (spherical wrist) | `j2s6s300_link_base` | `j2s6s300_end_effector` |
 
 </details>
 
@@ -131,7 +132,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -142,6 +143,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `crx20ial_ik` | FANUC CRX-20iA/L | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
 | `crx30ia_ik` | FANUC CRX-30iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
 | `crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
+| `m710ic_ik` | FANUC M-710iC/70 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 

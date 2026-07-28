@@ -63,13 +63,14 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `jaco2_ik` | `ikgeo.general_6r` | ~25 s | ~73 KB |
 | `gen3_ik` | `seven_r.srs_polished` | <1 s | ~10 KB |
 | `gen3_lite_ik` | `ikgeo.general_6r` | <1 s | ~10 KB |
+| `j2s6s300_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
 
 </details>
 
@@ -140,7 +141,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -151,6 +152,7 @@ preprocessing) and cleaner to ship in production stacks.
 | `crx20ial_ik` | `ikgeo.general_6r` | ~26 s | ~61 KB |
 | `crx30ia_ik` | `ikgeo.general_6r` | ~31 s | ~63 KB |
 | `crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
+| `m710ic_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
 
 </details>
 

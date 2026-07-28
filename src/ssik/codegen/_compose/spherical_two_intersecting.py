@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import sympy as sp
 
-from ssik._kinbody import KinBody
+from ssik._kinbody import KinBody, canonicalize_spherical_wrist
 from ssik.codegen._compose._target import make_target_symbols
 from ssik.codegen._compose.spherical_two_parallel import (
     _mat_const,
@@ -55,6 +55,11 @@ def render_constants_header() -> str:
 
 def compose(kb: KinBody) -> str:
     """Render ``_solve_algebraic`` for a Puma-class arm with intersecting shoulder."""
+    # Mirror the live solver: re-gauge a URDF flange offset onto the wrist
+    # intersection before baking constants. No-op for canonical wrists,
+    # load-bearing otherwise; without it the composer ships 0-solution
+    # prebuilts for offset-flange arms (#424).
+    kb = canonicalize_spherical_wrist(kb)
     target = make_target_symbols()
 
     axes = [j.axis for j in kb.joints]

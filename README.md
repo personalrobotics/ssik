@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->43<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->45<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -114,13 +114,14 @@ The wheel ships <!-- AUTOGEN:arm_count -->43<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `jaco2_ik` | Kinova JACO 2 | **non-Pieper 6R** | `base_link` | `ee_link` |
 | `gen3_ik` | Kinova Gen3 7-DOF | **approximate-SRS 7R** | `base_link` | `end_effector_link` |
 | `gen3_lite_ik` | Kinova Gen3 Lite | **non-Pieper 6R** | `base_link` | `end_effector_link` |
+| `j2s6s300_ik` | Kinova JACO j2s6s300 | Pieper 6R (spherical wrist) | `j2s6s300_link_base` | `j2s6s300_end_effector` |
 
 </details>
 
@@ -191,7 +192,7 @@ The wheel ships <!-- AUTOGEN:arm_count -->43<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -202,6 +203,7 @@ The wheel ships <!-- AUTOGEN:arm_count -->43<!-- /AUTOGEN --> ready-to-import ar
 | `crx20ial_ik` | FANUC CRX-20iA/L | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
 | `crx30ia_ik` | FANUC CRX-30iA | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
 | `crx10ial_ik` | FANUC CRX-10iA/L | **non-Pieper 6R** (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
+| `m710ic_ik` | FANUC M-710iC/70 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 
@@ -520,13 +522,14 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (3 arms)</summary>
+<summary><b>Kinova</b>: <code>ssik.prebuilt.kinova</code> (4 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | JACO 2 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 870 ± 20 µs / FK 8e-7 / 2-12 sols |
 | Gen3 (**approximate-SRS 7R**, 12 mm offset) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 12.87 ± 0.27 ms / FK 1e-12 / 11-92 sols |
 | Gen3 Lite (**non-Pieper 6R**) | **refuses** ("Intersection point can't be calculated for two parallel axes") | 1.35 ± 0.08 ms / FK 1e-8 / 1-12 sols |
+| JACO j2s6s300 (Pieper 6R, spherical wrist) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 380 ± 10 µs / FK 4e-8 / 6-8 sols |
 
 </details>
 
@@ -597,7 +600,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (7 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
@@ -608,6 +611,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | CRX-20iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 710 ± 20 µs / FK 9e-7 / 4-12 sols |
 | CRX-30iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.07 ± 0.11 ms / FK 5e-6 / 4-12 sols |
 | CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 960 ± 10 µs / FK 2e-6 / 4-12 sols |
+| M-710iC (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 4-8 sols | 220 ± 0 µs / FK 8e-12 / 4-8 sols |
 
 </details>
 

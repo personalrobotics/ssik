@@ -1629,3 +1629,75 @@ sols_max = 79
 [arms.yumi_right_ik.eaik]
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
+[arms.fanuc_m710ic_ik]
+display_name = "FANUC M-710iC/70"
+short_name = "M-710iC"
+vendor = "fanuc"
+fixture = "fanuc_m710ic_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / fanuc_m710ic_description"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 28
+sample_q = [0.2, 0.3, -0.4, 0.5, -0.2, 0.3]
+fk_ceiling_fuzz = 1e-9
+platform_drift = false
+
+[arms.fanuc_m710ic_ik.bench]
+ms_mean = 0.22
+ms_ci95 = 0.00
+max_fk = 8.3e-12
+sols_min = 4
+sols_max = 8
+
+[arms.fanuc_m710ic_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00396918
+ms_ci95 = 0.000224459
+max_fk = 8.2e-12
+sols_min = 4
+sols_max = 8
+
+[arms.j2s6s300_ik]
+display_name = "Kinova JACO j2s6s300"
+short_name = "JACO j2s6s300"
+vendor = "kinova"
+fixture = "j2s6s300_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "robot_descriptions / j2s6s300_description"
+base_link = "j2s6s300_link_base"
+ee_link = "j2s6s300_end_effector"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false
+build_time_sec = 1
+artifact_size_kb = 28
+sample_q = [0.2, 0.3, -0.4, 0.5, -0.2, 0.3]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.j2s6s300_ik.bench]
+ms_mean = 0.38
+ms_ci95 = 0.01
+max_fk = 3.7e-08
+sols_min = 6
+sols_max = 8
+
+[arms.j2s6s300_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
