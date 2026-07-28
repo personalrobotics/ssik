@@ -173,6 +173,38 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
             _LOG.info("dispatch: chose %s (tier 0, spherical-shoulder-7R)", plan.solver_name)
             return plan
 
+        # Tier-0 7R: approximate-SRS variant for arms whose URDF axes only
+        # nearly meet (Kinova Gen3: 12 mm shoulder + 0.4 mm wrist drift; Kinova
+        # j2s7s300: 1.6 mm shoulder + exact spherical wrist). Singh-Kreutz
+        # solver as warm-start factory + LM polish to machine precision against
+        # the original URDF FK.
+        #
+        # Checked BEFORE approximate-spherical-shoulder: an arm with an
+        # (approximately) spherical WRIST is SRS-family, and approximate-SRS
+        # requires BOTH shoulder and wrist near-concurrent, so it only claims
+        # spherical-wrist arms. The spherical-shoulder-polished path is for
+        # genuinely offset wrists (xArm7), whose wrist fails this 4 cm gate
+        # (``is_approximately_srs_7r`` returns None) and so falls through below.
+        # j2s7s300 matches the shoulder predicate too but is fully covered only
+        # by srs_polished (100% vs 38% on spherical_shoulder_polished, #424).
+        approx = is_approximately_srs_7r(kb, max_drift_m=0.04, policy=policy)
+        if approx is not None:
+            plan = _make_plan(
+                "seven_r.srs_polished",
+                reason=(
+                    "Approximately-SRS 7R: shoulder axes meet within "
+                    f"{approx.shoulder_drift_m * 1000:.1f} mm, wrist axes "
+                    f"meet within {approx.wrist_drift_m * 1000:.1f} mm.\n"
+                    "Singh-Kreutz on the relaxed pivots produces algebraic\n"
+                    "candidates; LM polish recovers machine-precision FK\n"
+                    "against the original URDF. 16-30x faster than the\n"
+                    "universal jointlock+HP fallback on small-drift arms.\n"
+                    "Covers Kinova Gen3 (12 mm / 0.4 mm drift)."
+                ),
+            )
+            _LOG.info("dispatch: chose %s (tier 0, approximate-SRS-7R)", plan.solver_name)
+            return plan
+
         # Tier-0 7R: approximately-spherical-shoulder (xArm7) -- the reversed
         # lock-6 wrist triple is concurrent to within a small drift, so the
         # closed-form q_i(q6) seeds + LM polish reach machine precision.
@@ -192,28 +224,6 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                 ),
             )
             _LOG.info("dispatch: chose %s (tier 0, approx-spherical-7R)", plan.solver_name)
-            return plan
-
-        # Tier-0 7R: approximate-SRS variant for arms whose URDF axes only
-        # nearly meet (Kinova Gen3: 12 mm shoulder + 0.4 mm wrist drift).
-        # Singh-Kreutz solver as warm-start factory + LM polish to
-        # machine precision against the original URDF FK.
-        approx = is_approximately_srs_7r(kb, max_drift_m=0.04, policy=policy)
-        if approx is not None:
-            plan = _make_plan(
-                "seven_r.srs_polished",
-                reason=(
-                    "Approximately-SRS 7R: shoulder axes meet within "
-                    f"{approx.shoulder_drift_m * 1000:.1f} mm, wrist axes "
-                    f"meet within {approx.wrist_drift_m * 1000:.1f} mm.\n"
-                    "Singh-Kreutz on the relaxed pivots produces algebraic\n"
-                    "candidates; LM polish recovers machine-precision FK\n"
-                    "against the original URDF. 16-30x faster than the\n"
-                    "universal jointlock+HP fallback on small-drift arms.\n"
-                    "Covers Kinova Gen3 (12 mm / 0.4 mm drift)."
-                ),
-            )
-            _LOG.info("dispatch: chose %s (tier 0, approximate-SRS-7R)", plan.solver_name)
             return plan
 
         # Tier-1 7R fallback: joint-lock + dispatch the inner 6R.

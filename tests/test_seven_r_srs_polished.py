@@ -43,10 +43,15 @@ from _perf import best_call_ms
 GEN3_URDF = Path(__file__).parent / "fixtures" / "gen3.urdf"
 RIZON4_URDF = Path(__file__).parent / "fixtures" / "rizon4.urdf"
 KR810_URDF = Path(__file__).parent / "fixtures" / "kassow_kr810.urdf"
+J2S7_URDF = Path(__file__).parent / "fixtures" / "j2s7s300.urdf"
 
 
 def _gen3_kb():
     return load_urdf_kinbody_normalized(GEN3_URDF, "base_link", "end_effector_link")
+
+
+def _j2s7_kb():
+    return load_urdf_kinbody_normalized(J2S7_URDF, "j2s7s300_link_base", "j2s7s300_link_7")
 
 
 def _rizon4_kb():
@@ -316,3 +321,49 @@ def test_polished_works_on_iiwa14() -> None:
     assert sols
     best_fk = min(s.fk_residual for s in sols)
     assert best_fk < 1e-10
+
+
+# ----------------------------------------------------------------------------
+# Kinova j2s7s300 (#424): spherical wrist + near-spherical shoulder (1.6 mm).
+# It matches BOTH the approximate-spherical-shoulder and approximate-SRS
+# predicates; approximate-SRS must win (dispatch order) because only
+# srs_polished gives full coverage (100% vs ~38% on spherical_shoulder_polished).
+# ----------------------------------------------------------------------------
+
+
+def test_dispatcher_routes_j2s7_to_srs_polished_not_spherical_shoulder() -> None:
+    """j2s7s300 has an exact spherical wrist, so it is SRS-family and must
+    route to srs_polished -- NOT spherical_shoulder_polished, which only
+    covers ~38% of its reachable poses (#424). Guards the dispatch precedence:
+    an (approximately) spherical-wrist arm is claimed by approximate-SRS first.
+    """
+    kb = _j2s7_kb()
+    approx = is_approximately_srs_7r(kb, max_drift_m=0.04)
+    assert approx is not None, "j2s7 must satisfy approximate-SRS"
+    assert approx.wrist_drift_m < 1e-3, "j2s7 wrist is (near-)exactly spherical"
+    assert dispatch(kb).solver_name == "seven_r.srs_polished"
+
+
+@given(seed=st.integers(min_value=0, max_value=2**31 - 1))
+@settings(
+    max_examples=50,
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
+)
+def test_j2s7_random_pose_fk_closure(seed: int) -> None:
+    """50 random reachable j2s7 poses: at least one retained IK FK-closes.
+
+    Regression for #424: spherical_shoulder_polished (the pre-fix route) covered
+    only ~38%; srs_polished covers 100%. This asserts full coverage on the
+    correctly-dispatched solver.
+    """
+    kb = _j2s7_kb()
+    rng = np.random.default_rng(seed)
+    lim = [j.limits if j.limits else (-np.pi, np.pi) for j in kb.joints]
+    q_star = np.array([rng.uniform(lo, hi) for lo, hi in lim])
+    T_target = poe_forward_kinematics(kb, q_star)
+    sols, _ = srs_polished.solve(kb, T_target)
+    assert sols, f"no IK for reachable j2s7 pose (seed={seed})"
+    assert any(
+        float(np.linalg.norm(poe_forward_kinematics(kb, s.q) - T_target)) < 1e-8 for s in sols
+    ), f"no FK-closing IK among {len(sols)} for seed={seed}"
