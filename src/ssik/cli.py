@@ -601,6 +601,18 @@ _DRIFT_PRONE_SOLVERS = frozenset(
 )
 
 
+# Scaffold FK-closure ceiling by solver numerical floor. Most paths reach
+# machine precision or LM-polish to <= 1e-8 (1e-6 is a safe loose bound); the
+# RR-resultant general_6r path has a documented ~1e-5 structural conditioning
+# floor (JACO 2 / PiPER class), so its scaffold needs a looser ceiling or the
+# generated coverage gate fails on a correct arm (Doosan M-series, #292).
+_SCAFFOLD_FK_CEILING: dict[str, float] = {"ikgeo.general_6r": 1e-4}
+
+
+def _scaffold_fk_ceiling(solver_name: str) -> float:
+    return _SCAFFOLD_FK_CEILING.get(solver_name, 1e-6)
+
+
 def _fk_ceiling_from_worst(worst_fk: float) -> float:
     """A clean power-of-ten FK ceiling one decade above the measured worst-case
     residual, floored at 1e-9 (no ceiling tighter than closed-form 6R needs)."""
@@ -925,6 +937,7 @@ def _render_test_scaffold(
     """
     arm_label = arm_name
     kb_helper = f"_{arm_name}_kinbody"
+    fk_ceiling = _scaffold_fk_ceiling(plan.solver_name)
     routing_test = f"test_{arm_name}_dispatches_to_{_solver_assertion_slug(plan.solver_name)}"
     docstring_header = (
         f'"""Bulletproof validation for the {arm_label} fixture '
@@ -971,9 +984,9 @@ URDF_PATH = Path(__file__).parent / "fixtures" / "{urdf_filename}"
 # returns few/none; this is the coverage floor the gate enforces.
 _MIN_COVERAGE = 0.95
 _N_COVERAGE_POSES = 64
-# Worst-case FK-closure ceiling on returned solutions. Tighten/loosen to
-# the arm's numerical floor (closed-form 6R ~1e-12; non-Pieper RR ~1e-6).
-_FK_CEILING = 1e-6
+# Worst-case FK-closure ceiling on returned solutions, set from the solver's
+# numerical floor (closed-form / LM-polished <= 1e-6; non-Pieper RR ~1e-5).
+_FK_CEILING = {fk_ceiling:.0e}
 
 
 def {kb_helper}():

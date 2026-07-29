@@ -41,7 +41,7 @@ _MIN_COVERAGE = 0.95
 _N_COVERAGE_POSES = 64
 # Worst-case FK-closure ceiling on returned solutions. Tighten/loosen to
 # the arm's numerical floor (closed-form 6R ~1e-12; non-Pieper RR ~1e-6).
-_FK_CEILING = 1e-6
+_FK_CEILING = 1e-4
 
 
 def _m1013_ik_kinbody():
