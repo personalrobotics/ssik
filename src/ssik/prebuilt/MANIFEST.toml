@@ -1982,3 +1982,189 @@ ms_ci95 = 1.83368e-05
 max_fk = 1.2e-15
 sols_min = 4
 sols_max = 4
+
+[arms.gp8_ik]
+display_name = "Yaskawa GP8"
+short_name = "GP8"
+vendor = "yaskawa"
+fixture = "gp8_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/motoman (motoman_gp8_support, BSD-3-Clause)"
+base_link = "base_link"
+ee_link = "link_6_t"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 28
+sample_q = [0.813, -0.146, -1.04, -3.21, 1.48, 5.19]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.gp8_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.30
+ms_ci95 = 0.03
+max_fk = 2.4e-12
+sols_min = 8
+sols_max = 8
+
+[arms.gp8_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00410456
+ms_ci95 = 0.000163968
+max_fk = 8.1e-12
+sols_min = 8
+sols_max = 8
+[arms.rs007n_ik]
+display_name = "Kawasaki RS007N"
+short_name = "RS007N"
+vendor = "kawasaki"
+fixture = "rs007n_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "Kawasaki-Robotics/khi_robot (khi_rs_description, BSD-3-Clause)"
+base_link = "base_link"
+ee_link = "link6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 30
+sample_q = [0.861, -1.08, -2.48, -3.38, 1.37, 5.19]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.rs007n_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.24
+ms_ci95 = 0.00
+max_fk = 8.1e-12
+sols_min = 4
+sols_max = 8
+
+[arms.rs007n_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00488917
+ms_ci95 = 0.000930451
+max_fk = 4.4e-12
+sols_min = 8
+sols_max = 8
+[arms.lrmate200id_ik]
+display_name = "FANUC LR Mate 200iD"
+short_name = "LR Mate 200iD"
+vendor = "fanuc"
+fixture = "lrmate200id_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/fanuc (fanuc_lrmate200id_support, BSD-3-Clause)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 28
+sample_q = [0.813, -0.592, -1.02, -3.21, 1.37, 5.19]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.lrmate200id_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.41
+ms_ci95 = 0.06
+max_fk = 2.7e-12
+sols_min = 8
+sols_max = 8
+
+[arms.lrmate200id_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00399542
+ms_ci95 = 0.000336859
+max_fk = 3.6e-12
+sols_min = 8
+sols_max = 8
+[arms.r2000ic210l_ik]
+display_name = "FANUC R-2000iC/210L"
+short_name = "R-2000iC/210L"
+vendor = "fanuc"
+fixture = "r2000ic210l_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/fanuc (fanuc_r2000ic_support, BSD-3-Clause)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 28
+sample_q = [0.884, -0.407, -1.9, -6.08, 1.37, 5.19]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.r2000ic210l_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.22
+ms_ci95 = 0.00
+max_fk = 8.3e-12
+sols_min = 4
+sols_max = 8
+
+[arms.r2000ic210l_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00354834
+ms_ci95 = 8.48088e-05
+max_fk = 8.2e-12
+sols_min = 4
+sols_max = 8
+[arms.rx160_ik]
+display_name = "Staubli RX160"
+short_name = "RX160"
+vendor = "staubli"
+fixture = "rx160_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/staubli (staubli_rx160_support, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 27
+sample_q = [0.765, -1.1, -2.4, -4.56, 1.36, 3.89]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.rx160_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.23
+ms_ci95 = 0.01
+max_fk = 8.2e-12
+sols_min = 2
+sols_max = 8
+
+[arms.rx160_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00388395
+ms_ci95 = 0.000669321
+max_fk = 8.2e-12
+sols_min = 4
+sols_max = 8

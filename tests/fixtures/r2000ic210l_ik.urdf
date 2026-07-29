@@ -1,0 +1,77 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="fanuc_r2000ic210l">
+  <link name="base_link">
+    </link>
+  <link name="link_1">
+    </link>
+  <link name="link_2">
+    </link>
+  <link name="link_3">
+    </link>
+  <link name="link_4">
+    </link>
+  <link name="link_5">
+    </link>
+  <link name="link_6">
+    </link>
+  <joint name="joint_1" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.67" />
+    <parent link="base_link" />
+    <child link="link_1" />
+    <axis xyz="0 0 1" />
+    <limit effort="0" lower="-3.2288591161895095" upper="3.2288591161895095" velocity="1.8325957145940461" />
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <origin rpy="0 0 0" xyz="0.312 0 0" />
+    <parent link="link_1" />
+    <child link="link_2" />
+    <axis xyz="0 1 0" />
+    <limit effort="0" lower="-1.0471975511965976" upper="1.3264502315156905" velocity="1.5707963267948966" />
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 1.075" />
+    <parent link="link_2" />
+    <child link="link_3" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0" lower="-2.111848394913139" upper="3.141592653589793" velocity="1.4835298641951802" />
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.225" />
+    <parent link="link_3" />
+    <child link="link_4" />
+    <axis xyz="-1 0 0" />
+    <limit effort="0" lower="-6.283185307179586" upper="6.283185307179586" velocity="2.0943951023931953" />
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <origin rpy="0 0 0" xyz="1.730 0 0" />
+    <parent link="link_4" />
+    <child link="link_5" />
+    <axis xyz="0 -1 0" />
+    <limit effort="0" lower="-2.181661564992912" upper="2.181661564992912" velocity="2.0943951023931953" />
+  </joint>
+  <joint name="joint_6" type="revolute">
+    <origin rpy="0 0 0" xyz="0.24 0 0" />
+    <parent link="link_5" />
+    <child link="link_6" />
+    <axis xyz="-1 0 0" />
+    <limit effort="0" lower="-6.283185307179586" upper="6.283185307179586" velocity="3.490658503988659" />
+  </joint>
+  <link name="base" />
+  <joint name="base_link-base" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0.670" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <link name="flange" />
+  <joint name="joint_6-flange" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="link_6" />
+    <child link="flange" />
+  </joint>
+  <link name="tool0" />
+  <joint name="link_6-tool0" type="fixed">
+    <origin rpy="3.141592653589793 -1.5707963267948966 0" xyz="0 0 0" />
+    <parent link="link_6" />
+    <child link="tool0" />
+  </joint>
+</robot>

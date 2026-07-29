@@ -136,7 +136,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (10 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -148,6 +148,8 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `crx30ia_ik` | FANUC CRX-30iA | non-Pieper 6R (non-spherical wrist) | `base_link` | `tool0` |
 | `crx10ial_ik` | FANUC CRX-10iA/L | non-Pieper 6R (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
 | `m710ic_ik` | FANUC M-710iC/70 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `lrmate200id_ik` | FANUC LR Mate 200iD | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `r2000ic210l_ik` | FANUC R-2000iC/210L | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 
@@ -202,6 +204,33 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `irb120_ik` | ABB IRB 120 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 | `irb1600_ik` | ABB IRB 1600 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 | `irb6700_ik` | ABB IRB 6700 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+
+</details>
+
+<details>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `gp8_ik` | Yaskawa GP8 | Pieper 6R (spherical wrist) | `base_link` | `link_6_t` |
+
+</details>
+
+<details>
+<summary><b>Kawasaki</b>: <code>ssik.prebuilt.kawasaki</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `rs007n_ik` | Kawasaki RS007N | Pieper 6R (spherical wrist) | `base_link` | `link6` |
+
+</details>
+
+<details>
+<summary><b>Staubli</b>: <code>ssik.prebuilt.staubli</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `rx160_ik` | Staubli RX160 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 <!-- /AUTOGEN -->

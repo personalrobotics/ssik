@@ -1,0 +1,83 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="staubli_rx160">
+  <link name="base_link">
+    </link>
+  <link name="link_1">
+    </link>
+  <link name="link_2">
+    </link>
+  <link name="link_3">
+    </link>
+  <link name="link_4">
+    </link>
+  <link name="link_5">
+    </link>
+  <link name="link_6">
+    </link>
+  <joint name="joint_1" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.55" />
+    <parent link="base_link" />
+    <child link="link_1" />
+    <axis xyz="0 0 1" />
+    <limit effort="692.0" lower="-2.792526803190927" upper="2.792526803190927" velocity="3.490658503988659" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <origin rpy="0 0 0" xyz="0.15 0 0" />
+    <parent link="link_1" />
+    <child link="link_2" />
+    <axis xyz="0 1 0" />
+    <limit effort="574.0" lower="-2.399827721492203" upper="2.399827721492203" velocity="3.490658503988659" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.825" />
+    <parent link="link_2" />
+    <child link="link_3" />
+    <axis xyz="0 1 0" />
+    <limit effort="242.0" lower="-2.6179938779914944" upper="2.6179938779914944" velocity="4.4505895925855405" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="link_3" />
+    <child link="link_4" />
+    <axis xyz="0 0 1" />
+    <limit effort="58.0" lower="-4.71238898038469" upper="4.71238898038469" velocity="5.497787143782138" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.625" />
+    <parent link="link_4" />
+    <child link="link_5" />
+    <axis xyz="0 1 0" />
+    <limit effort="29.0" lower="-1.8325957145940461" upper="2.0943951023931953" velocity="6.283185307179586" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <joint name="joint_6" type="revolute">
+    <origin rpy="0 0 0" xyz="0 0 0.11" />
+    <parent link="link_5" />
+    <child link="link_6" />
+    <axis xyz="0 0 1" />
+    <limit effort="29.0" lower="-4.71238898038469" upper="4.71238898038469" velocity="15.184364492350667" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <link name="base" />
+  <joint name="base_link-base" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0.550" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <link name="flange" />
+  <joint name="joint_6-flange" type="fixed">
+    <origin rpy="0 -1.5707963267948966 0" xyz="0 0 0" />
+    <parent link="link_6" />
+    <child link="flange" />
+  </joint>
+  <link name="tool0" />
+  <joint name="flange-tool0" type="fixed">
+    <origin rpy="0 1.5707963267948966 0" xyz="0 0 0" />
+    <parent link="flange" />
+    <child link="tool0" />
+  </joint>
+</robot>

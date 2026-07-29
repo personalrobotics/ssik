@@ -1,0 +1,71 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="khi_rs007n">
+  <link name="base_link">
+    </link>
+  <joint name="joint1" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 -1" />
+    <limit effort="1000.0" lower="-3.141592653589793" upper="3.141592653589793" velocity="8.203047484373348" />
+    <origin rpy="0 0 0" xyz="0 0 0.36" />
+    <parent link="base_link" />
+    <child link="link1" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <link name="link1">
+    </link>
+  <joint name="joint2" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 1" />
+    <limit effort="1000.0" lower="-2.356194490192345" upper="2.356194490192345" velocity="6.632251157578453" />
+    <origin rpy="0 -1.5707963267948966 0" xyz="0 0 0.0" />
+    <parent link="link1" />
+    <child link="link2" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <link name="link2">
+    </link>
+  <joint name="joint3" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 -1" />
+    <limit effort="1000.0" lower="-2.705260340591211" upper="2.705260340591211" velocity="9.075712110370514" />
+    <origin rpy="0 0 0" xyz="0.355 0 0" />
+    <parent link="link2" />
+    <child link="link3" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <link name="link3">
+    </link>
+  <joint name="joint4" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 1" />
+    <limit effort="1000.0" lower="-3.490658503988659" upper="3.490658503988659" velocity="9.599310885968812" />
+    <origin rpy="0 1.5707963267948966 0" xyz="0.0925 0 0" />
+    <parent link="link3" />
+    <child link="link4" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <link name="link4">
+    </link>
+  <joint name="joint5" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 -1" />
+    <limit effort="1000.0" lower="-2.181661564992912" upper="2.181661564992912" velocity="9.599310885968812" />
+    <origin rpy="0 -1.5707963267948966 0" xyz="0 0 0.2825" />
+    <parent link="link4" />
+    <child link="link5" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <link name="link5">
+    </link>
+  <joint name="joint6" type="revolute">
+    <axis rpy="0 0 0" xyz="0 0 1" />
+    <limit effort="1000.0" lower="-6.283185307179586" upper="6.283185307179586" velocity="17.453292519943297" />
+    <origin rpy="0 1.5707963267948966 0" xyz="0.078 0 0" />
+    <parent link="link5" />
+    <child link="link6" />
+    <dynamics damping="0.0" friction="0.0" />
+  </joint>
+  <link name="link6">
+    </link>
+  <link name="world" />
+  <joint name="world2base" type="fixed">
+    <parent link="world" />
+    <child link="base_link" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+</robot>

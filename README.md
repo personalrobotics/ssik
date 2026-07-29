@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->52<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->57<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -196,7 +196,7 @@ The wheel ships <!-- AUTOGEN:arm_count -->52<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (10 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
@@ -208,6 +208,8 @@ The wheel ships <!-- AUTOGEN:arm_count -->52<!-- /AUTOGEN --> ready-to-import ar
 | `crx30ia_ik` | FANUC CRX-30iA | **non-Pieper 6R** (non-spherical wrist) | `base_link` | `tool0` |
 | `crx10ial_ik` | FANUC CRX-10iA/L | **non-Pieper 6R** (non-spherical wrist, 150 mm y-offset) | `base_link` | `tool0` |
 | `m710ic_ik` | FANUC M-710iC/70 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `lrmate200id_ik` | FANUC LR Mate 200iD | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `r2000ic210l_ik` | FANUC R-2000iC/210L | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 
@@ -262,6 +264,33 @@ The wheel ships <!-- AUTOGEN:arm_count -->52<!-- /AUTOGEN --> ready-to-import ar
 | `irb120_ik` | ABB IRB 120 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 | `irb1600_ik` | ABB IRB 1600 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 | `irb6700_ik` | ABB IRB 6700 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+
+</details>
+
+<details>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `gp8_ik` | Yaskawa GP8 | Pieper 6R (spherical wrist) | `base_link` | `link_6_t` |
+
+</details>
+
+<details>
+<summary><b>Kawasaki</b>: <code>ssik.prebuilt.kawasaki</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `rs007n_ik` | Kawasaki RS007N | Pieper 6R (spherical wrist) | `base_link` | `link6` |
+
+</details>
+
+<details>
+<summary><b>Staubli</b>: <code>ssik.prebuilt.staubli</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `rx160_ik` | Staubli RX160 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 <!-- /AUTOGEN -->
@@ -611,7 +640,7 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (10 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
@@ -623,6 +652,8 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | CRX-30iA (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.07 ± 0.11 ms / FK 5e-6 / 4-12 sols |
 | CRX-10iA/L (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 960 ± 10 µs / FK 2e-6 / 4-12 sols |
 | M-710iC (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 4-8 sols | 220 ± 0 µs / FK 8e-12 / 4-8 sols |
+| LR Mate 200iD (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 4e-12 / 8 sols | 410 ± 60 µs / FK 3e-12 / 8 sols |
+| R-2000iC/210L (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 4-8 sols | 220 ± 0 µs / FK 8e-12 / 4-8 sols |
 
 </details>
 
@@ -677,6 +708,33 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | IRB 120 (Pieper 6R, spherical wrist) | 4 ± 1 µs / FK 3e-12 / 8 sols | 240 ± 10 µs / FK 4e-12 / 8 sols |
 | IRB 1600 (Pieper 6R, spherical wrist) | 3 ± 0 µs / FK 5e-12 / 4-8 sols | 210 ± 0 µs / FK 4e-12 / 4-8 sols |
 | IRB 6700 (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 4-8 sols | 210 ± 0 µs / FK 3e-12 / 4-8 sols |
+
+</details>
+
+<details>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| GP8 (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 8 sols | 300 ± 30 µs / FK 2e-12 / 8 sols |
+
+</details>
+
+<details>
+<summary><b>Kawasaki</b>: <code>ssik.prebuilt.kawasaki</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| RS007N (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 4e-12 / 8 sols | 240 ± 0 µs / FK 8e-12 / 4-8 sols |
+
+</details>
+
+<details>
+<summary><b>Staubli</b>: <code>ssik.prebuilt.staubli</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| RX160 (Pieper 6R, spherical wrist) | 4 ± 1 µs / FK 8e-12 / 4-8 sols | 230 ± 10 µs / FK 8e-12 / 2-8 sols |
 
 </details>
 <!-- /AUTOGEN -->

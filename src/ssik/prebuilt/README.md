@@ -145,7 +145,7 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (10 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
@@ -157,6 +157,8 @@ preprocessing) and cleaner to ship in production stacks.
 | `crx30ia_ik` | `ikgeo.general_6r` | ~31 s | ~63 KB |
 | `crx10ial_ik` | `ikgeo.general_6r` | ~36 s | ~76 KB |
 | `m710ic_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
+| `lrmate200id_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
+| `r2000ic210l_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
 
 </details>
 
@@ -211,6 +213,33 @@ preprocessing) and cleaner to ship in production stacks.
 | `irb120_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
 | `irb1600_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
 | `irb6700_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
+
+</details>
+
+<details>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `gp8_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
+
+</details>
+
+<details>
+<summary><b>Kawasaki</b>: <code>ssik.prebuilt.kawasaki</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `rs007n_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~30 KB |
+
+</details>
+
+<details>
+<summary><b>Staubli</b>: <code>ssik.prebuilt.staubli</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `rx160_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
 
 </details>
 <!-- /AUTOGEN -->

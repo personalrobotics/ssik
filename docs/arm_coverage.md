@@ -222,7 +222,7 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (8 arms)</summary>
+<summary><b>FANUC</b>: <code>ssik.prebuilt.fanuc</code> (10 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
@@ -234,6 +234,8 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `crx30ia_ik` | FANUC-CORPORATION/fanuc_description (Apache-2.0) |
 | `crx10ial_ik` | ros-industrial / fanuc_crx10ia_support |
 | `m710ic_ik` | robot_descriptions / fanuc_m710ic_description |
+| `lrmate200id_ik` | ros-industrial/fanuc (fanuc_lrmate200id_support, BSD-3-Clause) |
+| `r2000ic210l_ik` | ros-industrial/fanuc (fanuc_r2000ic_support, BSD-3-Clause) |
 
 </details>
 
@@ -288,6 +290,33 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `irb120_ik` | ros-industrial/abb (abb_irb120_support, Apache-2.0) |
 | `irb1600_ik` | ros-industrial/abb (abb_irb1600_support, Apache-2.0) |
 | `irb6700_ik` | ros-industrial/abb (abb_irb6700_support, Apache-2.0) |
+
+</details>
+
+<details>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `gp8_ik` | ros-industrial/motoman (motoman_gp8_support, BSD-3-Clause) |
+
+</details>
+
+<details>
+<summary><b>Kawasaki</b>: <code>ssik.prebuilt.kawasaki</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `rs007n_ik` | Kawasaki-Robotics/khi_robot (khi_rs_description, BSD-3-Clause) |
+
+</details>
+
+<details>
+<summary><b>Staubli</b>: <code>ssik.prebuilt.staubli</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `rx160_ik` | ros-industrial/staubli (staubli_rx160_support, Apache-2.0) |
 
 </details>
 <!-- /AUTOGEN -->
