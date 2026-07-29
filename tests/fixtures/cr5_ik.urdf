@@ -1,0 +1,64 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="cr5_robot">
+  <link name="dummy_link" />
+  <link name="base_link">
+    </link>
+  <joint name="dummy_joint" type="fixed">
+    <parent link="dummy_link" />
+    <child link="base_link" />
+  </joint>
+  <link name="Link1">
+    </link>
+  <joint name="joint1" type="revolute">
+    <origin xyz="0 0 0.147" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="Link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+  <link name="Link2">
+    </link>
+  <joint name="joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="1.5708 1.5708 0" />
+    <parent link="Link1" />
+    <child link="Link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+  <link name="Link3">
+    </link>
+  <joint name="joint3" type="revolute">
+    <origin xyz="-0.427 0 0" rpy="0 0 0" />
+    <parent link="Link2" />
+    <child link="Link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.793" upper="2.793" effort="0" velocity="0" />
+  </joint>
+  <link name="Link4">
+    </link>
+  <joint name="joint4" type="revolute">
+    <origin xyz="-0.357 0 0.141" rpy="0 0 -1.5708" />
+    <parent link="Link3" />
+    <child link="Link4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+  <link name="Link5">
+    </link>
+  <joint name="joint5" type="revolute">
+    <origin xyz="0 -0.116 0" rpy="1.5708 0 0" />
+    <parent link="Link4" />
+    <child link="Link5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+  <link name="Link6">
+    </link>
+  <joint name="joint6" type="revolute">
+    <origin xyz="0 0.105 0" rpy="-1.5708 0 0" />
+    <parent link="Link5" />
+    <child link="Link6" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+</robot>

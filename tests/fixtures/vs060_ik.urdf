@@ -1,0 +1,169 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="vs060">
+  <ros2_control name="GazeboSystem" type="system">
+    <hardware>
+      <plugin>denso_robot_control/DensoRobotHW</plugin>
+      <param name="ip_address">192.168.0.1</param>
+      <param name="robot_name">VS060A3-AV6-NNN-NNN A</param>
+      <param name="node_name">denso_robot_control</param>
+      <param name="node_namespace">vs060</param>
+      <param name="robot_joints">6</param>
+      <param name="joint_1">1</param>
+      <param name="joint_2">1</param>
+      <param name="joint_3">1</param>
+      <param name="joint_4">1</param>
+      <param name="joint_5">1</param>
+      <param name="joint_6">1</param>
+      <param name="arm_group">0</param>
+      <param name="send_format">288</param>
+      <param name="recv_format">292</param>
+      <param name="controller_type">8</param>
+      <param name="verbose">False</param>
+    </hardware>
+    <joint name="joint_1">
+      <command_interface name="position">
+        <param name="min">-2.967060</param>
+        <param name="max">2.967060</param>
+      </command_interface>
+      <command_interface name="velocity">
+        <param name="min">0</param>
+        <param name="max">0.392699081698724</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_2">
+      <command_interface name="position">
+        <param name="min">-2.094395</param>
+        <param name="max">2.094395</param>
+      </command_interface>
+      <command_interface name="velocity">
+        <param name="min">0</param>
+        <param name="max">0.261799387799149</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_3">
+      <command_interface name="position">
+        <param name="min">-2.181662</param>
+        <param name="max">2.705260</param>
+      </command_interface>
+      <command_interface name="velocity">
+        <param name="min">0</param>
+        <param name="max">0.285832571599111</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_4">
+      <command_interface name="position">
+        <param name="min">-4.712389</param>
+        <param name="max">4.712389</param>
+      </command_interface>
+      <command_interface name="velocity">
+        <param name="min">0</param>
+        <param name="max">0.392699081698724</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_5">
+      <command_interface name="position">
+        <param name="min">-2.094395</param>
+        <param name="max">2.094395</param>
+      </command_interface>
+      <command_interface name="velocity">
+        <param name="min">0</param>
+        <param name="max">0.302168853397778</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+    <joint name="joint_6">
+      <command_interface name="position">
+        <param name="min">-6.283185</param>
+        <param name="max">6.283185</param>
+      </command_interface>
+      <command_interface name="velocity">
+        <param name="min">0</param>
+        <param name="max">0.628318530717959</param>
+      </command_interface>
+      <state_interface name="position" />
+      <state_interface name="velocity" />
+      <state_interface name="effort" />
+    </joint>
+  </ros2_control>
+  <link name="world" />
+  <joint name="joint_w" type="fixed">
+    <parent link="world" />
+    <child link="base_link" />
+  </joint>
+  <link name="base_link">
+    </link>
+  <link name="J1">
+    </link>
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link" />
+    <child link="J1" />
+    <origin rpy="0.000000 0.000000 0.000000" xyz="0.000000 0.000000 0.181500" />
+    <axis xyz="-0.000000 -0.000000 1.000000" />
+    <limit effort="1" lower="-2.96705972839036" upper="2.96705972839036" velocity="3.73064127613788" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <link name="J2">
+    </link>
+  <joint name="joint_2" type="revolute">
+    <parent link="J1" />
+    <child link="J2" />
+    <origin rpy="0.000000 0.000000 0.000000" xyz="0.000000 0.000000 0.163500" />
+    <axis xyz="-0.000000 1.000000 -0.000000" />
+    <limit effort="1" lower="-2.0943951023932" upper="2.0943951023932" velocity="2.48709418409192" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <link name="J3">
+    </link>
+  <joint name="joint_3" type="revolute">
+    <parent link="J2" />
+    <child link="J3" />
+    <origin rpy="0.000000 0.000000 0.000000" xyz="0.000000 0.000000 0.305000" />
+    <axis xyz="-0.000000 1.000000 -0.000000" />
+    <limit effort="1" lower="-2.18166156499291" upper="2.70526034059121" velocity="2.71540943019156" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <link name="J4">
+    </link>
+  <joint name="joint_4" type="revolute">
+    <parent link="J3" />
+    <child link="J4" />
+    <origin rpy="0.000000 0.000000 0.000000" xyz="-0.010000 0.000000 0.164500" />
+    <axis xyz="-0.000000 -0.000000 1.000000" />
+    <limit effort="1" lower="-4.71238898038469" upper="4.71238898038469" velocity="3.73064127613788" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <link name="J5">
+    </link>
+  <joint name="joint_5" type="revolute">
+    <parent link="J4" />
+    <child link="J5" />
+    <origin rpy="0.000000 0.000000 0.000000" xyz="0.000000 0.000000 0.135500" />
+    <axis xyz="-0.000000 1.000000 -0.000000" />
+    <limit effort="1" lower="-2.0943951023932" upper="2.0943951023932" velocity="2.87060410727889" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+  <link name="J6">
+    </link>
+  <joint name="joint_6" type="revolute">
+    <parent link="J5" />
+    <child link="J6" />
+    <origin rpy="0.000000 0.000000 0.000000" xyz="0.000000 0.000000 0.070000" />
+    <axis xyz="-0.000000 -0.000000 1.000000" />
+    <limit effort="1" lower="-6.28318530717959" upper="6.28318530717959" velocity="5.96902604182061" />
+    <dynamics damping="0" friction="0" />
+  </joint>
+</robot>

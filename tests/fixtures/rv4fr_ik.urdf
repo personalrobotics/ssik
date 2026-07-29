@@ -1,0 +1,71 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="rv4fr">
+  <link name="world" />
+  <link name="rv4fr_base">
+    </link>
+  <link name="rv4fr_shoulder">
+    </link>
+  <link name="rv4fr_upper_arm">
+    </link>
+  <link name="rv4fr_elbow">
+    </link>
+  <link name="rv4fr_forearm">
+    </link>
+  <link name="rv4fr_wrist">
+    </link>
+  <link name="rv4fr_hand_flange">
+    </link>
+  <link name="rv4fr_default_tcp" />
+  <joint name="rv4fr_world_to_base" type="fixed">
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
+    <parent link="world" />
+    <child link="rv4fr_base" />
+  </joint>
+  <joint name="rv4fr_joint_1" type="revolute">
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
+    <parent link="rv4fr_base" />
+    <child link="rv4fr_shoulder" />
+    <axis xyz="0 0 1" />
+    <limit effort="1" lower="-4.1887902047863905" upper="4.1887902047863905" velocity="7.853981633974483" />
+  </joint>
+  <joint name="rv4fr_joint_2" type="revolute">
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.35" />
+    <parent link="rv4fr_shoulder" />
+    <child link="rv4fr_upper_arm" />
+    <axis xyz="0 1 0" />
+    <limit effort="1" lower="-2.0943951023931953" upper="2.0943951023931953" velocity="7.853981633974483" />
+  </joint>
+  <joint name="rv4fr_joint_3" type="revolute">
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.235" />
+    <parent link="rv4fr_upper_arm" />
+    <child link="rv4fr_elbow" />
+    <axis xyz="0 1 0" />
+    <limit effort="1" lower="0.0" upper="2.8099800957108703" velocity="5.235987755982989" />
+  </joint>
+  <joint name="rv4fr_joint_4" type="revolute">
+    <origin rpy="0 0 0" xyz="-0.05 0.0 0.0" />
+    <parent link="rv4fr_elbow" />
+    <child link="rv4fr_forearm" />
+    <axis xyz="0 0 1" />
+    <limit effort="1" lower="-3.490658503988659" upper="3.490658503988659" velocity="9.42477796076938" />
+  </joint>
+  <joint name="rv4fr_joint_5" type="revolute">
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.275" />
+    <parent link="rv4fr_forearm" />
+    <child link="rv4fr_wrist" />
+    <axis xyz="0 1 0" />
+    <limit effort="1" lower="-2.0943951023931953" upper="2.0943951023931953" velocity="10.873401239924673" />
+  </joint>
+  <joint name="rv4fr_joint_6" type="revolute">
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.085" />
+    <parent link="rv4fr_wrist" />
+    <child link="rv4fr_hand_flange" />
+    <axis xyz="0 0 1" />
+    <limit effort="1" lower="-6.283185307179586" upper="6.283185307179586" velocity="12.566370614359172" />
+  </joint>
+  <joint name="rv4fr_hand_tcp" type="fixed">
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
+    <parent link="rv4fr_hand_flange" />
+    <child link="rv4fr_default_tcp" />
+  </joint>
+</robot>

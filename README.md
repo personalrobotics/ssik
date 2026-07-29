@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->59<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->67<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -268,11 +268,12 @@ The wheel ships <!-- AUTOGEN:arm_count -->59<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `gp8_ik` | Yaskawa GP8 | Pieper 6R (spherical wrist) | `base_link` | `link_6_t` |
+| `hc10_ik` | Yaskawa HC10 | **non-Pieper 6R** | `base_link` | `link_6_t` |
 
 </details>
 
@@ -301,6 +302,53 @@ The wheel ships <!-- AUTOGEN:arm_count -->59<!-- /AUTOGEN --> ready-to-import ar
 |---|---|---|---|---|
 | `rm75_ik` | Realman RM75 | **approximate-SRS 7R** | `base_link` | `link_7` |
 | `gen72_ik` | Realman GEN72 | **approximately-spherical-shoulder 7R** | `base_link` | `Link7` |
+
+</details>
+
+<details>
+<summary><b>Dobot</b>: <code>ssik.prebuilt.dobot</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `cr5_ik` | Dobot CR5 | three-parallel 6R (UR-class) | `base_link` | `Link6` |
+| `nova5_ik` | Dobot Nova5 | three-parallel 6R (UR-class) | `base_link` | `Link6` |
+
+</details>
+
+<details>
+<summary><b>Mitsubishi</b>: <code>ssik.prebuilt.mitsubishi</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `rv4fr_ik` | Mitsubishi RV-4FR | Pieper 6R (spherical wrist) | `rv4fr_base` | `rv4fr_hand_flange` |
+
+</details>
+
+<details>
+<summary><b>Hyundai</b>: <code>ssik.prebuilt.hyundai</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `hh020_ik` | Hyundai HH020 | Pieper 6R (spherical wrist) | `base_link` | `tool0` |
+
+</details>
+
+<details>
+<summary><b>Denso</b>: <code>ssik.prebuilt.denso</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `vs060_ik` | Denso VS-060 | Pieper 6R (spherical wrist) | `base_link` | `J6` |
+
+</details>
+
+<details>
+<summary><b>Doosan</b>: <code>ssik.prebuilt.doosan</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `m1013_ik` | Doosan M1013 | **non-Pieper 6R** | `base_link` | `link_6` |
+| `m0609_ik` | Doosan M0609 | **non-Pieper 6R** | `base_link` | `link_6` |
 
 </details>
 <!-- /AUTOGEN -->
@@ -722,11 +770,12 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (2 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | GP8 (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 8 sols | 300 ± 30 µs / FK 2e-12 / 8 sols |
+| HC10 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.91 ± 0.94 ms / FK 6e-6 / 4-16 sols |
 
 </details>
 
@@ -755,6 +804,53 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 |---|---|---|
 | RM75 (**approximate-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 10.03 ± 0.71 ms / FK 1e-12 / 128 sols |
 | GEN72 (**approximately-spherical-shoulder 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.36 ± 0.09 ms / FK 1e-10 / 34-40 sols |
+
+</details>
+
+<details>
+<summary><b>Dobot</b>: <code>ssik.prebuilt.dobot</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| CR5 (three-parallel 6R) | 5 ± 1 µs / FK 2e-15 / 2-4 sols | 2.91 ± 0.11 ms / FK 8e-11 / 1-4 sols |
+| Nova5 (three-parallel 6R) | 4 ± 1 µs / FK 1e-15 / 2-4 sols | 4.26 ± 0.92 ms / FK 4e-11 / 1-4 sols |
+
+</details>
+
+<details>
+<summary><b>Mitsubishi</b>: <code>ssik.prebuilt.mitsubishi</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| RV-4FR (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 8 sols | 240 ± 10 µs / FK 8e-12 / 8 sols |
+
+</details>
+
+<details>
+<summary><b>Hyundai</b>: <code>ssik.prebuilt.hyundai</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| HH020 (Pieper 6R, spherical wrist) | 5 ± 2 µs / FK 2e-14 / 4-8 sols | 610 ± 70 µs / FK 2e-7 / 4-8 sols |
+
+</details>
+
+<details>
+<summary><b>Denso</b>: <code>ssik.prebuilt.denso</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| VS-060 (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 8e-12 / 8 sols | 230 ± 10 µs / FK 8e-12 / 4-8 sols |
+
+</details>
+
+<details>
+<summary><b>Doosan</b>: <code>ssik.prebuilt.doosan</code> (2 arms)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| M1013 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.35 ± 0.12 ms / FK 8e-6 / 2-8 sols |
+| M0609 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.78 ± 0.62 ms / FK 1e-5 / 2-8 sols |
 
 </details>
 <!-- /AUTOGEN -->

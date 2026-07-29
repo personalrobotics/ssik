@@ -1,0 +1,65 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="m1013">
+  <link name="base_link">
+    </link>
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link" />
+    <child link="link_1" />
+    <origin rpy="0 0 0" xyz="0 0 0.1525" />
+    <axis xyz="0 0 1" />
+    <limit effort="346" lower="-6.2832" upper="6.2832" velocity="2.0944" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_1">
+    </link>
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1" />
+    <child link="link_2" />
+    <origin rpy="0 -1.571 -1.571" xyz="0 0.0345 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="346" lower="-6.2832" upper="6.2832" velocity="2.0944" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_2">
+    </link>
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2" />
+    <child link="link_3" />
+    <origin rpy="0 0 1.571" xyz="0.62 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="163" lower="-2.7925" upper="2.7925" velocity="3.1416" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_3">
+    </link>
+  <joint name="joint_4" type="revolute">
+    <parent link="link_3" />
+    <child link="link_4" />
+    <origin rpy="1.571 0 0" xyz="0 -0.559 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="50" lower="-6.2832" upper="6.2832" velocity="3.927" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_4">
+    </link>
+  <joint name="joint_5" type="revolute">
+    <parent link="link_4" />
+    <child link="link_5" />
+    <origin rpy="-1.571 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="50" lower="-6.2832" upper="6.2832" velocity="3.927" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_5">
+    </link>
+  <joint name="joint_6" type="revolute">
+    <parent link="link_5" />
+    <child link="link_6" />
+    <origin rpy="1.571 0 0" xyz="0 -0.121 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="50" lower="-6.2832" upper="6.2832" velocity="3.927" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_6">
+    </link>
+</robot>

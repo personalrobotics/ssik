@@ -1,0 +1,64 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="nova5_robot">
+  <link name="dummy_link" />
+  <link name="base_link">
+    </link>
+  <joint name="dummy_joint" type="fixed">
+    <parent link="dummy_link" />
+    <child link="base_link" />
+  </joint>
+  <link name="Link1">
+    </link>
+  <joint name="joint1" type="revolute">
+    <origin xyz="0 0 0.240000000000178" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="Link1" />
+    <axis xyz="0 0 0.999999999999855" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+  <link name="Link2">
+    </link>
+  <joint name="joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.57080287682252 1.53586622836832 3.14159265358979" />
+    <parent link="Link1" />
+    <child link="Link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.142" upper="3.142" effort="0" velocity="0" />
+  </joint>
+  <link name="Link3">
+    </link>
+  <joint name="joint3" type="revolute">
+    <origin xyz="-0.399756009268664 -0.0139690033141953 0" rpy="0 0 0" />
+    <parent link="Link2" />
+    <child link="Link3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.793" upper="2.793" effort="0" velocity="0" />
+  </joint>
+  <link name="Link4">
+    </link>
+  <joint name="joint4" type="revolute">
+    <origin xyz="-0.329798707647103 -0.0115244277211674 0.134999532858734" rpy="0 0 -1.53586622840712" />
+    <parent link="Link3" />
+    <child link="Link4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+  <link name="Link5">
+    </link>
+  <joint name="joint5" type="revolute">
+    <origin xyz="0 -0.12 0" rpy="1.5708 0 0" />
+    <parent link="Link4" />
+    <child link="Link5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+  <link name="Link6">
+    </link>
+  <joint name="joint6" type="revolute">
+    <origin xyz="0 0.088328 0" rpy="-1.5708 0 0" />
+    <parent link="Link5" />
+    <child link="Link6" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+</robot>

@@ -294,11 +294,12 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (2 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `gp8_ik` | ros-industrial/motoman (motoman_gp8_support, BSD-3-Clause) |
+| `hc10_ik` | ros-industrial/motoman (motoman_hc10_support, BSD-3-Clause) |
 
 </details>
 
@@ -327,6 +328,53 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 |---|---|
 | `rm75_ik` | RealManRobot/rm_models (RM75, Apache-2.0) |
 | `gen72_ik` | RealManRobot/rm_models (GEN72, Apache-2.0) |
+
+</details>
+
+<details>
+<summary><b>Dobot</b>: <code>ssik.prebuilt.dobot</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `cr5_ik` | Dobot-Arm/TCP-IP-ROS-6AXis (dobot_description, MIT) |
+| `nova5_ik` | Dobot-Arm/TCP-IP-ROS-6AXis (dobot_description, MIT) |
+
+</details>
+
+<details>
+<summary><b>Mitsubishi</b>: <code>ssik.prebuilt.mitsubishi</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `rv4fr_ik` | Mitsubishi-Electric-Asia/melfa_ros2_driver (melfa_description, Apache-2.0) |
+
+</details>
+
+<details>
+<summary><b>Hyundai</b>: <code>ssik.prebuilt.hyundai</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `hh020_ik` | hyundai-robotics/hdr_description (Apache-2.0) |
+
+</details>
+
+<details>
+<summary><b>Denso</b>: <code>ssik.prebuilt.denso</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `vs060_ik` | DENSORobot/denso_robot_ros2 (denso_robot_descriptions, Apache-2.0) |
+
+</details>
+
+<details>
+<summary><b>Doosan</b>: <code>ssik.prebuilt.doosan</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `m1013_ik` | DoosanRobotics/doosan-robot2 (dsr_description2, Apache-2.0) |
+| `m0609_ik` | DoosanRobotics/doosan-robot2 (dsr_description2, Apache-2.0) |
 
 </details>
 <!-- /AUTOGEN -->

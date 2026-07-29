@@ -2241,3 +2241,297 @@ sols_max = 40
 [arms.gen72_ik.eaik]
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
+[arms.cr5_ik]
+display_name = "Dobot CR5"
+short_name = "CR5"
+vendor = "dobot"
+fixture = "cr5_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "Dobot-Arm/TCP-IP-ROS-6AXis (dobot_description, MIT)"
+base_link = "base_link"
+ee_link = "Link6"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R (UR-class)"
+short_class = "three-parallel 6R"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 34
+sample_q = [1.72, -2.89, -2.56, -6.07, 3.94, 5.18]
+fk_ceiling_fuzz = 1e-07  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.cr5_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 2.91
+ms_ci95 = 0.11
+max_fk = 8.2e-11
+sols_min = 1
+sols_max = 4
+
+[arms.cr5_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00497792
+ms_ci95 = 0.00092524
+max_fk = 1.9e-15
+sols_min = 2
+sols_max = 4
+[arms.nova5_ik]
+display_name = "Dobot Nova5"
+short_name = "Nova5"
+vendor = "dobot"
+fixture = "nova5_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "Dobot-Arm/TCP-IP-ROS-6AXis (dobot_description, MIT)"
+base_link = "base_link"
+ee_link = "Link6"
+dof = 6
+solver = "ikgeo.three_parallel"
+tier = 0
+kinematic_class = "three-parallel 6R (UR-class)"
+short_class = "three-parallel 6R"
+class_tags = ["three-parallel", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 34
+sample_q = [1.72, -1.45, -2.56, -6.07, 3.94, 5.18]
+fk_ceiling_fuzz = 1e-07  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.nova5_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 4.26
+ms_ci95 = 0.92
+max_fk = 3.5e-11
+sols_min = 1
+sols_max = 4
+
+[arms.nova5_ik.eaik]
+supported = true
+family = "6R-THREE_INNER_PARALLEL"
+ms_mean = 0.00398813
+ms_ci95 = 0.000610655
+max_fk = 1.0e-15
+sols_min = 2
+sols_max = 4
+[arms.rv4fr_ik]
+display_name = "Mitsubishi RV-4FR"
+short_name = "RV-4FR"
+vendor = "mitsubishi"
+fixture = "rv4fr_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "Mitsubishi-Electric-Asia/melfa_ros2_driver (melfa_description, Apache-2.0)"
+base_link = "rv4fr_base"
+ee_link = "rv4fr_hand_flange"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 27
+sample_q = [1.15, -0.964, 0.115, -3.38, 1.31, 5.19]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.rv4fr_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.24
+ms_ci95 = 0.01
+max_fk = 8.3e-12
+sols_min = 8
+sols_max = 8
+
+[arms.rv4fr_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00389747
+ms_ci95 = 6.05925e-05
+max_fk = 8.4e-12
+sols_min = 8
+sols_max = 8
+[arms.hh020_ik]
+display_name = "Hyundai HH020"
+short_name = "HH020"
+vendor = "hyundai"
+fixture = "hh020_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "hyundai-robotics/hdr_description (Apache-2.0)"
+base_link = "base_link"
+ee_link = "tool0"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 32
+sample_q = [0.884, 0.026, -1.21, -3.29, 1.48, 5.19]
+fk_ceiling_fuzz = 1e-6  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.hh020_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.61
+ms_ci95 = 0.07
+max_fk = 2.2e-07
+sols_min = 4
+sols_max = 8
+
+[arms.hh020_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00518667
+ms_ci95 = 0.00222167
+max_fk = 2.4e-14
+sols_min = 4
+sols_max = 8
+[arms.vs060_ik]
+display_name = "Denso VS-060"
+short_name = "VS-060"
+vendor = "denso"
+fixture = "vs060_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "DENSORobot/denso_robot_ros2 (denso_robot_descriptions, Apache-2.0)"
+base_link = "base_link"
+ee_link = "J6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 27
+sample_q = [0.813, -0.964, -1.98, -4.56, 1.31, 5.19]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.vs060_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.23
+ms_ci95 = 0.01
+max_fk = 8.2e-12
+sols_min = 4
+sols_max = 8
+
+[arms.vs060_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00507818
+ms_ci95 = 0.00140292
+max_fk = 8.3e-12
+sols_min = 8
+sols_max = 8
+[arms.m1013_ik]
+display_name = "Doosan M1013"
+short_name = "M1013"
+vendor = "doosan"
+fixture = "m1013_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "DoosanRobotics/doosan-robot2 (dsr_description2, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 85
+sample_q = [1.72, -2.89, -2.56, -6.08, 3.94, 5.19]
+fk_ceiling_fuzz = 1e-04  # from the validation smoke (~10x worst FK)
+platform_drift = true
+drift_markers = [
+    'SOLVER_NAME = "ikgeo.general_6r"',
+    "def fk(q):",
+]
+
+[arms.m1013_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 1.35
+ms_ci95 = 0.12
+max_fk = 7.5e-06
+sols_min = 2
+sols_max = 8
+
+[arms.m1013_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+[arms.m0609_ik]
+display_name = "Doosan M0609"
+short_name = "M0609"
+vendor = "doosan"
+fixture = "m0609_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "DoosanRobotics/doosan-robot2 (dsr_description2, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 87
+sample_q = [1.72, -2.89, -2.4, -6.08, 3.94, 5.19]
+fk_ceiling_fuzz = 1e-04  # from the validation smoke (~10x worst FK)
+platform_drift = true
+drift_markers = [
+    'SOLVER_NAME = "ikgeo.general_6r"',
+    "def fk(q):",
+]
+
+[arms.m0609_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 1.78
+ms_ci95 = 0.62
+max_fk = 9.8e-06
+sols_min = 2
+sols_max = 8
+
+[arms.m0609_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+[arms.hc10_ik]
+display_name = "Yaskawa HC10"
+short_name = "HC10"
+vendor = "yaskawa"
+fixture = "hc10_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/motoman (motoman_hc10_support, BSD-3-Clause)"
+base_link = "base_link"
+ee_link = "link_6_t"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 43
+sample_q = [0.861, -1.45, 0.17, -3.04, 1.97, 2.59]
+fk_ceiling_fuzz = 1e-05  # from the validation smoke (~10x worst FK)
+platform_drift = true
+drift_markers = [
+    'SOLVER_NAME = "ikgeo.general_6r"',
+    "def fk(q):",
+]
+
+[arms.hc10_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 1.91
+ms_ci95 = 0.94
+max_fk = 6.2e-06
+sols_min = 4
+sols_max = 16
+
+[arms.hc10_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"

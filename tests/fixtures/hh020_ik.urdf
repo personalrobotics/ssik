@@ -1,0 +1,107 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="hdr_robot">
+  <link name="base_link">
+    </link>
+  <link name="lower_frame_link">
+    </link>
+  <link name="upper_frame_link">
+    </link>
+  <link name="arm_link">
+    </link>
+  <link name="wrist_body_link">
+    </link>
+  <link name="wrist_holder_link">
+    </link>
+  <link name="flange_link">
+    </link>
+  <link name="motor_s">
+    </link>
+  <link name="motor_h">
+    </link>
+  <link name="motor_v">
+    </link>
+  <joint name="j1" type="revolute">
+    <parent link="base_link" />
+    <child link="lower_frame_link" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="962.91" lower="-3.229" upper="3.229" velocity="3.316" />
+  </joint>
+  <joint name="j2" type="revolute">
+    <parent link="lower_frame_link" />
+    <child link="upper_frame_link" />
+    <origin rpy="0 1.5708 0" xyz="0.160 0 0.4466" />
+    <axis xyz="0 -1 0" />
+    <limit effort="1043.28" lower="-1.222" upper="3.403" velocity="3.142" />
+  </joint>
+  <joint name="j3" type="revolute">
+    <parent link="upper_frame_link" />
+    <child link="arm_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.770" />
+    <axis xyz="0 -1 0" />
+    <limit effort="538.056" lower="-1.396" upper="3.141" velocity="3.316" />
+  </joint>
+  <joint name="j4" type="revolute">
+    <parent link="arm_link" />
+    <child link="wrist_body_link" />
+    <origin rpy="0 0 0" xyz="0 0 0.140" />
+    <axis xyz="1 0 0" />
+    <limit effort="44.91" lower="-3.403" upper="3.403" velocity="6.632" />
+  </joint>
+  <joint name="j5" type="revolute">
+    <parent link="wrist_body_link" />
+    <child link="wrist_holder_link" />
+    <origin rpy="0 0 0" xyz="0.8 0 0" />
+    <axis xyz="0 -1 0" />
+    <limit effort="43.52" lower="-2.356" upper="2.356" velocity="6.632" />
+  </joint>
+  <joint name="j6" type="revolute">
+    <parent link="wrist_holder_link" />
+    <child link="flange_link" />
+    <origin rpy="0 0 0" xyz="0.112 0 0" />
+    <axis xyz="1 0 0" />
+    <limit effort="25.6" lower="-6.283" upper="6.283" velocity="10.472" />
+  </joint>
+  <joint name="joint_motor_s" type="fixed">
+    <parent link="lower_frame_link" />
+    <child link="motor_s" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+  </joint>
+  <joint name="joint_motor_h" type="fixed">
+    <parent link="lower_frame_link" />
+    <child link="motor_h" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <axis xyz="1 0 0" />
+  </joint>
+  <joint name="joint_motor_v" type="fixed">
+    <parent link="upper_frame_link" />
+    <child link="motor_v" />
+    <origin rpy="0 0 0" xyz="-0.16 0 -0.4466" />
+    <axis xyz="1 0 0" />
+  </joint>
+  <link name="base" />
+  <joint name="base_link-base" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <link name="flange" />
+  <joint name="flange_link-flange" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="flange_link" />
+    <child link="flange" />
+  </joint>
+  <link name="tool0" />
+  <joint name="flange-tool0" type="fixed">
+    <origin rpy="0 1.5708 0" xyz="0 0 0" />
+    <parent link="flange" />
+    <child link="tool0" />
+  </joint>
+  <link name="world" />
+  <joint name="world_joint" type="fixed">
+    <parent link="world" />
+    <child link="base_link" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+</robot>

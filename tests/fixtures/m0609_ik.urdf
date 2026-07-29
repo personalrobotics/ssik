@@ -1,0 +1,77 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="m0609">
+  <link name="base_link">
+			</link>
+  <link name="base" />
+  <joint name="base_link-base" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0.450" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <joint name="joint_1" type="revolute">
+    <parent link="base_link" />
+    <child link="link_1" />
+    <origin rpy="0 0 0" xyz="0 0 0.1345" />
+    <axis xyz="0 0 1" />
+    <limit effort="163" lower="-6.2832" upper="6.2832" velocity="2.618" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_1">
+			</link>
+  <joint name="joint_2" type="revolute">
+    <parent link="link_1" />
+    <child link="link_2" />
+    <origin rpy="0 -1.571 -1.571" xyz="0 0.0062 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="163" lower="-6.2832" upper="6.2832" velocity="2.618" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_2">
+			</link>
+  <joint name="joint_3" type="revolute">
+    <parent link="link_2" />
+    <child link="link_3" />
+    <origin rpy="0 0 1.571" xyz="0.411 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="96" lower="-2.618" upper="2.618" velocity="3.1416" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_3">
+			</link>
+  <joint name="joint_4" type="revolute">
+    <parent link="link_3" />
+    <child link="link_4" />
+    <origin rpy="1.571 0 0" xyz="0 -0.368 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="50" lower="-6.2832" upper="6.2832" velocity="3.927" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_4">
+			</link>
+  <joint name="joint_5" type="revolute">
+    <parent link="link_4" />
+    <child link="link_5" />
+    <origin rpy="-1.571 0 0" xyz="0 0 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="50" lower="-6.2832" upper="6.2832" velocity="3.927" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_5">
+			</link>
+  <joint name="joint_6" type="revolute">
+    <parent link="link_5" />
+    <child link="link_6" />
+    <origin rpy="1.571 0 0" xyz="0 -0.121 0" />
+    <axis xyz="0 0 1" />
+    <limit effort="50" lower="-6.2832" upper="6.2832" velocity="3.927" />
+    <dynamics friction="0" />
+  </joint>
+  <link name="link_6">
+			</link>
+  <link name="tool0" />
+  <joint name="joint_6-tool0" type="fixed">
+    <origin rpy="3.1415926535 -1.570796327 0" xyz="0 0 0" />
+    <parent link="link_6" />
+    <child link="tool0" />
+  </joint>
+</robot>

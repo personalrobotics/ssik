@@ -217,11 +217,12 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (1 arm)</summary>
+<summary><b>Yaskawa</b>: <code>ssik.prebuilt.yaskawa</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `gp8_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
+| `hc10_ik` | `ikgeo.general_6r` | <1 s | ~43 KB |
 
 </details>
 
@@ -250,6 +251,53 @@ preprocessing) and cleaner to ship in production stacks.
 |---|---|:---:|:---:|
 | `rm75_ik` | `seven_r.srs_polished` | <1 s | ~14 KB |
 | `gen72_ik` | `seven_r.spherical_shoulder_polished` | <1 s | ~14 KB |
+
+</details>
+
+<details>
+<summary><b>Dobot</b>: <code>ssik.prebuilt.dobot</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `cr5_ik` | `ikgeo.three_parallel` | <1 s | ~34 KB |
+| `nova5_ik` | `ikgeo.three_parallel` | <1 s | ~34 KB |
+
+</details>
+
+<details>
+<summary><b>Mitsubishi</b>: <code>ssik.prebuilt.mitsubishi</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `rv4fr_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
+
+</details>
+
+<details>
+<summary><b>Hyundai</b>: <code>ssik.prebuilt.hyundai</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `hh020_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~32 KB |
+
+</details>
+
+<details>
+<summary><b>Denso</b>: <code>ssik.prebuilt.denso</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `vs060_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
+
+</details>
+
+<details>
+<summary><b>Doosan</b>: <code>ssik.prebuilt.doosan</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `m1013_ik` | `ikgeo.general_6r` | <1 s | ~85 KB |
+| `m0609_ik` | `ikgeo.general_6r` | <1 s | ~87 KB |
 
 </details>
 <!-- /AUTOGEN -->
