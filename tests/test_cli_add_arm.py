@@ -381,6 +381,19 @@ def test_add_arm_no_validate_runs_live_smoke(workspace: Path) -> None:
     assert "regen_artifacts.py --arm ur5_smoke_test" in result.stdout
 
 
+def test_coverage_band_thresholds() -> None:
+    """add-arm classifies in-limits coverage into fail / gap / clean bands so a
+    >1% in-limits coverage gap (near-singular swivel-vs-limits, #462) is warned,
+    not silently passed as clean."""
+    from ssik.cli import _coverage_band
+
+    assert _coverage_band(0.80) == "fail"  # broken arm (0 sols / locks / wrong ee)
+    assert _coverage_band(0.95) == "gap"  # ~5% gap -> warn + tracked xfail
+    assert _coverage_band(0.985) == "gap"  # >1% gap -> warn
+    assert _coverage_band(0.995) == "clean"  # <1% gap
+    assert _coverage_band(1.0) == "clean"
+
+
 def test_add_arm_missing_urdf_errors_cleanly(workspace: Path) -> None:
     """Pointing at a non-existent URDF errors instead of silently writing."""
     result = _run_cli(

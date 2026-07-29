@@ -613,6 +613,26 @@ def _scaffold_fk_ceiling(solver_name: str) -> float:
     return _SCAFFOLD_FK_CEILING.get(solver_name, 1e-6)
 
 
+# In-limits (default-path) coverage thresholds for the onboarding gate.
+# Below FAIL: the arm is broken (0 sols / [0,0] locks / wrong ee) -- refuse.
+# FAIL..CLEAN: the arm works but drops >1% of reachable in-limits poses -- the
+# swivel-vs-limits / near-singular gap (#462); ship only with a tracked xfail.
+# >= CLEAN: gap-free.
+_COVERAGE_FAIL_FLOOR = 0.90
+_COVERAGE_CLEAN_FLOOR = 0.99
+
+
+def _coverage_band(coverage: float) -> str:
+    """Classify in-limits coverage: ``"fail"`` (broken arm, refuse),
+    ``"gap"`` (works but drops >1% of in-limits poses -- warn + require a tracked
+    xfail), or ``"clean"`` (gap-free)."""
+    if coverage < _COVERAGE_FAIL_FLOOR:
+        return "fail"
+    if coverage < _COVERAGE_CLEAN_FLOOR:
+        return "gap"
+    return "clean"
+
+
 def _fk_ceiling_from_worst(worst_fk: float) -> float:
     """A clean power-of-ten FK ceiling one decade above the measured worst-case
     residual, floored at 1e-9 (no ceiling tighter than closed-form 6R needs)."""
@@ -645,9 +665,16 @@ def _build_and_validate(args: argparse.Namespace, kb: KinBody, plan: DispatchPla
             return None
         mod = ilu.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        coverage, worst_fk = check_solve_coverage(mod, n_poses=64)
+        # 400 poses x 3 seeds, worst coverage: a ~1% in-limits gap is
+        # near-singular-pose specific and single-seed-noisy (a lucky seed can
+        # show 0 misses), so take the worst of 3 seeds to catch it reliably
+        # rather than lose it to sampling luck.
+        seed_results = [check_solve_coverage(mod, n_poses=400, seed=s) for s in range(3)]
+        coverage = min(c for c, _ in seed_results)
+        worst_fk = max(w for _, w in seed_results)
 
-    if coverage < 0.9:
+    band = _coverage_band(coverage)
+    if band == "fail":
         print(
             f"[ssik add-arm] ✗ VALIDATION FAILED: coverage {coverage:.0%} (worst FK {worst_fk:.1e})"
         )
@@ -655,6 +682,18 @@ def _build_and_validate(args: argparse.Namespace, kb: KinBody, plan: DispatchPla
         print("[ssik add-arm]   NOT ship as-is. Check --base/--ee, joint limits ([0,0] locks the")
         print("[ssik add-arm]   arm), and wrist-gauge. The fixture/test/stanza were still written.")
         return None
+    if band == "gap":
+        gap = (1.0 - coverage) * 100.0
+        print(
+            f"[ssik add-arm] ⚠ VALIDATED WITH A COVERAGE GAP: in-limits coverage {coverage:.0%} "
+            f"-- ~{gap:.0f}% of reachable in-limits poses return no IK."
+        )
+        print("[ssik add-arm]   This is the swivel-vs-limits / near-singular in-limits gap that")
+        print("[ssik add-arm]   hits some redundant 7R arms (srs_polished class, #462). The arm")
+        print("[ssik add-arm]   can ship, but it is NOT gap-free: add it to _LIMITS_GAP_7R (xfail)")
+        print("[ssik add-arm]   in tests/test_prebuilt_uniform_fuzz.py with a tracking issue, and")
+        print("[ssik add-arm]   note the limitation -- do not let it pass as clean.")
+        return worst_fk
     print(f"[ssik add-arm] ✓ VALIDATED: coverage {coverage:.0%}, worst FK {worst_fk:.1e}")
     return worst_fk
 
