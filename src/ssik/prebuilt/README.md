@@ -242,6 +242,16 @@ preprocessing) and cleaner to ship in production stacks.
 | `rx160_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
 
 </details>
+
+<details>
+<summary><b>Realman</b>: <code>ssik.prebuilt.realman</code> (2 arms)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `rm75_ik` | `seven_r.srs_polished` | <1 s | ~14 KB |
+| `gen72_ik` | `seven_r.spherical_shoulder_polished` | <1 s | ~14 KB |
+
+</details>
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached

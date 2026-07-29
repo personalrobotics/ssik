@@ -233,6 +233,16 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `rx160_ik` | Staubli RX160 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
+
+<details>
+<summary><b>Realman</b>: <code>ssik.prebuilt.realman</code> (2 arms)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `rm75_ik` | Realman RM75 | approximate-SRS 7R | `base_link` | `link_7` |
+| `gen72_ik` | Realman GEN72 | approximately-spherical-shoulder 7R | `base_link` | `Link7` |
+
+</details>
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:

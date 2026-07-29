@@ -319,4 +319,14 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `rx160_ik` | ros-industrial/staubli (staubli_rx160_support, Apache-2.0) |
 
 </details>
+
+<details>
+<summary><b>Realman</b>: <code>ssik.prebuilt.realman</code> (2 arms)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `rm75_ik` | RealManRobot/rm_models (RM75, Apache-2.0) |
+| `gen72_ik` | RealManRobot/rm_models (GEN72, Apache-2.0) |
+
+</details>
 <!-- /AUTOGEN -->

@@ -1,0 +1,68 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="RM75-B">
+  <link name="base_link">
+    </link>
+  <link name="link_1">
+    </link>
+  <joint name="joint_1" type="revolute">
+    <origin xyz="0 0 0.2405" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="link_1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.106" upper="3.106" effort="60" velocity="3.14" />
+  </joint>
+  <link name="link_2">
+    </link>
+  <joint name="joint_2" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5708 0 0" />
+    <parent link="link_1" />
+    <child link="link_2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.2689" upper="2.2689" effort="60" velocity="3.14" />
+  </joint>
+  <link name="link_3">
+    </link>
+  <joint name="joint_3" type="revolute">
+    <origin xyz="0 -0.256 0" rpy="1.5708 0 0" />
+    <parent link="link_2" />
+    <child link="link_3" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.106" upper="3.106" effort="30" velocity="3.14" />
+  </joint>
+  <link name="link_4">
+    </link>
+  <joint name="joint_4" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5708 0 0" />
+    <parent link="link_3" />
+    <child link="link_4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.356" upper="2.356" effort="30" velocity="3.14" />
+  </joint>
+  <link name="link_5">
+    </link>
+  <joint name="joint_5" type="revolute">
+    <origin xyz="0 -0.21 0" rpy="1.5708 0 0" />
+    <parent link="link_4" />
+    <child link="link_5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.106" upper="3.106" effort="10" velocity="3.14" />
+  </joint>
+  <link name="link_6">
+    </link>
+  <joint name="joint_6" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5708 0 0" />
+    <parent link="link_5" />
+    <child link="link_6" />
+    <axis xyz="0 0 1" />
+    <limit lower="-2.234" upper="2.234" effort="10" velocity="3.14" />
+  </joint>
+  <link name="link_7">
+    </link>
+  <joint name="joint_7" type="revolute">
+    <origin xyz="0 -0.144 0" rpy="1.5708 0 0" />
+    <parent link="link_6" />
+    <child link="link_7" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="10" velocity="3.14" />
+  </joint>
+</robot>
