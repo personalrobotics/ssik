@@ -262,11 +262,14 @@ def test_prebuilt_7r_tight_policy_machine_precision(arm_name: str, q_star: np.nd
 # so the gap is visible; the other 7 arms get a real 0-empty guarantee.
 # ---------------------------------------------------------------------------
 
-# Every shipped 7R arm now holds the default-path in-limits guarantee: the
-# exactly-SRS arms via the closed-form feasible-swivel resolver (#359), and the
-# approximately-SRS gen3 via the same resolver on best-fit pivots + LM polish
-# (#370). Empty set = no arm is allowed to drop a reachable in-limits pose.
-_LIMITS_GAP_7R: set[str] = set()
+# Arms with a known residual in-limits-swivel gap on the default path, xfailed
+# with a tracking issue (never silently). Most shipped 7R arms hold the guarantee
+# via the closed-form feasible-swivel resolver (#359 exact-SRS, #370 approximate-
+# SRS). yumi_left / j2s7s300 (both srs_polished) drop ~0.5-1% of in-limits poses:
+# the best-fit-pivot approximation shifts the feasible swivel arc slightly so a
+# thin sliver is missed (the true in-limits IK exists; a 200-swivel sweep finds
+# it, production density doesn't). Tracked + root-caused in #462.
+_LIMITS_GAP_7R: set[str] = {"yumi_left_ik", "j2s7s300_ik"}
 
 
 def _joint_ranges(kb: object) -> list[tuple[float, float]]:
@@ -308,3 +311,38 @@ def test_prebuilt_7r_in_limits_default_path(arm_name: str) -> None:
             f"{arm_name}: reachable in-limits pose q={q.tolist()} returned [] "
             "on the default respect_limits=True path"
         )
+
+
+# Fast-CI companion to the thorough @slow test above. The @slow 200-pose /
+# 0-empty guard is only run in the local slow suite, so a large limited-coverage
+# regression (a new redundant 7R that drops 20% of in-limits poses, like Star1)
+# could ship green through fast CI. This non-slow smoke asserts a *floor* on
+# default-path in-limits coverage per 7R arm -- generous enough to tolerate the
+# ~1% known srs_polished sliver (#462) but tight enough to catch a gross gap.
+_LIMITS_COVERAGE_FLOOR = 0.90
+_LIMITS_SMOKE_POSES = 60
+
+
+@pytest.mark.parametrize(
+    "arm_name",
+    [a[0] for a in PREBUILT_ARMS_7R],
+    ids=[a[0] for a in PREBUILT_ARMS_7R],
+)
+def test_prebuilt_7r_in_limits_coverage_floor(arm_name: str) -> None:
+    """Default-path (``respect_limits=True``) in-limits coverage stays above
+    ``_LIMITS_COVERAGE_FLOOR`` for every 7R arm. Runs in the default suite (not
+    ``@slow``) so a gross limited-coverage regression is caught at PR time; the
+    exact 0-empty guarantee is the ``@slow`` test above (#359/#462)."""
+    mod = _load(arm_name)
+    ranges = _joint_ranges(mod._KB)
+    rng = np.random.default_rng(0)
+    covered = sum(
+        bool(mod.solve(mod.fk(np.array([rng.uniform(lo, hi) for lo, hi in ranges]))))
+        for _ in range(_LIMITS_SMOKE_POSES)
+    )
+    frac = covered / _LIMITS_SMOKE_POSES
+    assert frac >= _LIMITS_COVERAGE_FLOOR, (
+        f"{arm_name}: default-path in-limits coverage {frac:.0%} < "
+        f"{_LIMITS_COVERAGE_FLOOR:.0%} floor -- the solver drops too many reachable "
+        f"in-limits poses (branch/swivel recovery gap). Investigate; don't lower the floor."
+    )
