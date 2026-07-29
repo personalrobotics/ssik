@@ -130,7 +130,7 @@ The metadata for a shipped arm lives in `MANIFEST.toml`. The flow is now mostly 
 
    (Spec-transcribed arms still use a Python `*_specs()` builder + `fixture_kind = "specs"`. Xacro: expand to plain URDF first — modular-URDF support is #327.)
 
-2. **Paste the stanza into `MANIFEST.toml`** and fill the `TODO` fields (copy a same-class neighbour for `kinematic_class` / `class_tags`). Or pass `--write-manifest` to `add-arm` to append the stanza automatically (it refuses to clobber an existing entry unless `--force`); you still fill the curated `TODO` fields by hand.
+2. **Paste the stanza into `MANIFEST.toml`** (or pass `--write-manifest` to `add-arm` to append it automatically; it refuses to clobber an existing entry unless `--force`). `add-arm` derives most fields: `solver` / `tier` / `dof` / `platform_drift` / `fk_ceiling_fuzz` from dispatch + the validation smoke, `kinematic_class` / `short_class` / `class_tags` from the solver, `sample_q` from a verified-solvable pose, and a best-effort `display_name`. The only fields left to hand-fill are `fixture_source` (repo + license provenance) and confirming the marketing `display_name` / `short_name`. `regen_bench.py` fills `[bench]` / `[eaik]`.
 
 3. **Emit the artifact:**
 

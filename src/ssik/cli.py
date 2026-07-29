@@ -566,8 +566,9 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     else:
         _live_smoke(kb, args.name)
 
+    sample_q = _pick_sample_q(kb)
     stanza = _render_manifest_stanza(
-        args.name, args.base, args.ee, len(kb.joints), plan, args.vendor, worst_fk
+        args.name, args.base, args.ee, len(kb.joints), plan, args.vendor, worst_fk, sample_q
     )
     print()
     if args.write_manifest:
@@ -728,6 +729,111 @@ def _strip_manifest_entry(text: str, name: str) -> str:
     return "\n".join(out).rstrip("\n") + "\n"
 
 
+# Class metadata is a function of the dispatched solver, not the individual arm,
+# so add-arm derives it instead of leaving three TODOs the user hand-copies from a
+# same-class neighbour (error-prone; class_tags is one distinct set per solver
+# across the whole roster). A human may still refine the per-arm parenthetical
+# color in ``kinematic_class`` (e.g. "(offset wrist)", "~1.4 m reach").
+_SOLVER_CLASS_META: dict[str, tuple[str, str, list[str]]] = {
+    "ikgeo.three_parallel": (
+        "three-parallel 6R (UR-class)",
+        "three-parallel 6R",
+        ["three-parallel", "6R", "Pieper"],
+    ),
+    "ikgeo.spherical_two_parallel": (
+        "Pieper 6R (spherical wrist)",
+        "Pieper 6R, spherical wrist",
+        ["spherical-wrist", "6R", "Pieper"],
+    ),
+    "ikgeo.spherical_two_intersecting": (
+        "Pieper 6R (spherical wrist, intersecting shoulder)",
+        "Pieper 6R, spherical wrist",
+        ["spherical-wrist", "6R", "Pieper"],
+    ),
+    "ikgeo.spherical": (
+        "Pieper 6R (spherical wrist, general shoulder)",
+        "Pieper 6R, spherical wrist",
+        ["spherical-wrist", "6R", "Pieper"],
+    ),
+    "ikgeo.general_6r": ("non-Pieper 6R", "non-Pieper 6R", ["non-Pieper", "6R"]),
+    "jointlock.seven_r": ("non-SRS 7R", "non-SRS 7R", ["non-SRS", "7R"]),
+    "seven_r.srs": ("SRS 7R", "SRS 7R", ["SRS", "7R"]),
+    "seven_r.srs_polished": (
+        "approximate-SRS 7R",
+        "approximate-SRS 7R",
+        ["approximate-SRS", "7R"],
+    ),
+    "seven_r.spherical_shoulder": (
+        "spherical-shoulder + offset-wrist 7R",
+        "spherical-shoulder + offset-wrist 7R",
+        ["non-SRS", "spherical-shoulder", "offset-wrist", "7R"],
+    ),
+    "seven_r.spherical_shoulder_polished": (
+        "approximately-spherical-shoulder 7R",
+        "approximately-spherical-shoulder 7R",
+        ["non-SRS", "spherical-shoulder", "approximate", "7R"],
+    ),
+}
+
+# Vendor slug -> display prefix for the auto-derived display_name (a starting
+# point the user refines with the marketing model string).
+_VENDOR_DISPLAY: dict[str, str] = {
+    "universal_robots": "Universal Robots",
+    "abb": "ABB",
+    "kuka": "KUKA",
+    "kinova": "Kinova",
+    "fanuc": "FANUC",
+    "franka": "Franka",
+    "flexiv": "Flexiv",
+    "kassow": "Kassow",
+    "standard_bots": "Standard Bots",
+    "agilex": "AgileX",
+    "unitree": "Unitree",
+    "yaskawa": "Yaskawa",
+    "staubli": "Staubli",
+    "kawasaki": "Kawasaki",
+    "doosan": "Doosan",
+}
+
+
+def _class_meta(solver_name: str) -> tuple[str, str, str]:
+    """(kinematic_class, short_class, class_tags-as-TOML) for a solver, or TODO
+    placeholders if the solver is unmapped (a new solver family)."""
+    meta = _SOLVER_CLASS_META.get(solver_name)
+    if meta is None:
+        return ("TODO", "TODO", '["TODO"]')
+    kc, sc, tags = meta
+    return kc, sc, "[" + ", ".join(f'"{t}"' for t in tags) + "]"
+
+
+def _default_display_name(vendor: str, name: str) -> str:
+    """A best-effort ``display_name`` from vendor + arm name (the user confirms
+    the marketing model string). e.g. ('abb', 'irb120_ik') -> 'ABB irb120'."""
+    prefix = _VENDOR_DISPLAY.get(vendor, vendor.replace("_", " ").title())
+    model = name.removesuffix("_ik")
+    return f"{prefix} {model}".strip()
+
+
+def _pick_sample_q(kb: KinBody) -> list[float]:
+    """A verified in-limits, live-solvable pose for the stanza's ``sample_q``
+    (which ``test_prebuilt_sanity`` solves). Returns the first random in-limits
+    pose whose live solve succeeds -- usually the first try -- so a near-home
+    singular default can't silently break sanity. Falls back to a small tilt."""
+    import numpy as np
+
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+    from ssik.manipulator import Manipulator
+
+    arm = Manipulator(kb)
+    rng = np.random.default_rng(0)
+    limits = [(j.limits if j.limits is not None else (-np.pi, np.pi)) for j in kb.joints]
+    for _ in range(20):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in limits])
+        if arm.solve(poe_forward_kinematics(kb, q)):
+            return [round(float(x), 3) for x in q]
+    return [0.1] * len(kb.joints)
+
+
 def _render_manifest_stanza(
     name: str,
     base: str,
@@ -736,29 +842,35 @@ def _render_manifest_stanza(
     plan: DispatchPlan,
     vendor: str,
     worst_fk: float | None = None,
+    sample_q: list[float] | None = None,
 ) -> str:
-    """A ready-to-paste MANIFEST.toml stanza: derived fields filled (solver,
-    tier, dof, platform_drift, fk_ceiling from the validation smoke), curated
-    fields left as ``TODO``. ``regen_bench.py`` fills ``[bench]`` and ``[eaik]``."""
-    sample = ", ".join("0.1" for _ in range(dof))
+    """A ready-to-paste MANIFEST.toml stanza. Derived fields filled: solver, tier,
+    dof, platform_drift, fk_ceiling (validation smoke), kinematic_class /
+    short_class / class_tags (from the solver), sample_q (a verified-solvable
+    pose), and a best-effort display_name. Human-provenance fields
+    (fixture_source, the marketing display strings) stay editable.
+    ``regen_bench.py`` fills ``[bench]`` and ``[eaik]``."""
+    sample = ", ".join(f"{q:.3g}" for q in (sample_q or [0.1] * dof))
+    display = _default_display_name(vendor, name)
+    kin_class, short_class, tags_toml = _class_meta(plan.solver_name)
     drift = plan.solver_name in _DRIFT_PRONE_SOLVERS
     fk_ceiling = _fk_ceiling_from_worst(worst_fk) if worst_fk is not None else 1e-4
     lines = [
         f"[arms.{name}]",
-        'display_name = "TODO"',
-        'short_name = "TODO"',
+        f'display_name = "{display}"  # verify the marketing model string',
+        f'short_name = "{display}"  # shorten for compact table cells',
         f'vendor = "{vendor}"',
         f'fixture = "{name}.urdf"',
         'fixture_kind = "urdf"',
-        'fixture_source = "TODO (e.g. robot_descriptions / <pkg>)"',
+        'fixture_source = "TODO: repo/source + license (e.g. robot_descriptions / <pkg>)"',
         f'base_link = "{base}"',
         f'ee_link = "{ee}"',
         f"dof = {dof}",
         f'solver = "{plan.solver_name}"',
         f"tier = {plan.tier}",
-        'kinematic_class = "TODO"',
-        'short_class = "TODO"',
-        'class_tags = ["TODO"]',
+        f'kinematic_class = "{kin_class}"',
+        f'short_class = "{short_class}"',
+        f"class_tags = {tags_toml}",
         "slow_build = false  # set true if the build is minutes (cached-RR 7R)",
         "build_time_sec = 1",
         "artifact_size_kb = 20",

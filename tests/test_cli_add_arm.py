@@ -75,6 +75,37 @@ def test_add_arm_builds_and_validates(workspace: Path) -> None:
     assert "fk_ceiling_fuzz = 1e-04" not in result.stdout
 
 
+def test_add_arm_derives_class_metadata(workspace: Path) -> None:
+    """The printed stanza derives kinematic_class / short_class / class_tags from
+    the dispatched solver (not TODO), a verified-solvable sample_q (not the
+    near-home [0.1, ...] placeholder), and a best-effort display_name -- so the
+    only hand-fill left is the fixture_source provenance. UR5 -> three_parallel."""
+    result = _run_cli(
+        "add-arm",
+        "--no-validate",
+        str(REPO_ROOT / "tests" / "fixtures" / "ur5.urdf"),
+        "--base",
+        "base_link",
+        "--ee",
+        "ee_link",
+        "--name",
+        "ur5_class_test",
+        "--vendor",
+        "universal_robots",
+        "--repo-root",
+        str(workspace),
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert 'kinematic_class = "three-parallel 6R (UR-class)"' in out
+    assert 'class_tags = ["three-parallel", "6R", "Pieper"]' in out
+    assert 'kinematic_class = "TODO"' not in out
+    assert 'class_tags = ["TODO"]' not in out
+    # sample_q was replaced by a verified pose, not the [0.1, 0.1, ...] default.
+    assert "sample_q = [0.1, 0.1, 0.1, 0.1, 0.1, 0.1]" not in out
+    assert 'display_name = "Universal Robots' in out
+
+
 def test_add_arm_generates_files(workspace: Path) -> None:
     """``ssik add-arm`` vendors the URDF and emits a test scaffold."""
     result = _run_cli(
