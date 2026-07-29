@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->47<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->52<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -127,12 +127,14 @@ The wheel ships <!-- AUTOGEN:arm_count -->47<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (4 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `iiwa7_ik` | KUKA iiwa LBR 7 | SRS 7R (offset wrist) | `iiwa_link_0` | `iiwa_link_ee` |
+| `kr6_r900_ik` | KUKA KR 6 R900 sixx (Agilus) | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `kr210_r2700_ik` | KUKA KR 210 R2700 (Quantec) | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 
@@ -251,12 +253,15 @@ The wheel ships <!-- AUTOGEN:arm_count -->47<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (5 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `yumi_left_ik` | ABB YuMi (IRB 14000) left | **approximate-SRS 7R** | `yumi_body` | `yumi_link_7_l` |
 | `yumi_right_ik` | ABB YuMi (IRB 14000) right | **approximate-SRS 7R** | `yumi_body` | `yumi_link_7_r` |
+| `irb120_ik` | ABB IRB 120 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `irb1600_ik` | ABB IRB 1600 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `irb6700_ik` | ABB IRB 6700 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 <!-- /AUTOGEN -->
@@ -537,12 +542,14 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (4 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | iiwa14 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 4.84 ± 0.02 ms / FK 1e-13 / 128 sols |
 | iiwa7 (SRS 7R, offset wrist) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 5.83 ± 0.59 ms / FK 5e-14 / 128 sols |
+| KR 6 R900 (Pieper 6R, spherical wrist) | 3 ± 0 µs / FK 9e-12 / 4 sols | 210 ± 0 µs / FK 4e-12 / 4 sols |
+| KR 210 R2700 (Pieper 6R, spherical wrist) | 3 ± 0 µs / FK 1e-15 / 4 sols | 330 ± 0 µs / FK 9e-8 / 4 sols |
 
 </details>
 
@@ -661,12 +668,15 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (5 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | YuMi L (**approximate-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 20.35 ± 1.75 ms / FK 1e-12 / 26-70 sols |
 | YuMi R (**approximate-SRS 7R**) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 19.43 ± 1.38 ms / FK 1e-12 / 24-79 sols |
+| IRB 120 (Pieper 6R, spherical wrist) | 4 ± 1 µs / FK 3e-12 / 8 sols | 240 ± 10 µs / FK 4e-12 / 8 sols |
+| IRB 1600 (Pieper 6R, spherical wrist) | 3 ± 0 µs / FK 5e-12 / 4-8 sols | 210 ± 0 µs / FK 4e-12 / 4-8 sols |
+| IRB 6700 (Pieper 6R, spherical wrist) | 4 ± 0 µs / FK 8e-12 / 4-8 sols | 210 ± 0 µs / FK 3e-12 / 4-8 sols |
 
 </details>
 <!-- /AUTOGEN -->

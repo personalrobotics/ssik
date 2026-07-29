@@ -223,12 +223,20 @@ def _fmt(key: str, value: float | int) -> str:
     return f"{value:.2f}"
 
 
+def _is_table_header(line: str, header: str) -> bool:
+    """True if ``line`` is the TOML table header ``header``, tolerating a trailing
+    ``# comment``. ``ssik add-arm`` emits ``[arms.x.bench]  # filled by ...``, so a
+    strict ``line.strip() == header`` misses it and regen_bench can't fill an
+    add-arm-generated stanza (#425)."""
+    return line.split("#", 1)[0].strip() == header
+
+
 def update_manifest_bench(name: str, bench: dict[str, float | int]) -> None:
     """Surgically rewrite the five values under ``[arms.<name>.bench]`` in place,
     leaving every comment and hand-curated field untouched."""
     lines = MANIFEST.read_text().splitlines(keepends=True)
     header = f"[arms.{name}.bench]"
-    start = next((i for i, ln in enumerate(lines) if ln.strip() == header), None)
+    start = next((i for i, ln in enumerate(lines) if _is_table_header(ln, header)), None)
     if start is None:
         raise KeyError(f"{header} not found in {MANIFEST}")
     for i in range(start + 1, len(lines)):
@@ -273,7 +281,7 @@ def update_manifest_eaik(name: str, eaik: dict[str, object]) -> None:
     lines = MANIFEST.read_text().splitlines(keepends=True)
     header = f"[arms.{name}.eaik]"
     block = _eaik_block_lines(name, eaik)
-    start = next((i for i, ln in enumerate(lines) if ln.strip() == header), None)
+    start = next((i for i, ln in enumerate(lines) if _is_table_header(ln, header)), None)
     if start is not None:
         end = start + 1
         while end < len(lines) and not lines[end].lstrip().startswith("["):
@@ -282,7 +290,7 @@ def update_manifest_eaik(name: str, eaik: dict[str, object]) -> None:
     else:
         # Insert after the arm's bench block (which ends at the next section).
         bench_hdr = f"[arms.{name}.bench]"
-        b = next((i for i, ln in enumerate(lines) if ln.strip() == bench_hdr), None)
+        b = next((i for i, ln in enumerate(lines) if _is_table_header(ln, bench_hdr)), None)
         if b is None:
             raise KeyError(f"neither {header} nor {bench_hdr} found in {MANIFEST}")
         end = b + 1

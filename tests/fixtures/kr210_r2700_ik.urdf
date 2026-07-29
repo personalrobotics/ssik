@@ -1,0 +1,180 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="kr210_r2700_2">
+  <ros2_control is_async="False" name="kr210_r2700_2" type="system">
+    <properties>
+      <async affinity="[]" print_warnings="false" scheduling_policy="detached" thread_priority="69" />
+    </properties>
+    <hardware>
+      <param name="interface_prefix" />
+      <plugin>kuka_rsi_driver::KukaRSIHardwareInterface</plugin>
+      <param name="client_ip">0.0.0.0</param>
+      <param name="client_port">59152</param>
+      <param name="rsi_xml_config_file" />
+    </hardware>
+    <joint name="joint_1">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
+      <state_interface name="velocity">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="effort">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+    <joint name="joint_2">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">-1.5708</param>
+      </state_interface>
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
+      <state_interface name="velocity">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="effort">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+    <joint name="joint_3">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">1.5708</param>
+      </state_interface>
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
+      <state_interface name="velocity">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="effort">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+    <joint name="joint_4">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
+      <state_interface name="velocity">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="effort">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+    <joint name="joint_5">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
+      <state_interface name="velocity">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="effort">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+    <joint name="joint_6">
+      <command_interface name="position" />
+      <state_interface name="position">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <command_interface name="velocity" />
+      <command_interface name="effort" />
+      <state_interface name="velocity">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+      <state_interface name="effort">
+        <param name="initial_value">0.0</param>
+      </state_interface>
+    </joint>
+    <gpio name="gpio" />
+  </ros2_control>
+  <link name="world" />
+  <link name="base_link">
+    </link>
+  <link name="link_1">
+    </link>
+  <link name="link_2">
+    </link>
+  <link name="link_3">
+    </link>
+  <link name="link_4">
+    </link>
+  <link name="link_5">
+    </link>
+  <link name="link_6">
+    </link>
+  <joint name="joint_1" type="revolute">
+    <axis xyz="0.0 0.0 1.0" />
+    <child link="link_1" />
+    <limit effort="7290" lower="-3.2288591161895095E0" upper="3.2288591161895095E0" velocity="2.0384" />
+    <origin rpy="-3.141592653589793 0.0 -0.0" xyz="0.0 0.0 0.0" />
+    <parent link="base_link" />
+  </joint>
+  <joint name="joint_2" type="revolute">
+    <axis xyz="0.0 0.0 1.0" />
+    <child link="link_2" />
+    <limit effort="8910" lower="-2.443460952792061E0" upper="-8.726646259971647E-2" velocity="1.9451" />
+    <origin rpy="1.5707963267948963 0.0 -0.0" xyz="0.33 0.0 -0.645" />
+    <parent link="link_1" />
+  </joint>
+  <joint name="joint_3" type="revolute">
+    <axis xyz="0.0 0.0 1.0" />
+    <child link="link_3" />
+    <limit effort="6988.84717" lower="-2.0943951023931953E0" upper="2.9321531433504737E0" velocity="1.9547687622336491" />
+    <origin rpy="0.0 0.0 -1.5707963267948963" xyz="1.15 0.0 0.0" />
+    <parent link="link_2" />
+  </joint>
+  <joint name="joint_4" type="revolute">
+    <axis xyz="0.0 0.0 1.0" />
+    <child link="link_4" />
+    <limit effort="2274.29199" lower="-6.1086523819801535E0" upper="6.1086523819801535E0" velocity="3.12413936106985" />
+    <origin rpy="1.5707963267948963 0.0 -0.0" xyz="0.115 0.0 0.0" />
+    <parent link="link_3" />
+  </joint>
+  <joint name="joint_5" type="revolute">
+    <axis xyz="0.0 0.0 1.0" />
+    <child link="link_5" />
+    <limit effort="1398.30298" lower="-2.181661564992912E0" upper="2.181661564992912E0" velocity="3.001966313430247" />
+    <origin rpy="-1.5707963267948963 0.0 -0.0" xyz="0.0 0.0 -1.22" />
+    <parent link="link_4" />
+  </joint>
+  <joint name="joint_6" type="revolute">
+    <axis xyz="0.0 0.0 1.0" />
+    <child link="link_6" />
+    <limit effort="781.554626" lower="-6.1086523819801535E0" upper="6.1086523819801535E0" velocity="3.839724354387525" />
+    <origin rpy="1.5707963267948963 0.0 -0.0" xyz="0.0 0.0 0.0" />
+    <parent link="link_5" />
+  </joint>
+  <link name="base" />
+  <joint name="base_link-base" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0" />
+    <parent link="base_link" />
+    <child link="base" />
+  </joint>
+  <link name="flange" />
+  <joint name="link6-flange" type="fixed">
+    <child link="flange" />
+    <origin rpy="0 1.5707963267948966 -0.0" xyz="0.0 0.0 -0.215" />
+    <parent link="link_6" />
+  </joint>
+  <link name="tool0" />
+  <joint name="link6-tool0" type="fixed">
+    <child link="tool0" />
+    <origin rpy="0 3.141592653589793 -0.0" xyz="0.0 0.0 -0.215" />
+    <parent link="link_6" />
+  </joint>
+  <joint name="world-base_link" type="fixed">
+    <parent link="world" />
+    <child link="base_link" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+</robot>

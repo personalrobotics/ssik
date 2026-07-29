@@ -76,12 +76,14 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (4 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `iiwa14_ik` | `seven_r.srs` | <1 s | ~9 KB |
 | `iiwa7_ik` | `seven_r.srs` | <1 s | ~14 KB |
+| `kr6_r900_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~28 KB |
+| `kr210_r2700_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~43 KB |
 
 </details>
 
@@ -200,12 +202,15 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (5 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `yumi_left_ik` | `seven_r.srs_polished` | <1 s | ~14 KB |
 | `yumi_right_ik` | `seven_r.srs_polished` | <1 s | ~14 KB |
+| `irb120_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
+| `irb1600_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
+| `irb6700_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~27 KB |
 
 </details>
 <!-- /AUTOGEN -->

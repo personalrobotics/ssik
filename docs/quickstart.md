@@ -67,12 +67,14 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (4 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `iiwa14_ik` | KUKA iiwa LBR 14 | SRS 7R | `base` | `iiwa_link_ee_kuka` |
 | `iiwa7_ik` | KUKA iiwa LBR 7 | SRS 7R (offset wrist) | `iiwa_link_0` | `iiwa_link_ee` |
+| `kr6_r900_ik` | KUKA KR 6 R900 sixx (Agilus) | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `kr210_r2700_ik` | KUKA KR 210 R2700 (Quantec) | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 
@@ -191,12 +193,15 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (5 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `yumi_left_ik` | ABB YuMi (IRB 14000) left | approximate-SRS 7R | `yumi_body` | `yumi_link_7_l` |
 | `yumi_right_ik` | ABB YuMi (IRB 14000) right | approximate-SRS 7R | `yumi_body` | `yumi_link_7_r` |
+| `irb120_ik` | ABB IRB 120 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `irb1600_ik` | ABB IRB 1600 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
+| `irb6700_ik` | ABB IRB 6700 | Pieper 6R (spherical wrist) | `base_link` | `link_6` |
 
 </details>
 <!-- /AUTOGEN -->

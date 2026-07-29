@@ -80,6 +80,11 @@ _LEGACY_ALIASES: dict[str, str] = {
     "j2s6s300_ik": "kinova.j2s6s300_ik",
     "iiwa7_ik": "kuka.iiwa7_ik",
     "j2s7s300_ik": "kinova.j2s7s300_ik",
+    "irb120_ik": "abb.irb120_ik",
+    "irb1600_ik": "abb.irb1600_ik",
+    "irb6700_ik": "abb.irb6700_ik",
+    "kr6_r900_ik": "kuka.kr6_r900_ik",
+    "kr210_r2700_ik": "kuka.kr210_r2700_ik",
 }
 
 _PKG = __name__  # "ssik.prebuilt"

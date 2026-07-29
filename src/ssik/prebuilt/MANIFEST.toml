@@ -1796,3 +1796,189 @@ sols_max = 66
 [arms.j2s7s300_ik.eaik]
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
+[arms.irb120_ik]
+display_name = "ABB IRB 120"
+short_name = "IRB 120"
+vendor = "abb"
+fixture = "irb120_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/abb (abb_irb120_support, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 27
+sample_q = [0.3, -0.4, 0.5, 0.6, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.irb120_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.24
+ms_ci95 = 0.01
+max_fk = 4.4e-12
+sols_min = 8
+sols_max = 8
+
+[arms.irb120_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00448146
+ms_ci95 = 0.000529408
+max_fk = 3.2e-12
+sols_min = 8
+sols_max = 8
+[arms.irb1600_ik]
+display_name = "ABB IRB 1600"
+short_name = "IRB 1600"
+vendor = "abb"
+fixture = "irb1600_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/abb (abb_irb1600_support, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 27
+sample_q = [0.3, -0.4, 0.5, 0.6, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.irb1600_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.21
+ms_ci95 = 0.00
+max_fk = 3.9e-12
+sols_min = 4
+sols_max = 8
+
+[arms.irb1600_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00345045
+ms_ci95 = 4.81469e-05
+max_fk = 4.7e-12
+sols_min = 4
+sols_max = 8
+[arms.irb6700_ik]
+display_name = "ABB IRB 6700"
+short_name = "IRB 6700"
+vendor = "abb"
+fixture = "irb6700_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "ros-industrial/abb (abb_irb6700_support, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 27
+sample_q = [0.3, -0.4, 0.5, 0.6, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.irb6700_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.21
+ms_ci95 = 0.00
+max_fk = 2.8e-12
+sols_min = 4
+sols_max = 8
+
+[arms.irb6700_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00376978
+ms_ci95 = 0.000394431
+max_fk = 8.2e-12
+sols_min = 4
+sols_max = 8
+[arms.kr6_r900_ik]
+display_name = "KUKA KR 6 R900 sixx (Agilus)"
+short_name = "KR 6 R900"
+vendor = "kuka"
+fixture = "kr6_r900_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "kroshu/kuka_robot_descriptions (kuka_agilus_support, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 28
+sample_q = [0.3, -0.4, 0.5, 0.6, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-10
+platform_drift = false
+
+[arms.kr6_r900_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.21
+ms_ci95 = 0.00
+max_fk = 3.9e-12
+sols_min = 4
+sols_max = 4
+
+[arms.kr6_r900_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.0030694
+ms_ci95 = 4.10419e-05
+max_fk = 8.6e-12
+sols_min = 4
+sols_max = 4
+[arms.kr210_r2700_ik]
+display_name = "KUKA KR 210 R2700 (Quantec)"
+short_name = "KR 210 R2700"
+vendor = "kuka"
+fixture = "kr210_r2700_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "kroshu/kuka_robot_descriptions (kuka_quantec_support, Apache-2.0)"
+base_link = "base_link"
+ee_link = "link_6"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 43
+sample_q = [0.3, -0.4, 0.5, 0.6, -0.3, 0.4]
+fk_ceiling_fuzz = 1e-7
+platform_drift = false
+
+[arms.kr210_r2700_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.33
+ms_ci95 = 0.00
+max_fk = 9.2e-08
+sols_min = 4
+sols_max = 4
+
+[arms.kr210_r2700_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00302167
+ms_ci95 = 1.83368e-05
+max_fk = 1.2e-15
+sols_min = 4
+sols_max = 4

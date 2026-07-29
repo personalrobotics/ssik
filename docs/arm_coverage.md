@@ -153,12 +153,14 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (2 arms)</summary>
+<summary><b>KUKA</b>: <code>ssik.prebuilt.kuka</code> (4 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `iiwa14_ik` | robot_descriptions / iiwa14_description |
 | `iiwa7_ik` | robot_descriptions / iiwa7_description |
+| `kr6_r900_ik` | kroshu/kuka_robot_descriptions (kuka_agilus_support, Apache-2.0) |
+| `kr210_r2700_ik` | kroshu/kuka_robot_descriptions (kuka_quantec_support, Apache-2.0) |
 
 </details>
 
@@ -277,12 +279,15 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (2 arms)</summary>
+<summary><b>Abb</b>: <code>ssik.prebuilt.abb</code> (5 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `yumi_left_ik` | robot_descriptions / yumi_description |
 | `yumi_right_ik` | robot_descriptions / yumi_description |
+| `irb120_ik` | ros-industrial/abb (abb_irb120_support, Apache-2.0) |
+| `irb1600_ik` | ros-industrial/abb (abb_irb1600_support, Apache-2.0) |
+| `irb6700_ik` | ros-industrial/abb (abb_irb6700_support, Apache-2.0) |
 
 </details>
 <!-- /AUTOGEN -->
