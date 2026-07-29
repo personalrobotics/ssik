@@ -2535,3 +2535,36 @@ sols_max = 16
 [arms.hc10_ik.eaik]
 supported = false
 refusal = "6R-Unknown Kinematic Class"
+
+[arms.xmatepro7_ik]
+display_name = "Rokae xMate Pro7"
+short_name = "xMate Pro7"
+vendor = "rokae"
+fixture = "xmatepro7_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "RokaeRobot/rokae_ros2 (rokae_xMatePro7_moveit_config, Apache-2.0)"
+base_link = "xMatePro7_base"
+ee_link = "xMatePro7_link7"
+dof = 7
+solver = "seven_r.srs"
+tier = 0
+kinematic_class = "SRS 7R"
+short_class = "SRS 7R"
+class_tags = ["SRS", "7R"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 13
+sample_q = [0.836, -0.964, -2.8, -2.02, 1.91, 1.73, 1.34]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.xmatepro7_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 6.70
+ms_ci95 = 0.91
+max_fk = 1.0e-12
+sols_min = 128
+sols_max = 128
+
+[arms.xmatepro7_ik.eaik]
+supported = false
+refusal = "Currently, only 1-6R robots are solvable with EAIK"

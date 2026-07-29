@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->67<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->68<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -349,6 +349,15 @@ The wheel ships <!-- AUTOGEN:arm_count -->67<!-- /AUTOGEN --> ready-to-import ar
 |---|---|---|---|---|
 | `m1013_ik` | Doosan M1013 | **non-Pieper 6R** | `base_link` | `link_6` |
 | `m0609_ik` | Doosan M0609 | **non-Pieper 6R** | `base_link` | `link_6` |
+
+</details>
+
+<details>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `xmatepro7_ik` | Rokae xMate Pro7 | SRS 7R | `xMatePro7_base` | `xMatePro7_link7` |
 
 </details>
 <!-- /AUTOGEN -->
@@ -851,6 +860,15 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 |---|---|---|
 | M1013 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.35 ± 0.12 ms / FK 8e-6 / 2-8 sols |
 | M0609 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.78 ± 0.62 ms / FK 1e-5 / 2-8 sols |
+
+</details>
+
+<details>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| xMate Pro7 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 6.70 ± 0.91 ms / FK 1e-12 / 128 sols |
 
 </details>
 <!-- /AUTOGEN -->

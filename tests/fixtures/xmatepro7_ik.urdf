@@ -1,0 +1,73 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="xMatePro7">
+  <link name="world" />
+  <joint name="fixed" type="fixed">
+    <parent link="world" />
+    <child link="xMatePro7_base" />
+  </joint>
+  <link name="xMatePro7_base">
+        </link>
+  <joint name="joint1" type="revolute">
+    <parent link="xMatePro7_base" />
+    <child link="xMatePro7_link1" />
+    <limit effort="300" lower="-3.0527" upper="3.0527" velocity="10" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+  <link name="xMatePro7_link1">
+        </link>
+  <joint name="joint2" type="revolute">
+    <parent link="xMatePro7_link1" />
+    <child link="xMatePro7_link2" />
+    <limit effort="300" lower="-2.0933" upper="2.0933" velocity="10" />
+    <axis xyz="0 1 0" />
+    <origin rpy="0 0 0" xyz="0 0 0.404" />
+  </joint>
+  <link name="xMatePro7_link2">
+        </link>
+  <joint name="joint3" type="revolute">
+    <parent link="xMatePro7_link2" />
+    <child link="xMatePro7_link3" />
+    <limit effort="300" lower="-3.0527" upper="3.0527" velocity="10" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0 0 0" xyz="0 0 0.23743878" />
+  </joint>
+  <link name="xMatePro7_link3">
+        </link>
+  <joint name="joint4" type="revolute">
+    <parent link="xMatePro7_link3" />
+    <child link="xMatePro7_link4" />
+    <limit effort="300" lower="-2.0933" upper="2.0933" velocity="10" />
+    <axis xyz="0 1 0" />
+    <origin rpy="0 0 0" xyz="0 0 0.15549959" />
+  </joint>
+  <link name="xMatePro7_link4">
+        </link>
+  <joint name="joint5" type="revolute">
+    <parent link="xMatePro7_link4" />
+    <child link="xMatePro7_link5" />
+    <limit effort="300" lower="-3.0527" upper="3.0527" velocity="10" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0 0 0" xyz="0 0 0.22044633" />
+  </joint>
+  <link name="xMatePro7_link5">
+        </link>
+  <joint name="joint6" type="revolute">
+    <parent link="xMatePro7_link5" />
+    <child link="xMatePro7_link6" />
+    <limit effort="300" lower="-2.0933" upper="2.0933" velocity="10" />
+    <axis xyz="0 1 0" />
+    <origin rpy="0.0 0.0 0" xyz="0 0 0.14512568" />
+  </joint>
+  <link name="xMatePro7_link6">
+        </link>
+  <joint name="joint7" type="revolute">
+    <parent link="xMatePro7_link6" />
+    <child link="xMatePro7_link7" />
+    <limit effort="300" lower="-6.283" upper="6.283" velocity="10" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0.0 0.0 0.0" xyz="0 0 0.25090877" />
+  </joint>
+  <link name="xMatePro7_link7">
+        </link>
+</robot>

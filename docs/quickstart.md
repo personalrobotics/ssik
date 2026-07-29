@@ -291,6 +291,15 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `m0609_ik` | Doosan M0609 | non-Pieper 6R | `base_link` | `link_6` |
 
 </details>
+
+<details>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `xmatepro7_ik` | Rokae xMate Pro7 | SRS 7R | `xMatePro7_base` | `xMatePro7_link7` |
+
+</details>
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:

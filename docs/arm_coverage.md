@@ -377,4 +377,13 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `m0609_ik` | DoosanRobotics/doosan-robot2 (dsr_description2, Apache-2.0) |
 
 </details>
+
+<details>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `xmatepro7_ik` | RokaeRobot/rokae_ros2 (rokae_xMatePro7_moveit_config, Apache-2.0) |
+
+</details>
 <!-- /AUTOGEN -->

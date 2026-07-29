@@ -300,6 +300,15 @@ preprocessing) and cleaner to ship in production stacks.
 | `m0609_ik` | `ikgeo.general_6r` | <1 s | ~87 KB |
 
 </details>
+
+<details>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `xmatepro7_ik` | `seven_r.srs` | <1 s | ~13 KB |
+
+</details>
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached
