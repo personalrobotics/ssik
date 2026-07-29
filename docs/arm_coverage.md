@@ -379,11 +379,13 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (3 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `xmatepro7_ik` | RokaeRobot/rokae_ros2 (rokae_xMatePro7_moveit_config, Apache-2.0) |
+| `xmatecr7_ik` | RokaeRobot/rokae_ros2 (rokae_description, Apache-2.0) |
+| `xmatesr3_ik` | RokaeRobot/rokae_ros2 (rokae_description, Apache-2.0) |
 
 </details>
 <!-- /AUTOGEN -->

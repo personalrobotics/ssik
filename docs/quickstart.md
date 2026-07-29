@@ -293,11 +293,13 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (3 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `xmatepro7_ik` | Rokae xMate Pro7 | SRS 7R | `xMatePro7_base` | `xMatePro7_link7` |
+| `xmatecr7_ik` | Rokae xMate CR7 | non-Pieper 6R | `xMateCR7_base` | `xMateCR7_link6` |
+| `xmatesr3_ik` | Rokae xMate SR3 | non-Pieper 6R | `xMateSR3_base` | `xMateSR3_link6` |
 
 </details>
 <!-- /AUTOGEN -->

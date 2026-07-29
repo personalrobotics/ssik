@@ -1,0 +1,64 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="xMateCR7">
+  <link name="world" />
+  <joint name="fixed" type="fixed">
+    <parent link="world" />
+    <child link="xMateCR7_base" />
+  </joint>
+  <link name="xMateCR7_base">
+    </link>
+  <joint name="joint1" type="revolute">
+    <parent link="xMateCR7_base" />
+    <child link="xMateCR7_link1" />
+    <limit effort="194" lower="-3.0543" upper="3.0543" velocity="3.141592653589793" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0 0 0" xyz="0 0 0" />
+  </joint>
+  <link name="xMateCR7_link1">
+    </link>
+  <joint name="joint2" type="revolute">
+    <parent link="xMateCR7_link1" />
+    <child link="xMateCR7_link2" />
+    <limit effort="194" lower="-3.0543" upper="3.0543" velocity="3.141592653589793" />
+    <axis xyz="0 1 0" />
+    <origin rpy="0 0 0" xyz="0 0 0.296" />
+  </joint>
+  <link name="xMateCR7_link2">
+    </link>
+  <joint name="joint3" type="revolute">
+    <parent link="xMateCR7_link2" />
+    <child link="xMateCR7_link3" />
+    <limit effort="102" lower="-3.0543" upper="3.0543" velocity="4.084070449666731" />
+    <axis xyz="0 -1 0" />
+    <origin rpy="0 0 0" xyz="0 0 0.49" />
+  </joint>
+  <link name="xMateCR7_link3">
+    </link>
+  <joint name="joint4" type="revolute">
+    <parent link="xMateCR7_link3" />
+    <child link="xMateCR7_link4" />
+    <limit effort="66" lower="-3.0543" upper="3.0543" velocity="4.1887902047863905" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0 0 0" xyz="0 0 0.36" />
+  </joint>
+  <link name="xMateCR7_link4">
+    </link>
+  <joint name="joint5" type="revolute">
+    <parent link="xMateCR7_link4" />
+    <child link="xMateCR7_link5" />
+    <limit effort="66" lower="-3.0543" upper="3.0543" velocity="4.1887902047863905" />
+    <axis xyz="0 -1 0" />
+    <origin rpy="0 0 0" xyz="0 -0.151 0" />
+  </joint>
+  <link name="xMateCR7_link5">
+    </link>
+  <joint name="joint6" type="revolute">
+    <parent link="xMateCR7_link5" />
+    <child link="xMateCR7_link6" />
+    <limit effort="29" lower="-3.0543" upper="3.0543" velocity="5.235987755982989" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0.0 0.0 0" xyz="0 0 0.1265" />
+  </joint>
+  <link name="xMateCR7_link6">
+    </link>
+</robot>

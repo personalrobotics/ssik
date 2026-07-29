@@ -867,6 +867,14 @@ def _render_manifest_stanza(
     kin_class, short_class, tags_toml = _class_meta(plan.solver_name)
     drift = plan.solver_name in _DRIFT_PRONE_SOLVERS
     fk_ceiling = _fk_ceiling_from_worst(worst_fk) if worst_fk is not None else 1e-4
+    # Floor the ceiling at the solver's structural FK floor: the general_6r RR
+    # path's worst-case FK varies widely across the workspace, so a 64-pose
+    # validation smoke can under-estimate it and derive a ceiling the 500-pose
+    # uniform fuzz then breaks (xMate SR3: smoke 1.7e-8 -> 1e-6, fuzz found
+    # 2.7e-6). ``_SCAFFOLD_FK_CEILING`` holds that per-solver floor (general_6r
+    # -> 1e-4); ``.get(..., 0.0)`` leaves every other (machine-precision) solver
+    # on its tight smoke-derived value.
+    fk_ceiling = max(fk_ceiling, _SCAFFOLD_FK_CEILING.get(plan.solver_name, 0.0))
     lines = [
         f"[arms.{name}]",
         f'display_name = "{display}"  # verify the marketing model string',

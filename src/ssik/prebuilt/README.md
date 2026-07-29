@@ -302,11 +302,13 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (1 arm)</summary>
+<summary><b>Rokae</b>: <code>ssik.prebuilt.rokae</code> (3 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `xmatepro7_ik` | `seven_r.srs` | <1 s | ~13 KB |
+| `xmatecr7_ik` | `ikgeo.general_6r` | <1 s | ~47 KB |
+| `xmatesr3_ik` | `ikgeo.general_6r` | <1 s | ~45 KB |
 
 </details>
 <!-- /AUTOGEN -->

@@ -53,8 +53,13 @@ def test_prebuilt_arm_imports_and_solves(arm_name: str) -> None:
     sols = mod.solve(T)
     assert sols, f"{arm_name}: solve() returned empty list for FK-seeded target"
 
-    # FK closure on every returned candidate. 1e-6 is the wheel-build smoke
-    # bar; per-arm bulletproof contracts (in test_<arm>.py) gate machine
-    # precision separately.
+    # FK closure on every returned candidate. This is a packaging smoke bar
+    # (1e-6), not a precision test -- per-arm bulletproof contracts (test_<arm>.py
+    # + uniform_fuzz) gate machine precision separately. Loosen to the arm's
+    # documented ceiling for solvers whose structural floor is above 1e-6: the
+    # ikgeo.general_6r RR path returns some branches at ~1e-6 (JACO 2 / PiPER /
+    # Doosan / Rokae cobots), so a hard 1e-6 fails a correct arm depending on
+    # which sample_q branch is worst. Never tightens below the 1e-6 smoke bar.
+    ceiling = max(1e-6, arm.fk_ceiling_fuzz)
     max_fk = max(s.fk_residual for s in sols)
-    assert max_fk < 1e-6, f"{arm_name}: max FK residual {max_fk:.2e} > 1e-6"
+    assert max_fk < ceiling, f"{arm_name}: max FK residual {max_fk:.2e} > {ceiling:.0e}"

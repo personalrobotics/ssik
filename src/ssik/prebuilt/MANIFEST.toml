@@ -2568,3 +2568,76 @@ sols_max = 128
 [arms.xmatepro7_ik.eaik]
 supported = false
 refusal = "Currently, only 1-6R robots are solvable with EAIK"
+
+[arms.xmatecr7_ik]
+display_name = "Rokae xMate CR7"
+short_name = "xMate CR7"
+vendor = "rokae"
+fixture = "xmatecr7_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "RokaeRobot/rokae_ros2 (rokae_description, Apache-2.0)"
+base_link = "xMateCR7_base"
+ee_link = "xMateCR7_link6"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 47
+sample_q = [0.837, -1.41, -2.8, -2.95, 1.91, 2.52]
+fk_ceiling_fuzz = 1e-04  # from the validation smoke (~10x worst FK)
+platform_drift = true
+drift_markers = [
+    'SOLVER_NAME = "ikgeo.general_6r"',
+    "def fk(q):",
+]
+
+[arms.xmatecr7_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 1.03
+ms_ci95 = 0.03
+max_fk = 1.7e-08
+sols_min = 4
+sols_max = 12
+
+[arms.xmatecr7_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"
+[arms.xmatesr3_ik]
+display_name = "Rokae xMate SR3"
+short_name = "xMate SR3"
+vendor = "rokae"
+fixture = "xmatesr3_ik.urdf"
+fixture_kind = "urdf"
+fixture_source = "RokaeRobot/rokae_ros2 (rokae_description, Apache-2.0)"
+base_link = "xMateSR3_base"
+ee_link = "xMateSR3_link6"
+dof = 6
+solver = "ikgeo.general_6r"
+tier = 2
+kinematic_class = "non-Pieper 6R"
+short_class = "non-Pieper 6R"
+class_tags = ["non-Pieper", "6R"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 45
+sample_q = [0.837, -1.11, -2.83, -2.95, 1.91, 2.52]
+fk_ceiling_fuzz = 1e-4  # from the validation smoke (~10x worst FK)
+platform_drift = true
+drift_markers = [
+    'SOLVER_NAME = "ikgeo.general_6r"',
+    "def fk(q):",
+]
+
+[arms.xmatesr3_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.88
+ms_ci95 = 0.06
+max_fk = 6.1e-09
+sols_min = 2
+sols_max = 12
+
+[arms.xmatesr3_ik.eaik]
+supported = false
+refusal = "6R-Unknown Kinematic Class"

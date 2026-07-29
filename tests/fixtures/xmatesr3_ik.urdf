@@ -1,0 +1,64 @@
+<?xml version='1.0' encoding='utf-8'?>
+<robot name="xMateSR3">
+  <link name="world" />
+  <joint name="fixed" type="fixed">
+    <parent link="world" />
+    <child link="xMateSR3_base" />
+  </joint>
+  <link name="xMateSR3_base">
+    </link>
+  <joint name="joint1" type="revolute">
+    <parent link="xMateSR3_base" />
+    <child link="xMateSR3_link1" />
+    <limit effort="66" lower="-3.0543" upper="3.0543" velocity="3.141592653589793" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.334" />
+  </joint>
+  <link name="xMateSR3_link1">
+    </link>
+  <joint name="joint2" type="revolute">
+    <parent link="xMateSR3_link1" />
+    <child link="xMateSR3_link2" />
+    <limit effort="66" lower="-2.3562" upper="2.2689" velocity="3.141592653589793" />
+    <axis xyz="0 1 0" />
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
+  </joint>
+  <link name="xMateSR3_link2">
+    </link>
+  <joint name="joint3" type="revolute">
+    <parent link="xMateSR3_link2" />
+    <child link="xMateSR3_link3" />
+    <limit effort="29" lower="-3.0543" upper="2.3562" velocity="3.141592653589793" />
+    <axis xyz="0 -1 0" />
+    <origin rpy="0 0 0" xyz="0.05 0.0 0.29" />
+  </joint>
+  <link name="xMateSR3_link3">
+    </link>
+  <joint name="joint4" type="revolute">
+    <parent link="xMateSR3_link3" />
+    <child link="xMateSR3_link4" />
+    <limit effort="16" lower="-3.0543" upper="3.0543" velocity="3.141592653589793" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0 0 0" xyz="-0.05 0.0 0.29" />
+  </joint>
+  <link name="xMateSR3_link4">
+    </link>
+  <joint name="joint5" type="revolute">
+    <parent link="xMateSR3_link4" />
+    <child link="xMateSR3_link5" />
+    <limit effort="16" lower="-3.0543" upper="3.0543" velocity="3.141592653589793" />
+    <axis xyz="0 -1 0" />
+    <origin rpy="0 0 0" xyz="0.0 0.136 0.0" />
+  </joint>
+  <link name="xMateSR3_link5">
+    </link>
+  <joint name="joint6" type="revolute">
+    <parent link="xMateSR3_link5" />
+    <child link="xMateSR3_link6" />
+    <limit effort="16" lower="-3.0543" upper="3.0543" velocity="3.141592653589793" />
+    <axis xyz="0 0 1" />
+    <origin rpy="0.0 0.0 0" xyz="0.0 0.0 0.1035" />
+  </joint>
+  <link name="xMateSR3_link6">
+    </link>
+</robot>
