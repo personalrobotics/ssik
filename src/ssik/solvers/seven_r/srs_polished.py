@@ -55,15 +55,9 @@ from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import is_approximately_srs_7r
-from ssik.refinement import (
-    dedup_by_wrap_close,
-    kinbody_fk_jacobian_batch,
-    kinbody_jacobian,
-    lm_refine_batch,
-)
 from ssik.solvers.seven_r import srs
+from ssik.solvers.seven_r._polish import polish_candidates
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
     from ssik._kinbody import KinBody
@@ -164,70 +158,33 @@ def solve(
         # SRS produced nothing even at huge fk_atol; truly unreachable.
         return [], True
 
-    # Step 3: batched LM polish for all candidates simultaneously (#205).
-    # Synchronises the Newton iter loop across the N raw seeds so per-iter
-    # ``np.linalg.{solve, inv, norm}`` dispatch overhead amortises over N.
-    # Empirically ~30-50% faster than the sequential ``lm_refine`` loop on
-    # Gen3 (where N is typically 75-128). Tighter divergence detection
-    # (factor=2.0, min_iters=2) inherited from #203 keeps dead-end seeds
-    # from wasting iter budget.
-    def fk_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        out: NDArray[np.float64] = poe_forward_kinematics(kb, q)
-        return out
-
-    def jac_fn(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        out: NDArray[np.float64] = kinbody_jacobian(kb, q)
-        return out
-
-    def fk_jac_batch_fn(
-        q: NDArray[np.float64],
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-        # Batched FK + Jacobian over the whole active candidate set (all shipped
-        # arms are revolute; the primitive raises on prismatic and lm_refine_batch
-        # would fall back to the scalar callables above).
-        return kinbody_fk_jacobian_batch(kb, q)
-
-    q_seeds = np.array([c.q for c in raw], dtype=np.float64)
-    q_polished_arr, fk_residuals, _iters_used = lm_refine_batch(
-        q_seeds,
-        fk_fn,
-        jac_fn,
+    # Steps 3+4: batched LM polish for all candidates simultaneously (#205),
+    # then cluster-merge -- the shared polished-7R tail (#467). ``batched=True``
+    # runs the vectorised FK+Jacobian (~30-50% faster on Gen3, N=75-128); the
+    # divergence detection (factor=2.0, min_iters=2 from #203) is lm_refine_batch's
+    # default. Candidates carry SRS branch metadata, so preserve it via ``replace``
+    # rather than a fresh Solution.
+    deduped = polish_candidates(
+        kb,
+        np.array([c.q for c in raw], dtype=np.float64),
         T_target,
-        fk_atol=polish_fk_atol,
-        max_iters=polish_max_iters,
-        divergence_factor=2.0,
-        divergence_min_iters=2,
-        fk_jac_batch_fn=fk_jac_batch_fn,
+        accept_fk_atol=polish_fk_atol,
+        dedup_tol=policy.subproblem_dedup,
+        lm_fk_atol=polish_fk_atol,
+        lm_max_iters=polish_max_iters,
+        batched=True,
+        solution_factory=lambda i, q, r: replace(raw[i], q=q, fk_residual=r, refinement_used="lm"),
+        max_solutions=max_solutions,
     )
 
-    polished: list[Solution] = [
-        replace(
-            c,
-            q=q_polished_arr[i],
-            fk_residual=float(fk_residuals[i]),
-            refinement_used="lm",
-        )
-        for i, c in enumerate(raw)
-        if fk_residuals[i] < polish_fk_atol
-    ]
-
-    if not polished:
+    if not deduped:
         return [], True
 
-    # Step 4: cluster-merge. Different SRS branches may polish into
-    # the same true IK; dedup keeps one representative per cluster.
-    deduped = dedup_by_wrap_close(polished, policy.subproblem_dedup)
-
-    if max_solutions is not None and len(deduped) > max_solutions:
-        deduped = deduped[:max_solutions]
-
     _LOG.info(
-        "seven_r.srs_polished: drift_shoulder=%.4f m  drift_wrist=%.4f m  "
-        "raw=%d  polished=%d  deduped=%d",
+        "seven_r.srs_polished: drift_shoulder=%.4f m  drift_wrist=%.4f m  raw=%d  deduped=%d",
         cls.shoulder_drift_m,
         cls.wrist_drift_m,
         len(raw),
-        len(polished),
         len(deduped),
     )
 

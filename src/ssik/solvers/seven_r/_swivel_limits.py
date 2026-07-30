@@ -41,12 +41,12 @@ from ssik.kinematics.predicates import (
     _classify_srs_7r_geometric,
     is_approximately_srs_7r,
 )
-from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian, lm_refine_batch
 from ssik.solvers.seven_r._feasible_param import (
     PARAM_GRID,
     feasible_arcs,
     to_limits,
 )
+from ssik.solvers.seven_r._polish import polish_candidates
 from ssik.solvers.seven_r.srs import (
     _arm_constants,
     _min_rotation,
@@ -268,11 +268,6 @@ def _joint_limits(kb: KinBody) -> list[tuple[float, float]]:
 _APPROX_MAX_DRIFT_M = 0.04  # matches seven_r.srs_polished's default gate
 _APPROX_FK_ATOL = 1e-8
 
-
-def _in_limits(q: NDArray[np.float64], limits: list[tuple[float, float]]) -> bool:
-    return all(lo - 1e-9 <= q[i] <= hi + 1e-9 for i, (lo, hi) in enumerate(limits))
-
-
 _APPROX_ARC_SAMPLES = 5  # interior samples per approximate feasible arc
 
 
@@ -354,20 +349,12 @@ def resolve_in_limits(
     seeds = _approx_grid_seeds(kb, approx.base, T)
     if not seeds:
         return []
-
-    def _fk(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        t: NDArray[np.float64] = poe_forward_kinematics(kb, q)
-        return t
-
-    def _jac(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        j: NDArray[np.float64] = kinbody_jacobian(kb, q)
-        return j
-
-    q_polished, residuals, _iters = lm_refine_batch(np.asarray(seeds), _fk, _jac, T)
-    polished: list[Solution] = [
-        Solution(q=q_polished[i], fk_residual=float(residuals[i]), refinement_used="lm")
-        for i in range(q_polished.shape[0])
-        if residuals[i] <= _APPROX_FK_ATOL and _in_limits(q_polished[i], limits)
-    ]
-    out = dedup_by_wrap_close(polished, policy.subproblem_dedup)
-    return out[:max_solutions] if max_solutions is not None else out
+    return polish_candidates(
+        kb,
+        seeds,
+        T,
+        accept_fk_atol=_APPROX_FK_ATOL,
+        dedup_tol=policy.subproblem_dedup,
+        limits=limits,
+        max_solutions=max_solutions,
+    )

@@ -28,10 +28,9 @@ from numpy.typing import NDArray
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics._scalar3 import _se3_inv
-from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.reverse import reverse_kinematic_chain
-from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian, lm_refine_batch
 from ssik.solvers.jointlock.seven_r import _lock_joint
+from ssik.solvers.seven_r._polish import polish_candidates
 from ssik.solvers.seven_r.spherical_shoulder import (
     _LOCK,
     _SAMPLE_GRID,
@@ -112,27 +111,15 @@ def _polished(
     if not cand:
         return []
 
-    def _fk(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        out: NDArray[np.float64] = poe_forward_kinematics(kb, q)
-        return out
-
-    def _jac(q: NDArray[np.float64]) -> NDArray[np.float64]:
-        out: NDArray[np.float64] = kinbody_jacobian(kb, q)
-        return out
-
-    q_pol, res, _iters = lm_refine_batch(
-        np.asarray(cand), _fk, _jac, T, max_iters=_POLISH_MAX_ITERS
+    return polish_candidates(
+        kb,
+        cand,
+        T,
+        accept_fk_atol=_POLISH_FK_ATOL,
+        dedup_tol=policy.subproblem_dedup,
+        lm_max_iters=_POLISH_MAX_ITERS,
+        limits=limits if respect_limits else None,
     )
-    out: list[Solution] = []
-    for i in range(q_pol.shape[0]):
-        if res[i] > _POLISH_FK_ATOL:
-            continue
-        if respect_limits and not all(
-            limits[j][0] - 1e-9 <= q_pol[i][j] <= limits[j][1] + 1e-9 for j in range(7)
-        ):
-            continue
-        out.append(Solution(q=q_pol[i], fk_residual=float(res[i]), refinement_used="lm"))
-    return dedup_by_wrap_close(out, policy.subproblem_dedup)
 
 
 def solve(
