@@ -265,11 +265,14 @@ def test_prebuilt_7r_tight_policy_machine_precision(arm_name: str, q_star: np.nd
 # Arms with a known residual in-limits-swivel gap on the default path, xfailed
 # with a tracking issue (never silently). Most shipped 7R arms hold the guarantee
 # via the closed-form feasible-swivel resolver (#359 exact-SRS, #370 approximate-
-# SRS). yumi_left / j2s7s300 (both srs_polished) drop ~0.5-1% of in-limits poses:
-# the best-fit-pivot approximation shifts the feasible swivel arc slightly so a
-# thin sliver is missed (the true in-limits IK exists; a 200-swivel sweep finds
-# it, production density doesn't). Tracked + root-caused in #462.
-_LIMITS_GAP_7R: set[str] = {"yumi_left_ik", "j2s7s300_ik"}
+# SRS). The #462 seed-union fix (unfiltered full-swivel-grid + arc-interior seeds,
+# wrapped into the limit box, filtered only after the LM polish) closed j2s7s300
+# fully and more than halved yumi's gap. yumi_left retains a ~0.5% residual: for a
+# thin near-singular sliver the true in-limits IK lives on a *disconnected*
+# self-motion-manifold component that the best-fit-SRS branches don't seed and
+# null-space continuation can't cross to -- only brute global random-restart finds
+# it (verified), which is not a principled closed-form path. Tracked in #462.
+_LIMITS_GAP_7R: set[str] = {"yumi_left_ik"}
 
 
 def _joint_ranges(kb: object) -> list[tuple[float, float]]:
