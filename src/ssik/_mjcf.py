@@ -26,7 +26,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik._kinbody import JointType, KinBody, build_poe_kinbody
-from ssik._urdf import _GRIPPER_HINTS
+from ssik._urdf import _GRIPPER_HINTS, _MIN_ARM_DOF
 
 __all__ = [
     "load_mjcf_kinbody_normalized",
@@ -103,10 +103,25 @@ def suggest_base_ee_mjcf(mjcf_path: str | Path) -> tuple[str, str, list[str]]:
     actuated = [b for b in chain if n_actuated(b) > 0]
     base_body = name(int(model.body_parentid[actuated[0]]))
 
-    # Trim trailing gripper/tool bodies back to the kinematic flange.
+    # Cumulative actuated-joint count along the chain (dof if ee = chain[i]).
+    cum: list[int] = []
+    running = 0
+    for b in chain:
+        running += n_actuated(b)
+        cum.append(running)
+
+    # Trim trailing gripper/tool bodies back to the kinematic flange, but never
+    # below _MIN_ARM_DOF: a body named like a gripper can still carry a real arm
+    # DOF (Trossen ViperX/WidowX put the 6th joint, wrist-rotate, in
+    # ``gripper_link``), and since ssik only solves 6/7-DOF, trimming to <6 is
+    # never the intended flange -- it just fails dispatch (#470 follow-up).
     ee_idx = chain.index(actuated[-1])
     first_idx = chain.index(actuated[0])
-    while ee_idx > first_idx and any(h in name(chain[ee_idx]).lower() for h in _GRIPPER_HINTS):
+    while (
+        ee_idx > first_idx
+        and any(h in name(chain[ee_idx]).lower() for h in _GRIPPER_HINTS)
+        and (cum[-1] < _MIN_ARM_DOF or cum[ee_idx - 1] >= _MIN_ARM_DOF)
+    ):
         ee_idx -= 1
     ee_body = name(chain[ee_idx])
 
@@ -118,6 +133,12 @@ def suggest_base_ee_mjcf(mjcf_path: str | Path) -> tuple[str, str, list[str]]:
     ]
     if trailing:
         notes.append(f"frames past {ee_body!r}: {trailing} (pass ee= to use one)")
+    trimmed_grippers = [name(b) for b in chain[ee_idx + 1 :] if name(b) not in trailing]
+    if trimmed_grippers:
+        notes.append(
+            f"trimmed gripper/tool bodies past {ee_body!r}: {trimmed_grippers} "
+            "(pass ee= to include one if it's actually an arm DOF)"
+        )
     return base_body, ee_body, notes
 
 

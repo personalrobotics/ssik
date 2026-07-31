@@ -121,3 +121,37 @@ def test_suggest_base_ee_skips_leading_fixed_and_gripper() -> None:
         base, ee, _ = suggest_base_ee(src)
         assert base == "base_link"
         assert ee == "wrist"
+
+
+# A 6-DOF arm whose 6th joint's link is *named* like a gripper (Trossen
+# ViperX/WidowX put the wrist-rotate DOF in ``gripper_link``). The gripper-name
+# trim must NOT eat that link -- doing so yields a 5-DOF chain that can't
+# dispatch. The guard: never trim below 6 DOF (#470 follow-up).
+_ARM_GRIPPER_NAMED_SIXTH = f"""<?xml version="1.0"?>
+<robot name="arm">
+  <link name="base_link"/><link name="l1"/><link name="l2"/><link name="l3"/>
+  <link name="l4"/><link name="l5"/><link name="gripper_link"/>
+  <link name="finger_left"/><link name="finger_right"/>
+  {_rev("j1", "base_link", "l1")}
+  {_rev("j2", "l1", "l2")}
+  {_rev("j3", "l2", "l3")}
+  {_rev("j4", "l3", "l4")}
+  {_rev("j5", "l4", "l5")}
+  {_rev("j6", "l5", "gripper_link")}
+  {_rev("fl", "gripper_link", "finger_left")}
+  {_rev("fr", "gripper_link", "finger_right")}
+</robot>
+"""
+
+
+def test_suggest_base_ee_keeps_gripper_named_sixth_dof() -> None:
+    """The gripper-name trim never drops the chain below 6 DOF, so a 6th arm
+    joint that lives in a ``gripper_link`` (ViperX/WidowX) is retained."""
+    from ssik._urdf import suggest_base_ee
+
+    with tempfile.TemporaryDirectory() as d:
+        src = Path(d) / "arm.urdf"
+        src.write_text(_ARM_GRIPPER_NAMED_SIXTH)
+        base, ee, _notes = suggest_base_ee(src)
+        assert base == "base_link"
+        assert ee == "gripper_link"  # NOT trimmed to l5 (that would be 5-DOF)

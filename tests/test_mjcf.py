@@ -131,6 +131,27 @@ def _chain_jnt_ids(model: Any, base: str, ee: str) -> list[int]:
 
 
 @pytest.mark.parametrize(
+    ("module", "exp_base", "exp_ee"),
+    [
+        ("viper_mj_description", "base_link", "gripper_link"),
+        ("widow_mj_description", "wx250s/base_link", "wx250s/gripper_link"),
+    ],
+)
+def test_suggest_base_ee_keeps_gripper_named_sixth_dof(
+    module: str, exp_base: str, exp_ee: str
+) -> None:
+    """Trossen ViperX/WidowX put the 6th arm DOF (wrist-rotate) in
+    ``gripper_link``. Auto-detect must keep it (6-DOF), not trim it as a gripper
+    (which would give a 5-DOF chain that fails dispatch) -- the never-below-6-DOF
+    guard (#470 follow-up)."""
+    rd = pytest.importorskip(f"robot_descriptions.{module}")
+    base, ee, _notes = suggest_base_ee_mjcf(rd.MJCF_PATH)
+    assert (base, ee) == (exp_base, exp_ee)
+    arm = Manipulator.from_mjcf(rd.MJCF_PATH)
+    assert len(arm.kinbody.joints) == 6
+
+
+@pytest.mark.parametrize(
     ("module", "exp_base", "exp_ee", "dof"),
     _REAL_MJCF_ARMS,
     ids=[a[0] for a in _REAL_MJCF_ARMS],

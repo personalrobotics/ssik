@@ -95,6 +95,12 @@ _GRIPPER_HINTS = (
     "flange",
 )
 
+# Never let the gripper-name trim drop the auto-detected chain below this many
+# actuated DOF: ssik only solves 6/7-DOF, so a shorter chain is never the
+# intended flange, and a body named like a gripper can still carry a real arm
+# joint (e.g. Trossen ViperX/WidowX's 6th DOF lives in ``gripper_link``).
+_MIN_ARM_DOF = 6
+
 
 def suggest_base_ee(
     source: str | Path, xacro_args: dict[str, str] | None = None
@@ -159,11 +165,20 @@ def suggest_base_ee(
     base_link = chain_links[active_idx[0]]
     ee_idx = active_idx[-1] + 1
 
+    # active joints to reach chain_links[k] = dof if ee = chain_links[k].
+    def _dof_at(k: int) -> int:
+        return sum(1 for t in chain_types[:k] if t in _ACTIVE_URDF_JOINTS)
+
     # Gripper joints (fingers) are active too, so the longest actuated chain
     # runs past the wrist into a finger. Back the EE up to the last link that
-    # isn't gripper-named -- the kinematic flange.
-    while ee_idx > active_idx[0] and any(
-        hint in chain_links[ee_idx].lower() for hint in _GRIPPER_HINTS
+    # isn't gripper-named -- the kinematic flange -- but never below
+    # _MIN_ARM_DOF: a gripper-named link can still carry a real arm DOF (Trossen
+    # ViperX/WidowX put the 6th joint in ``gripper_link``), and ssik only solves
+    # 6/7-DOF, so trimming to <6 is never the intended flange.
+    while (
+        ee_idx > active_idx[0]
+        and any(hint in chain_links[ee_idx].lower() for hint in _GRIPPER_HINTS)
+        and (n_active < _MIN_ARM_DOF or _dof_at(ee_idx - 1) >= _MIN_ARM_DOF)
     ):
         ee_idx -= 1
     ee_link = chain_links[ee_idx]
