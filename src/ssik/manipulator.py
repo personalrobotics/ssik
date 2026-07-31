@@ -192,6 +192,61 @@ class Manipulator:
         return cls(kb, policy=policy)
 
     @classmethod
+    def from_mjcf(
+        cls,
+        path: str | Path,
+        *,
+        base: str | None = None,
+        ee: str | None = None,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    ) -> Manipulator:
+        """Load a MuJoCo MJCF and build a :class:`Manipulator` for the chain
+        between two bodies.
+
+        The MJCF is compiled by ``mujoco`` (resolving ``<default>`` classes,
+        ``<compiler>`` angle/coordinate settings, ``<include>``, keyframes), and
+        the POE-normalised chain is read straight off the compiled model, so no
+        XML is hand-parsed. Solvers and the dispatcher are format-agnostic: the
+        resulting arm is identical in form to one from :meth:`from_urdf`.
+
+        Only single-DOF joints (``hinge`` -> revolute, ``slide`` -> prismatic)
+        are supported; ``ball`` / ``free`` joints raise. ``q=0`` corresponds to
+        MuJoCo's reference ``qpos0``.
+
+        :param path: path to the ``.xml`` / ``.mjcf`` model file.
+        :param base: name of the base body. When omitted, the base of the
+            longest actuated chain is auto-detected (for multi-limb robots pass
+            an explicit ``base``/``ee`` to select a limb).
+        :param ee: name of the end-effector body. When omitted, the flange of
+            the longest actuated chain is auto-detected (trailing gripper/tool
+            bodies are skipped).
+        :param policy: tolerance policy. Defaults to
+            :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
+
+        :raises FileNotFoundError: if ``path`` doesn't exist.
+        :raises ValueError: if ``base``/``ee`` are not body names, or ``ee`` is
+            not a descendant of ``base``.
+        :raises NotImplementedError: on ball/free joints.
+        :raises ImportError: if the optional dependency ``mujoco`` is not
+            installed (``pip install ssik[mjcf]``).
+        """
+        # Imported lazily so the mujoco dependency is only required when
+        # from_mjcf is actually called (it's an optional extra).
+        from ssik._mjcf import load_mjcf_kinbody_normalized, suggest_base_ee_mjcf
+
+        path_obj = Path(path)
+        if not path_obj.exists():
+            raise FileNotFoundError(f"MJCF file not found: {path_obj}")
+
+        if base is None or ee is None:
+            det_base, det_ee, _notes = suggest_base_ee_mjcf(path)
+            base = base if base is not None else det_base
+            ee = ee if ee is not None else det_ee
+
+        kb = load_mjcf_kinbody_normalized(path, base, ee)
+        return cls(kb, policy=policy)
+
+    @classmethod
     def from_axes(
         cls,
         joint_axes: ArrayLike,

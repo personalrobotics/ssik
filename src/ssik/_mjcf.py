@@ -23,8 +23,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik._kinbody import JointType, KinBody, build_poe_kinbody
+from ssik._urdf import _GRIPPER_HINTS
 
-__all__ = ["load_mjcf_kinbody_normalized"]
+__all__ = ["load_mjcf_kinbody_normalized", "suggest_base_ee_mjcf"]
 
 
 def _import_mujoco() -> object:
@@ -36,6 +37,81 @@ def _import_mujoco() -> object:
             "`pip install ssik[mjcf]` (or `uv add mujoco`)."
         ) from err
     return mujoco
+
+
+def suggest_base_ee_mjcf(mjcf_path: str | Path) -> tuple[str, str, list[str]]:
+    """Suggest ``(base_body, ee_body)`` for the longest actuated chain in an MJCF,
+    plus human-readable notes about alternatives.
+
+    ``base_body`` is the parent body of the first actuated (hinge/slide) joint --
+    leading fixed bodies (e.g. ``world -> robot_base``) fold into the base.
+    ``ee_body`` is the body carrying the last actuated joint (the kinematic
+    flange); trailing gripper/tool bodies are reported as notes, not chosen. The
+    MJCF analogue of :func:`ssik._urdf.suggest_base_ee`. For multi-limb robots
+    (humanoids) only the single longest chain is returned -- pass an explicit
+    ``base``/``ee`` to select a different limb.
+
+    :returns: ``(base_body, ee_body, notes)``; ``notes`` empty for an
+        unambiguous single-chain arm.
+    :raises ValueError: if the MJCF has no hinge/slide joints.
+    """
+    mujoco = _import_mujoco()
+    model = mujoco.MjModel.from_xml_path(str(mjcf_path))  # type: ignore[attr-defined]
+    hinge = mujoco.mjtJoint.mjJNT_HINGE  # type: ignore[attr-defined]
+    slide = mujoco.mjtJoint.mjJNT_SLIDE  # type: ignore[attr-defined]
+
+    def name(bid: int) -> str:
+        return mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, bid) or f"body{bid}"  # type: ignore[attr-defined]
+
+    def n_actuated(bid: int) -> int:
+        j0 = int(model.body_jntadr[bid])
+        return sum(
+            1
+            for j in range(j0, j0 + int(model.body_jntnum[bid]))
+            if int(model.jnt_type[j]) in (hinge, slide)
+        )
+
+    children: dict[int, list[int]] = {}
+    for b in range(1, model.nbody):  # skip world (body 0)
+        children.setdefault(int(model.body_parentid[b]), []).append(b)
+
+    # Longest chain by number of actuated joints, over every world-rooted branch.
+    best: tuple[int, list[int]] | None = None
+
+    def walk(bid: int, path: list[int], nact: int) -> None:
+        nonlocal best
+        na = nact + n_actuated(bid)
+        if best is None or na > best[0]:
+            best = (na, list(path))
+        for c in children.get(bid, []):
+            walk(c, [*path, c], na)
+
+    for root in children.get(0, []):
+        walk(root, [root], 0)
+
+    if best is None or best[0] == 0:
+        raise ValueError("suggest_base_ee_mjcf: no hinge/slide joints found in MJCF")
+
+    chain = best[1]
+    actuated = [b for b in chain if n_actuated(b) > 0]
+    base_body = name(int(model.body_parentid[actuated[0]]))
+
+    # Trim trailing gripper/tool bodies back to the kinematic flange.
+    ee_idx = chain.index(actuated[-1])
+    first_idx = chain.index(actuated[0])
+    while ee_idx > first_idx and any(h in name(chain[ee_idx]).lower() for h in _GRIPPER_HINTS):
+        ee_idx -= 1
+    ee_body = name(chain[ee_idx])
+
+    notes: list[str] = []
+    trailing = [
+        name(b)
+        for b in chain[ee_idx + 1 :]
+        if not any(h in name(b).lower() for h in _GRIPPER_HINTS)
+    ]
+    if trailing:
+        notes.append(f"frames past {ee_body!r}: {trailing} (pass ee= to use one)")
+    return base_body, ee_body, notes
 
 
 def load_mjcf_kinbody_normalized(

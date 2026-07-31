@@ -6,15 +6,21 @@ group so CI runs these). The gold-standard oracle is mujoco's own ``mj_forward``
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 
 mujoco = pytest.importorskip("mujoco")
 
-from ssik._mjcf import load_mjcf_kinbody_normalized  # noqa: E402
+from ssik._mjcf import (  # noqa: E402
+    load_mjcf_kinbody_normalized,
+    suggest_base_ee_mjcf,
+)
 from ssik.kinematics.poe_fk import poe_forward_kinematics  # noqa: E402
+from ssik.manipulator import Manipulator  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TOY = FIXTURES / "toy3r.xml"
@@ -78,3 +84,87 @@ def test_mjcf_rejects_ball_joint(tmp_path: Path) -> None:
     )
     with pytest.raises(NotImplementedError, match="hinge/slide"):
         load_mjcf_kinbody_normalized(ball, "base", "ee")
+
+
+def test_from_mjcf_missing_file() -> None:
+    with pytest.raises(FileNotFoundError, match="MJCF file not found"):
+        Manipulator.from_mjcf(FIXTURES / "does_not_exist.xml")
+
+
+# --- Real MuJoCo Menagerie arms (gated on robot_descriptions) --------------
+# The mujoco mj_forward pass is the gold-standard FK oracle: build the KinBody
+# via the public auto-detecting entry point, then confirm its FK matches mujoco
+# body poses at random q for the *same* chain joints.
+
+robot_descriptions = pytest.importorskip("robot_descriptions")
+
+# (module, expected auto-detected base, expected auto-detected ee, dof). The
+# ee assertions pin the gripper-trim (arx_l5 must stop at link7, not a finger).
+_REAL_MJCF_ARMS = [
+    ("gen3_mj_description", "base_link", "bracelet_link", 7),
+    ("iiwa14_mj_description", "base", "link7", 7),
+    ("fr3_mj_description", "fr3_link0", "fr3_link7", 7),
+    ("arx_l5_mj_description", "base_link", "link7", 7),
+]
+
+
+def _chain_jnt_ids(model: Any, base: str, ee: str) -> list[int]:
+    """mujoco joint ids on the base->ee chain, in chain order."""
+    hinge, slide = mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE
+    bid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, ee)
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, base)
+    chain: list[int] = []
+    while bid != base_id:
+        chain.append(bid)
+        bid = int(model.body_parentid[bid])
+    chain.reverse()
+    ids: list[int] = []
+    for body in chain:
+        j0 = int(model.body_jntadr[body])
+        ids += [
+            j
+            for j in range(j0, j0 + int(model.body_jntnum[body]))
+            if int(model.jnt_type[j]) in (hinge, slide)
+        ]
+    return ids
+
+
+@pytest.mark.parametrize(
+    ("module", "exp_base", "exp_ee", "dof"),
+    _REAL_MJCF_ARMS,
+    ids=[a[0] for a in _REAL_MJCF_ARMS],
+)
+def test_from_mjcf_real_arm_fk_matches_mujoco(
+    module: str, exp_base: str, exp_ee: str, dof: int
+) -> None:
+    path = importlib.import_module(f"robot_descriptions.{module}").MJCF_PATH
+
+    # Auto-detect picks the documented base/ee (gripper trimmed to the flange).
+    base, ee, _notes = suggest_base_ee_mjcf(path)
+    assert (base, ee) == (exp_base, exp_ee)
+
+    arm = Manipulator.from_mjcf(path)  # auto-detect
+    assert len(arm.kinbody.joints) == dof
+
+    model = mujoco.MjModel.from_xml_path(path)
+    data = mujoco.MjData(model)
+    jids = _chain_jnt_ids(model, base, ee)
+    assert len(jids) == dof
+    base_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, base)
+    ee_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, ee)
+
+    rng = np.random.default_rng(0)
+    worst = 0.0
+    for _ in range(50):
+        q = rng.uniform(-1.0, 1.0, size=dof)
+        data.qpos[:] = 0.0
+        for qi, jid in zip(q, jids, strict=True):
+            data.qpos[int(model.jnt_qposadr[jid])] = qi
+        mujoco.mj_forward(model, data)
+        r_base = data.xmat[base_id].reshape(3, 3)
+        p_base = data.xpos[base_id]
+        ref = np.eye(4)
+        ref[:3, :3] = r_base.T @ data.xmat[ee_id].reshape(3, 3)
+        ref[:3, 3] = r_base.T @ (data.xpos[ee_id] - p_base)
+        worst = max(worst, float(np.abs(arm.fk(q) - ref).max()))
+    assert worst < 1e-11, f"{module}: from_mjcf FK off from mujoco by {worst:.2e}"
