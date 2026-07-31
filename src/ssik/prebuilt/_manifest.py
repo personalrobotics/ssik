@@ -13,7 +13,7 @@ from __future__ import annotations
 
 try:
     import tomllib
-except ModuleNotFoundError:  # Python < 3.11 (best-effort support, see #366)
+except ModuleNotFoundError:  # Python 3.10 (ROS2 Humble, #477)
     import tomli as tomllib
 from dataclasses import dataclass, field
 from functools import lru_cache

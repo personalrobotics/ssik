@@ -23,6 +23,11 @@ from pathlib import Path
 
 import pytest
 
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # 3.10 backport (ROS2 Humble, #477)
+    import tomli as tomllib
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -326,7 +331,6 @@ def _seed_manifest(workspace: Path) -> Path:
 def test_add_arm_write_manifest_appends_stanza(workspace: Path) -> None:
     """``--write-manifest`` appends the derived stanza to MANIFEST.toml (valid
     TOML, existing entries preserved)."""
-    import tomllib
 
     mf = _seed_manifest(workspace)
     result = _run_cli(
@@ -356,7 +360,6 @@ def test_add_arm_write_manifest_appends_stanza(workspace: Path) -> None:
 def test_add_arm_write_manifest_refuses_duplicate(workspace: Path) -> None:
     """``--write-manifest`` refuses to append a second entry for the same arm
     without ``--force`` (and doesn't duplicate)."""
-    import tomllib
 
     mf = _seed_manifest(workspace)
     args = [

@@ -24,7 +24,11 @@ import sys
 from pathlib import Path
 
 import pytest
-import tomllib
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # 3.10 backport (ROS2 Humble, #477)
+    import tomli as tomllib
 
 _REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO / "scripts"))

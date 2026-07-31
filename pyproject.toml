@@ -15,6 +15,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -23,8 +24,8 @@ classifiers = [
 dependencies = [
     "numpy>=1.26",
     # ``ssik.prebuilt._manifest`` parses the arm manifest with ``tomllib``,
-    # which is stdlib only on Python 3.11+. On the best-effort 3.10 floor
-    # (see #366) it falls back to the ``tomli`` backport, so pull it in there.
+    # which is stdlib only on Python 3.11+. On the 3.10 support floor (#477,
+    # for ROS2 Humble) it falls back to the ``tomli`` backport, so pull it in there.
     "tomli>=1.1.0; python_version < '3.11'",
     # scipy.linalg / scipy.signal are imported at module top in
     # ``ssik._pencil`` and ``ssik.solvers.husty_pfurner._eliminate``; HP backs
@@ -138,7 +139,9 @@ include = [
 # matrix invokes the hatchling build with our Cython hook -- the same path
 # as a local ``uv build --wheel`` -- so we keep one source of truth.
 [tool.cibuildwheel]
-build = "cp311-* cp312-* cp313-*"
+# cp310 is kept for ROS2 Humble (Ubuntu 22.04, Python 3.10, EOL May 2027) --
+# deliberately below the Scientific Python SPEC 0 window (#477).
+build = "cp310-* cp311-* cp312-* cp313-*"
 # Skip targets we don't ship in v1.0 (#132 "Deferred to v1.1+"): musllinux,
 # 32-bit Linux, 32-bit Windows, PyPy. Linux aarch64 is also deferred.
 skip = ["*-musllinux_*", "*-manylinux_i686", "*-win32", "pp*", "*linux_aarch64"]
@@ -217,6 +220,9 @@ select = [
 ]
 
 [tool.mypy]
+# 3.11 (not the 3.10 support floor): the 3.10 target only adds spurious numpy
+# ndarray `.copy()` no-any-return noise, while real 3.10 compat is gated by ruff
+# (target py310) + the 3.10 CI test-run (#477). Type-correctness is version-agnostic.
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
