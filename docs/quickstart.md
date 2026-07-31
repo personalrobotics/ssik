@@ -304,11 +304,12 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 </details>
 
 <details>
-<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `viperx300s_ik` | Trossen ViperX 300s | Pieper 6R (spherical wrist) | `base_link` | `gripper_link` |
+| `widowx250s_ik` | Trossen WidowX 250s | Pieper 6R (spherical wrist) | `wx250s/base_link` | `wx250s/gripper_link` |
 
 </details>
 <!-- /AUTOGEN -->

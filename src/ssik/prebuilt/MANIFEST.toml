@@ -2679,3 +2679,41 @@ ms_ci95 = 0.000881919
 max_fk = 8.5e-16
 sols_min = 8
 sols_max = 8
+
+[arms.widowx250s_ik]
+display_name = "Trossen WidowX 250s"
+short_name = "WidowX 250s"
+vendor = "trossen"
+fixture = "widowx250s_ik.xml"
+fixture_kind = "mjcf"
+fixture_source = "robot_descriptions / widow_mj_description (MuJoCo Menagerie trossen_wx250s, BSD-3-Clause)"
+base_link = "wx250s/base_link"
+ee_link = "wx250s/gripper_link"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 20
+sample_q = [0.861, -0.84, -1.99, -3.04, 1.42, 2.59]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.widowx250s_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.53
+ms_ci95 = 0.07
+max_fk = 8.2e-12
+sols_min = 8
+sols_max = 8
+
+[arms.widowx250s_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.00644581
+ms_ci95 = 0.00181039
+max_fk = 1.0e-15
+sols_min = 8
+sols_max = 8

@@ -1,0 +1,40 @@
+<mujoco model="wx250s">
+  <compiler angle="radian"/>
+  <worldbody>
+    <body name="wx250s/base_link" pos="0 0 0" quat="1 0 0 0">
+      <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+      <body name="wx250s/shoulder_link" pos="0 0 0.072" quat="1 0 0 0">
+        <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+        <joint name="waist" type="hinge" pos="0 0 0" axis="0 0 1" range="-3.14158 3.14158"/>
+        <body name="wx250s/upper_arm_link" pos="0 0 0.03865" quat="1 0 0 0">
+          <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+          <joint name="shoulder" type="hinge" pos="0 0 0" axis="0 1 0" range="-1.88496 1.98968"/>
+          <body name="wx250s/upper_forearm_link" pos="0.04975 0 0.25" quat="1 0 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+            <joint name="elbow" type="hinge" pos="0 0 0" axis="0 1 0" range="-2.14675 1.6057"/>
+            <body name="wx250s/lower_forearm_link" pos="0.175 0 0" quat="1 0 0 0">
+              <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+              <joint name="forearm_roll" type="hinge" pos="0 0 0" axis="1 0 0" range="-3.14158 3.14158"/>
+              <body name="wx250s/wrist_link" pos="0.075 0 0" quat="1 0 0 0">
+                <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                <joint name="wrist_angle" type="hinge" pos="0 0 0" axis="0 1 0" range="-1.74533 2.14675"/>
+                <body name="wx250s/gripper_link" pos="0.065 0 0" quat="1 0 0 0">
+                  <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                  <joint name="wrist_rotate" type="hinge" pos="0 0 0" axis="1 0 0" range="-3.14158 3.14158"/>
+                  <body name="wx250s/left_finger_link" pos="0.066 0 0" quat="1 0 0 0">
+                    <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                    <joint name="left_finger" type="slide" pos="0 0 0" axis="0 1 0" range="0.015 0.037"/>
+                  </body>
+                  <body name="wx250s/right_finger_link" pos="0.066 0 0" quat="1 0 0 0">
+                    <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                    <joint name="right_finger" type="slide" pos="0 0 0" axis="0 1 0" range="-0.037 -0.015"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

@@ -390,11 +390,12 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 </details>
 
 <details>
-<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (2 arms)</summary>
 
 | Module | Fixture provenance |
 |---|---|
 | `viperx300s_ik` | robot_descriptions / viper_mj_description (MuJoCo Menagerie trossen_vx300s, BSD-3-Clause) |
+| `widowx250s_ik` | robot_descriptions / widow_mj_description (MuJoCo Menagerie trossen_wx250s, BSD-3-Clause) |
 
 </details>
 <!-- /AUTOGEN -->

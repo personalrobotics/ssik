@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->71<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->72<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -364,11 +364,12 @@ The wheel ships <!-- AUTOGEN:arm_count -->71<!-- /AUTOGEN --> ready-to-import ar
 </details>
 
 <details>
-<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (2 arms)</summary>
 
 | Module | Arm | Class | base_link | ee_link |
 |---|---|---|---|---|
 | `viperx300s_ik` | Trossen ViperX 300s | Pieper 6R (spherical wrist) | `base_link` | `gripper_link` |
+| `widowx250s_ik` | Trossen WidowX 250s | Pieper 6R (spherical wrist) | `wx250s/base_link` | `wx250s/gripper_link` |
 
 </details>
 <!-- /AUTOGEN -->
@@ -886,11 +887,12 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 </details>
 
 <details>
-<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (2 arms)</summary>
 
 | Arm (class) | EAIK | ssik |
 |---|---|---|
 | ViperX 300s (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 9e-16 / 8 sols | 310 ± 20 µs / FK 3e-12 / 8 sols |
+| WidowX 250s (Pieper 6R, spherical wrist) | 6 ± 2 µs / FK 1e-15 / 8 sols | 530 ± 70 µs / FK 8e-12 / 8 sols |
 
 </details>
 <!-- /AUTOGEN -->

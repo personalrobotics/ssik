@@ -313,11 +313,12 @@ preprocessing) and cleaner to ship in production stacks.
 </details>
 
 <details>
-<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (2 arms)</summary>
 
 | Arm | Solver | Build time | Artifact size |
 |---|---|:---:|:---:|
 | `viperx300s_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~20 KB |
+| `widowx250s_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~20 KB |
 
 </details>
 <!-- /AUTOGEN -->
