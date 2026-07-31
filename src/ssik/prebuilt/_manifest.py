@@ -18,7 +18,8 @@ except ModuleNotFoundError:  # Python < 3.11 (best-effort support, see #366)
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+
+from ssik import _formats as formats
 
 _MANIFEST_PATH = Path(__file__).resolve().parent / "MANIFEST.toml"
 
@@ -73,7 +74,10 @@ class Arm:
     short_name: str
     table_name: str  # compact form for README / quickstart prebuilt tables
     fixture: str
-    fixture_kind: Literal["urdf", "specs"]
+    # A registered source-format kind (``ssik._formats``: "urdf", "mjcf", ...) or
+    # "specs" (a Python KinBody-builder module). Validated against the registry so
+    # a new format needs no edit here.
+    fixture_kind: str
     base_link: str
     ee_link: str
     dof: int
@@ -172,16 +176,19 @@ def _coerce_arm(name: str, body: dict[str, object]) -> Arm:
         known_gaps = ArmKnownGap(xfail_reason=str(gaps_dict["xfail_reason"]))
 
     fixture_kind = body["fixture_kind"]
-    if fixture_kind not in ("urdf", "specs"):
+    valid_kinds = (*formats.kinds(), "specs")
+    if fixture_kind not in valid_kinds:
         raise ValueError(
-            f"arm {name!r}: fixture_kind must be 'urdf' or 'specs', got {fixture_kind!r}"
+            f"arm {name!r}: fixture_kind must be one of {valid_kinds}, got {fixture_kind!r}"
         )
-    # ``specs_fn`` is required when fixture_kind == "specs"; absent for urdf.
+    # ``specs_fn`` is required when fixture_kind == "specs"; absent for a file format.
     specs_fn = body.get("specs_fn")
     if fixture_kind == "specs" and not specs_fn:
         raise ValueError(f"arm {name!r}: fixture_kind='specs' requires specs_fn")
-    if fixture_kind == "urdf" and specs_fn:
-        raise ValueError(f"arm {name!r}: fixture_kind='urdf' but specs_fn is set; remove specs_fn")
+    if fixture_kind != "specs" and specs_fn:
+        raise ValueError(
+            f"arm {name!r}: fixture_kind={fixture_kind!r} but specs_fn is set; remove specs_fn"
+        )
 
     return Arm(
         name=name,

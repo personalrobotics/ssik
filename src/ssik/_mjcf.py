@@ -17,7 +17,10 @@ solvers and the dispatcher are format-agnostic.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
+from xml.sax.saxutils import quoteattr
 
 import numpy as np
 from numpy.typing import NDArray
@@ -25,7 +28,11 @@ from numpy.typing import NDArray
 from ssik._kinbody import JointType, KinBody, build_poe_kinbody
 from ssik._urdf import _GRIPPER_HINTS
 
-__all__ = ["load_mjcf_kinbody_normalized", "suggest_base_ee_mjcf"]
+__all__ = [
+    "load_mjcf_kinbody_normalized",
+    "strip_mjcf_to_fixture",
+    "suggest_base_ee_mjcf",
+]
 
 
 def _import_mujoco() -> object:
@@ -202,3 +209,112 @@ def load_mjcf_kinbody_normalized(
     final_t_right = final_t_right @ rot4
 
     return build_poe_kinbody(records, final_t_right, base_body, ee_body)
+
+
+def strip_mjcf_to_fixture(source: Path, dest: Path) -> tuple[int, int]:
+    """Vendor a kinematics-only, self-contained MJCF from ``source`` to ``dest``.
+
+    The MJCF analogue of :func:`ssik._urdf.strip_urdf_to_fixture`: ``mujoco``
+    compiles the source (resolving ``<include>`` / ``<default>`` / assets), then
+    we *reconstruct* a minimal nested-``<body>`` model from the compiled kinematic
+    tree -- body ``pos``/``quat``, each hinge/slide joint's ``pos``/``axis``/
+    ``range``, and a unit placeholder ``<inertial>`` -- with no ``<geom>`` /
+    ``<asset>`` / mesh references. The result is self-contained (no mesh files
+    needed on disk) and recompiles to the *identical* kinematics, so a vendored
+    fixture never drags along an ``assets/`` tree.
+
+    :returns: ``(n_bodies, n_joints)`` in the reconstructed model.
+    """
+    mujoco = _import_mujoco()
+    model = mujoco.MjModel.from_xml_path(str(source))  # type: ignore[attr-defined]
+    jtype_xml = {
+        int(mujoco.mjtJoint.mjJNT_HINGE): "hinge",  # type: ignore[attr-defined]
+        int(mujoco.mjtJoint.mjJNT_SLIDE): "slide",  # type: ignore[attr-defined]
+        int(mujoco.mjtJoint.mjJNT_BALL): "ball",  # type: ignore[attr-defined]
+        int(mujoco.mjtJoint.mjJNT_FREE): "free",  # type: ignore[attr-defined]
+    }
+
+    def bname(i: int) -> str:
+        return mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) or f"body{i}"  # type: ignore[attr-defined]
+
+    def jname(i: int) -> str:
+        return mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, i) or f"joint{i}"  # type: ignore[attr-defined]
+
+    children: dict[int, list[int]] = {}
+    for b in range(1, model.nbody):
+        children.setdefault(int(model.body_parentid[b]), []).append(b)
+
+    def _vec(v: NDArray[np.float64]) -> str:
+        return " ".join(f"{float(x):.12g}" for x in v)
+
+    model_name = Path(source).stem
+    lines = [
+        f"<mujoco model={quoteattr(model_name)}>",
+        '  <compiler angle="radian"/>',
+        "  <worldbody>",
+    ]
+    n_bodies = 0
+    n_joints = 0
+
+    def emit(bid: int, indent: int) -> None:
+        nonlocal n_bodies, n_joints
+        n_bodies += 1
+        pad = "  " * indent
+        lines.append(
+            f"{pad}<body name={quoteattr(bname(bid))} "
+            f'pos="{_vec(model.body_pos[bid])}" quat="{_vec(model.body_quat[bid])}">'
+        )
+        lines.append(f'{pad}  <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>')
+        j0 = int(model.body_jntadr[bid])
+        for j in range(j0, j0 + int(model.body_jntnum[bid])):
+            n_joints += 1
+            jt = jtype_xml.get(int(model.jnt_type[j]), "hinge")
+            attrs = (
+                f"name={quoteattr(jname(j))} type={quoteattr(jt)} "
+                f'pos="{_vec(model.jnt_pos[j])}" axis="{_vec(model.jnt_axis[j])}"'
+            )
+            if bool(model.jnt_limited[j]):
+                attrs += f' range="{_vec(model.jnt_range[j])}"'
+            lines.append(f"{pad}  <joint {attrs}/>")
+        for c in children.get(bid, []):
+            emit(c, indent + 1)
+        lines.append(f"{pad}</body>")
+
+    for root in children.get(0, []):
+        emit(root, 2)
+    lines += ["  </worldbody>", "</mujoco>", ""]
+
+    dest.write_text("\n".join(lines))
+    return n_bodies, n_joints
+
+
+def _mjcf_adapter() -> object:
+    """Build the MJCF :class:`~ssik._formats.FormatAdapter` (registered on import)."""
+    from ssik._formats import FormatAdapter
+
+    def _load(path: Path, base: str, ee: str, _options: Mapping[str, Any]) -> KinBody:
+        return load_mjcf_kinbody_normalized(path, base, ee)
+
+    def _suggest(path: Path, _options: Mapping[str, Any]) -> tuple[str, str, list[str]]:
+        return suggest_base_ee_mjcf(path)
+
+    def _vendor(source: Path, dest: Path, _options: Mapping[str, Any]) -> tuple[int, int]:
+        return strip_mjcf_to_fixture(source, dest)
+
+    return FormatAdapter(
+        kind="mjcf",
+        label="MuJoCo MJCF",
+        extensions=(".mjcf", ".xml"),
+        fixture_suffix=".xml",
+        scaffold_loader_module="ssik._mjcf",
+        scaffold_loader_func="load_mjcf_kinbody_normalized",
+        load=_load,
+        suggest_base_ee=_suggest,
+        vendor=_vendor,
+        root_tags=("mujoco",),
+    )
+
+
+from ssik._formats import register as _register  # noqa: E402
+
+_register(_mjcf_adapter())  # type: ignore[arg-type]

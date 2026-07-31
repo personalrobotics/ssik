@@ -49,6 +49,43 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def test_add_arm_mjcf_end_to_end(workspace: Path) -> None:
+    """``ssik add-arm`` onboards a MuJoCo MJCF arm (#470): format auto-detected,
+    a kinematics-only ``.xml`` fixture vendored (no assets tree), the scaffold
+    wired to the MJCF loader, the manifest stanza tagged ``fixture_kind = "mjcf"``,
+    and the build+coverage gate passing on the MuJoCo source."""
+    pytest.importorskip("mujoco")
+    rd = pytest.importorskip("robot_descriptions.iiwa14_mj_description")
+    result = _run_cli(
+        "add-arm",
+        str(rd.MJCF_PATH),
+        "--name",
+        "iiwa14_mjcf_test",
+        "--vendor",
+        "kuka",
+        "--repo-root",
+        str(workspace),
+    )
+    assert result.returncode == 0, f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+    out = result.stdout
+    assert "Vendoring MuJoCo MJCF" in out
+    assert "VALIDATED" in out, f"no validation verdict:\n{out}"
+    assert 'fixture_kind = "mjcf"' in out
+    assert 'fixture = "iiwa14_mjcf_test.xml"' in out
+
+    # Kinematics-only MJCF fixture (no meshes/assets), and the scaffold loads it
+    # via the MJCF adapter.
+    fixture = workspace / "tests" / "fixtures" / "iiwa14_mjcf_test.xml"
+    assert fixture.is_file()
+    text = fixture.read_text()
+    assert text.lstrip().startswith("<mujoco")
+    assert "<mesh" not in text
+    assert "<asset" not in text
+    scaffold = (workspace / "tests" / "test_iiwa14_mjcf_test.py").read_text()
+    assert "from ssik._mjcf import load_mjcf_kinbody_normalized" in scaffold
+    assert "load_mjcf_kinbody_normalized(FIXTURE_PATH" in scaffold
+
+
 def test_add_arm_builds_and_validates(workspace: Path) -> None:
     """Default (no ``--no-validate``): add-arm builds the emitted artifact and
     runs the coverage gate locally, reporting a verdict, and the printed stanza

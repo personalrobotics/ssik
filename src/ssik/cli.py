@@ -29,14 +29,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ssik import _formats as formats
 from ssik._kinbody import KinBody
-from ssik._urdf import (
-    _as_plain_urdf,
-    load_urdf_kinbody_normalized,
-    needs_xacro_expansion,
-    strip_urdf_to_fixture,
-    suggest_base_ee,
-)
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import DispatchPlan, dispatch
 from ssik.subproblems._rotation import rotation_matrix
@@ -211,7 +205,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def _add_common_kinbody_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("urdf", type=Path, help="Path to the URDF or xacro file.")
+    parser.add_argument(
+        "urdf",
+        type=Path,
+        metavar="model",
+        help="Path to the robot description: URDF / xacro or MuJoCo MJCF (.xml/.mjcf).",
+    )
     parser.add_argument(
         "--base",
         default=None,
@@ -249,7 +248,8 @@ def _resolve_base_ee(args: argparse.Namespace) -> None:
     correctness risk."""
     if args.base and args.ee:
         return
-    base, ee, notes = suggest_base_ee(args.urdf, _parse_xacro_args(args))
+    adapter = formats.detect(args.urdf)
+    base, ee, notes = adapter.suggest_base_ee(args.urdf, {"xacro_args": _parse_xacro_args(args)})
     if not args.base:
         args.base = base
         print(f"[ssik]   auto-detected --base {base}")
@@ -308,8 +308,8 @@ def _configure_logging(verbose_count: int) -> None:
 def _run_classify(args: argparse.Namespace) -> int:
     print(f"[ssik] Loading {args.urdf}")
     _resolve_base_ee(args)
-    kb = load_urdf_kinbody_normalized(
-        args.urdf, args.base, args.ee, xacro_args=_parse_xacro_args(args)
+    kb = formats.detect(args.urdf).load(
+        args.urdf, args.base, args.ee, {"xacro_args": _parse_xacro_args(args)}
     )
     print(f"[ssik]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK")
     plan = dispatch(kb)
@@ -325,8 +325,8 @@ def _run_classify(args: argparse.Namespace) -> int:
 def _run_build(args: argparse.Namespace) -> int:
     print(f"[ssik] Loading {args.urdf}")
     _resolve_base_ee(args)
-    kb = load_urdf_kinbody_normalized(
-        args.urdf, args.base, args.ee, xacro_args=_parse_xacro_args(args)
+    kb = formats.detect(args.urdf).load(
+        args.urdf, args.base, args.ee, {"xacro_args": _parse_xacro_args(args)}
     )
     print(f"[ssik]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK")
 
@@ -512,36 +512,39 @@ def _run_add_arm(args: argparse.Namespace) -> int:
         print("[ssik add-arm]   Pass --repo-root to point at the ssik repository.")
         return 1
 
-    urdf_dest = fixtures_dir / f"{args.name}.urdf"
+    print(f"[ssik add-arm] Loading {args.urdf}")
+    if not args.urdf.is_file():
+        print(f"[ssik add-arm] ERROR: {args.urdf} not found.")
+        return 1
+    # Pick the source-format adapter (URDF, MJCF, ...) from the file; everything
+    # downstream (vendoring, loading, scaffold loader, manifest fixture_kind) is
+    # driven by it, so a new format needs no edit here (#470).
+    adapter = formats.detect(args.urdf)
+    fixture_dest = fixtures_dir / f"{args.name}{adapter.fixture_suffix}"
     test_dest = tests_dir / f"test_{args.name}.py"
     if not args.force:
-        for p in (urdf_dest, test_dest):
+        for p in (fixture_dest, test_dest):
             if p.exists():
                 print(f"[ssik add-arm] ERROR: {p} already exists.")
                 print("[ssik add-arm]   Pass --force to overwrite.")
                 return 1
 
-    print(f"[ssik add-arm] Loading {args.urdf}")
-    if not args.urdf.is_file():
-        print(f"[ssik add-arm] ERROR: {args.urdf} not found.")
-        return 1
     _resolve_base_ee(args)
-    # Vendor a mesh-free, kinematics-only fixture FIRST, then load + classify
-    # from THAT (never the mesh-laden source). Stripping meshes up front drops
-    # every ``package://`` reference, so vendor URDFs that declare xmlns:xacro
-    # but reference meshes by ROS package (ABB YuMi, FANUC) load without a ROS
-    # workspace. Only genuinely-macro'd xacro is expanded first.
-    rel = urdf_dest.relative_to(repo_root)
-    print(f"[ssik add-arm] Vendoring URDF (kinematics-only) -> {rel}")
-    if needs_xacro_expansion(args.urdf):
-        with _as_plain_urdf(args.urdf, _parse_xacro_args(args)) as plain_urdf:
-            n_links, n_joints = strip_urdf_to_fixture(plain_urdf, urdf_dest)
-    else:
-        n_links, n_joints = strip_urdf_to_fixture(args.urdf, urdf_dest)
-    kb_bytes = urdf_dest.stat().st_size
-    print(f"[ssik add-arm]   stripped to {n_links} links, {n_joints} joints, {kb_bytes:,} bytes")
+    # Vendor a kinematics-only fixture FIRST, then load + classify from THAT
+    # (never the mesh-laden source). Each adapter strips its format to a
+    # self-contained, mesh-free fixture: URDF drops every ``package://`` mesh
+    # reference (so ABB YuMi / FANUC load without a ROS workspace) and expands
+    # macro'd xacro first; MJCF reconstructs a minimal model from the compiled
+    # kinematic tree (no ``assets/`` tree).
+    rel = fixture_dest.relative_to(repo_root)
+    print(f"[ssik add-arm] Vendoring {adapter.label} (kinematics-only) -> {rel}")
+    n_bodies, n_joints = adapter.vendor(
+        args.urdf, fixture_dest, {"xacro_args": _parse_xacro_args(args)}
+    )
+    kb_bytes = fixture_dest.stat().st_size
+    print(f"[ssik add-arm]   stripped to {n_bodies} links, {n_joints} joints, {kb_bytes:,} bytes")
 
-    kb = load_urdf_kinbody_normalized(urdf_dest, args.base, args.ee)
+    kb = adapter.load(fixture_dest, args.base, args.ee, {})
     print(f"[ssik add-arm]   {len(kb.joints)} joints, {len(kb.links)} links — POE-normalized OK")
     print("[ssik add-arm] Classifying topology")
     plan = dispatch(kb)
@@ -550,7 +553,10 @@ def _run_add_arm(args: argparse.Namespace) -> int:
     print(f"[ssik add-arm] Generating test scaffold -> {test_dest.relative_to(repo_root)}")
     test_source = _render_test_scaffold(
         arm_name=args.name,
-        urdf_filename=urdf_dest.name,
+        fixture_filename=fixture_dest.name,
+        loader_module=adapter.scaffold_loader_module,
+        loader_func=adapter.scaffold_loader_func,
+        source_label=adapter.label,
         base_link=args.base,
         ee_link=args.ee,
         dof=len(kb.joints),
@@ -568,7 +574,16 @@ def _run_add_arm(args: argparse.Namespace) -> int:
 
     sample_q = _pick_sample_q(kb)
     stanza = _render_manifest_stanza(
-        args.name, args.base, args.ee, len(kb.joints), plan, args.vendor, worst_fk, sample_q
+        args.name,
+        args.base,
+        args.ee,
+        len(kb.joints),
+        plan,
+        args.vendor,
+        fixture_dest.name,
+        adapter.kind,
+        worst_fk,
+        sample_q,
     )
     print()
     if args.write_manifest:
@@ -892,6 +907,8 @@ def _render_manifest_stanza(
     dof: int,
     plan: DispatchPlan,
     vendor: str,
+    fixture_filename: str,
+    fixture_kind: str,
     worst_fk: float | None = None,
     sample_q: list[float] | None = None,
 ) -> str:
@@ -919,8 +936,8 @@ def _render_manifest_stanza(
         f'display_name = "{display}"  # verify the marketing model string',
         f'short_name = "{display}"  # shorten for compact table cells',
         f'vendor = "{vendor}"',
-        f'fixture = "{name}.urdf"',
-        'fixture_kind = "urdf"',
+        f'fixture = "{fixture_filename}"',
+        f'fixture_kind = "{fixture_kind}"',
         'fixture_source = "TODO: repo/source + license (e.g. robot_descriptions / <pkg>)"',
         f'base_link = "{base}"',
         f'ee_link = "{ee}"',
@@ -963,7 +980,10 @@ def _render_manifest_stanza(
 def _render_test_scaffold(
     *,
     arm_name: str,
-    urdf_filename: str,
+    fixture_filename: str,
+    loader_module: str,
+    loader_func: str,
+    source_label: str,
     base_link: str,
     ee_link: str,
     dof: int,
@@ -973,14 +993,16 @@ def _render_test_scaffold(
 
     The generated test file contains:
 
-    1. URDF load + DOF / joint-type sanity.
+    1. Fixture load + DOF / joint-type sanity.
     2. Dispatcher routing (asserts the solver name selected by the
        current dispatcher).
     3. ``@pytest.mark.slow`` hand-picked seeded recovery (4 q*).
     4. ``@pytest.mark.slow`` Hypothesis fuzz (10 random reachable poses).
 
     Tests assert FK closure ≤ 1e-10 on the BEST IK per pose (matching
-    the bulletproof-validation contract).
+    the bulletproof-validation contract). ``loader_module``/``loader_func`` and
+    ``source_label`` come from the source format's :class:`~ssik._formats.
+    FormatAdapter`, so the scaffold is format-agnostic (URDF, MJCF, ...).
     """
     arm_label = arm_name
     kb_helper = f"_{arm_name}_kinbody"
@@ -997,7 +1019,7 @@ current ``ssik.core.dispatcher``. The scaffold below verifies, against the
 **shipped artifact** (``ssik.prebuilt.{arm_name}`` -- build it with
 ``uv run python scripts/regen_artifacts.py --arm {arm_name}`` first):
 
-- URDF loads as a {dof}-DOF chain (revolute / continuous joints).
+- {source_label} loads as a {dof}-DOF chain (revolute / continuous joints).
 - Dispatcher routing is stable.
 - **Coverage:** poses sampled across the arm's real joint limits return at
   least one IK for at least ``_MIN_COVERAGE`` of them. This is the gate a
@@ -1010,7 +1032,7 @@ If the arm has a genuine structural coverage gap (redundant-7R near-
 singular poses, etc.), lower ``_MIN_COVERAGE`` here AND add a
 ``[arms.{arm_name}.known_gaps]`` entry in MANIFEST.toml documenting why.
 
-Source URDF: ``tests/fixtures/{urdf_filename}`` (vendored via ``ssik add-arm``).
+Source {source_label}: ``tests/fixtures/{fixture_filename}`` (vendored via ``ssik add-arm``).
 """
 
 from __future__ import annotations
@@ -1022,10 +1044,10 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from ssik._urdf import load_urdf_kinbody_normalized
+from {loader_module} import {loader_func}
 from ssik.core.dispatcher import dispatch
 
-URDF_PATH = Path(__file__).parent / "fixtures" / "{urdf_filename}"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "{fixture_filename}"
 
 # Fraction of reachable poses that must return >= 1 IK. A broken arm
 # returns few/none; this is the coverage floor the gate enforces.
@@ -1037,7 +1059,7 @@ _FK_CEILING = {fk_ceiling:.0e}
 
 
 def {kb_helper}():
-    return load_urdf_kinbody_normalized(URDF_PATH, "{base_link}", "{ee_link}")
+    return {loader_func}(FIXTURE_PATH, "{base_link}", "{ee_link}")
 
 
 def _joint_bounds():

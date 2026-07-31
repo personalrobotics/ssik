@@ -17,6 +17,7 @@ mujoco = pytest.importorskip("mujoco")
 
 from ssik._mjcf import (  # noqa: E402
     load_mjcf_kinbody_normalized,
+    strip_mjcf_to_fixture,
     suggest_base_ee_mjcf,
 )
 from ssik.kinematics.poe_fk import poe_forward_kinematics  # noqa: E402
@@ -127,6 +128,48 @@ def _chain_jnt_ids(model: Any, base: str, ee: str) -> list[int]:
             if int(model.jnt_type[j]) in (hinge, slide)
         ]
     return ids
+
+
+@pytest.mark.parametrize(
+    ("module", "exp_base", "exp_ee", "dof"),
+    _REAL_MJCF_ARMS,
+    ids=[a[0] for a in _REAL_MJCF_ARMS],
+)
+def test_strip_mjcf_to_fixture_preserves_kinematics(
+    module: str, exp_base: str, exp_ee: str, dof: int, tmp_path: Path
+) -> None:
+    """The vendored kinematics-only MJCF is self-contained (no mesh/asset refs)
+    and FK-identical to the source (#470)."""
+    src = importlib.import_module(f"robot_descriptions.{module}").MJCF_PATH
+    dest = tmp_path / "vendored.xml"
+    # strip vendors the WHOLE model tree (so base/ee selection still works on the
+    # fixture), so its joint count is >= the base->ee chain's dof (arx_l5 also has
+    # a gripper joint).
+    n_bodies, n_joints = strip_mjcf_to_fixture(Path(src), dest)
+    assert n_bodies >= dof
+    assert n_joints >= dof
+
+    text = dest.read_text()
+    assert "<mesh" not in text  # no asset tree needed
+    assert "<asset" not in text
+
+    base, ee, _ = suggest_base_ee_mjcf(dest)
+    assert (base, ee) == (exp_base, exp_ee)
+    kb_src = load_mjcf_kinbody_normalized(src, exp_base, exp_ee)
+    kb_vendored = load_mjcf_kinbody_normalized(dest, base, ee)
+    rng = np.random.default_rng(1)
+    worst = 0.0
+    for _ in range(30):
+        q = rng.uniform(-1.5, 1.5, size=dof)
+        worst = max(
+            worst,
+            float(
+                np.abs(
+                    poe_forward_kinematics(kb_src, q) - poe_forward_kinematics(kb_vendored, q)
+                ).max()
+            ),
+        )
+    assert worst < 1e-11, f"{module}: vendored MJCF FK drifted by {worst:.2e}"
 
 
 @pytest.mark.parametrize(

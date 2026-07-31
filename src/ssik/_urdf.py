@@ -17,9 +17,10 @@ from __future__ import annotations
 import os
 import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -605,3 +606,39 @@ def load_urdf_kinbody_robust(
         else:
             strip_urdf_to_fixture(src, stripped)
         return load_urdf_kinbody_normalized(stripped, base_link, ee_link)
+
+
+def _urdf_adapter() -> object:
+    """Build the URDF :class:`~ssik._formats.FormatAdapter` (registered on import)."""
+    from ssik._formats import FormatAdapter
+
+    def _load(path: Path, base: str, ee: str, options: Mapping[str, Any]) -> KinBody:
+        return load_urdf_kinbody_normalized(path, base, ee, xacro_args=options.get("xacro_args"))
+
+    def _suggest(path: Path, options: Mapping[str, Any]) -> tuple[str, str, list[str]]:
+        return suggest_base_ee(path, options.get("xacro_args"))
+
+    def _vendor(source: Path, dest: Path, options: Mapping[str, Any]) -> tuple[int, int]:
+        xacro_args = options.get("xacro_args")
+        if needs_xacro_expansion(source):
+            with _as_plain_urdf(source, xacro_args) as plain:
+                return strip_urdf_to_fixture(plain, dest)
+        return strip_urdf_to_fixture(source, dest)
+
+    return FormatAdapter(
+        kind="urdf",
+        label="URDF",
+        extensions=(".urdf", ".xacro", ".xml"),
+        fixture_suffix=".urdf",
+        scaffold_loader_module="ssik._urdf",
+        scaffold_loader_func="load_urdf_kinbody_normalized",
+        load=_load,
+        suggest_base_ee=_suggest,
+        vendor=_vendor,
+        root_tags=("robot",),
+    )
+
+
+from ssik._formats import register as _register  # noqa: E402
+
+_register(_urdf_adapter())  # type: ignore[arg-type]

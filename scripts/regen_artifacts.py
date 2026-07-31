@@ -32,8 +32,8 @@ import sys
 import time
 from pathlib import Path
 
+from ssik import _formats as formats
 from ssik._kinbody import build_kinbody
-from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
 from ssik.prebuilt._manifest import Arm, load_manifest
@@ -116,9 +116,7 @@ def _regen_prebuilt_init(manifest: dict[str, Arm]) -> None:
 def _emit_arm(arm: Arm) -> None:
     """Build + emit one prebuilt artifact from its manifest entry."""
     t = time.perf_counter()
-    if arm.fixture_kind == "urdf":
-        kb = load_urdf_kinbody_normalized(FIXTURES / arm.fixture, arm.base_link, arm.ee_link)
-    else:
+    if arm.fixture_kind == "specs":
         # specs: a Python builder module under tests/fixtures
         mod = __import__(arm.fixture)
         specs_fn_name = arm.specs_fn
@@ -127,6 +125,11 @@ def _emit_arm(arm: Arm) -> None:
             getattr(mod, specs_fn_name)(),
             base_link_name=arm.base_link,
             ee_link_name=arm.ee_link,
+        )
+    else:
+        # A registered source format (urdf, mjcf, ...): one loader, no branch.
+        kb = formats.get(arm.fixture_kind).load(
+            FIXTURES / arm.fixture, arm.base_link, arm.ee_link, {}
         )
     plan = dispatch(kb)
     # Vendor subpackage layout (#421): src/ssik/prebuilt/<vendor>/<basename>.py
