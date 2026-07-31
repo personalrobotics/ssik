@@ -108,7 +108,7 @@ For real-time control where you only need one IK per waypoint, `max_solutions=1`
 
 ## Fixture provenance
 
-Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, for legacy DH arms, the published parameter set). The IK promise (that the q-vector lands a real arm at the target) only holds when ssik's chain matches the manufacturer's. We lock this in with [`tests/test_prebuilt_fixture_parity.py`](../tests/test_prebuilt_fixture_parity.py): for every arm whose source is reachable via `robot_descriptions`, it asserts `module.fk(q) == upstream.fk(q)` to machine precision.
+Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, for legacy DH arms, the published parameter set). The IK promise (that the q-vector lands a real arm at the target) only holds when ssik's chain matches the manufacturer's. We lock this in with [`tests/test_prebuilt_fixture_parity.py`](https://github.com/personalrobotics/ssik/blob/main/tests/test_prebuilt_fixture_parity.py): for every arm whose source is reachable via `robot_descriptions`, it asserts `module.fk(q) == upstream.fk(q)` to machine precision.
 
 <!-- AUTOGEN:fixture_source_table -->
 <details>
