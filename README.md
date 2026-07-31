@@ -82,7 +82,7 @@ There are two artifact paths:
 
 ### Use a prebuilt arm (`ssik.prebuilt`)
 
-The wheel ships <!-- AUTOGEN:arm_count -->70<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
+The wheel ships <!-- AUTOGEN:arm_count -->71<!-- /AUTOGEN --> ready-to-import artifacts, grouped by vendor below (expand a vendor to see its arms). Each imports as `ssik.prebuilt.<vendor>.<module>` (e.g. `from ssik.prebuilt.universal_robots import ur5_ik`) and the flat `from ssik.prebuilt import ur5_ik` alias still works. Each was built against a specific URDF (or extracted spec); `T_target` is the pose of `EE_LINK` expressed in `BASE_LINK`:
 
 <!-- AUTOGEN:readme_prebuilt_table -->
 <details>
@@ -360,6 +360,15 @@ The wheel ships <!-- AUTOGEN:arm_count -->70<!-- /AUTOGEN --> ready-to-import ar
 | `xmatepro7_ik` | Rokae xMate Pro7 | SRS 7R | `xMatePro7_base` | `xMatePro7_link7` |
 | `xmatecr7_ik` | Rokae xMate CR7 | **non-Pieper 6R** | `xMateCR7_base` | `xMateCR7_link6` |
 | `xmatesr3_ik` | Rokae xMate SR3 | **non-Pieper 6R** | `xMateSR3_base` | `xMateSR3_link6` |
+
+</details>
+
+<details>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `viperx300s_ik` | Trossen ViperX 300s | Pieper 6R (spherical wrist) | `base_link` | `gripper_link` |
 
 </details>
 <!-- /AUTOGEN -->
@@ -873,6 +882,15 @@ EAIK (Ostermeier 2024) is the canonical Python wrapper around C++ subproblem-dec
 | xMate Pro7 (SRS 7R) | **refuses** ("Currently, only 1-6R robots are solvable with EAIK") | 6.70 ± 0.91 ms / FK 1e-12 / 128 sols |
 | xMate CR7 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 1.03 ± 0.03 ms / FK 2e-8 / 4-12 sols |
 | xMate SR3 (**non-Pieper 6R**) | **refuses** ("6R-Unknown Kinematic Class") | 880 ± 60 µs / FK 6e-9 / 2-12 sols |
+
+</details>
+
+<details>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+
+| Arm (class) | EAIK | ssik |
+|---|---|---|
+| ViperX 300s (Pieper 6R, spherical wrist) | 5 ± 1 µs / FK 9e-16 / 8 sols | 310 ± 20 µs / FK 3e-12 / 8 sols |
 
 </details>
 <!-- /AUTOGEN -->

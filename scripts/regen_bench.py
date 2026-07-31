@@ -121,15 +121,26 @@ def _load_eaik(arm: object) -> object:
     import eaik.IK_DH  # type: ignore[import-untyped]
     import eaik.IK_URDF  # type: ignore[import-untyped]
 
-    if arm.fixture_kind == "urdf":  # type: ignore[attr-defined]
-        return eaik.IK_URDF.UrdfRobot(str(FIXTURES_DIR / arm.fixture))  # type: ignore[attr-defined]
-    # specs arm: rebuild the KinBody to extract DH for EAIK's DH adapter.
-    sys.path.insert(0, str(FIXTURES_DIR))
-    from ssik._kinbody import build_kinbody
     from ssik.kinematics.poe_to_dh import poe_to_dh
 
-    mod = importlib.import_module(arm.fixture)  # type: ignore[attr-defined]
-    kb = build_kinbody(getattr(mod, arm.specs_fn)())  # type: ignore[attr-defined]
+    if arm.fixture_kind == "urdf":  # type: ignore[attr-defined]
+        return eaik.IK_URDF.UrdfRobot(str(FIXTURES_DIR / arm.fixture))  # type: ignore[attr-defined]
+    if arm.fixture_kind == "specs":  # type: ignore[attr-defined]
+        # specs arm: rebuild the KinBody to extract DH for EAIK's DH adapter.
+        sys.path.insert(0, str(FIXTURES_DIR))
+        from ssik._kinbody import build_kinbody
+
+        mod = importlib.import_module(arm.fixture)  # type: ignore[attr-defined]
+        kb = build_kinbody(getattr(mod, arm.specs_fn)())  # type: ignore[attr-defined]
+    else:
+        # Any other registered source format (mjcf, ...): EAIK has no loader for
+        # it, so load the KinBody via its adapter and hand EAIK the DH form (same
+        # DH path as specs arms) -- a real comparison, not a refusal.
+        from ssik import _formats as formats
+
+        kb = formats.get(arm.fixture_kind).load(  # type: ignore[attr-defined]
+            FIXTURES_DIR / arm.fixture, arm.base_link, arm.ee_link, {}
+        )
     dh = poe_to_dh(kb)
     return eaik.IK_DH.DhRobot(dh.alpha, dh.a, dh.d)
 

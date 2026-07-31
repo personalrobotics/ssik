@@ -311,6 +311,15 @@ preprocessing) and cleaner to ship in production stacks.
 | `xmatesr3_ik` | `ikgeo.general_6r` | <1 s | ~45 KB |
 
 </details>
+
+<details>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+
+| Arm | Solver | Build time | Artifact size |
+|---|---|:---:|:---:|
+| `viperx300s_ik` | `ikgeo.spherical_two_parallel` | <1 s | ~20 KB |
+
+</details>
 <!-- /AUTOGEN -->
 
 The slow ones (`rizon4_ik`, `kassow_kr810_ik`) carry the cached

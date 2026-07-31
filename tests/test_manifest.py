@@ -104,13 +104,13 @@ def test_manifest_matches_artifact_constants(arm_name: str, manifest: dict[str, 
 def test_manifest_fixture_file_exists(arm_name: str, manifest: dict[str, Arm]) -> None:
     """The fixture pointed at by each manifest entry must exist."""
     arm = manifest[arm_name]
-    if arm.fixture_kind == "urdf":
-        path = FIXTURES_DIR / arm.fixture
-        assert path.exists(), f"{arm_name}: fixture {path} does not exist"
-    else:
+    if arm.fixture_kind == "specs":
         # specs: a Python builder module under tests/fixtures
         path = FIXTURES_DIR / f"{arm.fixture}.py"
-        assert path.exists(), f"{arm_name}: fixture {path} does not exist"
+    else:
+        # A registered source format (urdf, mjcf, ...): the vendored fixture file.
+        path = FIXTURES_DIR / arm.fixture
+    assert path.exists(), f"{arm_name}: fixture {path} does not exist"
 
 
 @pytest.mark.parametrize(

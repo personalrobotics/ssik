@@ -302,6 +302,15 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 | `xmatesr3_ik` | Rokae xMate SR3 | non-Pieper 6R | `xMateSR3_base` | `xMateSR3_link6` |
 
 </details>
+
+<details>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+
+| Module | Arm | Class | base_link | ee_link |
+|---|---|---|---|---|
+| `viperx300s_ik` | Trossen ViperX 300s | Pieper 6R (spherical wrist) | `base_link` | `gripper_link` |
+
+</details>
 <!-- /AUTOGEN -->
 
 Each prebuilt exposes `BASE_LINK`, `EE_LINK`, `DOF`, `T_HOME` constants so you can verify the baked geometry matches your robot:

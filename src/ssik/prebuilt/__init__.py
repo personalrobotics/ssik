@@ -103,6 +103,7 @@ _LEGACY_ALIASES: dict[str, str] = {
     "xmatepro7_ik": "rokae.xmatepro7_ik",
     "xmatecr7_ik": "rokae.xmatecr7_ik",
     "xmatesr3_ik": "rokae.xmatesr3_ik",
+    "viperx300s_ik": "trossen.viperx300s_ik",
 }
 
 _PKG = __name__  # "ssik.prebuilt"

@@ -1,0 +1,43 @@
+<mujoco model="vx300s">
+  <compiler angle="radian"/>
+  <worldbody>
+    <body name="base_link" pos="0 0 0" quat="1 0 0 0">
+      <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+      <body name="shoulder_link" pos="0 0 0.079" quat="1 0 0 0">
+        <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+        <joint name="waist" type="hinge" pos="0 0 0" axis="0 0 1" range="-3.14158 3.14158"/>
+        <body name="upper_arm_link" pos="0 0 0.04805" quat="1 0 0 0">
+          <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+          <joint name="shoulder" type="hinge" pos="0 0 0" axis="0 1 0" range="-1.85005 1.25664"/>
+          <body name="upper_forearm_link" pos="0.05955 0 0.3" quat="1 0 0 0">
+            <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+            <joint name="elbow" type="hinge" pos="0 0 0" axis="0 1 0" range="-1.76278 1.6057"/>
+            <body name="lower_forearm_link" pos="0.2 0 0" quat="1 0 0 0">
+              <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+              <joint name="forearm_roll" type="hinge" pos="0 0 0" axis="1 0 0" range="-3.14158 3.14158"/>
+              <body name="wrist_link" pos="0.1 0 0" quat="1 0 0 0">
+                <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                <joint name="wrist_angle" type="hinge" pos="0 0 0" axis="0 1 0" range="-1.8675 2.23402"/>
+                <body name="gripper_link" pos="0.069744 0 0" quat="1 0 0 0">
+                  <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                  <joint name="wrist_rotate" type="hinge" pos="0 0 0" axis="1 0 0" range="-3.14158 3.14158"/>
+                  <body name="gripper_prop_link" pos="0.0485 0 0" quat="1 0 0 0">
+                    <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                  </body>
+                  <body name="left_finger_link" pos="0.0687 0 0" quat="1 0 0 0">
+                    <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                    <joint name="left_finger" type="slide" pos="0 0 0" axis="0 1 0" range="0.021 0.057"/>
+                  </body>
+                  <body name="right_finger_link" pos="0.0687 0 0" quat="1 0 0 0">
+                    <inertial pos="0 0 0" mass="1" diaginertia="0.01 0.01 0.01"/>
+                    <joint name="right_finger" type="slide" pos="0 0 0" axis="0 1 0" range="-0.057 -0.021"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+</mujoco>

@@ -388,4 +388,13 @@ Each prebuilt's kinematic chain is sourced from a specific upstream URDF (or, fo
 | `xmatesr3_ik` | RokaeRobot/rokae_ros2 (rokae_description, Apache-2.0) |
 
 </details>
+
+<details>
+<summary><b>Trossen</b>: <code>ssik.prebuilt.trossen</code> (1 arm)</summary>
+
+| Module | Fixture provenance |
+|---|---|
+| `viperx300s_ik` | robot_descriptions / viper_mj_description (MuJoCo Menagerie trossen_vx300s, BSD-3-Clause) |
+
+</details>
 <!-- /AUTOGEN -->

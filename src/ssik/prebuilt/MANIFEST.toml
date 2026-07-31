@@ -2641,3 +2641,41 @@ sols_max = 12
 [arms.xmatesr3_ik.eaik]
 supported = false
 refusal = "6R-Unknown Kinematic Class"
+
+[arms.viperx300s_ik]
+display_name = "Trossen ViperX 300s"
+short_name = "ViperX 300s"
+vendor = "trossen"
+fixture = "viperx300s_ik.xml"
+fixture_kind = "mjcf"
+fixture_source = "robot_descriptions / viper_mj_description (MuJoCo Menagerie trossen_vx300s, BSD-3-Clause)"
+base_link = "base_link"
+ee_link = "gripper_link"
+dof = 6
+solver = "ikgeo.spherical_two_parallel"
+tier = 0
+kinematic_class = "Pieper 6R (spherical wrist)"
+short_class = "Pieper 6R, spherical wrist"
+class_tags = ["spherical-wrist", "6R", "Pieper"]
+slow_build = false  # set true if the build is minutes (cached-RR 7R)
+build_time_sec = 1
+artifact_size_kb = 20
+sample_q = [0.861, -1.01, -1.62, -3.04, 1.47, 2.59]
+fk_ceiling_fuzz = 1e-09  # from the validation smoke (~10x worst FK)
+platform_drift = false
+
+[arms.viperx300s_ik.bench]  # filled by scripts/regen_bench.py
+ms_mean = 0.31
+ms_ci95 = 0.02
+max_fk = 2.9e-12
+sols_min = 8
+sols_max = 8
+
+[arms.viperx300s_ik.eaik]
+supported = true
+family = "6R-SPHERICAL_SECOND_TWO_PARALLEL"
+ms_mean = 0.0047383
+ms_ci95 = 0.000881919
+max_fk = 8.5e-16
+sols_min = 8
+sols_max = 8
