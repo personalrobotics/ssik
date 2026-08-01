@@ -148,6 +148,56 @@ def test_add_arm_derives_class_metadata(workspace: Path) -> None:
     assert 'display_name = "Universal Robots' in out
 
 
+def test_add_arm_appends_ik_suffix(workspace: Path) -> None:
+    """A --name without the ``_ik`` convention gets it appended, so the emitted
+    fixture/test/manifest key conform to the roster glob (#474)."""
+    result = _run_cli(
+        "add-arm",
+        "--no-validate",
+        str(REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"),
+        "--base",
+        "base_link",
+        "--ee",
+        "flange",
+        "--name",
+        "rizon4_suffix_test",  # no _ik
+        "--vendor",
+        "flexiv",
+        "--repo-root",
+        str(workspace),
+    )
+    assert result.returncode == 0, f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+    assert "applied the '_ik' convention" in result.stdout
+    # Files + manifest key carry the appended suffix, not the bare name.
+    assert (workspace / "tests" / "fixtures" / "rizon4_suffix_test_ik.urdf").exists()
+    assert (workspace / "tests" / "test_rizon4_suffix_test_ik.py").exists()
+    assert "[arms.rizon4_suffix_test_ik]" in result.stdout
+    assert (workspace / "tests" / "fixtures" / "rizon4_suffix_test.urdf").exists() is False
+
+
+def test_add_arm_keeps_existing_ik_suffix(workspace: Path) -> None:
+    """A --name already ending in ``_ik`` is left unchanged (no double suffix)."""
+    result = _run_cli(
+        "add-arm",
+        "--no-validate",
+        str(REPO_ROOT / "tests" / "fixtures" / "rizon4.urdf"),
+        "--base",
+        "base_link",
+        "--ee",
+        "flange",
+        "--name",
+        "rizon4_keep_ik",  # already ends in _ik
+        "--vendor",
+        "flexiv",
+        "--repo-root",
+        str(workspace),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "applied the '_ik' convention" not in result.stdout
+    assert (workspace / "tests" / "test_rizon4_keep_ik.py").exists()
+    assert (workspace / "tests" / "test_rizon4_keep_ik_ik.py").exists() is False
+
+
 def test_add_arm_generates_files(workspace: Path) -> None:
     """``ssik add-arm`` vendors the URDF and emits a test scaffold."""
     result = _run_cli(

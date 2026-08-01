@@ -148,10 +148,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--name",
         required=True,
         help=(
-            "Identifier for the arm (lowercase, underscore-separated). "
-            "Determines the fixture filename (tests/fixtures/<name>.urdf), "
-            "the test module (tests/test_<name>.py), and the Python helper "
-            "(_<name>_kinbody). Examples: 'kinova_gen3', 'flexiv_rizon4'."
+            "Identifier for the arm (lowercase, underscore-separated), by "
+            "convention ending in '_ik' -- appended automatically if omitted. "
+            "Determines the fixture filename (tests/fixtures/<name>.<ext>), the "
+            "test module (tests/test_<name>.py), and the manifest key. "
+            "Examples: 'gen3_ik', 'rizon4_ik', 'viperx300s_ik'."
         ),
     )
     add_arm_parser.add_argument(
@@ -505,6 +506,13 @@ def _fk_poe(kb: object, q: np.ndarray) -> np.ndarray:
 
 def _run_add_arm(args: argparse.Namespace) -> int:
     repo_root = args.repo_root or Path.cwd()
+    # Every shipped arm's manifest key + artifact basename ends in ``_ik`` (the
+    # roster test globs ``*/*_ik.py``), so auto-apply the convention: a bare
+    # --name like ``viperx300s`` otherwise silently produces non-conforming
+    # files that then fail the manifest/roster tests (#474).
+    if not args.name.endswith("_ik"):
+        args.name = f"{args.name}_ik"
+        print(f"[ssik add-arm] Using arm name {args.name!r} (applied the '_ik' convention)")
     fixtures_dir = repo_root / "tests" / "fixtures"
     tests_dir = repo_root / "tests"
     if not fixtures_dir.is_dir():
