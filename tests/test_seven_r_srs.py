@@ -179,18 +179,24 @@ def test_iiwa14_full_sweep_under_2ms() -> None:
 
 @pytest.mark.perf
 def test_iiwa14_max_solutions_one_under_1ms() -> None:
-    """`max_solutions=1` (give-me-any-IK use case) must take < 1 ms.
+    """`max_solutions=1` (give-me-any-IK use case) must early-exit, not compute
+    the full solution set.
 
-    Empirical (M3, single-thread): ~0.23 ms today. Gate set generously
-    at 1 ms to catch regressions. Best-of-N timing (see :mod:`tests._perf`):
-    at 0.23 ms compute a single scheduler preemption dragged the *median*
-    of 20 to 1.00 ms on CI (#383 flake); the best-of-N is the noise floor.
+    Empirical (M3, single-thread): ~0.23 ms today; a full iiwa14 SRS solve is
+    ~8.5 ms. The gate is a coarse "did the early-exit fire" ceiling, so it is set
+    at 3 ms -- ~13x nominal, cleanly below the ~8.5 ms broken-early-exit cost, and
+    robust to CI-runner load. The old 1 ms bound was ~4x nominal and flaked even
+    on the best-of-N noise floor under sustained CI load (#383 / #479 on the
+    4-version matrix). Precise regression detection is the relative-ratio gate's
+    job (tests/_perf_baseline.json); this test just guards the early-exit path.
     """
     kb = build_kinbody(kuka_iiwa14_specs())
     q_star = _HAND_PICKED_Q[0]
     T_target = poe_forward_kinematics(kb, q_star)
     best_ms = best_call_ms(lambda: srs_solve(kb, T_target, max_solutions=1))
-    assert best_ms < 1.0, f"SRS max_solutions=1 too slow: {best_ms:.2f} ms"
+    assert best_ms < 3.0, (
+        f"SRS max_solutions=1 too slow ({best_ms:.2f} ms): early-exit likely broken"
+    )
 
 
 # ----------------------------------------------------------------------------
