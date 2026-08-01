@@ -65,7 +65,7 @@ def test_add_arm_mjcf_end_to_end(workspace: Path) -> None:
         "add-arm",
         str(rd.MJCF_PATH),
         "--name",
-        "iiwa14_mjcf_test",
+        "iiwa14_mjcf_test_ik",
         "--vendor",
         "kuka",
         "--repo-root",
@@ -76,17 +76,17 @@ def test_add_arm_mjcf_end_to_end(workspace: Path) -> None:
     assert "Vendoring MuJoCo MJCF" in out
     assert "VALIDATED" in out, f"no validation verdict:\n{out}"
     assert 'fixture_kind = "mjcf"' in out
-    assert 'fixture = "iiwa14_mjcf_test.xml"' in out
+    assert 'fixture = "iiwa14_mjcf_test_ik.xml"' in out
 
     # Kinematics-only MJCF fixture (no meshes/assets), and the scaffold loads it
     # via the MJCF adapter.
-    fixture = workspace / "tests" / "fixtures" / "iiwa14_mjcf_test.xml"
+    fixture = workspace / "tests" / "fixtures" / "iiwa14_mjcf_test_ik.xml"
     assert fixture.is_file()
     text = fixture.read_text()
     assert text.lstrip().startswith("<mujoco")
     assert "<mesh" not in text
     assert "<asset" not in text
-    scaffold = (workspace / "tests" / "test_iiwa14_mjcf_test.py").read_text()
+    scaffold = (workspace / "tests" / "test_iiwa14_mjcf_test_ik.py").read_text()
     assert "from ssik._mjcf import load_mjcf_kinbody_normalized" in scaffold
     assert "load_mjcf_kinbody_normalized(FIXTURE_PATH" in scaffold
 
@@ -209,7 +209,7 @@ def test_add_arm_generates_files(workspace: Path) -> None:
         "--ee",
         "flange",
         "--name",
-        "rizon4_addarm_test",
+        "rizon4_addarm_test_ik",
         "--vendor",
         "flexiv",
         "--repo-root",
@@ -217,8 +217,8 @@ def test_add_arm_generates_files(workspace: Path) -> None:
     )
     assert result.returncode == 0, f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
 
-    urdf_dest = workspace / "tests" / "fixtures" / "rizon4_addarm_test.urdf"
-    test_dest = workspace / "tests" / "test_rizon4_addarm_test.py"
+    urdf_dest = workspace / "tests" / "fixtures" / "rizon4_addarm_test_ik.urdf"
+    test_dest = workspace / "tests" / "test_rizon4_addarm_test_ik.py"
     assert urdf_dest.exists(), "URDF not vendored"
     assert test_dest.exists(), "test scaffold not written"
     # Vendored URDF is stripped to kinematics-only (no mesh/visual/collision)
@@ -244,7 +244,7 @@ def test_add_arm_generates_files(workspace: Path) -> None:
 
 def test_add_arm_refuses_overwrite_without_force(workspace: Path) -> None:
     """If the fixture already exists, the CLI refuses unless ``--force``."""
-    target = workspace / "tests" / "fixtures" / "preexisting_arm.urdf"
+    target = workspace / "tests" / "fixtures" / "preexisting_arm_ik.urdf"
     target.write_text("<robot/>")
     result = _run_cli(
         "add-arm",
@@ -255,7 +255,7 @@ def test_add_arm_refuses_overwrite_without_force(workspace: Path) -> None:
         "--ee",
         "flange",
         "--name",
-        "preexisting_arm",
+        "preexisting_arm_ik",
         "--vendor",
         "flexiv",
         "--repo-root",
@@ -269,8 +269,8 @@ def test_add_arm_refuses_overwrite_without_force(workspace: Path) -> None:
 
 def test_add_arm_force_overwrites(workspace: Path) -> None:
     """``--force`` overwrites the existing fixture."""
-    target_urdf = workspace / "tests" / "fixtures" / "force_test.urdf"
-    target_test = workspace / "tests" / "test_force_test.py"
+    target_urdf = workspace / "tests" / "fixtures" / "force_test_ik.urdf"
+    target_test = workspace / "tests" / "test_force_test_ik.py"
     target_urdf.write_text("<robot/>")
     target_test.write_text("# stale")
     result = _run_cli(
@@ -282,7 +282,7 @@ def test_add_arm_force_overwrites(workspace: Path) -> None:
         "--ee",
         "flange",
         "--name",
-        "force_test",
+        "force_test_ik",
         "--vendor",
         "flexiv",
         "--repo-root",
@@ -306,14 +306,14 @@ def test_add_arm_generated_test_is_valid_python(workspace: Path) -> None:
         "--ee",
         "flange",
         "--name",
-        "compile_test",
+        "compile_test_ik",
         "--vendor",
         "flexiv",
         "--repo-root",
         str(workspace),
     )
     assert result.returncode == 0
-    test_dest = workspace / "tests" / "test_compile_test.py"
+    test_dest = workspace / "tests" / "test_compile_test_ik.py"
     source = test_dest.read_text()
     # Plain compile: catches any syntax errors in the f-string templating.
     compile(source, str(test_dest), "exec")
@@ -327,7 +327,7 @@ def test_add_arm_generated_test_runs_passes(workspace: Path, monkeypatch) -> Non
     avoid collisions) and run pytest against it.
     """
     # Generate into the real repo (so URDF_PATH resolves).
-    name = "addarm_runtest"
+    name = "addarm_runtest_ik"
     result = _run_cli(
         "add-arm",
         "--no-validate",
@@ -393,18 +393,18 @@ def test_add_arm_write_manifest_appends_stanza(workspace: Path) -> None:
         "--ee",
         "ee_link",
         "--name",
-        "ur5_wm_test",
+        "ur5_wm_test_ik",
         "--vendor",
         "universal_robots",
         "--repo-root",
         str(workspace),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Appended [arms.ur5_wm_test]" in result.stdout
+    assert "Appended [arms.ur5_wm_test_ik]" in result.stdout
     data = tomllib.loads(mf.read_text())
-    assert "ur5_wm_test" in data["arms"], "new stanza not written"
+    assert "ur5_wm_test_ik" in data["arms"], "new stanza not written"
     assert "existing_ik" in data["arms"], "existing entry clobbered"
-    assert data["arms"]["ur5_wm_test"]["dof"] == 6
+    assert data["arms"]["ur5_wm_test_ik"]["dof"] == 6
 
 
 def test_add_arm_write_manifest_refuses_duplicate(workspace: Path) -> None:
@@ -422,7 +422,7 @@ def test_add_arm_write_manifest_refuses_duplicate(workspace: Path) -> None:
         "--ee",
         "ee_link",
         "--name",
-        "ur5_dup_test",
+        "ur5_dup_test_ik",
         "--vendor",
         "universal_robots",
         "--repo-root",
@@ -436,7 +436,7 @@ def test_add_arm_write_manifest_refuses_duplicate(workspace: Path) -> None:
     assert second.returncode == 0
     text = mf.read_text()
     # Exactly one header table (with closing bracket; the .bench sub-table has a dot).
-    assert text.count("[arms.ur5_dup_test]") == 1, "force re-add duplicated the entry"
+    assert text.count("[arms.ur5_dup_test_ik]") == 1, "force re-add duplicated the entry"
     tomllib.loads(text)  # still valid TOML (raises on duplicate keys)
     # And without --force on an existing manifest entry, it errors.
     third = _run_cli(*args)
