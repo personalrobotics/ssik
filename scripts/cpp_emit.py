@@ -1,13 +1,27 @@
 #!/usr/bin/env python
-"""Emit a native C++ artifact header + FK parity fixture for one arm (#488).
+"""Emit a native C++ artifact header + parity fixtures for one arm (#488).
 
 Phase-0a scope: Band-A constant rendering (the KinBody -> a ``JointConsts``
-struct) plus a Python-computed FK parity fixture so the C++ side can be checked
-against the reference at machine precision. This is the CppRenderer precursor
-for #482; it will fold into ssik.core.codegen behind ``--target cpp`` once the
-solver bands land.
+struct) plus Python-computed FK/solve parity fixtures so the C++ side can be
+checked against the reference at machine precision. This is the CppRenderer
+precursor for #482; it will fold into ssik.core.codegen behind ``--target cpp``
+once the solver bands land.
 
-Usage: ``python scripts/cpp_emit.py <arm> [--out-dir cpp/gen]``  (e.g. ur5_ik)
+Two kinds of output, deliberately treated differently (#495):
+
+- ``<arm>.hpp`` (the constants header) is the shippable native artifact. It is
+  ``repr()`` of the baked KinBody floats -- no computation, byte-identical
+  across platforms -- so it is committed and guarded by ``--check``.
+- ``<arm>_fk_parity.hpp`` / ``<arm>_solve_parity.hpp`` are test scaffolding.
+  They are floating-point *results* (FK/eigensolve), so they carry BLAS-backend
+  ULP variance (#82) and are NOT byte-portable. They are git-ignored and
+  regenerated fresh from the current oracle before every build (``--all``),
+  then validated by ctest -- which is stronger than diffing stale bytes.
+
+Usage:
+  ``python scripts/cpp_emit.py <arm>``    emit one arm
+  ``python scripts/cpp_emit.py --all``    re-emit every arm in cpp/gen
+  ``python scripts/cpp_emit.py --check``  CI drift guard (constants headers)
 """
 
 from __future__ import annotations
@@ -202,12 +216,19 @@ def emitted_arms(gen_dir: Path) -> list[str]:
 
 
 def check_no_drift(gen_dir: Path) -> int:
-    """Regenerate every emitted arm into a temp dir and diff against ``gen_dir``.
+    """Regenerate each arm's *constants header* and byte-diff against ``gen_dir``.
 
-    Returns 0 when the committed artifacts are byte-identical to a fresh emit,
-    non-zero (listing the stale files) otherwise. This is the CI gate that makes
-    the Python oracle -> native fixture link impossible to silently break (#495):
-    change the oracle without re-emitting and this turns red.
+    Returns 0 when the committed ``<arm>.hpp`` constants headers are
+    byte-identical to a fresh emit, non-zero (listing the stale files) otherwise.
+    This is the CI gate that makes the Python oracle -> native artifact link
+    impossible to silently break (#495): change the KinBody/oracle without
+    re-emitting and this turns red.
+
+    Only the constants headers are checked. They are ``repr()`` of the already
+    baked KinBody floats -- no computation, so byte-identical across platforms.
+    The FK/solve parity fixtures are floating-point *results* (BLAS-backend
+    ULP variance, #82), so they are not committed and not byte-comparable; they
+    are regenerated fresh before every build and validated by ctest instead.
     """
     arms = emitted_arms(gen_dir)
     if not arms:
@@ -218,19 +239,19 @@ def check_no_drift(gen_dir: Path) -> int:
         tmp_dir = Path(tmp)
         for arm in arms:
             emit(arm, tmp_dir)
-        for fresh in sorted(tmp_dir.glob("*.hpp")):
-            committed = gen_dir / fresh.name
+            committed = gen_dir / f"{arm}.hpp"
+            fresh = tmp_dir / f"{arm}.hpp"
             if not committed.exists():
-                stale.append(f"{fresh.name} (missing from cpp/gen)")
+                stale.append(f"{arm}.hpp (missing from cpp/gen)")
             elif fresh.read_bytes() != committed.read_bytes():
-                stale.append(f"{fresh.name} (differs from a fresh emit)")
+                stale.append(f"{arm}.hpp (differs from a fresh emit)")
     if stale:
         print("[cpp_emit] --check FAILED: native artifacts are stale vs the Python oracle:")
         for s in stale:
             print(f"  - {s}")
         print("Re-run: python scripts/cpp_emit.py --all")
         return 1
-    print(f"[cpp_emit] --check OK: {len(arms)} arm(s) up to date ({', '.join(arms)})")
+    print(f"[cpp_emit] --check OK: {len(arms)} constants header(s) up to date ({', '.join(arms)})")
     return 0
 
 

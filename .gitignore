@@ -60,3 +60,9 @@ scratch/
 
 # C++ backend build artifacts (#482)
 cpp/build/
+# Parity fixtures are test scaffolding, regenerated fresh from the current
+# Python oracle before every build (scripts/cpp_emit.py --all). They are
+# floating-point results and thus not byte-portable across BLAS backends
+# (#82), so they are never committed -- only the constants headers are (#495).
+cpp/gen/*_fk_parity.hpp
+cpp/gen/*_solve_parity.hpp

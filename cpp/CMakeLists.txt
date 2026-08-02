@@ -33,6 +33,12 @@ target_link_libraries(ssik_cpp INTERFACE ${SSIK_EIGEN})
 
 enable_testing()
 
+# The conformance tests include the parity fixtures (cpp/gen/*_parity.hpp), which
+# are git-ignored and regenerated from the current Python oracle (#82/#495):
+#   python scripts/cpp_emit.py --all
+# Run that before configuring/building the tests from a fresh checkout. Shipped
+# consumers use only the constants header + include/ primitives, not these tests.
+
 add_executable(test_ur5_fk tests/test_ur5_fk.cpp)
 target_link_libraries(test_ur5_fk PRIVATE ssik_cpp)
 add_test(NAME ur5_fk COMMAND test_ur5_fk)

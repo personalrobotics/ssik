@@ -118,10 +118,14 @@ jobs:
   cpp:
     # Native C++ backend (#482): the end-to-end no-drift guard (#495). Two
     # halves, both red-on-recurrence:
-    #   1. cpp_emit --check: committed cpp/gen artifacts are byte-identical to a
-    #      fresh emit -- the Python oracle can't silently drift from the fixtures.
-    #   2. build + ctest: the hand-written native primitives/compositions still
-    #      reproduce those fixtures (FK + set-agreement conformance).
+    #   1. cpp_emit --check: the committed constants headers (cpp/gen/<arm>.hpp,
+    #      the shippable artifacts) are byte-identical to a fresh emit -- the
+    #      KinBody/oracle can't silently drift from what's shipped. These are
+    #      repr() of baked floats, so byte-portable across platforms.
+    #   2. --all + build + ctest: regenerate the parity fixtures fresh from the
+    #      *current* Linux oracle (they are FP results, not byte-portable, so not
+    #      committed -- #82), then check the native solver reproduces them (FK +
+    #      set-agreement conformance).
     # Neither runs in the pytest matrix, so this is the only place the native
     # artifacts are validated in CI.
     name: C++ conformance + drift guard
@@ -143,8 +147,11 @@ jobs:
       - name: Install Eigen + CMake
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libeigen3-dev
 
-      - name: cpp_emit --check (fixtures match the Python oracle)
+      - name: cpp_emit --check (constants headers match the Python oracle)
         run: uv run python scripts/cpp_emit.py --check
+
+      - name: Regenerate parity fixtures from the current oracle
+        run: uv run python scripts/cpp_emit.py --all
 
       - name: Configure + build
         run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
