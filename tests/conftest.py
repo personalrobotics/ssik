@@ -25,9 +25,24 @@ DH, so re-adding a wiped entry is exact.
 
 from __future__ import annotations
 
+import os
+
 import pytest
+from hypothesis import settings
 
 from ssik.solvers.ikgeo import _raghavan_roth as _rr_mod
+
+# CI determinism (#479). Unseeded Hypothesis boundary-hunting occasionally lands
+# in a measure-zero near-cancellation shell (#466: openarm exact-SRS at a
+# specific near-alignment) that random sampling never hits -- a run-to-run flake
+# the 3.10-3.13 matrix (#478) amplifies ~4x. The "ci" profile fixes the example
+# set so a CI failure is reproducible (and a real regression fails every run);
+# local dev keeps the exploratory (random) default so it still finds new cases.
+# GitHub Actions sets CI=true. Per-test ``@settings(...)`` inherit ``derandomize``
+# from the active profile unless they set it explicitly.
+settings.register_profile("ci", derandomize=True)
+settings.register_profile("dev", derandomize=False)
+settings.load_profile("ci" if os.environ.get("CI") else "dev")
 
 
 @pytest.fixture(autouse=True)
