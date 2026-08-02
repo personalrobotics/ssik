@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ssik._kinbody import KinBody
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -112,7 +113,7 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
 
 def _emit_solve_parity(
     arm: str,
-    kb: object,
+    kb: KinBody,
     out_dir: Path,
     ns: str,
     ranges: list[tuple[float, float]],
@@ -171,9 +172,7 @@ def _emit_solve_parity(
         for s in sols:
             sol_strs.append("{" + ", ".join(_f(v) for v in np.asarray(s.q)) + "}")
             res_strs.append(_f(float(s.fk_residual)))
-        out.append(
-            f"    {{{{{tstr}}}, {{{', '.join(sol_strs)}}}, {{{', '.join(res_strs)}}}}},"
-        )
+        out.append(f"    {{{{{tstr}}}, {{{', '.join(sol_strs)}}}, {{{', '.join(res_strs)}}}}},")
         n_emitted += 1
     out += ["  };", "  return cases;", "}", "", f"}}  // namespace ssik::{ns}", ""]
     (out_dir / f"{arm}_solve_parity.hpp").write_text("\n".join(out))
