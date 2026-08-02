@@ -90,3 +90,4 @@ nav:
           - HP robustness notes: specs/hp_robustness_investigation.md
   - Project:
       - Semver policy: semver_policy.md
+      - "ADR-0001: Python is the compiler": adr/0001-python-is-the-compiler.md
