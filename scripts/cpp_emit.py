@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -106,7 +107,11 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
     fx += ["  };", "  return cases;", "}", "", f"}}  // namespace ssik::{ns}", ""]
     (out_dir / f"{arm}_fk_parity.hpp").write_text("\n".join(fx))
 
-    print(f"[cpp_emit] {arm}: DOF={dof} -> {art.relative_to(_REPO)} + {n_parity} FK parity cases")
+    try:
+        art_disp = art.relative_to(_REPO)
+    except ValueError:
+        art_disp = art  # out_dir outside the repo (e.g. --check temp dir)
+    print(f"[cpp_emit] {arm}: DOF={dof} -> {art_disp} + {n_parity} FK parity cases")
 
     _emit_solve_parity(arm, kb, out_dir, ns, ranges, seed=seed + 1)
 
@@ -179,12 +184,78 @@ def _emit_solve_parity(
     print(f"[cpp_emit] {arm}: + {n_emitted} solve parity cases")
 
 
+def emitted_arms(gen_dir: Path) -> list[str]:
+    """Arms with a committed native artifact, derived from ``cpp/gen``.
+
+    The manifest is the generated tree itself: every ``<arm>.hpp`` that is not a
+    ``_fk_parity`` / ``_solve_parity`` fixture. Deriving the list this way means
+    adding an arm's artifact automatically enrols it in the drift guard -- there
+    is no hardcoded list to forget to update.
+    """
+    arms = []
+    for hpp in sorted(gen_dir.glob("*.hpp")):
+        stem = hpp.stem
+        if stem.endswith("_fk_parity") or stem.endswith("_solve_parity"):
+            continue
+        arms.append(stem)
+    return arms
+
+
+def check_no_drift(gen_dir: Path) -> int:
+    """Regenerate every emitted arm into a temp dir and diff against ``gen_dir``.
+
+    Returns 0 when the committed artifacts are byte-identical to a fresh emit,
+    non-zero (listing the stale files) otherwise. This is the CI gate that makes
+    the Python oracle -> native fixture link impossible to silently break (#495):
+    change the oracle without re-emitting and this turns red.
+    """
+    arms = emitted_arms(gen_dir)
+    if not arms:
+        print("[cpp_emit] --check: no emitted arms found in", gen_dir)
+        return 0
+    stale: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        for arm in arms:
+            emit(arm, tmp_dir)
+        for fresh in sorted(tmp_dir.glob("*.hpp")):
+            committed = gen_dir / fresh.name
+            if not committed.exists():
+                stale.append(f"{fresh.name} (missing from cpp/gen)")
+            elif fresh.read_bytes() != committed.read_bytes():
+                stale.append(f"{fresh.name} (differs from a fresh emit)")
+    if stale:
+        print("[cpp_emit] --check FAILED: native artifacts are stale vs the Python oracle:")
+        for s in stale:
+            print(f"  - {s}")
+        print("Re-run: python scripts/cpp_emit.py --all")
+        return 1
+    print(f"[cpp_emit] --check OK: {len(arms)} arm(s) up to date ({', '.join(arms)})")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("arm", help="prebuilt arm name, e.g. ur5_ik")
+    ap.add_argument("arm", nargs="?", help="prebuilt arm name, e.g. ur5_ik")
+    ap.add_argument("--all", action="store_true", help="re-emit every arm already in --out-dir")
+    ap.add_argument(
+        "--check",
+        action="store_true",
+        help="verify committed artifacts match a fresh emit (CI drift guard); no writes",
+    )
     ap.add_argument("--out-dir", type=Path, default=_REPO / "cpp" / "gen")
     args = ap.parse_args()
+
+    if args.check:
+        return check_no_drift(args.out_dir)
+
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    if args.all:
+        for arm in emitted_arms(args.out_dir):
+            emit(arm, args.out_dir)
+        return 0
+    if not args.arm:
+        ap.error("provide an arm name, or --all / --check")
     emit(args.arm, args.out_dir)
     return 0
 

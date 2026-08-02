@@ -114,3 +114,40 @@ jobs:
         # Wall-clock performance gates: run serially (no -n) so timing is
         # measured without cross-worker CPU contention. Small, fast set. (#348)
         run: uv run pytest -q -m "not slow and perf"
+
+  cpp:
+    # Native C++ backend (#482): the end-to-end no-drift guard (#495). Two
+    # halves, both red-on-recurrence:
+    #   1. cpp_emit --check: committed cpp/gen artifacts are byte-identical to a
+    #      fresh emit -- the Python oracle can't silently drift from the fixtures.
+    #   2. build + ctest: the hand-written native primitives/compositions still
+    #      reproduce those fixtures (FK + set-agreement conformance).
+    # Neither runs in the pytest matrix, so this is the only place the native
+    # artifacts are validated in CI.
+    name: C++ conformance + drift guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --dev --python 3.12
+
+      - name: Install Eigen + CMake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libeigen3-dev
+
+      - name: cpp_emit --check (fixtures match the Python oracle)
+        run: uv run python scripts/cpp_emit.py --check
+
+      - name: Configure + build
+        run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
+
+      - name: ctest (FK + solve conformance)
+        run: ctest --test-dir cpp/build --output-on-failure
