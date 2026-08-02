@@ -57,3 +57,6 @@ tests/artifacts/*.c
 tests/artifacts/*.html
 build/
 scratch/
+
+# C++ backend build artifacts (#482)
+cpp/build/
