@@ -18,6 +18,7 @@
 #include <Eigen/Dense>
 
 #include "ssik_cpp/fk.hpp"
+#include "ssik_cpp/newton.hpp"
 #include "ssik_cpp/rotation.hpp"
 #include "ssik_cpp/sp6.hpp"
 #include "ssik_cpp/subproblems.hpp"
@@ -39,9 +40,13 @@ inline std::pair<int, int> trio_reference_signs(const std::array<Eigen::Vector3d
 }  // namespace detail
 
 // Solve three-parallel 6R IK for target pose T. Returns FK-verified, deduped
-// joint solutions (analytical, no refinement). `tol` mirrors the Python policy.
+// joint solutions. `tol` mirrors the Python policy. With `allow_refinement`,
+// near-misses (FK > gate) are Newton-polished (the shipped artifact's
+// force_refine path); off by default, matching ikgeo.three_parallel.solve.
 inline std::vector<Solution<6>> three_parallel_solve(const JointConsts<6>& c, const Pose& T,
-                                                     const Tolerances& tol = {}) {
+                                                     const Tolerances& tol = {},
+                                                     bool allow_refinement = false,
+                                                     int refinement_max_iters = 15) {
   std::array<Eigen::Vector3d, 6> axes;
   for (int i = 0; i < 6; ++i) axes[i] = c.axis[i];
 
@@ -106,6 +111,11 @@ inline std::vector<Solution<6>> three_parallel_solve(const JointConsts<6>& c, co
     const double resid = (fk_q - T).norm();  // Frobenius
     if (resid <= kThreeParallelFkAtol) {
       verified.push_back(Solution<6>{q, resid, Refinement::None});
+    } else if (allow_refinement) {
+      const auto refined = lm_refine<6>(c, q, T, kThreeParallelFkAtol, refinement_max_iters);
+      if (refined) {
+        verified.push_back(Solution<6>{refined->first, refined->second, Refinement::Lm});
+      }
     }
   }
 

@@ -50,6 +50,12 @@ int main() {
     total_native += static_cast<int>(sols.size());
     total_expected += static_cast<int>(tc.solutions.size());
 
+    // The allow_refinement=true path must be a no-op on these happy-path poses
+    // (analytical candidates already FK-close well under the gate), so it yields
+    // the same set. Guards the refinement wiring against changing good results.
+    const auto sols_refined = ssik::three_parallel_solve(c, T, {}, /*allow_refinement=*/true);
+    if (sols_refined.size() != sols.size()) ++mismatched_cases;
+
     // (a) Soundness: every native solution FK-closes to the target.
     for (const auto& s : sols) {
       const ssik::Pose fk_q = ssik::fk<DOF>(c, s.q);

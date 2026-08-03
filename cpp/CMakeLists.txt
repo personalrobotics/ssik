@@ -46,3 +46,7 @@ add_test(NAME ur5_fk COMMAND test_ur5_fk)
 add_executable(test_ur5_solve tests/test_ur5_solve.cpp)
 target_link_libraries(test_ur5_solve PRIVATE ssik_cpp)
 add_test(NAME ur5_solve COMMAND test_ur5_solve)
+
+add_executable(test_ur5_newton tests/test_ur5_newton.cpp)
+target_link_libraries(test_ur5_newton PRIVATE ssik_cpp)
+add_test(NAME ur5_newton COMMAND test_ur5_newton)
