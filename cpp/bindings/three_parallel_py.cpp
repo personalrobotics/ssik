@@ -66,11 +66,75 @@ py::tuple three_parallel_solve_py(py::array_t<double> axes, py::array_t<double> 
   return py::make_tuple(qs, resids, is_ls);
 }
 
+// Full artifact-contract solve: exposes the <arm>_ik.solve() signature (limits,
+// seed ranking, seed tolerance, max_solutions) so the reused Python artifact
+// tests can drive the native artifact layer (#503).
+py::tuple three_parallel_artifact_solve_py(
+    py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
+    py::array_t<int> types, py::array_t<double> lo, py::array_t<double> hi,
+    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
+    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters) {
+  const ssik::JointConsts<6> c = make_consts(axes, t_left, t_right, types);
+
+  ssik::JointLimits<6> lim;
+  auto lo_u = lo.unchecked<1>();
+  auto hi_u = hi.unchecked<1>();
+  auto hl_u = has_limits.unchecked<1>();
+  for (int i = 0; i < 6; ++i) {
+    lim.lo[i] = lo_u(i);
+    lim.hi[i] = hi_u(i);
+    lim.present[i] = hl_u(i) != 0;
+  }
+
+  ssik::ArtifactParams<6> p;
+  p.respect_limits = respect_limits;
+  p.has_seed = has_seed;
+  if (has_seed) {
+    auto qs_u = q_seed.unchecked<1>();
+    for (int i = 0; i < 6; ++i) p.q_seed[i] = qs_u(i);
+  }
+  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
+  p.has_seed_tolerance = has_seed_tolerance;
+  p.seed_tolerance = seed_tolerance;
+  p.max_solutions = max_solutions;
+  p.allow_rescue = allow_rescue;
+  p.refinement_max_iters = refinement_max_iters;
+
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const std::vector<ssik::Solution<6>> sols = ssik::three_parallel_artifact_solve(c, lim, T, p);
+
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 6});
+  py::array_t<double> resids(n);
+  py::array_t<int> refine(n);  // 0 = none, 1 = lm (Solution.refinement_used)
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  auto fm = refine.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 6; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+    fm(i) = sols[i].refinement == ssik::Refinement::None ? 0 : 1;
+  }
+  return py::make_tuple(qs, resids, refine);
+}
+
 }  // namespace
 
 PYBIND11_MODULE(ssik_cpp_ext, m) {
   m.doc() = "Test-only native-solver binding for C++<->Python conformance (#499)";
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
+        py::arg("refinement_max_iters") = 15);
+  m.def("three_parallel_artifact_solve", &three_parallel_artifact_solve_py, py::arg("axes"),
+        py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
+        py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
+        py::arg("has_seed") = false, py::arg("q_seed"), py::arg("seed_metric") = "wrap_linf",
+        py::arg("has_seed_tolerance") = false, py::arg("seed_tolerance") = 0.0,
+        py::arg("max_solutions") = -1, py::arg("allow_rescue") = true,
         py::arg("refinement_max_iters") = 15);
 }

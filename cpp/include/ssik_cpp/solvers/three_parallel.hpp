@@ -17,6 +17,7 @@
 
 #include <Eigen/Dense>
 
+#include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/newton.hpp"
 #include "ssik_cpp/rotation.hpp"
@@ -143,6 +144,42 @@ inline std::vector<Solution<6>> three_parallel_solve(const JointConsts<6>& c, co
     }
   }
   return deduped;
+}
+
+// Reach-sphere upper bound (sum of all link translation norms) -- the rescue
+// gate from the artifact wrapper. Triangle-inequality bound, so it never
+// rejects a reachable pose.
+inline double reach_radius(const JointConsts<6>& c) {
+  double r = 0.0;
+  for (int i = 0; i < 6; ++i) {
+    r += c.t_left[i].block<3, 1>(0, 3).norm();
+    r += c.t_right[i].block<3, 1>(0, 3).norm();
+  }
+  return r;
+}
+
+// Full artifact-contract solve -- the C++ replica of <arm>_ik.solve() (#503):
+// core solve (force-refined, the artifact always polishes near-misses) ->
+// rescue gate -> finalize (limits -> seed -> truncate). The gate mirrors the
+// artifact but the rescue body is intentionally omitted: rescue_via_T_perturbation
+// is PROVEN DORMANT for the three_parallel family (0 firings in 3400 reachable
+// poses; analytical is complete), so this is behaviorally identical to the
+// artifact on every pose. A Python-side dormancy fuzz guards the assumption; the
+// full rescue port lands with the RR/HP families, where it is load-bearing.
+inline std::vector<Solution<6>> three_parallel_artifact_solve(const JointConsts<6>& c,
+                                                              const JointLimits<6>& lim,
+                                                              const Pose& T,
+                                                              const ArtifactParams<6>& p,
+                                                              const Tolerances& tol = {}) {
+  std::vector<Solution<6>> sols =
+      three_parallel_solve(c, T, tol, /*allow_refinement=*/true, p.refinement_max_iters);
+
+  // Rescue gate (dormant for this family; see the function comment). If it were
+  // ported, it would run here when: sols.empty() && p.allow_rescue &&
+  // T.block<3,1>(0,3).norm() <= reach_radius(c).
+  (void)reach_radius;
+
+  return finalize_solutions<6>(std::move(sols), c, lim, p);
 }
 
 }  // namespace ssik

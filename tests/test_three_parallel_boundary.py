@@ -117,3 +117,34 @@ def test_unreachable_returns_empty_is_ls(target_name: str, three_parallel_backen
     solutions, is_ls = three_parallel_backend(kb, t)
     assert solutions == [] or len(solutions) == 0, f"{target_name}: expected no solutions"
     assert is_ls, f"{target_name}: expected is_ls=True for unreachable target"
+
+
+_FAMILY_ARMS = [a.name for a in load_manifest().values() if a.solver == "ikgeo.three_parallel"]
+
+
+@pytest.mark.parametrize("arm_name", _FAMILY_ARMS)
+def test_rescue_is_dormant_across_family(arm_name: str) -> None:
+    """The T-perturbation rescue never fires for the three_parallel family.
+
+    This is the assumption that lets the native artifact layer (#503) omit the
+    full ``rescue_via_T_perturbation`` port: the analytical path is complete, so
+    ``allow_rescue`` changes nothing on reachable poses. If a future geometry or
+    tolerance change makes rescue start firing here, this goes red -- the signal
+    that the C++ artifact layer now needs the rescue port (deferred to the RR/HP
+    families where rescue is load-bearing).
+    """
+    mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
+    kb = mod._KB
+    ranges = [
+        (float(j.limits[0]), float(j.limits[1])) if j.limits else (-np.pi, np.pi) for j in kb.joints
+    ]
+    rng = np.random.default_rng(0)
+    for _ in range(40):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        t = np.asarray(poe_forward_kinematics(kb, q), dtype=np.float64)
+        with_rescue = mod.solve(t, allow_rescue=True, respect_limits=False)
+        without_rescue = mod.solve(t, allow_rescue=False, respect_limits=False)
+        assert len(with_rescue) == len(without_rescue), (
+            f"{arm_name}: rescue fired at a reachable pose -- the C++ artifact "
+            f"layer's rescue omission (#503) is no longer valid"
+        )
