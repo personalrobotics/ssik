@@ -171,4 +171,4 @@ jobs:
         # 17-arm family at moderate depth (incl. the anti-parallel-trio Standard
         # Bots arms). cpp legs skip when the ext is absent (the main pytest
         # matrix); here it is built, so they execute.
-        run: uv run pytest tests/test_three_parallel.py tests/test_three_parallel_family.py -q
+        run: uv run pytest tests/test_three_parallel.py tests/test_three_parallel_family.py tests/test_three_parallel_boundary.py -q
