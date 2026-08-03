@@ -43,10 +43,10 @@ add_executable(test_ur5_fk tests/test_ur5_fk.cpp)
 target_link_libraries(test_ur5_fk PRIVATE ssik_cpp)
 add_test(NAME ur5_fk COMMAND test_ur5_fk)
 
-add_executable(test_ur5_solve tests/test_ur5_solve.cpp)
-target_link_libraries(test_ur5_solve PRIVATE ssik_cpp)
-add_test(NAME ur5_solve COMMAND test_ur5_solve)
-
+# Solve-level conformance is validated by the reused Python suite (the C++
+# backend runs tests/test_three_parallel.py through the pybind binding, #499),
+# not a hand-written C++ set-agreement test. These two goldens validate the FK
+# and Newton primitives Python-free.
 add_executable(test_ur5_newton tests/test_ur5_newton.cpp)
 target_link_libraries(test_ur5_newton PRIVATE ssik_cpp)
 add_test(NAME ur5_newton COMMAND test_ur5_newton)

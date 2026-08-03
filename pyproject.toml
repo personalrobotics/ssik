@@ -105,6 +105,10 @@ dev = [
     "yourdfpy>=0.0.60",
     "xacrodoc>=2.0.1",
     "mujoco>=3.0", # exercised by the MJCF-adapter tests (also the [mjcf] extra)
+    # Test-only: builds the native-C++ solver into a Python extension so the
+    # existing Python test suite validates the C++ backend directly (#499). Never
+    # a runtime/wheel dependency -- the shipped native artifact needs no Python.
+    "pybind11>=2.12",
 ]
 docs = [
     "mkdocs-material>=9.5",

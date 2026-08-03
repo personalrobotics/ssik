@@ -154,9 +154,11 @@ def synthetic_three_parallel_kb() -> KinBody:
         np.array([1.5, -1.0, -0.5, 2.0, -0.8, 0.9]),
     ],
 )
-def test_generic_pose_all_solutions_fk_match(ur5_kb: Any, q_star: np.ndarray) -> None:
+def test_generic_pose_all_solutions_fk_match(
+    ur5_kb: Any, three_parallel_backend: Any, q_star: np.ndarray
+) -> None:
     T_star = _fk(ur5_kb, q_star)
-    solutions, is_ls = three_parallel.solve(ur5_kb, T_star)
+    solutions, is_ls = three_parallel_backend(ur5_kb, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
     for i, sol in enumerate(solutions):
@@ -175,19 +177,21 @@ def test_generic_pose_all_solutions_fk_match(ur5_kb: Any, q_star: np.ndarray) ->
         np.array([0.1, -0.2, 0.3, -0.4, 0.5, -0.6]),
     ],
 )
-def test_seeded_q_star_is_recovered(ur5_kb: Any, q_star: np.ndarray) -> None:
+def test_seeded_q_star_is_recovered(
+    ur5_kb: Any, three_parallel_backend: Any, q_star: np.ndarray
+) -> None:
     T_star = _fk(ur5_kb, q_star)
-    solutions, _ = three_parallel.solve(ur5_kb, T_star)
+    solutions, _ = three_parallel_backend(ur5_kb, T_star)
     assert any(_q_matches(s.q, q_star) for s in solutions), (
         f"q_star={q_star.tolist()} not recovered in {len(solutions)} solutions"
     )
 
 
-def test_generic_pose_returns_eight_solutions(ur5_kb: Any) -> None:
+def test_generic_pose_returns_eight_solutions(ur5_kb: Any, three_parallel_backend: Any) -> None:
     """Generic non-singular UR5 pose has exactly 8 IK solutions."""
     q_star = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2])
     T_star = _fk(ur5_kb, q_star)
-    solutions, _ = three_parallel.solve(ur5_kb, T_star)
+    solutions, _ = three_parallel_backend(ur5_kb, T_star)
     assert len(solutions) == 8
 
 
@@ -210,12 +214,14 @@ _NEAR_SINGULAR_Q = [
 
 
 @pytest.mark.parametrize("q_star", _NEAR_SINGULAR_Q)
-def test_near_singular_pose_returned_solutions_fk_match(ur5_kb: Any, q_star: np.ndarray) -> None:
+def test_near_singular_pose_returned_solutions_fk_match(
+    ur5_kb: Any, three_parallel_backend: Any, q_star: np.ndarray
+) -> None:
     """At each UR singularity, returned solutions must still satisfy FK.
     The solver may return fewer solutions (collapsed branches) but none
     should be silently wrong."""
     T_star = _fk(ur5_kb, q_star)
-    solutions, _ = three_parallel.solve(ur5_kb, T_star)
+    solutions, _ = three_parallel_backend(ur5_kb, T_star)
     assert len(solutions) >= 1, "no solutions at near-singular pose"
     for i, sol in enumerate(solutions):
         q = sol.q
@@ -239,12 +245,12 @@ def test_near_singular_pose_returned_solutions_fk_match(ur5_kb: Any, q_star: np.
     ],
 )
 def test_synthetic_three_parallel_fk_roundtrip(
-    synthetic_three_parallel_kb: KinBody, q_star: np.ndarray
+    synthetic_three_parallel_kb: KinBody, three_parallel_backend: Any, q_star: np.ndarray
 ) -> None:
     """Three-parallel solver on a synthesised arm with different link
     dimensions than UR5. Validates the 'generic, not UR-specific' claim."""
     T_star = _fk(synthetic_three_parallel_kb, q_star)
-    solutions, is_ls = three_parallel.solve(synthetic_three_parallel_kb, T_star)
+    solutions, is_ls = three_parallel_backend(synthetic_three_parallel_kb, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
     for i, sol in enumerate(solutions):
@@ -266,7 +272,9 @@ def test_synthetic_three_parallel_fk_roundtrip(
     deadline=None,
     suppress_health_check=[HealthCheck.filter_too_much, HealthCheck.function_scoped_fixture],
 )
-def test_random_q_roundtrip_fk(ur5_kb: Any, q_star: np.ndarray) -> None:
+def test_random_q_roundtrip_fk(
+    ur5_kb: Any, three_parallel_backend: Any, q_star: np.ndarray
+) -> None:
     """500 random non-singular q*: seeded q* is recovered, all returned
     solutions reproduce T_star under FK.
 
@@ -281,7 +289,7 @@ def test_random_q_roundtrip_fk(ur5_kb: Any, q_star: np.ndarray) -> None:
     Hypothesis seed from #115).
     """
     T_star = _fk(ur5_kb, q_star)
-    solutions, is_ls = three_parallel.solve(ur5_kb, T_star)
+    solutions, is_ls = three_parallel_backend(ur5_kb, T_star)
     assert not is_ls
     assert 1 <= len(solutions) <= 8
     for sol in solutions:
@@ -303,7 +311,9 @@ def test_random_q_roundtrip_fk(ur5_kb: Any, q_star: np.ndarray) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_recovers_shoulder_wrist_alignment_pose_issue_56(ur5_kb: Any) -> None:
+def test_recovers_shoulder_wrist_alignment_pose_issue_56(
+    ur5_kb: Any, three_parallel_backend: Any
+) -> None:
     """Regression for #56.
 
     Before the fix: SP6's ellipse-intersection produced 4 candidates
@@ -330,7 +340,7 @@ def test_recovers_shoulder_wrist_alignment_pose_issue_56(ur5_kb: Any) -> None:
     """
     q_star = np.array([0.0, 1.0, 1.0, 0.36474982, -1.0, 0.0])
     T_star = _fk(ur5_kb, q_star)
-    solutions, is_ls = three_parallel.solve(ur5_kb, T_star)
+    solutions, is_ls = three_parallel_backend(ur5_kb, T_star)
 
     assert not is_ls
     # UR5 at this shoulder-wrist alignment pose has 4 distinct IK

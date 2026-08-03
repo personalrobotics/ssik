@@ -45,6 +45,28 @@ settings.register_profile("dev", derandomize=False)
 settings.load_profile("ci" if os.environ.get("CI") else "dev")
 
 
+@pytest.fixture(params=["python", "cpp"])
+def three_parallel_backend(request):
+    """A ``three_parallel.solve``-compatible callable, once per backend (#499).
+
+    Parametrising a test over this fixture runs the *same* assertions against the
+    Python reference and the native C++ solver, so the C++ backend inherits the
+    full Python rigor (500-pose fuzz, singular coverage, #56/#362 regressions)
+    with zero duplicated assertion logic. The ``cpp`` leg skips when the test-only
+    extension isn't built (see tests/_cpp_backend.py + scripts/build_cpp_ext.py).
+    """
+    if request.param == "python":
+        from ssik.solvers.ikgeo import three_parallel
+
+        return three_parallel.solve
+
+    from tests._cpp_backend import cpp_available, cpp_three_parallel_solve
+
+    if not cpp_available():
+        pytest.skip("ssik_cpp_ext not built (run scripts/build_cpp_ext.py)")
+    return cpp_three_parallel_solve
+
+
 @pytest.fixture(autouse=True)
 def _restore_rr_global_caches():
     deriv_before = dict(_rr_mod._DERIVATION_CACHE)

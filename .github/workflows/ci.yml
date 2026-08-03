@@ -156,5 +156,17 @@ jobs:
       - name: Configure + build
         run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
 
-      - name: ctest (FK + solve conformance)
+      - name: ctest (FK + Newton golden conformance)
         run: ctest --test-dir cpp/build --output-on-failure
+
+      - name: Build native test extension (pybind11)
+        # Compiles the C++ solver into a Python module so the reused suite below
+        # drives the native backend directly (#499). Test-only, never shipped.
+        run: uv run python scripts/build_cpp_ext.py
+
+      - name: Reused Python suite vs the C++ backend
+        # The SAME tests/test_three_parallel.py (500-pose fuzz, singular coverage,
+        # #56 regression) now run against the native solver via the binding -- no
+        # assertion logic duplicated in C++. cpp legs skip when the ext is absent
+        # (the main pytest matrix); here it is built, so they execute.
+        run: uv run pytest tests/test_three_parallel.py -q
