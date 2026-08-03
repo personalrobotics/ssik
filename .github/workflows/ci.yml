@@ -165,8 +165,10 @@ jobs:
         run: uv run python scripts/build_cpp_ext.py
 
       - name: Reused Python suite vs the C++ backend
-        # The SAME tests/test_three_parallel.py (500-pose fuzz, singular coverage,
-        # #56 regression) now run against the native solver via the binding -- no
-        # assertion logic duplicated in C++. cpp legs skip when the ext is absent
-        # (the main pytest matrix); here it is built, so they execute.
-        run: uv run pytest tests/test_three_parallel.py -q
+        # The SAME Python tests run against the native solver via the binding --
+        # no assertion logic duplicated in C++. test_three_parallel: deep 500-pose
+        # fuzz + singular + #56 on UR5. test_three_parallel_family: the whole
+        # 17-arm family at moderate depth (incl. the anti-parallel-trio Standard
+        # Bots arms). cpp legs skip when the ext is absent (the main pytest
+        # matrix); here it is built, so they execute.
+        run: uv run pytest tests/test_three_parallel.py tests/test_three_parallel_family.py -q
