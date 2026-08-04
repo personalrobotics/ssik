@@ -35,6 +35,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from ssik._native import _NATIVE_SOLVERS
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
 
@@ -119,15 +120,16 @@ def test_unreachable_returns_empty_is_ls(target_name: str, three_parallel_backen
     assert is_ls, f"{target_name}: expected is_ls=True for unreachable target"
 
 
-_FAMILY_ARMS = [a.name for a in load_manifest().values() if a.solver == "ikgeo.three_parallel"]
+_FAMILY_ARMS = [a.name for a in load_manifest().values() if a.solver in _NATIVE_SOLVERS]
 
 
 @pytest.mark.parametrize("arm_name", _FAMILY_ARMS)
 def test_rescue_is_dormant_across_family(arm_name: str) -> None:
-    """The T-perturbation rescue never fires for the three_parallel family.
+    """The T-perturbation rescue never fires for the native geometric families.
 
-    This is the assumption that lets the native artifact layer (#503) omit the
-    full ``rescue_via_T_perturbation`` port: the analytical path is complete, so
+    This is the assumption that lets the native artifact layer (#503/#510) omit
+    the full ``rescue_via_T_perturbation`` port: the analytical path is complete
+    for these geometric families (three_parallel, spherical_two_parallel), so
     ``allow_rescue`` changes nothing on reachable poses. If a future geometry or
     tolerance change makes rescue start firing here, this goes red -- the signal
     that the C++ artifact layer now needs the rescue port (deferred to the RR/HP

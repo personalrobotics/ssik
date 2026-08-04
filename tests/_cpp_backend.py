@@ -152,7 +152,8 @@ def cpp_artifact_solve(
         np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(len(kb.joints), np.float64)
     )
 
-    qs, resids, refine = ext.three_parallel_artifact_solve(
+    qs, resids, refine = ext.native_artifact_solve(
+        "ikgeo.three_parallel",
         axes,
         t_left,
         t_right,

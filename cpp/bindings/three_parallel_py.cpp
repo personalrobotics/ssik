@@ -11,6 +11,7 @@
 #include <pybind11/pybind11.h>
 
 #include "ssik_cpp/fk.hpp"
+#include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/three_parallel.hpp"
 
 namespace py = pybind11;
@@ -66,15 +67,45 @@ py::tuple three_parallel_solve_py(py::array_t<double> axes, py::array_t<double> 
   return py::make_tuple(qs, resids, is_ls);
 }
 
-// Full artifact-contract solve: exposes the <arm>_ik.solve() signature (limits,
-// seed ranking, seed tolerance, max_solutions) so the reused Python artifact
-// tests can drive the native artifact layer (#503).
-py::tuple three_parallel_artifact_solve_py(
-    py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
-    py::array_t<int> types, py::array_t<double> lo, py::array_t<double> hi,
-    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
-    py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
-    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters) {
+// Core spherical_two_parallel solve (#510), for the beachhead validation against
+// the Python solver. Caller passes CANONICAL constants.
+py::tuple spherical_two_parallel_solve_py(py::array_t<double> axes, py::array_t<double> t_left,
+                                          py::array_t<double> t_right, py::array_t<int> types,
+                                          py::array_t<double> target, bool allow_refinement,
+                                          int refinement_max_iters) {
+  const ssik::JointConsts<6> c = make_consts(axes, t_left, t_right, types);
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const std::vector<ssik::Solution<6>> sols =
+      ssik::spherical_two_parallel_solve(c, T, {}, allow_refinement, refinement_max_iters);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 6});
+  py::array_t<double> resids(n);
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 6; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+  }
+  return py::make_tuple(qs, resids, n == 0);
+}
+
+// Full artifact-contract solve, family-dispatched (#503/#507/#510): exposes the
+// <arm>_ik.solve() signature (limits, seed ranking, seed tolerance,
+// max_solutions) so the reused Python tests + the shipped native=True path drive
+// the native artifact layer. `family` selects the core solver; the force-refine
+// + finalize (limits -> seed -> truncate) tail is shared. New geometric families
+// are one more dispatch case here.
+py::tuple native_artifact_solve_py(
+    const std::string& family, py::array_t<double> axes, py::array_t<double> t_left,
+    py::array_t<double> t_right, py::array_t<int> types, py::array_t<double> lo,
+    py::array_t<double> hi, py::array_t<int> has_limits, py::array_t<double> target,
+    bool respect_limits, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
+    bool has_seed_tolerance, double seed_tolerance, int max_solutions, bool allow_rescue,
+    int refinement_max_iters) {
   const ssik::JointConsts<6> c = make_consts(axes, t_left, t_right, types);
 
   ssik::JointLimits<6> lim;
@@ -106,7 +137,16 @@ py::tuple three_parallel_artifact_solve_py(
   for (int r = 0; r < 4; ++r)
     for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
 
-  const std::vector<ssik::Solution<6>> sols = ssik::three_parallel_artifact_solve(c, lim, T, p);
+  // Core solve (force-refined, as the artifact always polishes), family-selected;
+  // rescue is dormant for these geometric families (guarded on the Python side).
+  std::vector<ssik::Solution<6>> core;
+  if (family == "ikgeo.spherical_two_parallel") {
+    core = ssik::spherical_two_parallel_solve(c, T, {}, /*allow_refinement=*/true,
+                                              refinement_max_iters);
+  } else {
+    core = ssik::three_parallel_solve(c, T, {}, /*allow_refinement=*/true, refinement_max_iters);
+  }
+  const std::vector<ssik::Solution<6>> sols = ssik::finalize_solutions<6>(core, c, lim, p);
 
   const int n = static_cast<int>(sols.size());
   py::array_t<double> qs({n, 6});
@@ -134,7 +174,10 @@ PYBIND11_MODULE(_ssik_native, m) {
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);
-  m.def("three_parallel_artifact_solve", &three_parallel_artifact_solve_py, py::arg("axes"),
+  m.def("spherical_two_parallel_solve", &spherical_two_parallel_solve_py, py::arg("axes"),
+        py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("target"),
+        py::arg("allow_refinement") = false, py::arg("refinement_max_iters") = 15);
+  m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
         py::arg("has_seed") = false, py::arg("q_seed"), py::arg("seed_metric") = "wrap_linf",

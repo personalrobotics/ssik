@@ -21,7 +21,7 @@ from numpy.typing import NDArray
 from ssik.core.solution import Solution
 
 # Solver families with a native implementation in _ssik_native.
-_NATIVE_SOLVERS = frozenset({"ikgeo.three_parallel"})
+_NATIVE_SOLVERS = frozenset({"ikgeo.three_parallel", "ikgeo.spherical_two_parallel"})
 
 _ext: Any = None
 _ext_tried = False
@@ -52,19 +52,31 @@ def native_available() -> bool:
 _consts_cache: dict[int, tuple[Any, ...]] = {}
 
 
-def _consts(kb: Any) -> tuple[Any, ...]:
+def _consts(solver_name: str, kb: Any) -> tuple[Any, ...]:
     cached = _consts_cache.get(id(kb))
     if cached is not None:
         return cached
-    joints = kb.joints
+    # Per-family geometry preprocessing: spherical_two_parallel needs the wrist
+    # gauge canonicalized (the artifact bakes it at build time; the raw _KB lacks
+    # it -- 15/18 arms). Canonicalization is FK-identical, so the returned q are
+    # physical joint values and the joint limits are unchanged. Done here in
+    # Python (cached per-arm), so no preprocessing is ported to C++.
+    geom = kb
+    if solver_name == "ikgeo.spherical_two_parallel":
+        from ssik._kinbody import canonicalize_spherical_wrist
+        from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+        geom = canonicalize_spherical_wrist(kb, DEFAULT_TOLERANCE_POLICY)
+    gj = geom.joints
+    lj = kb.joints  # limits from the original (physical) joints
     marshalled = (
-        np.array([j.axis for j in joints], dtype=np.float64),
-        np.array([j.T_left for j in joints], dtype=np.float64),
-        np.array([j.T_right for j in joints], dtype=np.float64),
-        np.array([0 if j.joint_type == "revolute" else 1 for j in joints], dtype=np.int32),
-        np.array([j.limits[0] if j.limits else 0.0 for j in joints], dtype=np.float64),
-        np.array([j.limits[1] if j.limits else 0.0 for j in joints], dtype=np.float64),
-        np.array([1 if j.limits else 0 for j in joints], dtype=np.int32),
+        np.array([j.axis for j in gj], dtype=np.float64),
+        np.array([j.T_left for j in gj], dtype=np.float64),
+        np.array([j.T_right for j in gj], dtype=np.float64),
+        np.array([0 if j.joint_type == "revolute" else 1 for j in gj], dtype=np.int32),
+        np.array([j.limits[0] if j.limits else 0.0 for j in lj], dtype=np.float64),
+        np.array([j.limits[1] if j.limits else 0.0 for j in lj], dtype=np.float64),
+        np.array([1 if j.limits else 0 for j in lj], dtype=np.int32),
     )
     _consts_cache[id(kb)] = marshalled
     return marshalled
@@ -97,12 +109,13 @@ def try_native_solve(
     if len(kb.joints) != 6:
         return None
 
-    axes, t_left, t_right, types, lo, hi, has_limits = _consts(kb)
+    axes, t_left, t_right, types, lo, hi, has_limits = _consts(solver_name, kb)
     has_seed = q_seed is not None
     seed_arr = (
         np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(len(kb.joints), np.float64)
     )
-    qs, resids, refine = ext.three_parallel_artifact_solve(
+    qs, resids, refine = ext.native_artifact_solve(
+        solver_name,
         axes,
         t_left,
         t_right,

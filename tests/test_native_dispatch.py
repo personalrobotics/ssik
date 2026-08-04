@@ -24,7 +24,7 @@ from ssik import _native
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
 
-_ARMS = [arm.name for arm in load_manifest().values() if arm.solver == "ikgeo.three_parallel"]
+_ARMS = [arm.name for arm in load_manifest().values() if arm.solver in _native._NATIVE_SOLVERS]
 
 
 def _wrap(a: float) -> float:

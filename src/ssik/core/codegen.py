@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ssik._native import _NATIVE_SOLVERS as _NATIVE_SOLVER_FAMILIES
 from ssik.core.solver_registry import SOLVERS
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
@@ -241,10 +242,10 @@ def _render_specialised(
         "rescue_via_T_perturbation as _rescue_via_T_perturbation\n"
     )
     buf.write("from ssik.postprocess import finalize_solutions as _ps_finalize\n")
-    # Opt-in native (C++) dispatch (#507), emitted only for families with a
+    # Opt-in native (C++) dispatch (#507/#510), emitted only for families with a
     # native implementation: solve(..., native=True) tries ssik._ssik_native and
     # silently falls back to the Python path below when it is unavailable.
-    if plan.solver_name == "ikgeo.three_parallel":
+    if plan.solver_name in _NATIVE_SOLVER_FAMILIES:
         buf.write("from ssik._native import try_native_solve as _try_native_solve\n")
     buf.write("from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
@@ -274,7 +275,7 @@ def _render_specialised(
             _render_specialised_solve_orchestrator(
                 _spec.fk_atol_expr,
                 force_refine=_spec.force_refine,
-                emit_native=plan.solver_name == "ikgeo.three_parallel",
+                emit_native=plan.solver_name in _NATIVE_SOLVER_FAMILIES,
             )
         )
     buf.write(_render_fk_alias())
