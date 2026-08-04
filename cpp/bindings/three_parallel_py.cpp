@@ -12,24 +12,26 @@
 
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
+#include "ssik_cpp/solvers/srs_canonical.hpp"
 #include "ssik_cpp/solvers/three_parallel.hpp"
 
 namespace py = pybind11;
 
 namespace {
 
-// Build the native JointConsts<6> from the KinBody arrays marshalled by the
-// Python adapter. Shapes: axes (6,3), t_left/t_right (6,4,4), types (6,).
-ssik::JointConsts<6> make_consts(const py::array_t<double>& axes,
-                                 const py::array_t<double>& t_left,
-                                 const py::array_t<double>& t_right,
-                                 const py::array_t<int>& types) {
+// Build a native JointConsts<N> from the KinBody arrays marshalled by the Python
+// adapter. Shapes: axes (N,3), t_left/t_right (N,4,4), types (N,).
+template <int N>
+ssik::JointConsts<N> make_consts_n(const py::array_t<double>& axes,
+                                   const py::array_t<double>& t_left,
+                                   const py::array_t<double>& t_right,
+                                   const py::array_t<int>& types) {
   auto a = axes.unchecked<2>();
   auto tl = t_left.unchecked<3>();
   auto tr = t_right.unchecked<3>();
   auto ty = types.unchecked<1>();
-  ssik::JointConsts<6> c;
-  for (int i = 0; i < 6; ++i) {
+  ssik::JointConsts<N> c;
+  for (int i = 0; i < N; ++i) {
     c.axis[i] = Eigen::Vector3d(a(i, 0), a(i, 1), a(i, 2));
     for (int r = 0; r < 4; ++r)
       for (int col = 0; col < 4; ++col) {
@@ -39,6 +41,50 @@ ssik::JointConsts<6> make_consts(const py::array_t<double>& axes,
     c.type[i] = ty(i) == 0 ? ssik::JointType::Revolute : ssik::JointType::Prismatic;
   }
   return c;
+}
+
+ssik::JointConsts<6> make_consts(const py::array_t<double>& axes,
+                                 const py::array_t<double>& t_left,
+                                 const py::array_t<double>& t_right,
+                                 const py::array_t<int>& types) {
+  return make_consts_n<6>(axes, t_left, t_right, types);
+}
+
+// Core canonical-SRS solve (#512) for the beachhead validation. SRS geometric
+// constants are precomputed in Python and passed in.
+py::tuple srs_canonical_solve_py(py::array_t<double> axes, py::array_t<double> t_left,
+                                 py::array_t<double> t_right, py::array_t<int> types, double l_se,
+                                 double l_ew, py::array_t<double> ee_offset,
+                                 py::array_t<double> shoulder_pivot,
+                                 py::array_t<double> r_post_wrist, py::array_t<double> target) {
+  const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  ssik::SrsConsts s;
+  s.l_se = l_se;
+  s.l_ew = l_ew;
+  auto eo = ee_offset.unchecked<1>();
+  auto sp = shoulder_pivot.unchecked<1>();
+  auto rp = r_post_wrist.unchecked<2>();
+  for (int i = 0; i < 3; ++i) {
+    s.ee_offset_local[i] = eo(i);
+    s.shoulder_pivot[i] = sp(i);
+    for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
+  }
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const std::vector<ssik::Solution<7>> sols = ssik::srs_canonical_solve(c, s, T);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 7});
+  py::array_t<double> resids(n);
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 7; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+  }
+  return py::make_tuple(qs, resids);
 }
 
 py::tuple three_parallel_solve_py(py::array_t<double> axes, py::array_t<double> t_left,
@@ -177,6 +223,9 @@ PYBIND11_MODULE(_ssik_native, m) {
   m.def("spherical_two_parallel_solve", &spherical_two_parallel_solve_py, py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("target"),
         py::arg("allow_refinement") = false, py::arg("refinement_max_iters") = 15);
+  m.def("srs_canonical_solve", &srs_canonical_solve_py, py::arg("axes"), py::arg("t_left"),
+        py::arg("t_right"), py::arg("types"), py::arg("l_se"), py::arg("l_ew"), py::arg("ee_offset"),
+        py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("target"));
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,

@@ -45,4 +45,23 @@ Pose fk(const JointConsts<N>& c, const std::array<double, N>& q) {
   return t;
 }
 
+// Partial FK: the world frame (rotation R, origin p) at joint k BEFORE its own
+// rotation, given config q. Mirrors ssik.solvers.seven_r.srs._frame_at_joint
+// exactly (T_left contributes translation only -- rotation block is I in a
+// POE-normalized chain -- and T_right's rotation is applied after the joint).
+template <int N>
+std::pair<Eigen::Matrix3d, Eigen::Vector3d> frame_at_joint(const JointConsts<N>& c,
+                                                           const std::array<double, N>& q, int k) {
+  Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d p = Eigen::Vector3d::Zero();
+  for (int i = 0; i < N; ++i) {
+    p = p + R * c.t_left[i].template block<3, 1>(0, 3);
+    if (i == k) return {R, p};
+    R = R * Eigen::AngleAxisd(q[i], c.axis[i].normalized()).toRotationMatrix();
+    R = R * c.t_right[i].template block<3, 3>(0, 0);
+    p = p + R * c.t_right[i].template block<3, 1>(0, 3);
+  }
+  return {R, p};
+}
+
 }  // namespace ssik
