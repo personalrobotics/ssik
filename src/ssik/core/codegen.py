@@ -241,6 +241,11 @@ def _render_specialised(
         "rescue_via_T_perturbation as _rescue_via_T_perturbation\n"
     )
     buf.write("from ssik.postprocess import finalize_solutions as _ps_finalize\n")
+    # Opt-in native (C++) dispatch (#507), emitted only for families with a
+    # native implementation: solve(..., native=True) tries ssik._ssik_native and
+    # silently falls back to the Python path below when it is unavailable.
+    if plan.solver_name == "ikgeo.three_parallel":
+        buf.write("from ssik._native import try_native_solve as _try_native_solve\n")
     buf.write("from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -269,6 +274,7 @@ def _render_specialised(
             _render_specialised_solve_orchestrator(
                 _spec.fk_atol_expr,
                 force_refine=_spec.force_refine,
+                emit_native=plan.solver_name == "ikgeo.three_parallel",
             )
         )
     buf.write(_render_fk_alias())
@@ -276,9 +282,42 @@ def _render_specialised(
     return buf.getvalue()
 
 
+# Injected into the 6R orchestrator's solve() for native-capable families (#507):
+# a `native: bool = False` kwarg plus an early dispatch to the shipped C++
+# extension that silently falls back (returns None -> continue) when unavailable.
+_NATIVE_HOOK = """\
+    if native:
+        _native_sols = _try_native_solve(
+            SOLVER_NAME,
+            _KB,
+            T_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+        )
+        if _native_sols is not None:
+            return _native_sols
+"""
+
+# Docstring entry for the injected `native` kwarg (dedented base indent).
+_NATIVE_DOC = """\
+    :param native: opt into the shipped native (C++) backend for this
+        arm's solver family (~50x faster). Returns the same solution
+        *set*; the *order* without a seed and the near-singular
+        *representative* may differ (numpy vs Eigen). Silently falls back
+        to the Python path when the native extension isn't available
+        (Windows / source installs). Default ``False``.
+"""
+
+
 def _render_specialised_solve_orchestrator(
     fk_atol_expr: str = "policy.subproblem_numerical",
     force_refine: bool = False,
+    emit_native: bool = False,
 ) -> str:
     """Render the public ``solve()`` for specialised artifacts.
 
@@ -675,6 +714,24 @@ def _render_specialised_solve_orchestrator(
         # the gate when set, so non-forced artifacts stay byte-identical.
         template = template.replace(
             "if not allow_refinement:", "if not (allow_refinement or True):"
+        )
+    if emit_native:
+        # Add the `native` kwarg + early native dispatch. Only native-capable
+        # families opt in, so every other artifact stays byte-identical.
+        template = template.replace(
+            "    seed_tolerance: float | None = None,\n):",
+            "    seed_tolerance: float | None = None,\n    native: bool = False,\n):",
+        )
+        template = template.replace(
+            '        raise ValueError("seed_tolerance requires q_seed")\n'
+            "    T = np.asarray(T_target, dtype=np.float64)",
+            '        raise ValueError("seed_tolerance requires q_seed")\n'
+            + _NATIVE_HOOK
+            + "    T = np.asarray(T_target, dtype=np.float64)",
+        )
+        template = template.replace(
+            "    :returns: list of :class:`Solution`; empty list iff no IK",
+            _NATIVE_DOC + "    :returns: list of :class:`Solution`; empty list iff no IK",
         )
     return template
 

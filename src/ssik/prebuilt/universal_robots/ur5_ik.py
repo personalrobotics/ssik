@@ -54,6 +54,7 @@ from ssik.refinement import lm_refine as _lm_refine
 import functools as _functools
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.postprocess import finalize_solutions as _ps_finalize
+from ssik._native import try_native_solve as _try_native_solve
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.three_parallel"
@@ -479,6 +480,7 @@ def solve(
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
+    native: bool = False,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -528,12 +530,33 @@ def solve(
         Rarely customised.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
+    :param native: opt into the shipped native (C++) backend for this
+        arm's solver family (~50x faster). Returns the same solution
+        *set*; the *order* without a seed and the near-singular
+        *representative* may differ (numpy vs Eigen). Silently falls back
+        to the Python path when the native extension isn't available
+        (Windows / source installs). Default ``False``.
     :returns: list of :class:`Solution`; empty list iff no IK
         closed within ``policy.subproblem_numerical`` (or all
         IKs were filtered by ``respect_limits=True``).
     """
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
+    if native:
+        _native_sols = _try_native_solve(
+            SOLVER_NAME,
+            _KB,
+            T_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+        )
+        if _native_sols is not None:
+            return _native_sols
     T = np.asarray(T_target, dtype=np.float64)
     candidates = _solve_algebraic(T)
 

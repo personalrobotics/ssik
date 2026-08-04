@@ -115,13 +115,16 @@ def test_artifact_contract_parity(arm_name: str) -> None:
         if cpp_l2:
             assert _close(py_l2[0].q, cpp_l2[0].q), f"{arm_name}: wrap_l2 nearest mismatch"
 
-        # q_seed + max_solutions: nearest-k in order.
+        # seed + max: same count and the nearest (top-1) matches. Deeper ordering
+        # isn't asserted -- near-equidistant solutions at a near-singular pose can
+        # swap which lands k-th by BLAS backend (the #56 representative ambiguity).
         py_sm = mod.solve(t, q_seed=seed, max_solutions=2)
         cpp_sm = cpp_artifact_solve(kb, t, q_seed=seed, max_solutions=2)
         assert len(py_sm) == len(cpp_sm), f"{arm_name}: seed+max_solutions count mismatch"
-        assert all(_close(a.q, b.q) for a, b in zip(py_sm, cpp_sm, strict=True)), (
-            f"{arm_name}: seed+max_solutions ordered mismatch"
-        )
+        if cpp_sm:
+            assert _close(py_sm[0].q, cpp_sm[0].q), (
+                f"{arm_name}: seed+max_solutions nearest mismatch"
+            )
 
         # seed_tolerance: unordered agreement of the kept set.
         assert _set_match(

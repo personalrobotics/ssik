@@ -599,6 +599,19 @@ sols = take_first(sols, k=4)                                 # top-k after ranki
 
 By default `solve()` already runs `wrap_to_limits` + `respect_limits` (and, when `q_seed`/`seed_tolerance`/`seed_metric` are passed, the seed filter + ranking); the standalone helpers exist for callers who want a different order, a different metric, or to add their own filters (collision-aware filtering, dexterity scoring) between the layers.
 
+### Native (C++) backend: `solve(native=True)`
+
+For the three-parallel 6R family (the UR sizes, CR5, Nova5, Z1, Standard Bots core/spark/thor), `solve()` accepts an opt-in `native=True` that runs a bundled C++ implementation of the full `solve()` contract — roughly **50× faster** on these arms:
+
+```python
+sols = ur5_ik.solve(T_target, native=True)                   # same API, native speed
+sols = ur5_ik.solve(T_target, native=True, q_seed=q_current, max_solutions=1)
+```
+
+- **Same answers.** It reproduces the Python result's solution *set*. The *order* (without a seed) and the near-singular *representative* may differ (numpy vs Eigen); with a seed the nearest solution is stable.
+- **Silent fallback.** `native=True` is a hint: where the native extension isn't bundled (Windows wheels, source installs) or the arm's solver isn't native-capable, it transparently uses the Python path — it never fails for unavailability.
+- **Opt-in only.** The default (`native=False`) is unchanged. The native artifact is validated against the Python `solve()` as the oracle across the whole family and every option (limits / seed / max / tolerance).
+
 Out of scope: collision filtering (use FCL or similar at the application layer) and continuous-trajectory smoothness (typically a separate planner concern).
 
 ## How it compares
