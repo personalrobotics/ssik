@@ -50,6 +50,7 @@ from ssik.refinement import seeded_track as _seeded_track
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits
 from ssik.solvers.seven_r.srs import solve as _solver_solve
+from ssik._native import try_native_srs_algebraic as _try_native_srs_algebraic
 
 SOLVER_NAME = "seven_r.srs"
 SOLVER_TIER = 0
@@ -163,6 +164,7 @@ def solve(
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
+    native: bool = False,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -243,13 +245,19 @@ def solve(
             )
             if _fast:
                 return _fast
-    sols, _is_ls = _solver_solve(
-        _KB,
-        T_target,
-        policy=policy,
-        allow_refinement=allow_refinement,
-        refinement_max_iters=refinement_max_iters,
+    _native_sols = (
+        _try_native_srs_algebraic(SOLVER_NAME, _KB, T_target) if native else None
     )
+    if _native_sols is not None:
+        sols = _native_sols
+    else:
+        sols, _is_ls = _solver_solve(
+            _KB,
+            T_target,
+            policy=policy,
+            allow_refinement=allow_refinement,
+            refinement_max_iters=refinement_max_iters,
+        )
     # Bulletproof fallback (#319 / #358): the analytical path found
     # nothing. If the target is within the arm's max reach it may be a
     # measure-zero degenerate pose (near-singular elbow/gimbal, or a

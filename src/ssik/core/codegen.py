@@ -178,7 +178,17 @@ def _render_thin_wrapper(
         else "ssik.solvers.seven_r._swivel_limits"
     )
     buf.write(f"from {_resolver_module} import resolve_in_limits as _resolve_in_limits\n")
-    buf.write(f"from {solver_module} import solve as _solver_solve\n\n")
+    buf.write(f"from {solver_module} import solve as _solver_solve\n")
+    # Opt-in native (C++) dispatch (#512) for thin-wrapper families with a native
+    # core (seven_r.srs canonical path). solve(..., native=True) replaces the
+    # analytical sweep with ssik._ssik_native and reuses the Python postprocess
+    # (seeded-track / limits / seed / resolve_in_limits). Falls back silently.
+    emit_native = plan.solver_name in _NATIVE_SOLVER_FAMILIES
+    if emit_native:
+        buf.write(
+            "from ssik._native import try_native_srs_algebraic as _try_native_srs_algebraic\n"
+        )
+    buf.write("\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
     buf.write(f"EXPECTED_MS_MEDIAN = {plan.expected_ms_median!r}\n")
@@ -190,7 +200,7 @@ def _render_thin_wrapper(
     buf.write("\n")
     buf.write(_render_kinbody_builder())
     buf.write("\n")
-    buf.write(_render_solve_function(solver_short))
+    buf.write(_render_solve_function(solver_short, emit_native=emit_native))
     buf.write(_render_fk_function_from_kb())
     buf.write(_render_all_export())
     return buf.getvalue()
@@ -1361,9 +1371,9 @@ def _render_kinbody_builder() -> str:
     )
 
 
-def _render_solve_function(solver_short: str) -> str:
+def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
     """Emit the public ``solve`` callable wrapping the chosen ssik solver."""
-    return textwrap.dedent(
+    template = textwrap.dedent(
         f"""\
 
         def solve(
@@ -1507,6 +1517,37 @@ def _render_solve_function(solver_short: str) -> str:
             )
         """
     )
+    if emit_native:
+        # Add the `native` kwarg + replace the analytical sweep with the native
+        # core (when available), reusing the Python postprocess. Only families
+        # with a native thin-wrapper core opt in; others stay byte-identical.
+        template = template.replace(
+            "    seed_tolerance: float | None = None,\n):",
+            "    seed_tolerance: float | None = None,\n    native: bool = False,\n):",
+        )
+        template = template.replace(
+            "    sols, _is_ls = _solver_solve(\n"
+            "        _KB,\n"
+            "        T_target,\n"
+            "        policy=policy,\n"
+            "        allow_refinement=allow_refinement,\n"
+            "        refinement_max_iters=refinement_max_iters,\n"
+            "    )",
+            "    _native_sols = (\n"
+            "        _try_native_srs_algebraic(SOLVER_NAME, _KB, T_target) if native else None\n"
+            "    )\n"
+            "    if _native_sols is not None:\n"
+            "        sols = _native_sols\n"
+            "    else:\n"
+            "        sols, _is_ls = _solver_solve(\n"
+            "            _KB,\n"
+            "            T_target,\n"
+            "            policy=policy,\n"
+            "            allow_refinement=allow_refinement,\n"
+            "            refinement_max_iters=refinement_max_iters,\n"
+            "        )",
+        )
+    return template
 
 
 def _render_all_export() -> str:
