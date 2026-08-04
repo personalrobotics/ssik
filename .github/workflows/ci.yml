@@ -172,3 +172,43 @@ jobs:
         # Bots arms). cpp legs skip when the ext is absent (the main pytest
         # matrix); here it is built, so they execute.
         run: uv run pytest tests/test_three_parallel.py tests/test_three_parallel_family.py tests/test_three_parallel_boundary.py tests/test_three_parallel_artifact.py -q
+
+  native_wheel:
+    # Ships the native extension in the wheel (#506). cibuildwheel runs only on
+    # release tags, so this validates the wheel build + native bundling on PRs:
+    # build a wheel on Linux + macOS, install it, and native-solve through the
+    # shipped ssik._ssik_native. Without this the native ship is unexercised
+    # until a release tag.
+    name: Native wheel build — ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install Eigen (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
+
+      - name: Install Eigen (macOS)
+        if: runner.os == 'macOS'
+        run: brew install eigen
+
+      - name: Build wheel
+        run: uv build --wheel
+
+      - name: Install wheel + native smoke
+        run: |
+          uv venv .wheelenv
+          uv pip install --python .wheelenv/bin/python dist/*.whl numpy
+          .wheelenv/bin/python scripts/native_smoke.py

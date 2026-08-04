@@ -1,10 +1,10 @@
 """Adapter exposing the native C++ solver as a ``three_parallel.solve`` drop-in.
 
 Lets the existing Python test suite validate the C++ backend without re-writing
-any assertions (#499): the same tests run against ``{python, cpp}``. The C++
-extension (``ssik_cpp_ext``, built by ``scripts/build_cpp_ext.py`` into
-``cpp/build``) is test-only -- never shipped, never a runtime dependency. Tests
-skip the C++ backend when it isn't built.
+any assertions (#499): the same tests run against ``{python, cpp}``. Prefers the
+shipped ``ssik._ssik_native`` extension (#506) when installed, else falls back to
+the test-only build (``scripts/build_cpp_ext.py`` into ``cpp/build``). Tests skip
+the C++ backend when neither is available.
 """
 
 from __future__ import annotations
@@ -27,12 +27,22 @@ def _load_ext() -> Any:
     global _ext
     if _ext is not None:
         return _ext
+    # Prefer the shipped extension (ssik._ssik_native, #506) so tests exercise
+    # the wheel's native path when installed; fall back to the test-only build
+    # under cpp/build produced by scripts/build_cpp_ext.py.
+    try:
+        from ssik import _ssik_native  # type: ignore[attr-defined]
+
+        _ext = _ssik_native
+        return _ext
+    except ImportError:
+        pass
     if str(_BUILD) not in sys.path:
         sys.path.insert(0, str(_BUILD))
     try:
-        import ssik_cpp_ext  # type: ignore[import-not-found]
+        import _ssik_native  # type: ignore[import-not-found]
 
-        _ext = ssik_cpp_ext
+        _ext = _ssik_native
     except ImportError:
         _ext = False
     return _ext
@@ -69,7 +79,7 @@ def cpp_three_parallel_solve(
     """
     ext = _load_ext()
     if not ext:
-        raise RuntimeError("ssik_cpp_ext not built; run scripts/build_cpp_ext.py")
+        raise RuntimeError("_ssik_native not built; run scripts/build_cpp_ext.py")
     if len(kb.joints) != 6:
         raise ValueError(f"three_parallel requires a 6-DOF chain; got {len(kb.joints)} joints")
 
@@ -123,7 +133,7 @@ def cpp_artifact_solve(
     """
     ext = _load_ext()
     if not ext:
-        raise RuntimeError("ssik_cpp_ext not built; run scripts/build_cpp_ext.py")
+        raise RuntimeError("_ssik_native not built; run scripts/build_cpp_ext.py")
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
     if len(kb.joints) != 6:

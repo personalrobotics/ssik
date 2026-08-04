@@ -38,6 +38,41 @@ CYTHON_TARGETS: tuple[str, ...] = (
     # call sites switch to typed memoryviews or scalar arguments.
 )
 
+# Native C++ solver extension (#506): the opt-in native backend (#501). The same
+# pybind source that powers the test conformance binding is compiled into the
+# wheel as ``ssik._ssik_native``. Header-only Eigen + C++20; shipped on Linux +
+# macOS. Windows falls back to the Python path (native deferred), so the wheel
+# still builds there without it.
+# Top-level Extension name so build_ext --inplace drops the .so at the repo root
+# (predictable, unlike a dotted name which setuptools resolves against src/); the
+# force_include below then maps it to ssik/ in the wheel, imported as
+# ``ssik._ssik_native`` (the pybind init symbol is keyed on the leaf name).
+NATIVE_EXT_MODULE = "_ssik_native"
+NATIVE_EXT_SOURCE = "cpp/bindings/three_parallel_py.cpp"
+NATIVE_SUPPORTED_PLATFORMS = ("linux", "darwin")
+
+
+def _native_supported() -> bool:
+    return sys.platform in NATIVE_SUPPORTED_PLATFORMS
+
+
+def _eigen_include(root: Path) -> str | None:
+    """Locate the Eigen headers: EIGEN_INCLUDE_DIR (set by CIBW_BEFORE_ALL) or
+    the standard system paths for local builds. Header-only, so no link step."""
+    import os
+
+    env = os.environ.get("EIGEN_INCLUDE_DIR")
+    candidates = [env] if env else []
+    candidates += [
+        "/opt/homebrew/include/eigen3",
+        "/usr/local/include/eigen3",
+        "/usr/include/eigen3",
+    ]
+    for c in candidates:
+        if c and (Path(c) / "Eigen" / "Dense").exists():
+            return c
+    return None
+
 
 class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
     PLUGIN_NAME = "cython"
@@ -51,7 +86,7 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
         # Lazy imports: Cython + setuptools are build-time dependencies declared
         # in [build-system].requires.
         from Cython.Build import cythonize
-        from setuptools import setup  # type: ignore[import-untyped]
+        from setuptools import Extension, setup  # type: ignore[import-untyped]
 
         root = Path(self.root)
 
@@ -73,6 +108,28 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 compiler_directives={"language_level": "3"},
                 annotate=False,
             )
+            # Append the native C++ solver extension on supported platforms.
+            native_built = False
+            if _native_supported():
+                import pybind11
+
+                eigen = _eigen_include(root)
+                if eigen is None:
+                    raise RuntimeError(
+                        "Eigen headers not found (set EIGEN_INCLUDE_DIR); required to build "
+                        f"{NATIVE_EXT_MODULE} on this platform ({sys.platform})."
+                    )
+                ext_modules = [
+                    *ext_modules,
+                    Extension(
+                        NATIVE_EXT_MODULE,
+                        sources=[str(root / NATIVE_EXT_SOURCE)],
+                        include_dirs=[str(root / "cpp" / "include"), pybind11.get_include(), eigen],
+                        language="c++",
+                        extra_compile_args=["-std=c++20", "-O2"],
+                    ),
+                ]
+                native_built = True
             setup(
                 name="ssik-cython-ext",
                 ext_modules=ext_modules,
@@ -98,6 +155,19 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
             # build_data["force_include"] is {source_abs_path: dest_in_wheel}.
             rel_dest = str(so_path.relative_to(root / "src"))
             force_include[str(so_path)] = rel_dest
+
+        # Force-include the native C++ extension (#506). setuptools infers
+        # package_dir[""]="src" from the Cython packages, so build_ext --inplace
+        # drops the top-level _ssik_native module at src/; ship it as
+        # ssik/_ssik_native.<abi>.so.
+        if native_built:
+            native_so = root / "src" / f"_ssik_native{so_suffix}"
+            if not native_so.exists():
+                raise RuntimeError(
+                    f"CythonBuildHook: expected native extension at {native_so} after "
+                    f"build_ext --inplace; got nothing."
+                )
+            force_include[str(native_so)] = f"ssik/_ssik_native{so_suffix}"
 
         # Mark wheel as platform-specific so the .so files (which are arch +
         # python-version + OS specific) only get installed on matching hosts.

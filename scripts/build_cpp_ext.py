@@ -2,7 +2,7 @@
 """Build the test-only native-solver Python extension (#499).
 
 Compiles ``cpp/bindings/three_parallel_py.cpp`` (which includes the header-only
-native solver) into ``ssik_cpp_ext`` so the existing Python test suite can drive
+native solver) into ``_ssik_native`` so the existing Python test suite can drive
 the C++ backend. This is NOT part of the shipped wheel -- it is a dev/CI test
 tool. The Python test suite skips the C++ backend when the extension is absent.
 
@@ -40,7 +40,7 @@ def _eigen_include() -> str:
 def build(out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
-    out = out_dir / f"ssik_cpp_ext{ext_suffix}"
+    out = out_dir / f"_ssik_native{ext_suffix}"
     src = _REPO / "cpp" / "bindings" / "three_parallel_py.cpp"
 
     cmd = [

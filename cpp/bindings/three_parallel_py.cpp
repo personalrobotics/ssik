@@ -125,8 +125,12 @@ py::tuple three_parallel_artifact_solve_py(
 
 }  // namespace
 
-PYBIND11_MODULE(ssik_cpp_ext, m) {
-  m.doc() = "Test-only native-solver binding for C++<->Python conformance (#499)";
+// Module name `_ssik_native`: the same source is compiled both as the test-only
+// extension (built into cpp/build by scripts/build_cpp_ext.py) and as the
+// shipped `ssik._ssik_native` extension in the wheel (hatch_build.py, #506).
+// The pybind init symbol is keyed on the leaf name, so both import paths work.
+PYBIND11_MODULE(_ssik_native, m) {
+  m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);
