@@ -190,8 +190,13 @@ test-command = [
 ]
 
 [tool.cibuildwheel.linux]
-# manylinux_2_28 ships GCC 14; sufficient for Cython 3.x.
+# manylinux_2_28 ships GCC 14; sufficient for Cython 3.x + the C++20 native ext.
 manylinux-x86_64-image = "manylinux_2_28"
+# Provide Eigen for the native extension (#506). The manylinux container has no
+# eigen package, so fetch a pinned header-only release once per build and point
+# hatch_build at it via EIGEN_INCLUDE_DIR (env is passed through to the build).
+before-all = "curl -sSL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz | tar xz -C /opt"
+environment = { EIGEN_INCLUDE_DIR = "/opt/eigen-3.4.0" }
 
 [tool.cibuildwheel.macos]
 # Build both arm64 (native) and x86_64 (cross-compiled) on the macos-latest
@@ -202,6 +207,10 @@ manylinux-x86_64-image = "manylinux_2_28"
 # same flags, just hosted on a different CPU). Test-skip above prevents
 # cibuildwheel from trying to RUN the x86_64 wheel on arm64.
 archs = ["arm64", "x86_64"]
+# Eigen for the native ext (#506); brew lands headers where hatch_build looks
+# (/opt/homebrew or /usr/local include/eigen3). Header-only, so the arm64 host
+# building the x86_64 cross-wheel still just needs the include path.
+before-all = "brew install eigen"
 
 [tool.ruff]
 line-length = 100
