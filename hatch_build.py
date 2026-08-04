@@ -108,28 +108,41 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 compiler_directives={"language_level": "3"},
                 annotate=False,
             )
-            # Append the native C++ solver extension on supported platforms.
+            # Append the native C++ solver extension on supported platforms when
+            # Eigen is available. If Eigen is absent (a dev/editable install that
+            # doesn't need native -- the test harness uses cpp/build), skip it
+            # rather than failing the build. Shipped wheels are still guaranteed
+            # to carry native by the wheel smoke gate ([tool.cibuildwheel]
+            # test-command asserts ssik._ssik_native imports) + the native_wheel
+            # CI job -- so a native-less wheel can never be published silently.
             native_built = False
             if _native_supported():
-                import pybind11
-
                 eigen = _eigen_include(root)
                 if eigen is None:
-                    raise RuntimeError(
-                        "Eigen headers not found (set EIGEN_INCLUDE_DIR); required to build "
-                        f"{NATIVE_EXT_MODULE} on this platform ({sys.platform})."
+                    print(
+                        f"[hatch_build] Eigen not found (set EIGEN_INCLUDE_DIR); skipping "
+                        f"{NATIVE_EXT_MODULE}. Fine for a dev install; shipped wheels require it "
+                        f"(enforced by the wheel smoke gate).",
+                        file=sys.stderr,
                     )
-                ext_modules = [
-                    *ext_modules,
-                    Extension(
-                        NATIVE_EXT_MODULE,
-                        sources=[str(root / NATIVE_EXT_SOURCE)],
-                        include_dirs=[str(root / "cpp" / "include"), pybind11.get_include(), eigen],
-                        language="c++",
-                        extra_compile_args=["-std=c++20", "-O2"],
-                    ),
-                ]
-                native_built = True
+                else:
+                    import pybind11
+
+                    ext_modules = [
+                        *ext_modules,
+                        Extension(
+                            NATIVE_EXT_MODULE,
+                            sources=[str(root / NATIVE_EXT_SOURCE)],
+                            include_dirs=[
+                                str(root / "cpp" / "include"),
+                                pybind11.get_include(),
+                                eigen,
+                            ],
+                            language="c++",
+                            extra_compile_args=["-std=c++20", "-O2"],
+                        ),
+                    ]
+                    native_built = True
             setup(
                 name="ssik-cython-ext",
                 ext_modules=ext_modules,
