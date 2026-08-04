@@ -50,3 +50,9 @@ add_test(NAME ur5_fk COMMAND test_ur5_fk)
 add_executable(test_ur5_newton tests/test_ur5_newton.cpp)
 target_link_libraries(test_ur5_newton PRIVATE ssik_cpp)
 add_test(NAME ur5_newton COMMAND test_ur5_newton)
+
+# THE GATE: the self-contained artifact compiles standalone (only ur5_ik.hpp +
+# header-only primitives, zero Python) and its solve() matches the Python oracle.
+add_executable(test_ur5_artifact tests/test_ur5_artifact.cpp)
+target_link_libraries(test_ur5_artifact PRIVATE ssik_cpp)
+add_test(NAME ur5_artifact COMMAND test_ur5_artifact)

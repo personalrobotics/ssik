@@ -66,3 +66,4 @@ cpp/build/
 # (#82), so they are never committed -- only the constants headers are (#495).
 cpp/gen/*_fk_parity.hpp
 cpp/gen/*_newton_parity.hpp
+cpp/gen/*_solve_parity.hpp
