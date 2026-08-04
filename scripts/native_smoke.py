@@ -40,7 +40,8 @@ def main() -> int:
     q = np.array([0.3, -0.7, 0.9, 1.1, -0.5, 0.2])
     t_target = np.asarray(ur5_ik.fk(q), dtype=np.float64)
 
-    qs, resids, _refine = _ssik_native.three_parallel_artifact_solve(
+    qs, resids, _refine = _ssik_native.native_artifact_solve(
+        "ikgeo.three_parallel",
         axes,
         t_left,
         t_right,
