@@ -36,14 +36,11 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 # (name, base, ee, is_canonical) -- a canonical-ZYZ arm + general concurrent-axis
 # arms, so the port is exercised on both the offset-free and the general path.
-# iiwa14 uses iiwa_link_7 (not iiwa_link_ee): the ee link carries a home flange
-# rotation (R_home != I), which the SRS family mishandles for *both* the
-# canonical solve and the resolver (ee_offset_local is baked as a world-home
-# vector but applied as ee-local) -- see GitHub #517. That is a shared Python
-# solver bug, out of scope for this C++ parity port; validate on the supported
-# R_home == I domain.
+# iiwa14 uses iiwa_link_ee: the ee link carries a rotated home flange
+# (R_home != I), so this also exercises the #517 ee-frame gauge-normalization in
+# the baked SrsConsts (before that fix the resolver returned nothing here).
 _SRS_ARMS = [
-    ("kuka_iiwa14", "iiwa_link_0", "iiwa_link_7", True),
+    ("kuka_iiwa14", "iiwa_link_0", "iiwa_link_ee", True),
     ("r1pro_left", "left_arm_base_link", "left_arm_link7", False),
     ("openarm_left", "openarm_left_base_link", "openarm_left_ee_base_link", False),
 ]

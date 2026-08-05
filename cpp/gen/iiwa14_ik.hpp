@@ -112,7 +112,7 @@ inline SrsConsts srs_consts() {
   SrsConsts s;
   s.l_se = 0.42000000000000004;
   s.l_ew = 0.3999999999999999;
-  s.ee_offset_local = Eigen::Vector3d(-5.5109105961630834e-18, -2.2945432535474377e-17, 0.1259999999999999);
+  s.ee_offset_local = Eigen::Vector3d(-5.510910596163081e-18, -3.837598220473101e-17, 0.1259999999999999);
   s.shoulder_pivot = Eigen::Vector3d(0.0, 0.0, 0.36);
   s.r_post_wrist = (Eigen::Matrix3d() <<
        1.0, 4.898587196589412e-16, 1.4791141972893971e-31,
