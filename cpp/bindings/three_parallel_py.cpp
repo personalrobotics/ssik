@@ -11,6 +11,7 @@
 #include <pybind11/pybind11.h>
 
 #include "ssik_cpp/fk.hpp"
+#include "ssik_cpp/seven_r/feasible_arcs.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
 #include "ssik_cpp/solvers/three_parallel.hpp"
@@ -215,6 +216,40 @@ py::tuple native_artifact_solve_py(
 // extension (built into cpp/build by scripts/build_cpp_ext.py) and as the
 // shipped `ssik._ssik_native` extension in the wheel (hatch_build.py, #506).
 // The pybind init symbol is keyed on the leaf name, so both import paths work.
+// Test-only: exercise the C++ feasible_arcs geometry (#515) against the Python
+// _feasible_param oracle. A synthetic two-harmonic joint family q_i(t) =
+// off + a1 cos t + b1 sin t + a2 cos 2t + b2 sin 2t (coeffs shape (K,5)) is
+// evaluated identically here and in Python; the arcs must match.
+py::list feasible_arcs_test_py(py::array_t<double> coeffs, py::array_t<int> swept,
+                               py::array_t<double> lo, py::array_t<double> hi,
+                               py::array_t<double> grid_arr, bool bounded) {
+  auto co = coeffs.unchecked<2>();
+  const int K = static_cast<int>(co.shape(0));
+  auto lo_u = lo.unchecked<1>();
+  auto hi_u = hi.unchecked<1>();
+  std::vector<ssik::feasible::Arc> limits(K);
+  for (int i = 0; i < K; ++i) limits[i] = {lo_u(i), hi_u(i)};
+  std::vector<int> sw;
+  auto sw_u = swept.unchecked<1>();
+  for (int i = 0; i < static_cast<int>(sw_u.shape(0)); ++i) sw.push_back(sw_u(i));
+  std::vector<double> grid;
+  auto g_u = grid_arr.unchecked<1>();
+  for (int k = 0; k < static_cast<int>(g_u.shape(0)); ++k) grid.push_back(g_u(k));
+
+  auto q_scalar = [&](double t) {
+    std::vector<double> q(K);
+    for (int i = 0; i < K; ++i)
+      q[i] = co(i, 0) + co(i, 1) * std::cos(t) + co(i, 2) * std::sin(t) +
+             co(i, 3) * std::cos(2.0 * t) + co(i, 4) * std::sin(2.0 * t);
+    return q;
+  };
+  const auto arcs = bounded ? ssik::feasible::feasible_arcs_bounded(q_scalar, sw, limits, grid)
+                            : ssik::feasible::feasible_arcs(q_scalar, sw, limits, grid);
+  py::list out;
+  for (const auto& [a, b] : arcs) out.append(py::make_tuple(a, b));
+  return out;
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
@@ -226,6 +261,8 @@ PYBIND11_MODULE(_ssik_native, m) {
   m.def("srs_canonical_solve", &srs_canonical_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("l_se"), py::arg("l_ew"), py::arg("ee_offset"),
         py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("target"));
+  m.def("feasible_arcs_test", &feasible_arcs_test_py, py::arg("coeffs"), py::arg("swept"),
+        py::arg("lo"), py::arg("hi"), py::arg("grid"), py::arg("bounded") = false);
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,

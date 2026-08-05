@@ -173,7 +173,7 @@ jobs:
         # test_native_dispatch: solve(native=True) parity + fallback (#507). cpp
         # legs / native tests skip when the ext is absent (the main matrix); here
         # it is built, so they execute.
-        run: uv run pytest tests/test_three_parallel.py tests/test_three_parallel_family.py tests/test_three_parallel_boundary.py tests/test_three_parallel_artifact.py tests/test_native_dispatch.py -q
+        run: uv run pytest tests/test_three_parallel.py tests/test_three_parallel_family.py tests/test_three_parallel_boundary.py tests/test_three_parallel_artifact.py tests/test_native_dispatch.py tests/test_feasible_arcs.py -q
 
   native_wheel:
     # Ships the native extension in the wheel (#506). cibuildwheel runs only on
