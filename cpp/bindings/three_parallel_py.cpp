@@ -12,6 +12,7 @@
 
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
+#include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
 #include "ssik_cpp/solvers/three_parallel.hpp"
@@ -250,6 +251,54 @@ py::list feasible_arcs_test_py(py::array_t<double> coeffs, py::array_t<int> swep
   return out;
 }
 
+// Test-only: exercise the C++ SRS swivel-limits resolver (#515) against Python
+// resolve_in_limits. Takes the baked SRS geometry (base + branch-enumeration
+// extras) + limits; returns the in-limits joint vectors.
+py::list srs_resolve_in_limits_py(py::array_t<double> axes, py::array_t<double> t_left,
+                                  py::array_t<double> t_right, py::array_t<int> types, double l_se,
+                                  double l_ew, py::array_t<double> ee_offset,
+                                  py::array_t<double> shoulder_pivot, py::array_t<double> r_post,
+                                  int elbow_index, py::array_t<double> upper_home,
+                                  py::array_t<double> forearm_home, py::array_t<double> lo,
+                                  py::array_t<double> hi, py::array_t<double> target,
+                                  double fk_atol) {
+  const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  ssik::SrsConsts s;
+  s.l_se = l_se;
+  s.l_ew = l_ew;
+  s.elbow_index = elbow_index;
+  auto eo = ee_offset.unchecked<1>();
+  auto sp = shoulder_pivot.unchecked<1>();
+  auto uh = upper_home.unchecked<1>();
+  auto fh = forearm_home.unchecked<1>();
+  auto rp = r_post.unchecked<2>();
+  for (int i = 0; i < 3; ++i) {
+    s.ee_offset_local[i] = eo(i);
+    s.shoulder_pivot[i] = sp(i);
+    s.upper_home[i] = uh(i);
+    s.forearm_home[i] = fh(i);
+    for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
+  }
+  std::array<std::array<double, 2>, 7> limits;
+  auto lo_u = lo.unchecked<1>();
+  auto hi_u = hi.unchecked<1>();
+  for (int i = 0; i < 7; ++i) limits[i] = {lo_u(i), hi_u(i)};
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const auto sols = ssik::srs_swivel::resolve_in_limits(c, s, T, limits, fk_atol);
+  py::list out;
+  for (const auto& sol : sols) {
+    py::array_t<double> q(7);
+    auto qm = q.mutable_unchecked<1>();
+    for (int i = 0; i < 7; ++i) qm(i) = sol.q[i];
+    out.append(q);
+  }
+  return out;
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
@@ -263,6 +312,11 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("target"));
   m.def("feasible_arcs_test", &feasible_arcs_test_py, py::arg("coeffs"), py::arg("swept"),
         py::arg("lo"), py::arg("hi"), py::arg("grid"), py::arg("bounded") = false);
+  m.def("srs_resolve_in_limits", &srs_resolve_in_limits_py, py::arg("axes"), py::arg("t_left"),
+        py::arg("t_right"), py::arg("types"), py::arg("l_se"), py::arg("l_ew"), py::arg("ee_offset"),
+        py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("elbow_index"),
+        py::arg("upper_home"), py::arg("forearm_home"), py::arg("lo"), py::arg("hi"),
+        py::arg("target"), py::arg("fk_atol"));
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
