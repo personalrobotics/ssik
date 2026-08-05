@@ -21,9 +21,9 @@ from numpy.typing import NDArray
 from ssik.core.solution import Solution
 
 # Solver families with a native implementation in _ssik_native. The 6R geometric
-# families expose the full artifact contract via try_native_solve; seven_r.srs
-# exposes only its analytical sweep via try_native_srs_algebraic (the Python
-# wrapper keeps seeded-track / resolve_in_limits / finalize).
+# families run the full artifact via try_native_solve; seven_r.srs runs the full
+# artifact via try_native_srs_solve (seeded-track + canonical/general core +
+# finalize + in-limits fallback, all native).
 _NATIVE_SOLVERS = frozenset({"ikgeo.three_parallel", "ikgeo.spherical_two_parallel", "seven_r.srs"})
 
 _ext: Any = None
@@ -156,7 +156,7 @@ def srs_native_geometry(kb: Any) -> dict[str, Any] | None:
     """Baked SRS geometry (the SrsConsts fields + the canonical/general dispatch
     flag) for ANY concurrent-axis SRS 7R arm, or None when the arm is not
     SRS-class. Single source of truth shared by the runtime native path
-    (:func:`_srs_native_args` / :func:`try_native_srs_algebraic`) AND the C++
+    (:func:`_srs_native_args` / :func:`try_native_srs_solve`) AND the C++
     emit (``scripts/cpp_emit._srs_bake``), so the pip ``native=True`` backend and
     the self-contained artifact always cover exactly the same arms -- adding an
     SRS arm enrols it in both automatically.
@@ -218,23 +218,38 @@ def _srs_native_args(kb: Any) -> dict[str, Any] | None:
             "types": np.array(
                 [0 if jt.joint_type == "revolute" else 1 for jt in j], dtype=np.int32
             ),
+            # Joint limits for the full-artifact native path (finalize's box).
+            "lo": np.array([jt.limits[0] if jt.limits else 0.0 for jt in j], dtype=np.float64),
+            "hi": np.array([jt.limits[1] if jt.limits else 0.0 for jt in j], dtype=np.float64),
+            "has_limits": np.array([1 if jt.limits else 0 for jt in j], dtype=np.int32),
             **geom,
         }
     _srs_cache[id(kb)] = result
     return result
 
 
-def try_native_srs_algebraic(
-    solver_name: str, kb: Any, t_target: NDArray[np.float64]
+def try_native_srs_solve(
+    solver_name: str,
+    kb: Any,
+    t_target: NDArray[np.float64],
+    *,
+    respect_limits: bool = True,
+    q_seed: NDArray[np.float64] | None = None,
+    seed_metric: str = "wrap_linf",
+    seed_tolerance: float | None = None,
+    max_solutions: int | None = None,
+    allow_rescue: bool = True,
+    refinement_max_iters: int = 15,
 ) -> list[Solution] | None:
-    """Native SRS analytical sweep (the expensive part), or None to fall back.
+    """FULL native SRS artifact solve (the whole ``<arm>.solve()`` contract in
+    C++), or ``None`` to fall back. Runs the entire pipeline natively via
+    ``srs_artifact_solve`` -- seeded-track fast path, canonical/general core,
+    finalize (limits -> seed -> truncate), and the #359 in-limits fallback -- so
+    the Python postprocess (which dominated the per-call time) is skipped.
 
-    Returns the deduped, FK-verified analytical candidate set (pre-finalize) --
-    the Python artifact keeps the seeded-track / limits / resolve_in_limits /
-    finalize postprocess around it. Covers EVERY concurrent-axis SRS arm: the
-    canonical-ZYZ offset-free core (iiwa14 / xmatepro7) and the general Davenport
-    core (#354; iiwa7 / r1pro / openarm), dispatched on the baked ``general_path``
-    flag so no arm silently falls back to Python.
+    The T-perturbation rescue is omitted (proven dormant for SRS + guarded), same
+    as the 6R native path. Parity with the Python solve is validated across the
+    full contract in tests/test_srs_artifact_cpp.py + test_srs_general_cpp.py.
     """
     if solver_name != "seven_r.srs":
         return None
@@ -244,37 +259,41 @@ def try_native_srs_algebraic(
     a = _srs_native_args(kb)
     if a is None:
         return None
-    tt = np.asarray(t_target, dtype=np.float64)
-    if a["general_path"]:
-        qs, resids = ext.srs_general_solve(
-            a["axes"],
-            a["t_left"],
-            a["t_right"],
-            a["types"],
-            a["l_se"],
-            a["l_ew"],
-            a["ee_offset_local"],
-            a["shoulder_pivot"],
-            a["r_post_wrist"],
-            a["elbow_index"],
-            a["upper_home"],
-            a["forearm_home"],
-            tt,
-        )
-    else:
-        qs, resids = ext.srs_canonical_solve(
-            a["axes"],
-            a["t_left"],
-            a["t_right"],
-            a["types"],
-            a["l_se"],
-            a["l_ew"],
-            a["ee_offset_local"],
-            a["shoulder_pivot"],
-            a["r_post_wrist"],
-            tt,
-        )
+    has_seed = q_seed is not None
+    seed_arr = np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(7, np.float64)
+    qs, resids, refine = ext.srs_artifact_solve(
+        a["axes"],
+        a["t_left"],
+        a["t_right"],
+        a["types"],
+        a["l_se"],
+        a["l_ew"],
+        a["ee_offset_local"],
+        a["shoulder_pivot"],
+        a["r_post_wrist"],
+        a["elbow_index"],
+        a["upper_home"],
+        a["forearm_home"],
+        a["lo"],
+        a["hi"],
+        a["has_limits"],
+        np.asarray(t_target, dtype=np.float64),
+        a["general_path"],
+        respect_limits,
+        has_seed,
+        seed_arr,
+        seed_metric,
+        seed_tolerance is not None,
+        seed_tolerance if seed_tolerance is not None else 0.0,
+        max_solutions if max_solutions is not None else -1,
+        allow_rescue,
+        refinement_max_iters,
+    )
     return [
-        Solution(q=np.asarray(qs[i], dtype=np.float64), fk_residual=float(resids[i]))
+        Solution(
+            q=np.asarray(qs[i], dtype=np.float64),
+            fk_residual=float(resids[i]),
+            refinement_used="lm" if int(refine[i]) == 1 else "none",
+        )
         for i in range(len(qs))
     ]

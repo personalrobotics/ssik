@@ -17,7 +17,7 @@ import importlib
 import numpy as np
 import pytest
 
-from ssik._native import srs_native_geometry, try_native_srs_algebraic
+from ssik._native import srs_native_geometry, try_native_srs_solve
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
 from tests._cpp_backend import cpp_available
@@ -60,7 +60,7 @@ def test_native_covers_and_matches(arm: str) -> None:
     for _ in range(60):
         q = np.array([rng.uniform(lo, hi) for lo, hi in lims])
         T = poe_forward_kinematics(kb, q)
-        if try_native_srs_algebraic("seven_r.srs", kb, np.asarray(T)) is not None:
+        if try_native_srs_solve("seven_r.srs", kb, np.asarray(T)) is not None:
             routed_native += 1
         na = [np.asarray(s.q) for s in mod.solve(T, native=True)]
         py = [np.asarray(s.q) for s in mod.solve(T, native=False)]

@@ -50,7 +50,7 @@ from ssik.refinement import seeded_track as _seeded_track
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits
 from ssik.solvers.seven_r.srs import solve as _solver_solve
-from ssik._native import try_native_srs_algebraic as _try_native_srs_algebraic
+from ssik._native import try_native_srs_solve as _try_native_srs_solve
 
 SOLVER_NAME = "seven_r.srs"
 SOLVER_TIER = 0
@@ -212,6 +212,21 @@ def solve(
     """
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
+    if native:
+        _native_sols = _try_native_srs_solve(
+            SOLVER_NAME,
+            _KB,
+            T_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+        )
+        if _native_sols is not None:
+            return _native_sols
     # Seeded numerical-tracking fast path (#380): the caller gave a seed
     # and wants a single IK -- the trajectory-tracking idiom. Newton-
     # continue from the seed (~0.2 ms) instead of resolving the whole
@@ -245,19 +260,13 @@ def solve(
             )
             if _fast:
                 return _fast
-    _native_sols = (
-        _try_native_srs_algebraic(SOLVER_NAME, _KB, T_target) if native else None
+    sols, _is_ls = _solver_solve(
+        _KB,
+        T_target,
+        policy=policy,
+        allow_refinement=allow_refinement,
+        refinement_max_iters=refinement_max_iters,
     )
-    if _native_sols is not None:
-        sols = _native_sols
-    else:
-        sols, _is_ls = _solver_solve(
-            _KB,
-            T_target,
-            policy=policy,
-            allow_refinement=allow_refinement,
-            refinement_max_iters=refinement_max_iters,
-        )
     # Bulletproof fallback (#319 / #358): the analytical path found
     # nothing. If the target is within the arm's max reach it may be a
     # measure-zero degenerate pose (near-singular elbow/gimbal, or a

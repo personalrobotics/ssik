@@ -179,15 +179,15 @@ def _render_thin_wrapper(
     )
     buf.write(f"from {_resolver_module} import resolve_in_limits as _resolve_in_limits\n")
     buf.write(f"from {solver_module} import solve as _solver_solve\n")
-    # Opt-in native (C++) dispatch (#512) for thin-wrapper families with a native
-    # core (seven_r.srs canonical path). solve(..., native=True) replaces the
-    # analytical sweep with ssik._ssik_native and reuses the Python postprocess
-    # (seeded-track / limits / seed / resolve_in_limits). Falls back silently.
+    # Opt-in native (C++) dispatch for thin-wrapper families with a native core
+    # (seven_r.srs, canonical + general #354). solve(..., native=True) runs the
+    # WHOLE artifact in C++ via ssik._ssik_native -- seeded-track, the analytical
+    # core, finalize (limits/seed/truncate), and the #359 in-limits fallback -- so
+    # the Python postprocess (which dominated per-call time) is skipped. Returns
+    # early on success, else falls back silently to the Python path below.
     emit_native = plan.solver_name in _NATIVE_SOLVER_FAMILIES
     if emit_native:
-        buf.write(
-            "from ssik._native import try_native_srs_algebraic as _try_native_srs_algebraic\n"
-        )
+        buf.write("from ssik._native import try_native_srs_solve as _try_native_srs_solve\n")
     buf.write("\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -1518,34 +1518,34 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
         """
     )
     if emit_native:
-        # Add the `native` kwarg + replace the analytical sweep with the native
-        # core (when available), reusing the Python postprocess. Only families
-        # with a native thin-wrapper core opt in; others stay byte-identical.
+        # Add the `native` kwarg + inject a top-of-body early dispatch to the FULL
+        # C++ artifact (whole pipeline, not just the analytical sweep). Only
+        # families with a native thin-wrapper core opt in; others stay
+        # byte-identical.
         template = template.replace(
             "    seed_tolerance: float | None = None,\n):",
             "    seed_tolerance: float | None = None,\n    native: bool = False,\n):",
         )
         template = template.replace(
-            "    sols, _is_ls = _solver_solve(\n"
-            "        _KB,\n"
-            "        T_target,\n"
-            "        policy=policy,\n"
-            "        allow_refinement=allow_refinement,\n"
-            "        refinement_max_iters=refinement_max_iters,\n"
-            "    )",
-            "    _native_sols = (\n"
-            "        _try_native_srs_algebraic(SOLVER_NAME, _KB, T_target) if native else None\n"
-            "    )\n"
-            "    if _native_sols is not None:\n"
-            "        sols = _native_sols\n"
-            "    else:\n"
-            "        sols, _is_ls = _solver_solve(\n"
+            "    if seed_tolerance is not None and q_seed is None:\n"
+            '        raise ValueError("seed_tolerance requires q_seed")\n',
+            "    if seed_tolerance is not None and q_seed is None:\n"
+            '        raise ValueError("seed_tolerance requires q_seed")\n'
+            "    if native:\n"
+            "        _native_sols = _try_native_srs_solve(\n"
+            "            SOLVER_NAME,\n"
             "            _KB,\n"
             "            T_target,\n"
-            "            policy=policy,\n"
-            "            allow_refinement=allow_refinement,\n"
+            "            respect_limits=respect_limits,\n"
+            "            q_seed=q_seed,\n"
+            "            seed_metric=seed_metric,\n"
+            "            seed_tolerance=seed_tolerance,\n"
+            "            max_solutions=max_solutions,\n"
+            "            allow_rescue=allow_rescue,\n"
             "            refinement_max_iters=refinement_max_iters,\n"
-            "        )",
+            "        )\n"
+            "        if _native_sols is not None:\n"
+            "            return _native_sols\n",
         )
     return template
 
