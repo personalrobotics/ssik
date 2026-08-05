@@ -67,3 +67,6 @@ cpp/build/
 cpp/gen/*_fk_parity.hpp
 cpp/gen/*_newton_parity.hpp
 cpp/gen/*_solve_parity.hpp
+# The data-driven artifact gate aggregates the (regenerated) solve goldens; it is
+# itself generated from the cpp/gen arm list, so it is not committed either.
+cpp/gen/artifact_gate.hpp

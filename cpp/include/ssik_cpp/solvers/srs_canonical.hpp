@@ -34,6 +34,10 @@ struct SrsConsts {
   int elbow_index = 3;
   Eigen::Vector3d upper_home{0, 0, 0};    // origins[elbow] - shoulder_pivot
   Eigen::Vector3d forearm_home{0, 0, 0};  // wrist_pivot - origins[elbow]
+  // Route to the general Davenport path (#354) instead of the canonical ZYZ
+  // sweep: set when the arm is non-ZYZ and/or has a laterally-offset wrist
+  // (mirrors the Python `use_canonical` dispatch at bake time).
+  bool general_path = false;
 };
 
 inline constexpr int kSrsSwivelSamples = 16;

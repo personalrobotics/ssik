@@ -26,6 +26,7 @@
 #include "ssik_cpp/newton.hpp"  // seeded_track
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
+#include "ssik_cpp/solvers/srs_general.hpp"
 
 namespace ssik {
 
@@ -63,8 +64,10 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
     }
   }
 
-  // 2. Analytical swivel sweep.
-  std::vector<Solution<7>> sols = srs_canonical_solve(c, s, T);
+  // 2. Analytical swivel sweep -- canonical ZYZ fast-path or the general
+  //    Davenport path, per the baked dispatch flag (mirrors use_canonical).
+  std::vector<Solution<7>> sols =
+      s.general_path ? srs_general_solve(c, s, T) : srs_canonical_solve(c, s, T);
 
   // 3. Rescue gate (dormant for this family; see the file comment). If ported,
   //    the rescue would run here when sols.empty() && p.allow_rescue &&

@@ -12,6 +12,7 @@
 
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
+#include "ssik_cpp/generalized_euler.hpp"
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs.hpp"
@@ -311,15 +312,17 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
                                 int elbow_index, py::array_t<double> upper_home,
                                 py::array_t<double> forearm_home, py::array_t<double> lo,
                                 py::array_t<double> hi, py::array_t<int> has_limits,
-                                py::array_t<double> target, bool respect_limits, bool has_seed,
-                                py::array_t<double> q_seed, const std::string& seed_metric,
-                                bool has_seed_tolerance, double seed_tolerance, int max_solutions,
-                                bool allow_rescue, int refinement_max_iters) {
+                                py::array_t<double> target, bool general_path, bool respect_limits,
+                                bool has_seed, py::array_t<double> q_seed,
+                                const std::string& seed_metric, bool has_seed_tolerance,
+                                double seed_tolerance, int max_solutions, bool allow_rescue,
+                                int refinement_max_iters) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
   ssik::SrsConsts s;
   s.l_se = l_se;
   s.l_ew = l_ew;
   s.elbow_index = elbow_index;
+  s.general_path = general_path;
   auto eo = ee_offset.unchecked<1>();
   auto sp = shoulder_pivot.unchecked<1>();
   auto uh = upper_home.unchecked<1>();
@@ -378,8 +381,35 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   return py::make_tuple(qs, resids, refine);
 }
 
+// Test-only: exercise the C++ generalized-Euler decomposition (#354) against the
+// Python decompose_3axis oracle. Returns the up-to-2 (a,b,c) branches.
+py::list decompose_3axis_test_py(py::array_t<double> R_arr, py::array_t<double> n1,
+                                 py::array_t<double> n2, py::array_t<double> n3) {
+  auto rm = R_arr.unchecked<2>();
+  Eigen::Matrix3d R;
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) R(i, j) = rm(i, j);
+  auto v = [](py::array_t<double> a) {
+    auto u = a.unchecked<1>();
+    return Eigen::Vector3d(u(0), u(1), u(2));
+  };
+  const auto branches = ssik::geuler::decompose_3axis(R, v(n1), v(n2), v(n3));
+  py::list out;
+  for (const auto& b : branches) {
+    py::array_t<double> t(3);
+    auto tm = t.mutable_unchecked<1>();
+    tm(0) = b.a;
+    tm(1) = b.b;
+    tm(2) = b.c;
+    out.append(t);
+  }
+  return out;
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
+  m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
+        py::arg("n2"), py::arg("n3"));
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);
@@ -400,11 +430,11 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("t_right"), py::arg("types"), py::arg("l_se"), py::arg("l_ew"), py::arg("ee_offset"),
         py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("elbow_index"),
         py::arg("upper_home"), py::arg("forearm_home"), py::arg("lo"), py::arg("hi"),
-        py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
-        py::arg("has_seed") = false, py::arg("q_seed"), py::arg("seed_metric") = "wrap_linf",
-        py::arg("has_seed_tolerance") = false, py::arg("seed_tolerance") = 0.0,
-        py::arg("max_solutions") = -1, py::arg("allow_rescue") = true,
-        py::arg("refinement_max_iters") = 15);
+        py::arg("has_limits"), py::arg("target"), py::arg("general_path") = false,
+        py::arg("respect_limits") = true, py::arg("has_seed") = false, py::arg("q_seed"),
+        py::arg("seed_metric") = "wrap_linf", py::arg("has_seed_tolerance") = false,
+        py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
+        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15);
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
