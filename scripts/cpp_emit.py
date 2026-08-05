@@ -62,18 +62,39 @@ def _render_limits(joints: list[Any]) -> list[str]:
 # C++ consumer calls ssik::<arm>::solve(T) with zero Python. Families not listed
 # here emit constants only (self-contained solve pending their port).
 def _render_solve(solver: str) -> tuple[str, list[str]] | None:
-    if solver == "ikgeo.three_parallel":
-        return (
-            '#include "ssik_cpp/solvers/three_parallel.hpp"',
-            [
-                "// Self-contained IK solve -- header-only C++, no Python runtime.",
-                "inline std::vector<Solution<DOF>> solve(",
-                "    const Pose& T, const ArtifactParams<DOF>& p = {}) {",
-                "  return three_parallel_artifact_solve(consts(), limits(), T, p);",
-                "}",
-            ],
-        )
-    return None
+    fn = {
+        "ikgeo.three_parallel": ("three_parallel", "three_parallel_artifact_solve"),
+        "ikgeo.spherical_two_parallel": (
+            "spherical_two_parallel",
+            "spherical_two_parallel_artifact_solve",
+        ),
+    }.get(solver)
+    if fn is None:
+        return None
+    header, artifact_solve = fn
+    return (
+        f'#include "ssik_cpp/solvers/{header}.hpp"',
+        [
+            "// Self-contained IK solve -- header-only C++, no Python runtime.",
+            "inline std::vector<Solution<DOF>> solve(",
+            "    const Pose& T, const ArtifactParams<DOF>& p = {}) {",
+            f"  return {artifact_solve}(consts(), limits(), T, p);",
+            "}",
+        ],
+    )
+
+
+def _consts_kinbody(arm_solver: str, kb: KinBody) -> KinBody:
+    """The KinBody whose frames get baked into consts(). Spherical bakes the
+    CANONICAL wrist gauge (the runtime canonicalize, moved to build time -- so the
+    self-contained artifact has zero runtime preprocessing). Limits stay from the
+    original (physical) kb; canonicalization is FK-identical + limit-preserving."""
+    if arm_solver == "ikgeo.spherical_two_parallel":
+        from ssik._kinbody import canonicalize_spherical_wrist
+        from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+        return canonicalize_spherical_wrist(kb, DEFAULT_TOLERANCE_POLICY)
+    return kb
 
 
 def _f(x: float) -> str:
@@ -124,7 +145,9 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
         "inline JointConsts<DOF> consts() {",
         "  JointConsts<DOF> c;",
     ]
-    for i, j in enumerate(joints):
+    # Spherical bakes the CANONICAL wrist gauge; three_parallel bakes kb as-is.
+    consts_joints = _consts_kinbody(solver, kb).joints
+    for i, j in enumerate(consts_joints):
         jt = "Revolute" if j.joint_type == "revolute" else "Prismatic"
         lines.append(f"  c.axis[{i}] = {_vec3(np.asarray(j.axis))};")
         lines.append(f"  c.t_left[{i}] = {_mat4(np.asarray(j.T_left))};")

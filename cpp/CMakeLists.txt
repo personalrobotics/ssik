@@ -51,8 +51,14 @@ add_executable(test_ur5_newton tests/test_ur5_newton.cpp)
 target_link_libraries(test_ur5_newton PRIVATE ssik_cpp)
 add_test(NAME ur5_newton COMMAND test_ur5_newton)
 
-# THE GATE: the self-contained artifact compiles standalone (only ur5_ik.hpp +
+# THE GATE: each self-contained artifact compiles standalone (only <arm>.hpp +
 # header-only primitives, zero Python) and its solve() matches the Python oracle.
+# ur5 = three_parallel; irb6700 = spherical_two_parallel with a baked-canonical
+# (offset) wrist.
 add_executable(test_ur5_artifact tests/test_ur5_artifact.cpp)
 target_link_libraries(test_ur5_artifact PRIVATE ssik_cpp)
 add_test(NAME ur5_artifact COMMAND test_ur5_artifact)
+
+add_executable(test_irb6700_artifact tests/test_irb6700_artifact.cpp)
+target_link_libraries(test_irb6700_artifact PRIVATE ssik_cpp)
+add_test(NAME irb6700_artifact COMMAND test_irb6700_artifact)

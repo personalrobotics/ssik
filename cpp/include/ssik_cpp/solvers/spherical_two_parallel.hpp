@@ -16,6 +16,7 @@
 
 #include <Eigen/Dense>
 
+#include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/newton.hpp"
 #include "ssik_cpp/rotation.hpp"
@@ -125,6 +126,18 @@ inline std::vector<Solution<6>> spherical_two_parallel_solve(const JointConsts<6
     }
   }
   return deduped;
+}
+
+// Full artifact-contract solve (#513): core solve (force-refined, as the artifact
+// always polishes) -> finalize (limits -> seed -> truncate). `c` must be the
+// CANONICAL constants (canonicalize_spherical_wrist applied at emit time and
+// baked). Rescue is dormant for this family (guarded on the Python side).
+inline std::vector<Solution<6>> spherical_two_parallel_artifact_solve(
+    const JointConsts<6>& c, const JointLimits<6>& lim, const Pose& T, const ArtifactParams<6>& p,
+    const Tolerances& tol = {}) {
+  std::vector<Solution<6>> core =
+      spherical_two_parallel_solve(c, T, tol, /*allow_refinement=*/true, p.refinement_max_iters);
+  return finalize_solutions<6>(std::move(core), c, lim, p);
 }
 
 }  // namespace ssik
