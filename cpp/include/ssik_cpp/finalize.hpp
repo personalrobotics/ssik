@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <vector>
 
 #include "ssik_cpp/fk.hpp"
@@ -150,14 +151,20 @@ std::vector<Solution<N>> nearest_to_seed(std::vector<Solution<N>> sols,
 
 // The finalize_solutions pipeline: limits -> seed(tolerance then rank) ->
 // truncate, in that fixed order. (postprocess.py:255-301)
+//
+// in_limits_fallback (optional): a zero-arg callable invoked ONLY when
+// respect_limits empties the set (redundant-7R exact resolver, #359). Its
+// solutions are already in-limits, so they skip the wrap/drop pass and flow
+// straight into seed -> truncate -- matching the Python hook exactly.
 template <int N>
-std::vector<Solution<N>> finalize_solutions(std::vector<Solution<N>> sols,
-                                            const JointConsts<N>& consts,
-                                            const JointLimits<N>& lim,
-                                            const ArtifactParams<N>& p) {
+std::vector<Solution<N>> finalize_solutions(
+    std::vector<Solution<N>> sols, const JointConsts<N>& consts, const JointLimits<N>& lim,
+    const ArtifactParams<N>& p,
+    const std::function<std::vector<Solution<N>>()>& in_limits_fallback = nullptr) {
   if (p.respect_limits) {
     sols = wrap_to_limits<N>(sols, consts, lim);
     sols = apply_respect_limits<N>(sols, lim);
+    if (sols.empty() && in_limits_fallback) sols = in_limits_fallback();
   }
   if (p.has_seed) {
     if (p.has_seed_tolerance) sols = within_seed_tolerance<N>(sols, p.q_seed, p.seed_tolerance);

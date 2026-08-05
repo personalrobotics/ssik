@@ -147,4 +147,29 @@ std::optional<std::pair<std::array<double, N>, double>> lm_refine(
   return std::make_pair(q, final_fro);
 }
 
+// ssik.refinement.seeded_track: the trajectory-tracking fast path. Newton-
+// continue from q_seed and accept the continuation only if it converges to
+// fk_atol AND stays within max_dist (wrap-to-pi L-infinity) of the seed -- so a
+// step that jumped to a different branch is rejected and the caller falls back
+// to the full analytical solve. fk_atol/max_iters default to seeded_track's
+// (tighter) values, not lm_refine's.
+template <int N>
+std::optional<Solution<N>> seeded_track(const JointConsts<N>& c,
+                                        const std::array<double, N>& q_seed, const Pose& t_target,
+                                        double fk_atol = 1e-10, int max_iters = 20,
+                                        double max_dist = 0.5) {
+  const auto res = lm_refine<N>(c, q_seed, t_target, fk_atol, max_iters);
+  if (!res) return std::nullopt;
+  const auto& [q, residual] = *res;
+  if (residual > fk_atol) return std::nullopt;
+  double dist = 0.0;
+  for (int i = 0; i < N; ++i) {
+    double d = std::fmod(q[i] - q_seed[i] + M_PI, 2.0 * M_PI);
+    if (d < 0.0) d += 2.0 * M_PI;
+    dist = std::max(dist, std::abs(d - M_PI));
+  }
+  if (dist > max_dist) return std::nullopt;
+  return Solution<N>{q, residual, Refinement::Lm};
+}
+
 }  // namespace ssik
