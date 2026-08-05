@@ -102,12 +102,21 @@ _LOG = logging.getLogger(__name__)
 def _arm_constants(
     kb: KinBody, cls: SrsClassification
 ) -> tuple[float, float, NDArray[np.float64], list[NDArray[np.float64]]]:
-    """Compute (L_se, L_ew, ee_offset_local, joint_origins) from the chain at q=0."""
+    """Compute (L_se, L_ew, ee_offset_local, joint_origins) from the chain at q=0.
+
+    ``ee_offset_local`` is the wrist-pivot -> end-effector offset expressed in the
+    **end-effector frame**, so a solver recovers the wrist pivot at any target as
+    ``W_t = p_target - R_target @ ee_offset_local``. It must be gauge-normalized by
+    the home ee orientation: the raw ``ee_home - wrist_pivot`` is a *world* vector
+    at q=0, which only equals the ee-frame offset when ``R_ee_home == I``. Skipping
+    the ``R_home.T`` rotates the wrist target wrong for any arm whose home flange
+    is rotated relative to the base, making both the canonical solve and the
+    feasible-swivel resolver miss (GitHub #517)."""
     origins = joint_origins(kb.joints)
     L_se = float(np.linalg.norm(origins[cls.elbow_index] - cls.shoulder_pivot))
     L_ew = float(np.linalg.norm(origins[cls.elbow_index] - cls.wrist_pivot))
-    ee_home = poe_forward_kinematics(kb, np.zeros(len(kb.joints)))[:3, 3]
-    ee_offset_local = ee_home - cls.wrist_pivot
+    fk_home = poe_forward_kinematics(kb, np.zeros(len(kb.joints)))
+    ee_offset_local = fk_home[:3, :3].T @ (fk_home[:3, 3] - cls.wrist_pivot)
     return L_se, L_ew, ee_offset_local, origins
 
 

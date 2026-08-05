@@ -338,3 +338,39 @@ def test_iiwa7_offset_wrist_random_pose_fk_closure(seed: int) -> None:
     assert any(
         float(np.linalg.norm(poe_forward_kinematics(kb, s.q) - T_target)) < 1e-8 for s in sols
     ), f"no FK-closing IK among {len(sols)} for seed={seed}"
+
+
+# ----------------------------------------------------------------------------
+# Rotated home ee frame (#517): R_ee_home != I must not break the SRS solve
+# ----------------------------------------------------------------------------
+
+_IIWA14_URDF = Path(__file__).parent / "fixtures" / "kuka_iiwa14.urdf"
+
+
+def test_srs_solves_with_rotated_home_ee_frame() -> None:
+    """A rotated home flange (R_ee_home != I) must still solve to machine
+    precision. Regression for #517: _arm_constants baked the tool offset as a
+    *world* vector at q=0, but the solver applies it as an *ee-frame* offset
+    (W_t = p - R_target @ ee_offset_local). Without the R_home.T gauge-
+    normalization the wrist target was displaced by a constant ~0.18 m, and
+    *every* candidate missed FK closure -> zero solutions. iiwa_link_ee (offset-
+    free but with a rotated home flange) is the canonical-path reproducer; the
+    offset-free iiwa_link_7 (R_home == I) is unaffected.
+    """
+    from ssik._urdf import load_urdf_kinbody_normalized
+    from ssik.kinematics.poe_fk import poe_forward_kinematics as fk
+
+    kb = load_urdf_kinbody_normalized(_IIWA14_URDF, "iiwa_link_0", "iiwa_link_ee")
+    assert not np.allclose(fk(kb, np.zeros(7))[:3, :3], np.eye(3)), (
+        "fixture must have a rotated home ee frame to guard #517"
+    )
+    rng = np.random.default_rng(0)
+    worst = 0.0
+    for _ in range(100):
+        q = rng.uniform(-2.0, 2.0, size=7)
+        t = fk(kb, q)
+        sols, is_ls = srs_solve(kb, t)
+        assert sols, "no IK for a reachable rotated-home-ee pose (#517)"
+        assert not is_ls, "rotated-home-ee pose returned a least-squares (empty) result (#517)"
+        worst = max(worst, min(float(np.linalg.norm(fk(kb, s.q) - t)) for s in sols))
+    assert worst < 1e-10, f"rotated-home-ee FK closure {worst:.2e} (#517 regressed)"

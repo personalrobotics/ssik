@@ -24,6 +24,10 @@ _SRS_ARMS = [
     ("r1pro_right", "right_arm_base_link", "right_arm_link7"),
     ("openarm_left", "openarm_left_base_link", "openarm_left_ee_base_link"),
     ("openarm_right", "openarm_right_base_link", "openarm_right_ee_base_link"),
+    # iiwa_link_ee has a rotated home flange (R_ee_home != I): the #517 regression
+    # guard. Before the ee-frame gauge-normalization in _arm_constants, the
+    # resolver mislocated the wrist by a constant ~0.18 m and returned nothing.
+    ("kuka_iiwa14", "iiwa_link_0", "iiwa_link_ee"),
 ]
 
 
