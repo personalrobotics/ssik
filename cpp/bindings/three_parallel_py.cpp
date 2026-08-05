@@ -91,6 +91,51 @@ py::tuple srs_canonical_solve_py(py::array_t<double> axes, py::array_t<double> t
   return py::make_tuple(qs, resids);
 }
 
+// Core general-path SRS analytical solve (#354): the Davenport sweep for
+// concurrent-axis arms the canonical path can't (offset/tilted wrist, non-ZYZ).
+// Same pre-finalize candidate contract as srs_canonical_solve; needs the
+// branch-enumeration extras (elbow_index, upper_home, forearm_home).
+py::tuple srs_general_solve_py(py::array_t<double> axes, py::array_t<double> t_left,
+                               py::array_t<double> t_right, py::array_t<int> types, double l_se,
+                               double l_ew, py::array_t<double> ee_offset,
+                               py::array_t<double> shoulder_pivot, py::array_t<double> r_post,
+                               int elbow_index, py::array_t<double> upper_home,
+                               py::array_t<double> forearm_home, py::array_t<double> target) {
+  const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  ssik::SrsConsts s;
+  s.l_se = l_se;
+  s.l_ew = l_ew;
+  s.elbow_index = elbow_index;
+  auto eo = ee_offset.unchecked<1>();
+  auto sp = shoulder_pivot.unchecked<1>();
+  auto uh = upper_home.unchecked<1>();
+  auto fh = forearm_home.unchecked<1>();
+  auto rp = r_post.unchecked<2>();
+  for (int i = 0; i < 3; ++i) {
+    s.ee_offset_local[i] = eo(i);
+    s.shoulder_pivot[i] = sp(i);
+    s.upper_home[i] = uh(i);
+    s.forearm_home[i] = fh(i);
+    for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
+  }
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const std::vector<ssik::Solution<7>> sols = ssik::srs_general_solve(c, s, T);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 7});
+  py::array_t<double> resids(n);
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 7; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+  }
+  return py::make_tuple(qs, resids);
+}
+
 py::tuple three_parallel_solve_py(py::array_t<double> axes, py::array_t<double> t_left,
                                   py::array_t<double> t_right, py::array_t<int> types,
                                   py::array_t<double> target, bool allow_refinement,
@@ -419,6 +464,10 @@ PYBIND11_MODULE(_ssik_native, m) {
   m.def("srs_canonical_solve", &srs_canonical_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("l_se"), py::arg("l_ew"), py::arg("ee_offset"),
         py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("target"));
+  m.def("srs_general_solve", &srs_general_solve_py, py::arg("axes"), py::arg("t_left"),
+        py::arg("t_right"), py::arg("types"), py::arg("l_se"), py::arg("l_ew"), py::arg("ee_offset"),
+        py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("elbow_index"),
+        py::arg("upper_home"), py::arg("forearm_home"), py::arg("target"));
   m.def("feasible_arcs_test", &feasible_arcs_test_py, py::arg("coeffs"), py::arg("swept"),
         py::arg("lo"), py::arg("hi"), py::arg("grid"), py::arg("bounded") = false);
   m.def("srs_resolve_in_limits", &srs_resolve_in_limits_py, py::arg("axes"), py::arg("t_left"),

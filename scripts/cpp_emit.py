@@ -90,44 +90,13 @@ def _render_solve(solver: str, kb: KinBody) -> tuple[str, list[str]] | None:
 
 def _srs_bake(kb: KinBody) -> dict[str, Any] | None:
     """Bake the SrsConsts for a concurrent-axis SRS 7R arm, or None when the arm
-    is not SRS-class. ``general_path`` mirrors the Python ``use_canonical``
-    dispatch (reach_slack == 0): canonical-ZYZ + offset-free wrist -> canonical
-    fast-path, everything else (non-ZYZ shoulder/wrist, offset wrist) -> the
-    general Davenport path (#354). Both are self-contained in C++."""
-    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as pol
-    from ssik.solvers.seven_r.srs import (  # type: ignore[attr-defined]
-        _arm_constants,
-        _classify_srs_7r_geometric,
-    )
+    is not SRS-class. Delegates to :func:`ssik._native.srs_native_geometry` -- the
+    single source shared with the runtime ``native=True`` path -- so the emitted
+    self-contained artifact and the pip native backend always cover exactly the
+    same arms and route them the same way (``general_path``)."""
+    from ssik._native import srs_native_geometry
 
-    cls = _classify_srs_7r_geometric(kb, pol)
-    if cls is None or len(kb.joints) != 7:
-        return None
-    l_se, l_ew, ee_offset, origins = _arm_constants(kb, cls)
-    j = kb.joints
-    upper = origins[cls.elbow_index] - cls.shoulder_pivot
-    u_home = upper / np.linalg.norm(upper)
-    ez, ey = np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])
-    canonical = (
-        np.allclose(j[0].axis, ez)
-        and np.allclose(j[1].axis, ey)
-        and np.allclose(u_home, ez)
-        and np.allclose(j[4].axis, ez)
-        and np.allclose(j[5].axis, ey)
-        and np.allclose(j[6].axis, ez)
-    )
-    offset_free = np.allclose(origins[5], cls.wrist_pivot, atol=pol.axis_intersect)
-    return {
-        "l_se": float(l_se),
-        "l_ew": float(l_ew),
-        "ee_offset_local": np.asarray(ee_offset, dtype=np.float64),
-        "shoulder_pivot": np.asarray(cls.shoulder_pivot, dtype=np.float64),
-        "r_post_wrist": np.asarray(j[6].T_right[:3, :3], dtype=np.float64),
-        "elbow_index": int(cls.elbow_index),
-        "upper_home": np.asarray(upper, dtype=np.float64),
-        "forearm_home": np.asarray(cls.wrist_pivot - origins[cls.elbow_index], dtype=np.float64),
-        "general_path": not (canonical and offset_free),
-    }
+    return srs_native_geometry(kb)
 
 
 def _render_srs_solve(kb: KinBody) -> tuple[str, list[str]] | None:

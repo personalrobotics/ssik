@@ -147,52 +147,79 @@ def try_native_solve(
     ]
 
 
-# Per-KinBody native-SRS metadata: (is_canonical, marshalled args) or None. The
-# canonical-ZYZ + offset-free check + the SRS geometric constants are geometry-
-# only, so cache per-arm (keyed on id(kb)).
-_srs_cache: dict[int, Any] = {}
+# Per-KinBody native-SRS args (baked geometry + marshalled JointConsts) or None.
+# Geometry-only, so cache per-arm (keyed on the long-lived artifact _KB's id).
+_srs_cache: dict[int, dict[str, Any] | None] = {}
 
 
-def _srs_native_args(kb: Any) -> Any:
-    """Marshalled srs_canonical_solve args for a canonical SRS arm, or None when
-    the arm isn't the canonical-ZYZ offset-free path the native core supports."""
-    if id(kb) in _srs_cache:
-        return _srs_cache[id(kb)]
+def srs_native_geometry(kb: Any) -> dict[str, Any] | None:
+    """Baked SRS geometry (the SrsConsts fields + the canonical/general dispatch
+    flag) for ANY concurrent-axis SRS 7R arm, or None when the arm is not
+    SRS-class. Single source of truth shared by the runtime native path
+    (:func:`_srs_native_args` / :func:`try_native_srs_algebraic`) AND the C++
+    emit (``scripts/cpp_emit._srs_bake``), so the pip ``native=True`` backend and
+    the self-contained artifact always cover exactly the same arms -- adding an
+    SRS arm enrols it in both automatically.
+
+    ``general_path`` mirrors the Python ``use_canonical`` dispatch (reach_slack
+    == 0): canonical-ZYZ + offset-free wrist -> the canonical fast-path core,
+    everything else (non-ZYZ shoulder/wrist, laterally-offset wrist) -> the
+    general Davenport core (#354). Both are native.
+    """
     from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as _POL
     from ssik.solvers.seven_r.srs import (  # type: ignore[attr-defined]
         _arm_constants,
         _classify_srs_7r_geometric,
     )
 
-    result = None
     cls = _classify_srs_7r_geometric(kb, _POL)
-    if cls is not None and len(kb.joints) == 7:
-        l_se, l_ew, ee_offset, origins = _arm_constants(kb, cls)
-        upper = origins[cls.elbow_index] - cls.shoulder_pivot
-        u_home = upper / np.linalg.norm(upper)
+    if cls is None or len(kb.joints) != 7:
+        return None
+    l_se, l_ew, ee_offset, origins = _arm_constants(kb, cls)
+    j = kb.joints
+    upper = origins[cls.elbow_index] - cls.shoulder_pivot
+    u_home = upper / np.linalg.norm(upper)
+    ez, ey = np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])
+    canonical = (
+        np.allclose(j[0].axis, ez)
+        and np.allclose(j[1].axis, ey)
+        and np.allclose(u_home, ez)
+        and np.allclose(j[4].axis, ez)
+        and np.allclose(j[5].axis, ey)
+        and np.allclose(j[6].axis, ez)
+    )
+    offset_free = np.allclose(origins[5], cls.wrist_pivot, atol=_POL.axis_intersect)
+    return {
+        "l_se": float(l_se),
+        "l_ew": float(l_ew),
+        "ee_offset_local": np.asarray(ee_offset, dtype=np.float64),
+        "shoulder_pivot": np.asarray(cls.shoulder_pivot, dtype=np.float64),
+        "r_post_wrist": np.asarray(j[6].T_right[:3, :3], dtype=np.float64),
+        "elbow_index": int(cls.elbow_index),
+        "upper_home": np.asarray(upper, dtype=np.float64),
+        "forearm_home": np.asarray(cls.wrist_pivot - origins[cls.elbow_index], dtype=np.float64),
+        "general_path": not (canonical and offset_free),
+    }
+
+
+def _srs_native_args(kb: Any) -> dict[str, Any] | None:
+    """Cached :func:`srs_native_geometry` + the marshalled JointConsts arrays for
+    the binding, or None when the arm isn't SRS-class."""
+    if id(kb) in _srs_cache:
+        return _srs_cache[id(kb)]
+    geom = srs_native_geometry(kb)
+    result: dict[str, Any] | None = None
+    if geom is not None:
         j = kb.joints
-        ez, ey = np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])
-        canonical = (
-            np.allclose(j[0].axis, ez)
-            and np.allclose(j[1].axis, ey)
-            and np.allclose(u_home, ez)
-            and np.allclose(j[4].axis, ez)
-            and np.allclose(j[5].axis, ey)
-            and np.allclose(j[6].axis, ez)
-        )
-        offset_free = np.allclose(origins[5], cls.wrist_pivot, atol=_POL.axis_intersect)
-        if canonical and offset_free:
-            result = (
-                np.array([jt.axis for jt in j], dtype=np.float64),
-                np.array([jt.T_left for jt in j], dtype=np.float64),
-                np.array([jt.T_right for jt in j], dtype=np.float64),
-                np.array([0 if jt.joint_type == "revolute" else 1 for jt in j], dtype=np.int32),
-                float(l_se),
-                float(l_ew),
-                np.asarray(ee_offset, dtype=np.float64),
-                np.asarray(cls.shoulder_pivot, dtype=np.float64),
-                np.asarray(j[6].T_right[:3, :3], dtype=np.float64),
-            )
+        result = {
+            "axes": np.array([jt.axis for jt in j], dtype=np.float64),
+            "t_left": np.array([jt.T_left for jt in j], dtype=np.float64),
+            "t_right": np.array([jt.T_right for jt in j], dtype=np.float64),
+            "types": np.array(
+                [0 if jt.joint_type == "revolute" else 1 for jt in j], dtype=np.int32
+            ),
+            **geom,
+        }
     _srs_cache[id(kb)] = result
     return result
 
@@ -204,30 +231,49 @@ def try_native_srs_algebraic(
 
     Returns the deduped, FK-verified analytical candidate set (pre-finalize) --
     the Python artifact keeps the seeded-track / limits / resolve_in_limits /
-    finalize postprocess around it. Supports the canonical-ZYZ offset-free path
-    (iiwa14 / xmatepro7); other SRS arms (offset/tilted wrist) return None.
+    finalize postprocess around it. Covers EVERY concurrent-axis SRS arm: the
+    canonical-ZYZ offset-free core (iiwa14 / xmatepro7) and the general Davenport
+    core (#354; iiwa7 / r1pro / openarm), dispatched on the baked ``general_path``
+    flag so no arm silently falls back to Python.
     """
     if solver_name != "seven_r.srs":
         return None
     ext = _load_ext()
     if ext is None:
         return None
-    args = _srs_native_args(kb)
-    if args is None:
+    a = _srs_native_args(kb)
+    if a is None:
         return None
-    axes, t_left, t_right, types, l_se, l_ew, ee_offset, shoulder_pivot, r_post = args
-    qs, resids = ext.srs_canonical_solve(
-        axes,
-        t_left,
-        t_right,
-        types,
-        l_se,
-        l_ew,
-        ee_offset,
-        shoulder_pivot,
-        r_post,
-        np.asarray(t_target, dtype=np.float64),
-    )
+    tt = np.asarray(t_target, dtype=np.float64)
+    if a["general_path"]:
+        qs, resids = ext.srs_general_solve(
+            a["axes"],
+            a["t_left"],
+            a["t_right"],
+            a["types"],
+            a["l_se"],
+            a["l_ew"],
+            a["ee_offset_local"],
+            a["shoulder_pivot"],
+            a["r_post_wrist"],
+            a["elbow_index"],
+            a["upper_home"],
+            a["forearm_home"],
+            tt,
+        )
+    else:
+        qs, resids = ext.srs_canonical_solve(
+            a["axes"],
+            a["t_left"],
+            a["t_right"],
+            a["types"],
+            a["l_se"],
+            a["l_ew"],
+            a["ee_offset_local"],
+            a["shoulder_pivot"],
+            a["r_post_wrist"],
+            tt,
+        )
     return [
         Solution(q=np.asarray(qs[i], dtype=np.float64), fk_residual=float(resids[i]))
         for i in range(len(qs))
