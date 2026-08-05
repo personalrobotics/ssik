@@ -21,13 +21,19 @@
 
 namespace ssik {
 
-// Precomputed SRS geometry (from the Python classifier + _arm_constants).
+// Precomputed SRS geometry (from the Python classifier + _arm_constants). The
+// canonical solve uses l_se..r_post_wrist; the swivel-limits resolver (#515)
+// additionally needs the elbow index + home upper/forearm vectors for branch
+// enumeration. All baked at emit time.
 struct SrsConsts {
   double l_se = 0.0;
   double l_ew = 0.0;
   Eigen::Vector3d ee_offset_local{0, 0, 0};  // ee_home - wrist_pivot (local)
   Eigen::Vector3d shoulder_pivot{0, 0, 0};
   Eigen::Matrix3d r_post_wrist = Eigen::Matrix3d::Identity();  // joints[6].T_right rotation
+  int elbow_index = 3;
+  Eigen::Vector3d upper_home{0, 0, 0};    // origins[elbow] - shoulder_pivot
+  Eigen::Vector3d forearm_home{0, 0, 0};  // wrist_pivot - origins[elbow]
 };
 
 inline constexpr int kSrsSwivelSamples = 16;

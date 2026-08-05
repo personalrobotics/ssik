@@ -176,8 +176,9 @@ inline std::vector<Solution<6>> three_parallel_artifact_solve(const JointConsts<
 
   // Rescue gate (dormant for this family; see the function comment). If it were
   // ported, it would run here when: sols.empty() && p.allow_rescue &&
-  // T.block<3,1>(0,3).norm() <= reach_radius(c).
-  (void)reach_radius;
+  // T.block<3,1>(0,3).norm() <= reach.
+  const double reach = reach_radius(c);
+  (void)reach;
 
   return finalize_solutions<6>(std::move(sols), c, lim, p);
 }

@@ -60,8 +60,11 @@ def _render_limits(joints: list[Any]) -> list[str]:
 # Per-solver self-contained C++ solve(): (include, body-lines). The artifact
 # composes the header-only core solver + finalize with its baked constants, so a
 # C++ consumer calls ssik::<arm>::solve(T) with zero Python. Families not listed
-# here emit constants only (self-contained solve pending their port).
-def _render_solve(solver: str) -> tuple[str, list[str]] | None:
+# here (or arms outside a family's native domain) emit constants only (self-
+# contained solve pending their port).
+def _render_solve(solver: str, kb: KinBody) -> tuple[str, list[str]] | None:
+    if solver == "seven_r.srs":
+        return _render_srs_solve(kb)
     fn = {
         "ikgeo.three_parallel": ("three_parallel", "three_parallel_artifact_solve"),
         "ikgeo.spherical_two_parallel": (
@@ -79,6 +82,82 @@ def _render_solve(solver: str) -> tuple[str, list[str]] | None:
             "inline std::vector<Solution<DOF>> solve(",
             "    const Pose& T, const ArtifactParams<DOF>& p = {}) {",
             f"  return {artifact_solve}(consts(), limits(), T, p);",
+            "}",
+        ],
+    )
+
+
+def _srs_bake(kb: KinBody) -> dict[str, Any] | None:
+    """Bake the SrsConsts (base + branch-enumeration extras) for a canonical-ZYZ
+    offset-free SRS arm, or None when the arm is outside srs_canonical_solve's
+    native domain (offset/tilted wrist -> general #354 path, still Python).
+
+    Mirrors ssik._native._srs_native_args' eligibility gate exactly so the emit
+    and the runtime native path agree on which arms are self-contained."""
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as pol
+    from ssik.solvers.seven_r.srs import (  # type: ignore[attr-defined]
+        _arm_constants,
+        _classify_srs_7r_geometric,
+    )
+
+    cls = _classify_srs_7r_geometric(kb, pol)
+    if cls is None or len(kb.joints) != 7:
+        return None
+    l_se, l_ew, ee_offset, origins = _arm_constants(kb, cls)
+    j = kb.joints
+    upper = origins[cls.elbow_index] - cls.shoulder_pivot
+    u_home = upper / np.linalg.norm(upper)
+    ez, ey = np.array([0.0, 0.0, 1.0]), np.array([0.0, 1.0, 0.0])
+    canonical = (
+        np.allclose(j[0].axis, ez)
+        and np.allclose(j[1].axis, ey)
+        and np.allclose(u_home, ez)
+        and np.allclose(j[4].axis, ez)
+        and np.allclose(j[5].axis, ey)
+        and np.allclose(j[6].axis, ez)
+    )
+    offset_free = np.allclose(origins[5], cls.wrist_pivot, atol=pol.axis_intersect)
+    if not (canonical and offset_free):
+        return None
+    return {
+        "l_se": float(l_se),
+        "l_ew": float(l_ew),
+        "ee_offset_local": np.asarray(ee_offset, dtype=np.float64),
+        "shoulder_pivot": np.asarray(cls.shoulder_pivot, dtype=np.float64),
+        "r_post_wrist": np.asarray(j[6].T_right[:3, :3], dtype=np.float64),
+        "elbow_index": int(cls.elbow_index),
+        "upper_home": np.asarray(origins[cls.elbow_index] - cls.shoulder_pivot, dtype=np.float64),
+        "forearm_home": np.asarray(cls.wrist_pivot - origins[cls.elbow_index], dtype=np.float64),
+    }
+
+
+def _render_srs_solve(kb: KinBody) -> tuple[str, list[str]] | None:
+    """Self-contained SRS solve(): bakes SrsConsts + composes srs_artifact_solve.
+    None for arms outside the canonical-ZYZ offset-free native domain."""
+    s = _srs_bake(kb)
+    if s is None:
+        return None
+    return (
+        '#include "ssik_cpp/solvers/srs.hpp"',
+        [
+            "// Baked SRS geometry (classifier + _arm_constants), zero runtime Python.",
+            "inline SrsConsts srs_consts() {",
+            "  SrsConsts s;",
+            f"  s.l_se = {_f(s['l_se'])};",
+            f"  s.l_ew = {_f(s['l_ew'])};",
+            f"  s.ee_offset_local = {_vec3(s['ee_offset_local'])};",
+            f"  s.shoulder_pivot = {_vec3(s['shoulder_pivot'])};",
+            f"  s.r_post_wrist = {_mat3(s['r_post_wrist'])};",
+            f"  s.elbow_index = {s['elbow_index']};",
+            f"  s.upper_home = {_vec3(s['upper_home'])};",
+            f"  s.forearm_home = {_vec3(s['forearm_home'])};",
+            "  return s;",
+            "}",
+            "",
+            "// Self-contained IK solve -- header-only C++, no Python runtime.",
+            "inline std::vector<Solution<DOF>> solve(",
+            "    const Pose& T, const ArtifactParams<DOF>& p = {}) {",
+            "  return srs_artifact_solve(consts(), srs_consts(), limits(), T, p);",
             "}",
         ],
     )
@@ -113,6 +192,12 @@ def _vec3(v: np.ndarray) -> str:
     return f"Eigen::Vector3d({_f(v[0])}, {_f(v[1])}, {_f(v[2])})"
 
 
+def _mat3(m: np.ndarray) -> str:
+    m = np.asarray(m, dtype=np.float64).reshape(3, 3)
+    rows = ",\n       ".join(", ".join(_f(v) for v in row) for row in m)
+    return f"(Eigen::Matrix3d() <<\n       {rows}).finished()"
+
+
 def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
     mod = importlib.import_module(f"ssik.prebuilt.{arm}")
     kb = mod._KB
@@ -122,7 +207,7 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
 
     # --- Self-contained C++ artifact: baked constants + limits + solve() ----
     solver = load_manifest()[arm].solver
-    rendered_solve = _render_solve(solver)
+    rendered_solve = _render_solve(solver, kb)
     header_include = rendered_solve[0] if rendered_solve else '#include "ssik_cpp/fk.hpp"'
     title = (
         f"// Self-contained C++ IK artifact for {arm} ({dof}-DOF): baked constants"
@@ -206,7 +291,7 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
     # solve() output per pose, so a standalone C++ program (which can't call
     # Python) can validate ssik::<arm>::solve(T) against the oracle. Emitted for
     # arms with a self-contained C++ solve().
-    if _render_solve(load_manifest()[arm].solver) is not None:
+    if _render_solve(load_manifest()[arm].solver, kb) is not None:
         _emit_solve_parity(arm, out_dir, ns, ranges, seed=seed + 2)
 
 
