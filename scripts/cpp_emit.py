@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -451,20 +452,58 @@ def emitted_arms(gen_dir: Path) -> list[str]:
     return arms
 
 
+# A C++ double literal: has a decimal point and/or an exponent. Integers (array
+# indices, DOF, sizes) have neither, so they stay in the structural template and
+# are compared exactly. Digit runs inside identifiers (e.g. "iiwa14_ik") lack a
+# '.'/'e' and are likewise not matched.
+_FLOAT_LITERAL_RE = re.compile(
+    r"[-+]?(?:\d+\.\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)"
+)
+# Cross-platform ULP tolerance for computed baked geometry (#517/#82). The SRS
+# artifact bakes constants derived from FK + a home-gauge matmul, whose low bits
+# carry BLAS-backend variance; a real un-re-emitted oracle change moves geometry
+# by >> this, so the guard stays sharp.
+_DRIFT_ATOL = 1e-12
+_DRIFT_RTOL = 1e-10
+
+
+def _constants_match(committed: str, fresh: str) -> bool:
+    """True when two constants headers are identical up to cross-platform ULP.
+
+    Byte comparison is too strict for headers that bake *computed* geometry (the
+    SRS ``ee_offset_local`` etc. go through FK + an ``R_home.T`` matmul whose low
+    bits are BLAS-backend-sensitive, #517/#82). Instead: the non-float structure
+    (identifiers, integers, layout) must match exactly, and every float literal
+    must match within ``_DRIFT_ATOL``/``_DRIFT_RTOL`` -- orders of magnitude below
+    any real geometry change, so a forgotten re-emit still turns the guard red.
+    Pure-``repr`` constants (ur5, irb6700) match exactly and are unaffected.
+    """
+    if _FLOAT_LITERAL_RE.sub("~", committed) != _FLOAT_LITERAL_RE.sub("~", fresh):
+        return False
+    ca = [float(x) for x in _FLOAT_LITERAL_RE.findall(committed)]
+    fa = [float(x) for x in _FLOAT_LITERAL_RE.findall(fresh)]
+    if len(ca) != len(fa):
+        return False
+    return all(
+        abs(c - f) <= _DRIFT_ATOL + _DRIFT_RTOL * abs(f) for c, f in zip(ca, fa, strict=True)
+    )
+
+
 def check_no_drift(gen_dir: Path) -> int:
-    """Regenerate each arm's *constants header* and byte-diff against ``gen_dir``.
+    """Regenerate each arm's *constants header* and diff against ``gen_dir``.
 
-    Returns 0 when the committed ``<arm>.hpp`` constants headers are
-    byte-identical to a fresh emit, non-zero (listing the stale files) otherwise.
-    This is the CI gate that makes the Python oracle -> native artifact link
-    impossible to silently break (#495): change the KinBody/oracle without
-    re-emitting and this turns red.
+    Returns 0 when the committed ``<arm>.hpp`` constants headers match a fresh
+    emit (structure exactly, float literals within cross-platform ULP), non-zero
+    (listing the stale files) otherwise. This is the CI gate that makes the
+    Python oracle -> native artifact link impossible to silently break (#495):
+    change the KinBody/oracle without re-emitting and this turns red.
 
-    Only the constants headers are checked. They are ``repr()`` of the already
-    baked KinBody floats -- no computation, so byte-identical across platforms.
-    The FK/solve parity fixtures are floating-point *results* (BLAS-backend
-    ULP variance, #82), so they are not committed and not byte-comparable; they
-    are regenerated fresh before every build and validated by ctest instead.
+    Comparison is structural-exact + numeric-tolerant, not byte-exact: the SRS
+    artifact bakes *computed* geometry (FK + a home-gauge matmul) whose low bits
+    carry BLAS-backend variance (#517/#82), so a byte diff would false-positive
+    across platforms. The tolerance (see :func:`_constants_match`) is far below
+    any real geometry change. The FK/solve parity fixtures are floating-point
+    *results*, not committed, and validated by ctest instead.
     """
     arms = emitted_arms(gen_dir)
     if not arms:
@@ -479,7 +518,7 @@ def check_no_drift(gen_dir: Path) -> int:
             fresh = tmp_dir / f"{arm}.hpp"
             if not committed.exists():
                 stale.append(f"{arm}.hpp (missing from cpp/gen)")
-            elif fresh.read_bytes() != committed.read_bytes():
+            elif not _constants_match(committed.read_text(), fresh.read_text()):
                 stale.append(f"{arm}.hpp (differs from a fresh emit)")
     if stale:
         print("[cpp_emit] --check FAILED: native artifacts are stale vs the Python oracle:")
