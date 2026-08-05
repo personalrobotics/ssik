@@ -62,3 +62,9 @@ add_test(NAME ur5_artifact COMMAND test_ur5_artifact)
 add_executable(test_irb6700_artifact tests/test_irb6700_artifact.cpp)
 target_link_libraries(test_irb6700_artifact PRIVATE ssik_cpp)
 add_test(NAME irb6700_artifact COMMAND test_irb6700_artifact)
+
+# iiwa14 = seven_r.srs: the full SRS artifact (seeded_track + srs_canonical_solve
+# + finalize with the resolve_in_limits in-limits fallback), zero Python.
+add_executable(test_iiwa14_artifact tests/test_iiwa14_artifact.cpp)
+target_link_libraries(test_iiwa14_artifact PRIVATE ssik_cpp)
+add_test(NAME iiwa14_artifact COMMAND test_iiwa14_artifact)
