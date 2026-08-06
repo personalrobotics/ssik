@@ -694,25 +694,38 @@ def _render_specialised_solve_orchestrator(
             # allow_rescue=False (recursion guard + analytical-only escape
             # hatch). Rescued sols carry refinement_used="lm", FK-gated to
             # machine precision.
-            if not solutions and allow_rescue:
+            # Shared post-processing pipeline (limits -> seed -> truncate); the
+            # one definition lives in ssik.postprocess.finalize_solutions.
+            # Limit pass only (no seed/tolerance/truncate yet): the rescue gate is
+            # "no in-limits solution exists", so it must not depend on the
+            # seed-tolerance / max_solutions filters (a seed filter emptying a
+            # non-empty in-limits set is a user preference, not a missing solution).
+            _in_limits = _ps_finalize(solutions, _KB, respect_limits=respect_limits)
+            # Rescue on LIMIT-empty (#524): fire when nothing survives the limit
+            # filter (not just when the analytical count was zero), so a pose
+            # whose only analytical candidates were out-of-limits still gets
+            # rescued. Perturbed re-solves run with allow_rescue=False.
+            if not _in_limits and allow_rescue:
                 _reach_radius = sum(
                     float(np.linalg.norm(np.asarray(_t)[:3, 3]))
                     for _t in (*_JOINT_T_LEFTS, *_JOINT_T_RIGHTS)
                 )
                 if float(np.linalg.norm(T[:3, 3])) <= _reach_radius:
-                    solutions = _rescue_via_T_perturbation(
-                        _fk,
-                        _functools.partial(solve, allow_rescue=False),
-                        T,
-                        jacobian_fn=_spatial_jacobian,
+                    _in_limits = _ps_finalize(
+                        _rescue_via_T_perturbation(
+                            _fk,
+                            _functools.partial(solve, allow_rescue=False),
+                            T,
+                            jacobian_fn=_spatial_jacobian,
+                        ),
+                        _KB,
+                        respect_limits=respect_limits,
                     )
-
-            # Shared post-processing pipeline (limits -> seed -> truncate); the
-            # one definition lives in ssik.postprocess.finalize_solutions.
+            # Seed tolerance / ranking / truncate over the in-limits set.
             return _ps_finalize(
-                solutions,
+                _in_limits,
                 _KB,
-                respect_limits=respect_limits,
+                respect_limits=False,
                 q_seed=q_seed,
                 seed_metric=seed_metric,
                 seed_tolerance=seed_tolerance,
@@ -1475,45 +1488,57 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
                 allow_refinement=allow_refinement,
                 refinement_max_iters=refinement_max_iters,
             )
-            # Bulletproof fallback (#319 / #358): the analytical path found
-            # nothing. If the target is within the arm's max reach it may be a
-            # measure-zero degenerate pose (near-singular elbow/gimbal, or a
-            # near-parallel-axis spherical joint) the algebraic extraction
-            # can't resolve -- rather than an unreachable target. Recover via
-            # the T-perturbation rescue. The reach-sphere (sum of link lengths;
-            # an exact upper bound by the triangle inequality, so it never
-            # rejects a reachable pose) is checked only in this rare empty
-            # branch and keeps far-field targets cheap. Perturbed re-solves run
-            # with allow_rescue=False (recursion guard + analytical escape
-            # hatch); the rescue calls back with respect_limits=False, so the
-            # rescued set flows through the same limit/seed postprocess below.
-            if not sols and allow_rescue:
+            # Limit pass + #359 in-limits fallback ONLY (no seed/tolerance/
+            # truncate yet). The rescue gate below is "no in-limits solution
+            # exists", so it must not depend on the seed-tolerance / max_solutions
+            # filters -- a seed filter emptying a non-empty in-limits set is a
+            # user preference, NOT a missing solution, and must not trigger a
+            # rescue (which would diverge native vs Python by sampling a different
+            # continuum). The in-limits fallback (#359) recovers a reachable
+            # in-limits solution the coarse sweep missed (no-op for non-redundant
+            # chains).
+            _in_limits = _ps_finalize(
+                sols,
+                _KB,
+                respect_limits=respect_limits,
+                in_limits_fallback=lambda: _resolve_in_limits(_KB, T_target, policy=policy),
+            )
+            # Bulletproof fallback (#319 / #358 / #524): nothing survives the
+            # limit filter. If the target is within the arm's max reach it may be
+            # a measure-zero degenerate pose (near-singular elbow/gimbal) the
+            # algebraic extraction can't resolve, NOT an unreachable target --
+            # recover via the T-perturbation rescue. Gating on the LIMIT-filtered
+            # empty (not the pre-limit analytical count) is what lets a pose whose
+            # only analytical candidates were out-of-limits still get rescued
+            # (#524). The reach-sphere (sum of link lengths; an exact triangle-
+            # inequality upper bound, so it never rejects a reachable pose) keeps
+            # far-field targets cheap; perturbed re-solves run allow_rescue=False.
+            if not _in_limits and allow_rescue:
                 _reach_radius = sum(
                     float(np.linalg.norm(np.asarray(_t)[:3, 3]))
                     for _t in (*_JOINT_T_LEFTS, *_JOINT_T_RIGHTS)
                 )
                 _T = np.asarray(T_target, dtype=np.float64)
                 if float(np.linalg.norm(_T[:3, 3])) <= _reach_radius:
-                    sols = _rescue_via_T_perturbation(
-                        fk,
-                        _functools.partial(solve, allow_rescue=False),
-                        _T,
-                        jacobian_fn=lambda _q: _kinbody_jacobian(_KB, _q),
+                    _in_limits = _ps_finalize(
+                        _rescue_via_T_perturbation(
+                            fk,
+                            _functools.partial(solve, allow_rescue=False),
+                            _T,
+                            jacobian_fn=lambda _q: _kinbody_jacobian(_KB, _q),
+                        ),
+                        _KB,
+                        respect_limits=respect_limits,
                     )
-            # Shared post-processing pipeline (limits -> seed -> truncate); the
-            # one definition lives in ssik.postprocess.finalize_solutions. The
-            # in-limits fallback (#359) recovers a reachable in-limits solution
-            # the coarse sweep missed via the solver-matched exact resolver
-            # (no-op for non-redundant chains).
+            # Seed tolerance / ranking / truncate over the in-limits set.
             return _ps_finalize(
-                sols,
+                _in_limits,
                 _KB,
-                respect_limits=respect_limits,
+                respect_limits=False,
                 q_seed=q_seed,
                 seed_metric=seed_metric,
                 seed_tolerance=seed_tolerance,
                 max_solutions=max_solutions,
-                in_limits_fallback=lambda: _resolve_in_limits(_KB, T_target, policy=policy),
             )
         """
     )

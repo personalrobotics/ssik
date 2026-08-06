@@ -1065,25 +1065,38 @@ def solve(
     # allow_rescue=False (recursion guard + analytical-only escape
     # hatch). Rescued sols carry refinement_used="lm", FK-gated to
     # machine precision.
-    if not solutions and allow_rescue:
+    # Shared post-processing pipeline (limits -> seed -> truncate); the
+    # one definition lives in ssik.postprocess.finalize_solutions.
+    # Limit pass only (no seed/tolerance/truncate yet): the rescue gate is
+    # "no in-limits solution exists", so it must not depend on the
+    # seed-tolerance / max_solutions filters (a seed filter emptying a
+    # non-empty in-limits set is a user preference, not a missing solution).
+    _in_limits = _ps_finalize(solutions, _KB, respect_limits=respect_limits)
+    # Rescue on LIMIT-empty (#524): fire when nothing survives the limit
+    # filter (not just when the analytical count was zero), so a pose
+    # whose only analytical candidates were out-of-limits still gets
+    # rescued. Perturbed re-solves run with allow_rescue=False.
+    if not _in_limits and allow_rescue:
         _reach_radius = sum(
             float(np.linalg.norm(np.asarray(_t)[:3, 3]))
             for _t in (*_JOINT_T_LEFTS, *_JOINT_T_RIGHTS)
         )
         if float(np.linalg.norm(T[:3, 3])) <= _reach_radius:
-            solutions = _rescue_via_T_perturbation(
-                _fk,
-                _functools.partial(solve, allow_rescue=False),
-                T,
-                jacobian_fn=_spatial_jacobian,
+            _in_limits = _ps_finalize(
+                _rescue_via_T_perturbation(
+                    _fk,
+                    _functools.partial(solve, allow_rescue=False),
+                    T,
+                    jacobian_fn=_spatial_jacobian,
+                ),
+                _KB,
+                respect_limits=respect_limits,
             )
-
-    # Shared post-processing pipeline (limits -> seed -> truncate); the
-    # one definition lives in ssik.postprocess.finalize_solutions.
+    # Seed tolerance / ranking / truncate over the in-limits set.
     return _ps_finalize(
-        solutions,
+        _in_limits,
         _KB,
-        respect_limits=respect_limits,
+        respect_limits=False,
         q_seed=q_seed,
         seed_metric=seed_metric,
         seed_tolerance=seed_tolerance,

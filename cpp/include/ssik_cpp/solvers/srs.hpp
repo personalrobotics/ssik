@@ -60,23 +60,31 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
   const auto core = [&](const Pose& Tp) {
     return s.general_path ? srs_general_solve(c, s, Tp) : srs_canonical_solve(c, s, Tp);
   };
-  std::vector<Solution<7>> sols = core(T);
 
-  // 3. Rescue gate (#319): the analytical extraction found nothing. If the
-  //    target is within reach it is a measure-zero rank-deficient pose (a
-  //    kinematic singularity where the closed-form solve degenerates), not an
-  //    unreachable target -- recover via the T-perturbation rescue. The
-  //    reach-sphere (triangle-inequality upper bound) is checked only in this
-  //    rare empty branch, so far-field targets stay cheap.
-  if (sols.empty() && p.allow_rescue &&
-      T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    sols = rescue_via_T_perturbation<7>(core, c, T);
-  }
-
-  // 4. Finalize with the #359 exact in-limits fallback.
-  return finalize_solutions<7>(std::move(sols), c, lim, p, [&]() {
+  // 3. Limit pass + #359 in-limits fallback ONLY (no seed/tolerance/truncate
+  //    yet): the rescue gate is "no in-limits solution exists", so it must not
+  //    depend on the seed-tolerance / max_solutions filters -- a seed filter
+  //    emptying a non-empty in-limits set is a user preference, not a missing
+  //    solution, and must not trigger a rescue (#524).
+  ArtifactParams<7> p_limits;
+  p_limits.respect_limits = p.respect_limits;
+  p_limits.refinement_max_iters = p.refinement_max_iters;
+  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits, [&]() {
     return srs_swivel::resolve_in_limits(c, s, T, limits, kSrsFkThreshold);
   });
+
+  // 4. Rescue gate (#319/#524): nothing survives the limit filter. If the target
+  //    is within reach it is a measure-zero rank-deficient pose (a kinematic
+  //    singularity where the closed-form degenerates), not an unreachable target
+  //    -- recover via the T-perturbation rescue, then re-apply the limit filter.
+  if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
+    in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, p_limits);
+  }
+
+  // 5. Seed tolerance / ranking / truncate over the in-limits set.
+  ArtifactParams<7> p_seed = p;
+  p_seed.respect_limits = false;
+  return finalize_solutions<7>(std::move(in_limits), c, lim, p_seed);
 }
 
 }  // namespace ssik

@@ -142,13 +142,19 @@ inline std::vector<Solution<6>> spherical_two_parallel_artifact_solve(
     return spherical_two_parallel_solve(c, Tp, tol, /*allow_refinement=*/true,
                                         p.refinement_max_iters);
   };
-  std::vector<Solution<6>> sols = core(T);
-
-  if (sols.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    sols = rescue_via_T_perturbation<6>(core, c, T);
+  // Limit pass only, then rescue on LIMIT-empty (#524): the gate is "no in-limits
+  // solution", so it must not depend on the seed-tolerance / max_solutions
+  // filters. Seed/truncate is applied afterwards over the in-limits set.
+  ArtifactParams<6> p_limits;
+  p_limits.respect_limits = p.respect_limits;
+  p_limits.refinement_max_iters = p.refinement_max_iters;
+  std::vector<Solution<6>> in_limits = finalize_solutions<6>(core(T), c, lim, p_limits);
+  if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
+    in_limits = finalize_solutions<6>(rescue_via_T_perturbation<6>(core, c, T), c, lim, p_limits);
   }
-
-  return finalize_solutions<6>(std::move(sols), c, lim, p);
+  ArtifactParams<6> p_seed = p;
+  p_seed.respect_limits = false;
+  return finalize_solutions<6>(std::move(in_limits), c, lim, p_seed);
 }
 
 }  // namespace ssik
