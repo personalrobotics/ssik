@@ -19,6 +19,7 @@
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/newton.hpp"
+#include "ssik_cpp/rescue.hpp"
 #include "ssik_cpp/rotation.hpp"
 #include "ssik_cpp/sp6.hpp"  // detail::wrap_pi
 #include "ssik_cpp/subproblems.hpp"
@@ -129,15 +130,25 @@ inline std::vector<Solution<6>> spherical_two_parallel_solve(const JointConsts<6
 }
 
 // Full artifact-contract solve (#513): core solve (force-refined, as the artifact
-// always polishes) -> finalize (limits -> seed -> truncate). `c` must be the
-// CANONICAL constants (canonicalize_spherical_wrist applied at emit time and
-// baked). Rescue is dormant for this family (guarded on the Python side).
+// always polishes) -> rescue gate (#319) -> finalize (limits -> seed ->
+// truncate). `c` must be the CANONICAL constants (canonicalize_spherical_wrist
+// applied at emit time and baked). The rescue recovers solutions at reachable
+// rank-deficient (singular) poses where the analytical returns empty, so the
+// standalone artifact matches Python's solve() there; dormant otherwise.
 inline std::vector<Solution<6>> spherical_two_parallel_artifact_solve(
     const JointConsts<6>& c, const JointLimits<6>& lim, const Pose& T, const ArtifactParams<6>& p,
     const Tolerances& tol = {}) {
-  std::vector<Solution<6>> core =
-      spherical_two_parallel_solve(c, T, tol, /*allow_refinement=*/true, p.refinement_max_iters);
-  return finalize_solutions<6>(std::move(core), c, lim, p);
+  const auto core = [&](const Pose& Tp) {
+    return spherical_two_parallel_solve(c, Tp, tol, /*allow_refinement=*/true,
+                                        p.refinement_max_iters);
+  };
+  std::vector<Solution<6>> sols = core(T);
+
+  if (sols.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
+    sols = rescue_via_T_perturbation<6>(core, c, T);
+  }
+
+  return finalize_solutions<6>(std::move(sols), c, lim, p);
 }
 
 }  // namespace ssik

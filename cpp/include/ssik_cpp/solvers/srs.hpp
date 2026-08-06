@@ -6,13 +6,14 @@
 //
 //   1. seeded_track fast path (q_seed + max_solutions == 1): Newton-continue
 //      from the seed, finalize, return if non-empty.
-//   2. analytical solve (srs_canonical_solve, the Singh-Kreutz swivel sweep).
-//   3. T-perturbation rescue gate: PROVEN DORMANT for the canonical SRS arms
-//      (well-conditioned; the analytical path is never empty on a reachable
-//      pose) and guarded red-on-fire by a Python dormancy fuzz, so the body is
-//      omitted -- matching three_parallel_artifact_solve. The rescue uses a
-//      numpy RNG that cannot be reproduced bit-for-bit in C++ anyway; it lands
-//      with the RR/HP families where it is load-bearing.
+//   2. analytical solve (canonical Singh-Kreutz or general Davenport sweep).
+//   3. T-perturbation rescue (#319): when the analytical path is empty at a
+//      reachable target -- a measure-zero kinematic singularity where the
+//      closed-form solve degenerates (within ~1e-9 rad of an exact singularity;
+//      the exact-SRS analytical is complete everywhere else) -- recover via the
+//      shared, family-agnostic rescue. This is what makes the standalone artifact
+//      genuinely complete: no Python fallback, so it must handle the singular
+//      poses Python's solve() does.
 //   4. finalize (limits -> seed -> truncate) with the #359 in-limits fallback
 //      wired to resolve_in_limits (the exact feasible-swivel resolver).
 #pragma once
@@ -24,22 +25,12 @@
 
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/newton.hpp"  // seeded_track
+#include "ssik_cpp/rescue.hpp"
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
 #include "ssik_cpp/solvers/srs_general.hpp"
 
 namespace ssik {
-
-// Reach-sphere upper bound (sum of all link translation norms), the rescue
-// gate. Triangle-inequality bound, so it never rejects a reachable pose.
-inline double reach_radius(const JointConsts<7>& c) {
-  double r = 0.0;
-  for (int i = 0; i < 7; ++i) {
-    r += c.t_left[i].block<3, 1>(0, 3).norm();
-    r += c.t_right[i].block<3, 1>(0, 3).norm();
-  }
-  return r;
-}
 
 // Full artifact-contract solve for a canonical-ZYZ offset-free SRS arm. All
 // geometry is baked (JointConsts + SrsConsts + JointLimits); no Python.
@@ -66,14 +57,21 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
 
   // 2. Analytical swivel sweep -- canonical ZYZ fast-path or the general
   //    Davenport path, per the baked dispatch flag (mirrors use_canonical).
-  std::vector<Solution<7>> sols =
-      s.general_path ? srs_general_solve(c, s, T) : srs_canonical_solve(c, s, T);
+  const auto core = [&](const Pose& Tp) {
+    return s.general_path ? srs_general_solve(c, s, Tp) : srs_canonical_solve(c, s, Tp);
+  };
+  std::vector<Solution<7>> sols = core(T);
 
-  // 3. Rescue gate (dormant for this family; see the file comment). If ported,
-  //    the rescue would run here when sols.empty() && p.allow_rescue &&
-  //    T.p.norm() <= reach.
-  const double reach = reach_radius(c);
-  (void)reach;
+  // 3. Rescue gate (#319): the analytical extraction found nothing. If the
+  //    target is within reach it is a measure-zero rank-deficient pose (a
+  //    kinematic singularity where the closed-form solve degenerates), not an
+  //    unreachable target -- recover via the T-perturbation rescue. The
+  //    reach-sphere (triangle-inequality upper bound) is checked only in this
+  //    rare empty branch, so far-field targets stay cheap.
+  if (sols.empty() && p.allow_rescue &&
+      T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
+    sols = rescue_via_T_perturbation<7>(core, c, T);
+  }
 
   // 4. Finalize with the #359 exact in-limits fallback.
   return finalize_solutions<7>(std::move(sols), c, lim, p, [&]() {
