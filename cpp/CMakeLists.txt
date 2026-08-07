@@ -8,9 +8,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Eigen (header-only). Prefer the CMake package; fall back to common include
-# paths so a bare `cmake ..` works without Eigen3Config on the path.
-find_package(Eigen3 3.3 QUIET NO_MODULE)
+# Eigen (header-only). Prefer the CMake package (needed to export a clean
+# ssik::ssik_cpp for downstream find_package); fall back to common include paths
+# so a bare in-tree `cmake ..` still builds without Eigen3Config on the path. No
+# version pin: ssik uses only stable Eigen basics, and pinning a MAJOR (e.g. 3.3)
+# makes SameMajorVersion reject a newer Eigen (5.x on current Homebrew).
+find_package(Eigen3 QUIET NO_MODULE)
 if(TARGET Eigen3::Eigen)
   set(SSIK_EIGEN Eigen3::Eigen)
 else()
@@ -25,11 +28,52 @@ else()
 endif()
 
 # Shared native headers (Band C primitives) + the generated per-arm artifacts.
+# BUILD_INTERFACE points at the source tree (for the in-tree tests/examples);
+# INSTALL_INTERFACE points at the installed include dir (for external consumers
+# via find_package(ssik_cpp) -- see the install rules below and cpp/README.md).
+include(GNUInstallDirs)  # defines CMAKE_INSTALL_INCLUDEDIR used just below
 add_library(ssik_cpp INTERFACE)
+add_library(ssik::ssik_cpp ALIAS ssik_cpp)
 target_include_directories(ssik_cpp INTERFACE
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/gen)
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/gen>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(ssik_cpp INTERFACE ${SSIK_EIGEN})
+target_compile_features(ssik_cpp INTERFACE cxx_std_20)
+
+# Install + export the header-only package so a downstream C++/MoveIt project can
+#   find_package(ssik_cpp)  ->  target_link_libraries(app ssik::ssik_cpp)
+# and #include "<arm>_ik.hpp". Requires the Eigen3 CMake package (the exported
+# config find_dependency()s it); the bare-include-path fallback above is in-tree
+# only. Toggle with -DSSIK_CPP_INSTALL=OFF.
+option(SSIK_CPP_INSTALL "Install headers + export the ssik::ssik_cpp CMake package" ON)
+if(SSIK_CPP_INSTALL AND TARGET Eigen3::Eigen)
+  include(CMakePackageConfigHelpers)
+  # Header-only primitives + the committed per-arm artifacts (constants headers).
+  # The *_parity / artifact_gate fixtures are test-only (git-ignored) -- not shipped.
+  install(DIRECTORY include/ssik_cpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(DIRECTORY gen/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.hpp"
+    PATTERN "*_parity.hpp" EXCLUDE
+    PATTERN "artifact_gate.hpp" EXCLUDE)
+  install(TARGETS ssik_cpp EXPORT ssik_cppTargets)
+  install(EXPORT ssik_cppTargets NAMESPACE ssik:: FILE ssik_cppTargets.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ssik_cpp)
+  configure_package_config_file(cmake/ssik_cppConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/ssik_cppConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ssik_cpp)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ssik_cppConfig.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ssik_cpp)
+endif()
+
+# In-tree usage example (built against the source-tree headers). External
+# consumers build the same source against the INSTALLED package -- see
+# examples/consumer/. Toggle with -DSSIK_CPP_EXAMPLES=OFF.
+option(SSIK_CPP_EXAMPLES "Build the in-tree usage example" ON)
+if(SSIK_CPP_EXAMPLES)
+  add_executable(solve_arm examples/solve_arm.cpp)
+  target_link_libraries(solve_arm PRIVATE ssik::ssik_cpp)
+endif()
 
 enable_testing()
 

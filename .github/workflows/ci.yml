@@ -159,6 +159,13 @@ jobs:
       - name: ctest (FK + Newton golden conformance)
         run: ctest --test-dir cpp/build --output-on-failure
 
+      - name: C++ consumer smoke (install + find_package + build + run)
+        # Proves the self-contained artifacts are usable by an external C++
+        # project: installs ssik_cpp to a temp prefix, then a standalone
+        # downstream CMake project find_package(ssik_cpp)es it, builds the
+        # example, and runs it -- no ssik source tree, no Python (#493).
+        run: bash cpp/examples/consumer/smoke.sh
+
       - name: Build native extension into the package (pybind11)
         # Compiles the C++ solver as ssik._ssik_native (the shipped import path,
         # #506/#507) so the reused suite drives the native backend AND the
