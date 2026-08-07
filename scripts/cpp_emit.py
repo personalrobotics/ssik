@@ -297,10 +297,31 @@ def _emit_solve_parity(
         "inline const std::vector<SolveParityCase>& solve_parity_cases() {",
         "  static const std::vector<SolveParityCase> cases = {",
     ]
-    for _ in range(n_cases):
+    # Only WELL-CONDITIONED poses go in the golden: the gate demands exact
+    # set-match, which is a meaningful cross-platform invariant only OFF the
+    # measure-zero near-singular set. At a branch-boundary pose a pair of
+    # solutions is FP-unstable, so C++ and Python can return different (both
+    # sound) counts on different platforms (e.g. gp8 case 119: 4 on Linux vs 6 on
+    # macOS). Reject any pose whose solution count changes under a tiny random
+    # perturbation -- that flags proximity to a boundary far wider (1e-6) than the
+    # ~1e-15 C++/Python FP gap, so the survivors are cross-platform reproducible.
+    kept = 0
+    attempts = 0
+    while kept < n_cases and attempts < n_cases * 40:
+        attempts += 1
         seed_q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
         t = np.asarray(poe_forward_kinematics(kb, seed_q), dtype=np.float64)
         sols = mod.solve(t)
+        stable = True
+        for _ in range(2):
+            dq = rng.uniform(-1e-6, 1e-6, len(seed_q))
+            tp = np.asarray(poe_forward_kinematics(kb, seed_q + dq), dtype=np.float64)
+            if len(mod.solve(tp)) != len(sols):
+                stable = False
+                break
+        if not stable:
+            continue
+        kept += 1
         tstr = ", ".join(_f(v) for v in t.reshape(16))
         sol_strs = ["{" + ", ".join(_f(v) for v in np.asarray(s.q)) + "}" for s in sols]
         out.append(f"    {{{{{tstr}}}, {{{', '.join(sol_strs)}}}}},")
