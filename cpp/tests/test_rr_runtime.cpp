@@ -12,6 +12,12 @@
 #define RR_FIXTURE "xarm6_ik_rr_parity.hpp"
 #endif
 #include RR_FIXTURE
+// With -DUSE_EMITTED_COEFFS, drive the full path through the emitted rr_coeffs
+// (slice 4) instead of the fixture's Python-evaluated P/Q -- validates the
+// sympy->C++ emitter end-to-end against the same expected solution set.
+#ifdef USE_EMITTED_COEFFS
+#include RR_COEFFS_HEADER
+#endif
 
 namespace {
 
@@ -46,6 +52,10 @@ int main() {
   double worst_match = 0.0;
   for (std::size_t pi = 0; pi < poses.size(); ++pi) {
     const auto& p = poses[pi];
+#ifdef USE_EMITTED_COEFFS
+    const auto got =
+        general_6r_core(rr, rr_emitted::rr_coeffs, p.t, rr_parity::fk_atol(), rr_parity::dedup_atol());
+#else
     // Coeff callback: ignore t12, return the fixture's pre-evaluated P/Q.
     auto coeffs = [&](const double[12], rr_detail::Mat14x9& p_sin, rr_detail::Mat14x9& p_cos,
                       rr_detail::Mat14x9& p_one, rr_detail::Mat14x8& q) {
@@ -55,6 +65,7 @@ int main() {
       q = p.q;
     };
     const auto got = general_6r_core(rr, coeffs, p.t, rr_parity::fk_atol(), rr_parity::dedup_atol());
+#endif
 
 #ifdef POSE_DEBUG
     if (static_cast<int>(pi) == POSE_DEBUG) {

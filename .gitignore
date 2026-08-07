@@ -71,3 +71,4 @@ cpp/gen/*_rr_parity.hpp
 # The data-driven artifact gate aggregates the (regenerated) solve goldens; it is
 # itself generated from the cpp/gen arm list, so it is not committed either.
 cpp/gen/artifact_gate.hpp
+cpp/gen/*_rr_coeffs.hpp
