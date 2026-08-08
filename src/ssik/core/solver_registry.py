@@ -106,6 +106,17 @@ SOLVERS: dict[str, SolverSpec] = {
         _spec("ikgeo.spherical", 0, 7.5, 10_312, composer=f"{_COMPOSE}.spherical"),
         _spec("ikgeo.two_parallel", 1, 261.0, 141_569, auto_dispatch=False),
         _spec("ikgeo.two_intersecting", 1, 1184.0, 2_650_681, auto_dispatch=False),
+        # fk_atol_expr / force_refine (#528, mirrors three_parallel): at near-
+        # double roots (degenerate 6R poses, e.g. m0609 / m1013 / hc10) det M(x)
+        # has two tiny singular values, so the back-sub null-vector v_12 is
+        # numerically delicate; numpy's SVD resolves it less accurately than a
+        # one-sided Jacobi, leaving genuine solutions at ~1e-4 FK that get
+        # silently dropped. Always-polish recovers them (converge -> kept) while
+        # spurious near-misses stall -> dropped; the tightened 1e-7 gate keeps
+        # the refinement target above the ~1e-6 the marginal solutions settle at
+        # under the default 1e-5 (they refine cleanly to <1e-7, count unchanged).
+        # Surfaced by the native C++ (Eigen JacobiSVD) artifact finding all 8
+        # where the un-refined Python found 4 (#490).
         _spec(
             "ikgeo.general_6r",
             2,
@@ -113,6 +124,8 @@ SOLVERS: dict[str, SolverSpec] = {
             30_000_000,
             needs_symbolic_precompute=True,
             composer=f"{_COMPOSE}.general_6r",
+            fk_atol_expr="1e-7",
+            force_refine=True,
         ),
         _spec("husty_pfurner.general_6r", 2, 120.0, 50_000_000),
         _spec("seven_r.srs", 0, 8.5, 1_900),
