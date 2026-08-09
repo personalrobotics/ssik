@@ -30,9 +30,20 @@
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
+#include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/ik_types.hpp"
+#include "ssik_cpp/newton.hpp"  // lm_refine (force_refine path)
+#include "ssik_cpp/rescue.hpp"
 
 namespace ssik {
+
+// FK-closure gate + dedup tolerance, matching the general_6r SolverSpec
+// (fk_atol_expr="1e-7" + force_refine, #528) and subproblem_dedup, so the native
+// core keeps exactly the Python artifact's solution set. The tightened 1e-7 gate
+// is the refinement target: marginal near-double-root candidates refine cleanly
+// below it (count unchanged) and spurious near-misses stall out.
+inline constexpr double kGeneral6rFkAtol = 1e-7;
+inline constexpr double kGeneral6rDedupAtol = 1e-3;
 
 // Per-arm baked constants for the RR bridge (everything except the coefficient
 // matrices). poe_to_dh gives (alpha, a, d, theta_offset, T_pre, T_post) with
@@ -276,8 +287,10 @@ using RrCoeffFn = void (*)(const double t12[12], rr_detail::Mat14x9& p_sin,
 // fk_residual is the DH-frame Frobenius residual (== POE residual under the
 // rigid bridge). No limit/seed/refine/rescue logic -- that is the artifact layer.
 template <class CoeffFn>
-std::vector<Solution<6>> general_6r_core(const RrConsts& rr, CoeffFn&& coeffs, const Pose& t_poe,
-                                         double fk_atol, double dedup_atol) {
+std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts& rr,
+                                         CoeffFn&& coeffs, const Pose& t_poe, double fk_atol,
+                                         double dedup_atol, bool allow_refinement,
+                                         int refinement_max_iters) {
   using namespace rr_detail;
   const Eigen::Matrix4d t_dh = rr.t_pre_inv * t_poe * rr.t_post_inv;
 
@@ -302,13 +315,58 @@ std::vector<Solution<6>> general_6r_core(const RrConsts& rr, CoeffFn&& coeffs, c
     std::array<double, 6> q_dh{};
     double fk_err = 0.0;
     if (!back_substitute(roots[k], vecs[k], pq, rr, t_dh, q_dh, fk_err)) continue;
-    if (fk_err > fk_atol) continue;
-    Solution<6> sol;
-    for (int i = 0; i < 6; ++i) sol.q[i] = q_dh[i] - rr.theta_offset[i];
-    sol.fk_residual = fk_err;
-    cands.push_back(sol);
+    std::array<double, 6> q_poe;
+    for (int i = 0; i < 6; ++i) q_poe[i] = q_dh[i] - rr.theta_offset[i];
+    if (fk_err <= fk_atol) {
+      cands.push_back(Solution<6>{q_poe, fk_err, Refinement::None});
+    } else if (allow_refinement) {
+      // Marginal algebraic candidate: at near-double roots the back-sub v_12 is
+      // numerically delicate, leaving a genuine solution above the gate. Polish
+      // it in POE frame (keep iff it converges), mirroring solve_all_ik's
+      // force_refine path (#528). q_poe is exact-bridge-equivalent to q_dh.
+      const auto refined = lm_refine<6>(c, q_poe, t_poe, fk_atol, refinement_max_iters);
+      if (refined) cands.push_back(Solution<6>{refined->first, refined->second, Refinement::Lm});
+    }
   }
   return dedup_wrap_close(cands, dedup_atol);
+}
+
+// Full artifact-contract solve for a general 6R (RR) arm. All geometry is baked
+// (JointConsts for the POE FK/rescue + RrConsts for the DH solve + coeffs +
+// JointLimits); no Python. Mirrors the codegen thin-wrapper solve() and the
+// SRS artifact structure: limit-pass gate -> T-perturbation rescue when no
+// in-limits solution exists at a reachable target (#524) -> seed/truncate.
+// No seeded-track or in-limits swivel fallback: those are redundant-7R specific;
+// a 6R has a discrete solution set.
+template <class CoeffFn>
+std::vector<Solution<6>> general_6r_artifact_solve(const JointConsts<6>& c, const RrConsts& rr,
+                                                   CoeffFn&& coeffs, const JointLimits<6>& lim,
+                                                   const Pose& T, const ArtifactParams<6>& p) {
+  // force_refine=True on the general_6r SolverSpec (#528): the artifact always
+  // polishes marginal near-double-root candidates, so the native set matches the
+  // Python oracle.
+  const auto core = [&](const Pose& tp) {
+    return general_6r_core(c, rr, coeffs, tp, kGeneral6rFkAtol, kGeneral6rDedupAtol,
+                           /*allow_refinement=*/true, p.refinement_max_iters);
+  };
+
+  // Limit pass only (no seed/tolerance/truncate): the rescue gate is "no
+  // in-limits solution exists", so it must not depend on the seed filters (#524).
+  ArtifactParams<6> p_limits;
+  p_limits.respect_limits = p.respect_limits;
+  p_limits.refinement_max_iters = p.refinement_max_iters;
+  std::vector<Solution<6>> in_limits = finalize_solutions<6>(core(T), c, lim, p_limits);
+
+  // Rescue gate: nothing in-limits + target within reach => a measure-zero
+  // rank-deficient pose where the closed form degenerates; recover via the
+  // shared T-perturbation rescue, then re-apply the limit filter.
+  if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
+    in_limits = finalize_solutions<6>(rescue_via_T_perturbation<6>(core, c, T), c, lim, p_limits);
+  }
+
+  ArtifactParams<6> p_seed = p;
+  p_seed.respect_limits = false;
+  return finalize_solutions<6>(std::move(in_limits), c, lim, p_seed);
 }
 
 }  // namespace ssik

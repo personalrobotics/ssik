@@ -31,7 +31,7 @@ import importlib
 import re
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -66,6 +66,8 @@ def _render_limits(joints: list[Any]) -> list[str]:
 def _render_solve(solver: str, kb: KinBody) -> tuple[str, list[str]] | None:
     if solver == "seven_r.srs":
         return _render_srs_solve(kb)
+    if solver == "ikgeo.general_6r":
+        return _render_general_6r_solve(kb)
     fn = {
         "ikgeo.three_parallel": ("three_parallel", "three_parallel_artifact_solve"),
         "ikgeo.spherical_two_parallel": (
@@ -130,6 +132,57 @@ def _render_srs_solve(kb: KinBody) -> tuple[str, list[str]] | None:
             "}",
         ],
     )
+
+
+def _render_general_6r_solve(kb: KinBody) -> tuple[str, list[str]] | None:
+    """Self-contained general-6R (Raghavan-Roth) solve(): bakes the DH bridge +
+    AE-3 leftvar metadata (RrConsts), emits the CSE'd coefficient function, and
+    composes general_6r_artifact_solve. None only for a non-6R chain."""
+    if len(kb.joints) != 6 or any(j.joint_type != "revolute" for j in kb.joints):
+        return None
+    from _rr_emit import render_rr_coeffs
+
+    from ssik.kinematics.poe_to_dh import poe_to_dh
+    from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar, _cached_derivation
+
+    dh = poe_to_dh(kb)
+    alpha, a, d = dh.to_dh_tuple()
+    lin = int(_cached_best_leftvar(tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())))
+    *_fns, meta = _cached_derivation(
+        tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist()), lin, False
+    )
+    lb0, lb1 = cast("tuple[int, int]", meta["left_bilinear"])
+    rb0, rb1 = cast("tuple[int, int]", meta["right_bilinear"])
+    drop = cast(int, meta["drop_joint"])
+    t_pre_inv = np.linalg.inv(dh.t_pre)
+    t_post_inv = np.linalg.inv(dh.t_post)
+
+    body = [
+        "// Baked RR geometry (poe_to_dh DH bridge + AE-3 leftvar), zero runtime Python.",
+        "inline RrConsts rr_consts() {",
+        "  RrConsts r;",
+        f"  r.alpha = {{{', '.join(_f(v) for v in alpha)}}};",
+        f"  r.a = {{{', '.join(_f(v) for v in a)}}};",
+        f"  r.d = {{{', '.join(_f(v) for v in d)}}};",
+        f"  r.theta_offset = {{{', '.join(_f(v) for v in dh.theta_offset)}}};",
+        f"  r.t_pre_inv = {_mat4(t_pre_inv)};",
+        f"  r.t_post_inv = {_mat4(t_post_inv)};",
+        f"  r.linearity_joint = {lin};",
+        f"  r.left_bilinear = {{{lb0}, {lb1}}};",
+        f"  r.right_bilinear = {{{rb0}, {rb1}}};",
+        f"  r.drop_joint = {drop};",
+        "  return r;",
+        "}",
+        "",
+        *render_rr_coeffs(meta),
+        "",
+        "// Self-contained IK solve -- header-only C++, no Python runtime.",
+        "inline std::vector<Solution<DOF>> solve(",
+        "    const Pose& T, const ArtifactParams<DOF>& p = {}) {",
+        "  return general_6r_artifact_solve(consts(), rr_consts(), rr_coeffs, limits(), T, p);",
+        "}",
+    ]
+    return ('#include "ssik_cpp/solvers/general_6r.hpp"', body)
 
 
 def _consts_kinbody(arm_solver: str, kb: KinBody) -> KinBody:
@@ -435,7 +488,9 @@ def emitted_arms(gen_dir: Path) -> list[str]:
     arms = []
     for hpp in sorted(gen_dir.glob("*.hpp")):
         stem = hpp.stem
-        if stem.endswith(("_fk_parity", "_solve_parity", "_newton_parity")):
+        if stem.endswith(
+            ("_fk_parity", "_solve_parity", "_newton_parity", "_rr_parity", "_rr_coeffs")
+        ):
             continue
         if stem == "artifact_gate":  # the generated data-driven gate, not an arm
             continue

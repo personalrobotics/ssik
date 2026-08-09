@@ -53,8 +53,11 @@ int main() {
   for (std::size_t pi = 0; pi < poses.size(); ++pi) {
     const auto& p = poses[pi];
 #ifdef USE_EMITTED_COEFFS
-    const auto got =
-        general_6r_core(rr, rr_emitted::rr_coeffs, p.t, rr_parity::fk_atol(), rr_parity::dedup_atol());
+    // Refinement off: the fixture's expected set is un-refined solve_all_ik, so
+    // JointConsts is unused here (only the force_refine path touches it).
+    const auto got = general_6r_core(JointConsts<6>{}, rr, rr_emitted::rr_coeffs, p.t,
+                                     rr_parity::fk_atol(), rr_parity::dedup_atol(),
+                                     /*allow_refinement=*/false, 15);
 #else
     // Coeff callback: ignore t12, return the fixture's pre-evaluated P/Q.
     auto coeffs = [&](const double[12], rr_detail::Mat14x9& p_sin, rr_detail::Mat14x9& p_cos,
@@ -64,7 +67,8 @@ int main() {
       p_one = p.p_one;
       q = p.q;
     };
-    const auto got = general_6r_core(rr, coeffs, p.t, rr_parity::fk_atol(), rr_parity::dedup_atol());
+    const auto got = general_6r_core(JointConsts<6>{}, rr, coeffs, p.t, rr_parity::fk_atol(),
+                                     rr_parity::dedup_atol(), /*allow_refinement=*/false, 15);
 #endif
 
 #ifdef POSE_DEBUG
