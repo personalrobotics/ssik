@@ -26,8 +26,13 @@ bool wrap_close(const std::array<double, DOF>& a, const std::array<double, DOF>&
 
 // Cases: a container of {std::array<double,16> target; vector<array<double,DOF>>
 // solutions;}. SolveFn: Pose -> vector<Solution<DOF>>.
+// fk_ceiling: the arm's own FK-closure tolerance (its solver's fk_atol). A
+// solution that closes within its solver's tolerance is valid; a global 1e-7 is
+// wrong for families whose gate is looser (RR / general_6r at 1e-5, where force-
+// refined near-double-root solutions settle ~1e-6). The emitter passes it.
 template <int DOF, typename Cases, typename SolveFn>
-int run(const char* name, const JointConsts<DOF>& c, const Cases& cases, SolveFn solve_fn) {
+int run(const char* name, const JointConsts<DOF>& c, const Cases& cases, SolveFn solve_fn,
+        double fk_ceiling = 1e-7) {
   double worst_fk = 0.0;
   int mismatched = 0;
   for (std::size_t ci = 0; ci < cases.size(); ++ci) {
@@ -60,7 +65,7 @@ int run(const char* name, const JointConsts<DOF>& c, const Cases& cases, SolveFn
   }
   std::printf("%s self-contained artifact: %zu poses, worst FK = %.3e, mismatches = %d\n", name,
               cases.size(), worst_fk, mismatched);
-  if (worst_fk < 1e-7 && mismatched == 0) {
+  if (worst_fk <= fk_ceiling && mismatched == 0) {
     std::printf("PASS\n");
     return 0;
   }

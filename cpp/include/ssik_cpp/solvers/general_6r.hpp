@@ -38,11 +38,13 @@
 namespace ssik {
 
 // FK-closure gate + dedup tolerance, matching the general_6r SolverSpec
-// (fk_atol_expr="1e-7" + force_refine, #528) and subproblem_dedup, so the native
-// core keeps exactly the Python artifact's solution set. The tightened 1e-7 gate
-// is the refinement target: marginal near-double-root candidates refine cleanly
-// below it (count unchanged) and spurious near-misses stall out.
-inline constexpr double kGeneral6rFkAtol = 1e-7;
+// (force_refine, #528; default subproblem_numerical gate) and subproblem_dedup,
+// so the native core keeps exactly the Python artifact's solution set. Marginal
+// near-double-root candidates refine to well under 1e-5 (they settle ~1e-6);
+// the artifact gate ceiling is per-arm (this fk_atol), not a global 1e-7 (which
+// refined too many candidates and put solutions on a cross-backend-fragile
+// boundary, #490 CI).
+inline constexpr double kGeneral6rFkAtol = 1e-5;
 inline constexpr double kGeneral6rDedupAtol = 1e-3;
 
 // Per-arm baked constants for the RR bridge (everything except the coefficient
@@ -319,7 +321,10 @@ std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts
     for (int i = 0; i < 6; ++i) q_poe[i] = q_dh[i] - rr.theta_offset[i];
     if (fk_err <= fk_atol) {
       cands.push_back(Solution<6>{q_poe, fk_err, Refinement::None});
-    } else if (allow_refinement) {
+    } else if (allow_refinement && fk_err < 0.1) {
+      // Refine only near-misses (fk < 0.1): a candidate already >0.1 off is an
+      // eigensolve root with no real IK here, and polishing it just stalls
+      // (matches the codegen refine pre-filter, #490).
       // Marginal algebraic candidate: at near-double roots the back-sub v_12 is
       // numerically delicate, leaving a genuine solution above the gate. Polish
       // it in POE frame (keep iff it converges), mirroring solve_all_ik's

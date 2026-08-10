@@ -620,6 +620,16 @@ def solve(
             continue
         if not (allow_refinement or True):
             continue
+        # Refine only NEAR-misses. An algebraic candidate whose FK is
+        # already >0.1 off (Frobenius) is an eigensolve root that does not
+        # correspond to a real IK solution here (genuine near-double-root
+        # marginals sit at ~1e-4); polishing it just burns Newton iters
+        # that stall out and add nothing (#490: force_refine was 5-10x on
+        # degenerate arms doing exactly this). 0.1 is 100x looser than the
+        # 1e-3 band that once dropped genuine piper solutions -- it only
+        # skips candidates clearly not near any solution.
+        if residual >= 0.1:
+            continue
         # Newton polish using the per-arm spatial Jacobian.
         refined = _lm_refine(
             q,

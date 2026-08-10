@@ -503,6 +503,19 @@ def emitted_arms(gen_dir: Path) -> list[str]:
 _SOLVE_MARKER = "std::vector<Solution<DOF>> solve("
 
 
+def _arm_fk_ceiling(arm: str) -> float:
+    """The arm's own FK-closure tolerance (its solver's fk_atol), used as the
+    gate's worst-FK ceiling. A solution within its solver's tolerance is valid;
+    a global 1e-7 is wrong for looser families (RR at 1e-5, where force-refined
+    near-double-root solutions settle ~1e-6)."""
+    from ssik.core.solver_registry import SOLVERS
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+    spec = SOLVERS[load_manifest()[arm].solver]
+    ns = {"policy": DEFAULT_TOLERANCE_POLICY}
+    return float(eval(spec.fk_atol_expr, {"__builtins__": {}}, ns))
+
+
 def emit_artifact_gate(gen_dir: Path) -> None:
     """Generate the single data-driven artifact gate over EVERY self-contained
     arm (one with an emitted ``solve()``). Adding an arm needs no test/CMake edit
@@ -523,9 +536,10 @@ def emit_artifact_gate(gen_dir: Path) -> None:
         lines += [f'#include "{a}.hpp"', f'#include "{a}_solve_parity.hpp"']
     lines += ["", "namespace ssik::artifact_test {", "", "inline int run_all() {", "  int rc = 0;"]
     for a in arms:
+        ceil = _f(_arm_fk_ceiling(a))
         lines.append(
             f'  rc |= run<{a}::DOF>("{a}", {a}::consts(), {a}::solve_parity_cases(),\n'
-            f"                     [](const Pose& T) {{ return {a}::solve(T); }});"
+            f"                     [](const Pose& T) {{ return {a}::solve(T); }}, {ceil});"
         )
     lines += ["  return rc;", "}", "", "}  // namespace ssik::artifact_test", ""]
     (gen_dir / "artifact_gate.hpp").write_text("\n".join(lines))

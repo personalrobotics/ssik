@@ -113,7 +113,9 @@ inline std::vector<Solution<6>> three_parallel_solve(const JointConsts<6>& c, co
     const double resid = (fk_q - T).norm();  // Frobenius
     if (resid <= kThreeParallelFkAtol) {
       verified.push_back(Solution<6>{q, resid, Refinement::None});
-    } else if (allow_refinement) {
+    } else if (allow_refinement && resid < 0.1) {
+      // Refine only near-misses; skip candidates clearly not near a solution
+      // (matches the codegen refine pre-filter, #490).
       const auto refined = lm_refine<6>(c, q, T, kThreeParallelFkAtol, refinement_max_iters);
       if (refined) {
         verified.push_back(Solution<6>{refined->first, refined->second, Refinement::Lm});
