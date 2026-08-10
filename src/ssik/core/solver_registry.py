@@ -117,6 +117,14 @@ SOLVERS: dict[str, SolverSpec] = {
         # under the default 1e-5 (they refine cleanly to <1e-7, count unchanged).
         # Surfaced by the native C++ (Eigen JacobiSVD) artifact finding all 8
         # where the un-refined Python found 4 (#490).
+        # KNOWN measure-zero gap (#531): at an *exact* rank-deficient ridge,
+        # force_refine partially heals the pose (non-empty), which suppresses the
+        # empty-gated T-perturbation rescue for a branch that is a genuinely
+        # complex root there (real only under perturbation). Analytical recovery
+        # is fragile (linearization-dependent) and the robust rescue-union
+        # over-fires (~50-70% of poses); see #531 for the full analysis. Never
+        # affects a real pose -- the fuzz + full C++ gate are complete; only the
+        # 3 xfail'd exact-ridge reproducers in test_refinement_rescue.py hit it.
         _spec(
             "ikgeo.general_6r",
             2,
