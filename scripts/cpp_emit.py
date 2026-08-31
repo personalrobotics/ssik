@@ -198,7 +198,15 @@ def _render_general_6r_solve(kb: KinBody) -> tuple[str, list[str]] | None:
 
 
 def _jointlock_rr_complete(arm: str, kb: KinBody, n_probe: int = 150) -> bool:
-    """True iff a native RR-only lock-sweep (no HP kernel, no rescue) can cover the
+    """ONBOARDING TOOL (not called at emit time): decide whether a new jointlock
+    7R arm's RR-only lock-sweep covers it, to set its membership in
+    ``_HP_DEFERRED_JOINTLOCK_ARMS``. It runs backend-sensitive oracle solves, so
+    its result can flip across BLAS backends at a borderline pose -- fine for a
+    one-time human-run onboarding decision, but it must NOT drive the per-emit
+    header structure (that has to be byte-deterministic for the --check drift
+    guard, #536). Run this when adding a jointlock arm; bake the answer.
+
+    True iff a native RR-only lock-sweep (no HP kernel, no rescue) can cover the
     arm, tested two ways over n_probe reachable poses (#535):
 
     1. HP-fire: if the Python oracle ever dispatches to the HP Study-quaternion
@@ -275,13 +283,28 @@ def _wrap_close(a: np.ndarray, b: np.ndarray, atol: float) -> bool:
     return bool(np.max(np.abs((a - b + np.pi) % (2 * np.pi) - np.pi)) < atol)
 
 
+# Jointlock 7R arms whose locked sub-chains genuinely need the HP Study-quaternion
+# kernel (their RR-only sweep is incomplete), so they ship constants-only until
+# the HP native kernel lands (#491). This is a COMMITTED decision, not a per-emit
+# recompute: `_jointlock_rr_complete` runs backend-sensitive oracle solves (SVD /
+# eig near singularities), so its True/False can FLIP across BLAS backends
+# (Accelerate vs OpenBLAS) at a borderline pose -- which would make the emitted
+# header structure platform-dependent and break the --check drift guard (#536).
+# The direct check remains the onboarding tool that DECIDES membership here (run
+# it when adding a jointlock arm); baking the result keeps every re-emit
+# byte-deterministic. Correctness of the set is backstopped by the artifact gate:
+# an RR-covered arm listed here would lose coverage (caught by review), and an
+# HP-needing arm NOT listed would gate-fail loudly (its sweep misses the oracle).
+_HP_DEFERRED_JOINTLOCK_ARMS = {"kassow_kr810_ik"}
+
+
 def _render_jointlock_solve(arm: str, kb: KinBody) -> tuple[str, list[str]] | None:
     """Self-contained jointlock.seven_r solve() for RR-covered arms: bake the lock
     joint + 16-sample schedule + each locked 6R sub-chain's RR unit, and compose
     the sweep (jointlock_artifact_solve). None for HP-needing arms (kassow)."""
     from ssik.solvers.jointlock.seven_r import _lock_joint, choose_lock_joint
 
-    if len(kb.joints) != 7 or not _jointlock_rr_complete(arm, kb):
+    if len(kb.joints) != 7 or arm in _HP_DEFERRED_JOINTLOCK_ARMS:
         return None
     lock = int(choose_lock_joint(kb))
     j = kb.joints[lock]
@@ -716,7 +739,23 @@ def _constants_match(committed: str, fresh: str) -> tuple[bool, float, str]:
         near-miss or a pass-with-margin is visible in CI logs).
     """
     if _FLOAT_LITERAL_RE.sub("~", committed) != _FLOAT_LITERAL_RE.sub("~", fresh):
-        return False, float("inf"), "structural mismatch (non-float text differs)"
+        cl, fl = committed.count("\n"), fresh.count("\n")
+        first = next(
+            (
+                i + 1
+                for i, (a, b) in enumerate(
+                    zip(committed.splitlines(), fresh.splitlines(), strict=False)
+                )
+                if _FLOAT_LITERAL_RE.sub("~", a) != _FLOAT_LITERAL_RE.sub("~", b)
+            ),
+            min(cl, fl) + 1,
+        )
+        return (
+            False,
+            float("inf"),
+            f"structural mismatch (non-float text differs): committed {cl} lines vs fresh {fl} "
+            f"lines, first structural diff at line {first}",
+        )
     ca = [float(x) for x in _FLOAT_LITERAL_RE.findall(committed)]
     fa = [float(x) for x in _FLOAT_LITERAL_RE.findall(fresh)]
     if len(ca) != len(fa):
