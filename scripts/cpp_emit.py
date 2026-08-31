@@ -687,34 +687,49 @@ def emit_artifact_gate(gen_dir: Path) -> None:
 _FLOAT_LITERAL_RE = re.compile(
     r"[-+]?(?:\d+\.\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+)"
 )
-# Cross-platform ULP tolerance for computed baked geometry (#517/#82). The SRS
-# artifact bakes constants derived from FK + a home-gauge matmul, whose low bits
-# carry BLAS-backend variance; a real un-re-emitted oracle change moves geometry
-# by >> this, so the guard stays sharp.
-_DRIFT_ATOL = 1e-12
-_DRIFT_RTOL = 1e-10
+# Cross-platform tolerance for computed baked geometry (#517/#82). The SRS
+# artifact bakes constants from FK + a home-gauge matmul, and the jointlock RR
+# units bake poe_to_dh of 16 locked sub-chains -- some at a degenerate lock
+# sample where an angle is exactly +/-pi and its low bits (~1e-9) differ between
+# BLAS backends (Accelerate vs OpenBLAS, #536). A real un-re-emitted oracle
+# change moves geometry by >> this (mm / rad, i.e. >> 1e-6), so the guard stays
+# sharp: it only tolerates the last few bits of a computed value, never a change.
+_DRIFT_ATOL = 1e-11
+_DRIFT_RTOL = 1e-8
 
 
-def _constants_match(committed: str, fresh: str) -> bool:
-    """True when two constants headers are identical up to cross-platform ULP.
+def _constants_match(committed: str, fresh: str) -> tuple[bool, float, str]:
+    """Whether two constants headers are identical up to cross-platform ULP,
+    plus a one-line diagnostic of the worst float delta.
 
     Byte comparison is too strict for headers that bake *computed* geometry (the
     SRS ``ee_offset_local`` etc. go through FK + an ``R_home.T`` matmul whose low
-    bits are BLAS-backend-sensitive, #517/#82). Instead: the non-float structure
+    bits are BLAS-backend-sensitive, #517/#82; the jointlock RR units bake
+    poe_to_dh of 16 locked sub-chains, #536). Instead: the non-float structure
     (identifiers, integers, layout) must match exactly, and every float literal
     must match within ``_DRIFT_ATOL``/``_DRIFT_RTOL`` -- orders of magnitude below
     any real geometry change, so a forgotten re-emit still turns the guard red.
     Pure-``repr`` constants (ur5, irb6700) match exactly and are unaffected.
+
+    :returns: ``(ok, worst_ratio, detail)`` where ``worst_ratio`` is the largest
+        delta-over-budget (>1 means a real mismatch) and ``detail`` names it (so a
+        near-miss or a pass-with-margin is visible in CI logs).
     """
     if _FLOAT_LITERAL_RE.sub("~", committed) != _FLOAT_LITERAL_RE.sub("~", fresh):
-        return False
+        return False, float("inf"), "structural mismatch (non-float text differs)"
     ca = [float(x) for x in _FLOAT_LITERAL_RE.findall(committed)]
     fa = [float(x) for x in _FLOAT_LITERAL_RE.findall(fresh)]
     if len(ca) != len(fa):
-        return False
-    return all(
-        abs(c - f) <= _DRIFT_ATOL + _DRIFT_RTOL * abs(f) for c, f in zip(ca, fa, strict=True)
-    )
+        return False, float("inf"), f"float count differs ({len(ca)} vs {len(fa)})"
+    worst_ratio, worst_detail = 0.0, "identical"
+    for c, f in zip(ca, fa, strict=True):
+        delta = abs(c - f)
+        budget = _DRIFT_ATOL + _DRIFT_RTOL * abs(f)
+        ratio = delta / budget if budget > 0 else 0.0
+        if ratio > worst_ratio:
+            worst_ratio = ratio
+            worst_detail = f"|Δ|={delta:.2e} at value {f:.12g} (budget {budget:.2e}, {ratio:.2f}x)"
+    return worst_ratio <= 1.0, worst_ratio, worst_detail
 
 
 def check_no_drift(gen_dir: Path) -> int:
@@ -738,6 +753,7 @@ def check_no_drift(gen_dir: Path) -> int:
         print("[cpp_emit] --check: no emitted arms found in", gen_dir)
         return 0
     stale: list[str] = []
+    worst_overall = (0.0, "", "")  # (ratio, arm, detail) across all arms, for CI visibility
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         for arm in arms:
@@ -746,8 +762,14 @@ def check_no_drift(gen_dir: Path) -> int:
             fresh = tmp_dir / f"{arm}.hpp"
             if not committed.exists():
                 stale.append(f"{arm}.hpp (missing from cpp/gen)")
-            elif not _constants_match(committed.read_text(), fresh.read_text()):
-                stale.append(f"{arm}.hpp (differs from a fresh emit)")
+                continue
+            ok, ratio, detail = _constants_match(committed.read_text(), fresh.read_text())
+            if ratio > worst_overall[0]:
+                worst_overall = (ratio, arm, detail)
+            if not ok:
+                stale.append(f"{arm}.hpp (differs from a fresh emit): {detail}")
+    if worst_overall[1]:
+        print(f"[cpp_emit] --check worst float delta: {worst_overall[1]} -> {worst_overall[2]}")
     if stale:
         print("[cpp_emit] --check FAILED: native artifacts are stale vs the Python oracle:")
         for s in stale:
