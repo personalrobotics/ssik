@@ -14,6 +14,7 @@
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
 #include "ssik_cpp/generalized_euler.hpp"
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
+#include "ssik_cpp/solvers/husty_pfurner.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
@@ -451,10 +452,46 @@ py::list decompose_3axis_test_py(py::array_t<double> R_arr, py::array_t<double> 
   return out;
 }
 
+// HP f/g kernel parity (#537): given the baked (4,8,2) tensors T_u / T_w_pre,
+// the target's Study DQ sigma_E, and drop_idx, return (f (9,7), g (6,5)) exactly
+// as _eliminate.compute_fg_numeric. Validates the sigma_E injection + Cramer
+// interpolation + convolution stage bit-for-bit against Python.
+py::tuple hp_compute_fg_test_py(py::array_t<double> t_u_arr, py::array_t<double> t_w_pre_arr,
+                                py::array_t<double> sigma_e_arr, int drop_idx) {
+  auto load_tensor = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
+    auto u = a.unchecked<3>();  // (4, 8, 2)
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 8; ++j)
+        for (int k = 0; k < 2; ++k) dst[k](i, j) = u(i, j, k);
+  };
+  ssik::HpConsts hp;
+  load_tensor(t_u_arr, hp.t_u);
+  load_tensor(t_w_pre_arr, hp.t_w_pre);
+  auto se = sigma_e_arr.unchecked<1>();
+  ssik::Vec8 sigma_E;
+  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+
+  ssik::hp_detail::Mat9x7 f;
+  ssik::hp_detail::Mat6x5 g;
+  ssik::hp_detail::compute_fg(hp, sigma_E, drop_idx, f, g);
+
+  py::array_t<double> f_out({9, 7});
+  auto fm = f_out.mutable_unchecked<2>();
+  for (int i = 0; i < 9; ++i)
+    for (int j = 0; j < 7; ++j) fm(i, j) = f(i, j);
+  py::array_t<double> g_out({6, 5});
+  auto gm = g_out.mutable_unchecked<2>();
+  for (int i = 0; i < 6; ++i)
+    for (int j = 0; j < 5; ++j) gm(i, j) = g(i, j);
+  return py::make_tuple(f_out, g_out);
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
         py::arg("n2"), py::arg("n3"));
+  m.def("hp_compute_fg_test", &hp_compute_fg_test_py, py::arg("t_u"), py::arg("t_w_pre"),
+        py::arg("sigma_e"), py::arg("drop_idx") = 7);
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);
