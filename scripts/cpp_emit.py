@@ -63,11 +63,13 @@ def _render_limits(joints: list[Any]) -> list[str]:
 # C++ consumer calls ssik::<arm>::solve(T) with zero Python. Families not listed
 # here (or arms outside a family's native domain) emit constants only (self-
 # contained solve pending their port).
-def _render_solve(solver: str, kb: KinBody) -> tuple[str, list[str]] | None:
+def _render_solve(solver: str, kb: KinBody, arm: str = "") -> tuple[str, list[str]] | None:
     if solver == "seven_r.srs":
         return _render_srs_solve(kb)
     if solver == "ikgeo.general_6r":
         return _render_general_6r_solve(kb)
+    if solver == "jointlock.seven_r":
+        return _render_jointlock_solve(arm, kb)
     fn = {
         "ikgeo.three_parallel": ("three_parallel", "three_parallel_artifact_solve"),
         "ikgeo.spherical_two_parallel": (
@@ -134,32 +136,32 @@ def _render_srs_solve(kb: KinBody) -> tuple[str, list[str]] | None:
     )
 
 
-def _render_general_6r_solve(kb: KinBody) -> tuple[str, list[str]] | None:
-    """Self-contained general-6R (Raghavan-Roth) solve(): bakes the DH bridge +
-    AE-3 leftvar metadata (RrConsts), emits the CSE'd coefficient function, and
-    composes general_6r_artifact_solve. None only for a non-6R chain."""
-    if len(kb.joints) != 6 or any(j.joint_type != "revolute" for j in kb.joints):
-        return None
+def _render_rr_unit(kb: KinBody, suffix: str = "") -> list[str]:
+    """Render ``rr_consts<suffix>()`` + ``rr_coeffs<suffix>(...)`` for one 6R
+    KinBody: the baked DH bridge + AE-3 leftvar (RrConsts) + the CSE'd coefficient
+    function. Shared by the general_6r artifact and the jointlock per-sample fan-
+    out (each locked 6R sub-chain is its own RR unit)."""
     from _rr_emit import render_rr_coeffs
 
     from ssik.kinematics.poe_to_dh import poe_to_dh
-    from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar, _cached_derivation
+    from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar, _derive_pq_for_arm
 
     dh = poe_to_dh(kb)
     alpha, a, d = dh.to_dh_tuple()
-    lin = int(_cached_best_leftvar(tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())))
-    *_fns, meta = _cached_derivation(
-        tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist()), lin, False
-    )
+    at, bt, dt = tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())
+    lin = int(_cached_best_leftvar(at, bt, dt))
+    # Derive directly (not _cached_derivation): importing a jointlock arm primes
+    # the derivation cache with AOT-lambdified entries that lack the `_sym_*`
+    # symbolic matrices render_rr_coeffs needs. The fresh derivation always
+    # carries them (and uses the same raw DH, so the emitted literals are stable).
+    *_fns, meta = _derive_pq_for_arm(at, bt, dt, linearity_joint=lin)
     lb0, lb1 = cast("tuple[int, int]", meta["left_bilinear"])
     rb0, rb1 = cast("tuple[int, int]", meta["right_bilinear"])
     drop = cast(int, meta["drop_joint"])
     t_pre_inv = np.linalg.inv(dh.t_pre)
     t_post_inv = np.linalg.inv(dh.t_post)
-
-    body = [
-        "// Baked RR geometry (poe_to_dh DH bridge + AE-3 leftvar), zero runtime Python.",
-        "inline RrConsts rr_consts() {",
+    return [
+        f"inline RrConsts rr_consts{suffix}() {{",
         "  RrConsts r;",
         f"  r.alpha = {{{', '.join(_f(v) for v in alpha)}}};",
         f"  r.a = {{{', '.join(_f(v) for v in a)}}};",
@@ -174,7 +176,17 @@ def _render_general_6r_solve(kb: KinBody) -> tuple[str, list[str]] | None:
         "  return r;",
         "}",
         "",
-        *render_rr_coeffs(meta),
+        *render_rr_coeffs(meta, name=f"rr_coeffs{suffix}"),
+    ]
+
+
+def _render_general_6r_solve(kb: KinBody) -> tuple[str, list[str]] | None:
+    """Self-contained general-6R (Raghavan-Roth) solve(). None for a non-6R chain."""
+    if len(kb.joints) != 6 or any(j.joint_type != "revolute" for j in kb.joints):
+        return None
+    body = [
+        "// Baked RR geometry (poe_to_dh DH bridge + AE-3 leftvar), zero runtime Python.",
+        *_render_rr_unit(kb),
         "",
         "// Self-contained IK solve -- header-only C++, no Python runtime.",
         "inline std::vector<Solution<DOF>> solve(",
@@ -183,6 +195,128 @@ def _render_general_6r_solve(kb: KinBody) -> tuple[str, list[str]] | None:
         "}",
     ]
     return ('#include "ssik_cpp/solvers/general_6r.hpp"', body)
+
+
+def _jointlock_rr_complete(arm: str, kb: KinBody, n_probe: int = 150) -> bool:
+    """True iff a native RR-only lock-sweep (no HP kernel, no rescue) can cover the
+    arm, tested two ways over n_probe reachable poses (#535):
+
+    1. HP-fire: if the Python oracle ever dispatches to the HP Study-quaternion
+       kernel, an RR-only artifact CANNOT reproduce that pose by definition (HP
+       found a root cached-RR could not). This is the sensitive signal -- it fires
+       whenever ANY of the 16 lock samples needs HP (~16% of poses for kassow), so
+       n_probe=150 catches it with overwhelming probability and returns early.
+    2. Direct sweep-vs-oracle: even without HP, the native RR sweep (different
+       numerics than Python's cached-RR) must not miss any oracle solution.
+
+    The old HP-fire-only probe used just 20 poses and let kassow through; the rescue
+    then MASKED the gap at the gate. Deferred (RR-incomplete) arms stay
+    constants-only until the HP kernel lands (#491). The full gate is the
+    deterministic backstop if this ever wrongly returns True."""
+    from unittest.mock import patch
+
+    import ssik.solvers.husty_pfurner.general_6r as _hp
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as _pol
+    from ssik.refinement import dedup_by_wrap_close
+    from ssik.solvers.ikgeo import general_6r as _g6
+    from ssik.solvers.jointlock.seven_r import _lock_joint, choose_lock_joint
+
+    lock = int(choose_lock_joint(kb))
+    lo0, hi0 = kb.joints[lock].limits or (-np.pi, np.pi)
+    samples = np.linspace(lo0, hi0, 16, endpoint=False)
+    mod = importlib.import_module(f"ssik.prebuilt.{arm}")
+    fk_atol, dedup_atol = _pol.subproblem_numerical, _pol.subproblem_dedup
+    rng = np.random.default_rng(0)
+    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in kb.joints]
+    # jointlock imports this module object as hp_general_6r and looks up .solve at
+    # call time, so one patch counts every HP-kernel dispatch inside mod.solve.
+    fired = {"n": 0}
+    orig = _hp.solve
+
+    def counting(*a: Any, **k: Any) -> Any:
+        fired["n"] += 1
+        return orig(*a, **k)
+
+    with patch.object(_hp, "solve", counting):
+        for _ in range(n_probe):
+            q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+            t = np.asarray(poe_forward_kinematics(kb, q), dtype=np.float64)
+            before = fired["n"]
+            oracle = list(mod.solve(t, respect_limits=False))
+            if fired["n"] > before:
+                return False  # oracle needed the HP kernel -> RR-only artifact can't cover it
+            # RR-only sweep, mirroring the native runtime: lock -> RR solve -> pad
+            # -> 7R re-verify against the actual target -> dedup. _g6 never routes
+            # to HP, so this stays a pure RR sweep.
+            cands = []
+            for q_lock in samples:
+                sub = _lock_joint(kb, lock, float(q_lock))
+                sols, _ = _g6.solve(sub, t)
+                for s in sols:
+                    q7 = np.insert(s.q, lock, q_lock)
+                    if np.linalg.norm(poe_forward_kinematics(kb, q7) - t) <= fk_atol:
+                        cands.append(_Sol(q7))
+            sweep = dedup_by_wrap_close(cands, dedup_atol)
+            for o in oracle:
+                if not any(_wrap_close(o.q, s.q, dedup_atol) for s in sweep):
+                    return False  # oracle solution the RR-only sweep misses
+    return True
+
+
+class _Sol:
+    """Minimal Solution stand-in for dedup_by_wrap_close in the RR-completeness probe."""
+
+    def __init__(self, q: np.ndarray) -> None:
+        self.q = q
+        self.fk_residual = 0.0
+
+
+def _wrap_close(a: np.ndarray, b: np.ndarray, atol: float) -> bool:
+    return bool(np.max(np.abs((a - b + np.pi) % (2 * np.pi) - np.pi)) < atol)
+
+
+def _render_jointlock_solve(arm: str, kb: KinBody) -> tuple[str, list[str]] | None:
+    """Self-contained jointlock.seven_r solve() for RR-covered arms: bake the lock
+    joint + 16-sample schedule + each locked 6R sub-chain's RR unit, and compose
+    the sweep (jointlock_artifact_solve). None for HP-needing arms (kassow)."""
+    from ssik.solvers.jointlock.seven_r import _lock_joint, choose_lock_joint
+
+    if len(kb.joints) != 7 or not _jointlock_rr_complete(arm, kb):
+        return None
+    lock = int(choose_lock_joint(kb))
+    j = kb.joints[lock]
+    lo, hi = j.limits if j.limits else (-np.pi, np.pi)
+    samples = np.linspace(lo, hi, 16, endpoint=False)
+
+    body = [
+        f"// Jointlock 7R: lock joint {lock}, sweep 16 samples, RR-solve each 6R sub-chain.",
+        "inline JointlockConsts<16> jl_consts() {",
+        "  JointlockConsts<16> j;",
+        f"  j.lock_idx = {lock};",
+        f"  j.q_lock = {{{', '.join(_f(v) for v in samples)}}};",
+        "  return j;",
+        "}",
+        "",
+    ]
+    for i, q_lock in enumerate(samples):
+        body += ["", f"// --- lock sample {i} (q_lock = {_f(q_lock)}) ---"]
+        body += _render_rr_unit(_lock_joint(kb, lock, float(q_lock)), f"_{i}")
+    body += [
+        "",
+        "inline std::array<RrConsts, 16> jl_rr() {",
+        "  return {" + ", ".join(f"rr_consts_{i}()" for i in range(16)) + "};",
+        "}",
+        "inline std::array<RrCoeffFn, 16> jl_coeffs() {",
+        "  return {" + ", ".join(f"rr_coeffs_{i}" for i in range(16)) + "};",
+        "}",
+        "",
+        "inline std::vector<Solution<DOF>> solve(",
+        "    const Pose& T, const ArtifactParams<DOF>& p = {}) {",
+        "  return jointlock_artifact_solve<16>(consts(), jl_consts(), jl_rr(), jl_coeffs(),",
+        "                                      limits(), T, p);",
+        "}",
+    ]
+    return ('#include "ssik_cpp/solvers/jointlock_seven_r.hpp"', body)
 
 
 def _consts_kinbody(arm_solver: str, kb: KinBody) -> KinBody:
@@ -229,7 +363,7 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
 
     # --- Self-contained C++ artifact: baked constants + limits + solve() ----
     solver = load_manifest()[arm].solver
-    rendered_solve = _render_solve(solver, kb)
+    rendered_solve = _render_solve(solver, kb, arm)
     header_include = rendered_solve[0] if rendered_solve else '#include "ssik_cpp/fk.hpp"'
     title = (
         f"// Self-contained C++ IK artifact for {arm} ({dof}-DOF): baked constants"
@@ -313,7 +447,7 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
     # solve() output per pose, so a standalone C++ program (which can't call
     # Python) can validate ssik::<arm>::solve(T) against the oracle. Emitted for
     # arms with a self-contained C++ solve().
-    if _render_solve(load_manifest()[arm].solver, kb) is not None:
+    if _render_solve(load_manifest()[arm].solver, kb, arm) is not None:
         _emit_solve_parity(arm, out_dir, ns, ranges, seed=seed + 2)
 
 

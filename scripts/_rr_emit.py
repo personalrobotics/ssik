@@ -33,8 +33,8 @@ class _RrPrinter(CXX11CodePrinter):  # type: ignore[misc]  # sympy is untyped
         return str(super()._print_Pow(expr))
 
 
-def render_rr_coeffs(meta: dict[str, object]) -> list[str]:
-    """Render the ``rr_coeffs`` C++ function from the derivation metadata.
+def render_rr_coeffs(meta: dict[str, object], name: str = "rr_coeffs") -> list[str]:
+    """Render the ``<name>`` C++ coefficient function from the derivation metadata.
 
     CSE runs across all four matrices jointly so subexpressions shared between
     P_sin/P_cos/P_one/Q collapse to one temporary. Only non-zero entries are
@@ -51,11 +51,11 @@ def render_rr_coeffs(meta: dict[str, object]) -> list[str]:
 
     exprs: list[sp.Expr] = []
     layout: list[tuple[str, int, int]] = []
-    for name, mat in mats:
+    for mat_name, mat in mats:
         m = sp.Matrix(mat)
         for r in range(m.rows):
             for c in range(m.cols):
-                layout.append((name, r, c))
+                layout.append((mat_name, r, c))
                 exprs.append(m[r, c])
 
     replacements, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("_t"), optimizations="basic")
@@ -63,7 +63,7 @@ def render_rr_coeffs(meta: dict[str, object]) -> list[str]:
     lines = [
         "// Elimination coefficients P_sin/P_cos/P_one (14x9) + Q (14x8) as CSE'd",
         "// polynomials in the 12 target entries. Emitted from the sympy derivation.",
-        "inline void rr_coeffs(const double t12[12], rr_detail::Mat14x9& p_sin,",
+        f"inline void {name}(const double t12[12], rr_detail::Mat14x9& p_sin,",
         "                      rr_detail::Mat14x9& p_cos, rr_detail::Mat14x9& p_one,",
         "                      rr_detail::Mat14x8& q) {",
     ]
@@ -72,9 +72,9 @@ def render_rr_coeffs(meta: dict[str, object]) -> list[str]:
     lines.append("  p_sin.setZero(); p_cos.setZero(); p_one.setZero(); q.setZero();")
     for sym, sub in replacements:
         lines.append(f"  const double {printer.doprint(sym)} = {printer.doprint(sub)};")
-    for (name, r, c), expr in zip(layout, reduced, strict=True):
+    for (mat_name, r, c), expr in zip(layout, reduced, strict=True):
         if expr == 0:
             continue
-        lines.append(f"  {name}({r}, {c}) = {printer.doprint(expr)};")
+        lines.append(f"  {mat_name}({r}, {c}) = {printer.doprint(expr)};")
     lines.append("}")
     return lines
