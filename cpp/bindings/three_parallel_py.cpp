@@ -486,12 +486,35 @@ py::tuple hp_compute_fg_test_py(py::array_t<double> t_u_arr, py::array_t<double>
   return py::make_tuple(f_out, g_out);
 }
 
+// HP pencil eigensolve parity (#538): given f (9x7) and g (6x5), return the
+// sorted finite real candidate u roots of det S(u)=0, as
+// solve_pencil_eigenvalues / _pencil.solve_polynomial_matrix_eigenvalues.
+py::array_t<double> hp_pencil_roots_test_py(py::array_t<double> f_arr, py::array_t<double> g_arr,
+                                            double real_tol, double max_magnitude) {
+  auto fm = f_arr.unchecked<2>();  // (9, 7)
+  auto gm = g_arr.unchecked<2>();  // (6, 5)
+  ssik::hp_detail::Mat9x7 f;
+  ssik::hp_detail::Mat6x5 g;
+  for (int i = 0; i < 9; ++i)
+    for (int j = 0; j < 7; ++j) f(i, j) = fm(i, j);
+  for (int i = 0; i < 6; ++i)
+    for (int j = 0; j < 5; ++j) g(i, j) = gm(i, j);
+  const std::vector<double> roots =
+      ssik::hp_detail::solve_pencil_eigenvalues(f, g, real_tol, max_magnitude);
+  py::array_t<double> out(static_cast<py::ssize_t>(roots.size()));
+  auto om = out.mutable_unchecked<1>();
+  for (std::size_t i = 0; i < roots.size(); ++i) om(static_cast<py::ssize_t>(i)) = roots[i];
+  return out;
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
         py::arg("n2"), py::arg("n3"));
   m.def("hp_compute_fg_test", &hp_compute_fg_test_py, py::arg("t_u"), py::arg("t_w_pre"),
         py::arg("sigma_e"), py::arg("drop_idx") = 7);
+  m.def("hp_pencil_roots_test", &hp_pencil_roots_test_py, py::arg("f"), py::arg("g"),
+        py::arg("real_tol") = 1e-3, py::arg("max_magnitude") = 1e10);
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);

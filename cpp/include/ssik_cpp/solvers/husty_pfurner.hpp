@@ -12,9 +12,14 @@
 // and dropped-row g(u,w) (6x5). Parity-gated vs _eliminate.compute_fg_numeric.
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <complex>
+#include <vector>
 
 #include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
 
 #include "ssik_cpp/study_dq.hpp"
 
@@ -179,6 +184,193 @@ inline void compute_fg(const HpConsts& hp, const Vec8& sigma_E, int drop_idx, Ma
   const PCoef p = cramer_8vec_via_interp(hp.t_u, t_w, drop_idx);
   f = study_quadric_f(p);
   g = dropped_row_g(hp.t_u, t_w, p, drop_idx);
+}
+
+// =============================================================================
+// Sylvester pencil + 80x80 generalized eigensolve (#538). From f (9x7), g (6x5)
+// to the candidate real u roots. For the 6R HP chain the degrees are fixed:
+// deg_w(f)=6, deg_w(g)=4 -> n=10; deg_u(f)=8, deg_u(g)=5 -> max_d=8; so the
+// Sylvester tensor is S (9,10,10) and its Frobenius companion pencil is 80x80.
+// =============================================================================
+
+using Mat10 = Eigen::Matrix<double, 10, 10>;
+using Vec10 = Eigen::Matrix<double, 10, 1>;
+using Pencil = std::array<Mat10, 9>;  // S[d], d = 0..8
+
+// Sylvester matrix pencil S(u) = sum_d S[d] u^d (_eliminate.build_pencil_tensor).
+// Top deg_w(g)=4 rows are shifted f-rows (descending in w); bottom deg_w(f)=6
+// rows are shifted g-rows.
+inline Pencil build_pencil_tensor(const Mat9x7& f, const Mat6x5& g) {
+  constexpr int deg_w_f = 6, deg_w_g = 4;
+  Pencil S;
+  for (auto& m : S) m.setZero();
+  for (int shift = 0; shift < deg_w_g; ++shift)
+    for (int d = 0; d < 9; ++d)
+      for (int k = 0; k < 7; ++k) S[d](shift, shift + (deg_w_f - k)) += f(d, k);
+  for (int shift = 0; shift < deg_w_f; ++shift)
+    for (int d = 0; d < 6; ++d)
+      for (int k = 0; k < 5; ++k) S[d](deg_w_g + shift, shift + (deg_w_g - k)) += g(d, k);
+  return S;
+}
+
+// Row + column equilibration with variable rescale (_pencil.equilibrate_
+// polynomial_matrix, rescale_variable=True). Returns S_eq; scale_c is written
+// out (eigenvalues of S_eq(x_internal)=0 times scale_c give those of S(x)=0).
+// d_l/d_r are not needed for eigenvalues, so they are not returned.
+inline Pencil equilibrate(const Pencil& S, double& scale_c) {
+  const double norm_0 = S[0].cwiseAbs().maxCoeff();
+  const double norm_d = S[8].cwiseAbs().maxCoeff();
+  scale_c = (norm_0 > 0.0 && norm_d > 0.0) ? std::pow(norm_0 / norm_d, 1.0 / 8.0) : 1.0;
+
+  Pencil ss;
+  if (scale_c != 1.0)
+    for (int k = 0; k < 9; ++k) ss[k] = S[k] * std::pow(scale_c, k);
+  else
+    ss = S;
+
+  Vec10 row_max = Vec10::Zero();
+  for (int k = 0; k < 9; ++k) row_max = row_max.cwiseMax(ss[k].cwiseAbs().rowwise().maxCoeff());
+  for (int i = 0; i < 10; ++i)
+    if (row_max[i] <= 0.0) row_max[i] = 1.0;
+  const Vec10 d_l = row_max.cwiseInverse();
+
+  Pencil after_row;
+  for (int k = 0; k < 9; ++k) after_row[k] = d_l.asDiagonal() * ss[k];
+
+  Vec10 col_max = Vec10::Zero();
+  for (int k = 0; k < 9; ++k)
+    col_max = col_max.cwiseMax(after_row[k].cwiseAbs().colwise().maxCoeff().transpose());
+  for (int j = 0; j < 10; ++j)
+    if (col_max[j] <= 0.0) col_max[j] = 1.0;
+  const Vec10 d_r = col_max.cwiseInverse();
+
+  Pencil s_eq;
+  for (int k = 0; k < 9; ++k) s_eq[k] = after_row[k] * d_r.asDiagonal();
+  return s_eq;
+}
+
+// Frobenius companion linearization of S(x) into (A, B) with A v = x B v
+// (_pencil.build_frobenius_pencil_pair). d=8, n=10 -> 80x80. B = block_diag(I x
+// 7, S[8]); A has identity superdiagonal blocks and bottom row [-S[0]..-S[7]].
+inline void build_frobenius(const Pencil& s, Eigen::MatrixXd& A, Eigen::MatrixXd& B) {
+  constexpr int n = 10, d = 8, nd = 80;
+  A = Eigen::MatrixXd::Zero(nd, nd);
+  B = Eigen::MatrixXd::Identity(nd, nd);
+  for (int k = 0; k < d - 1; ++k) A.block<n, n>(k * n, (k + 1) * n).setIdentity();
+  for (int k = 0; k < d; ++k) A.block<n, n>((d - 1) * n, k * n) = -s[k];
+  B.block<n, n>((d - 1) * n, (d - 1) * n) = s[d];
+}
+
+// End-to-end det S(u)=0 solve (solve_pencil_eigenvalues -> _pencil.solve_
+// polynomial_matrix_eigenvalues): equilibrate -> Frobenius -> generalized
+// eigensolve -> filter finite / |re|<=max_magnitude / near-real. Returns the
+// sorted finite real candidate u values.
+inline std::vector<double> solve_pencil_eigenvalues(const Mat9x7& f, const Mat6x5& g,
+                                                    double real_tol = 1e-3,
+                                                    double max_magnitude = 1e10) {
+  constexpr int n = 10, d = 8, nd = 80;
+  double scale_c = 1.0;
+  const Pencil s_eq = equilibrate(build_pencil_tensor(f, g), scale_c);
+
+  std::vector<double> out;
+  auto keep = [&](std::complex<double> e) {
+    e *= scale_c;
+    if (!std::isfinite(e.real()) || !std::isfinite(e.imag())) return;
+    const double re = e.real(), im = e.imag();
+    if (std::abs(re) > max_magnitude) return;
+    if (std::abs(im) / (1.0 + std::abs(re)) > real_tol) return;
+    out.push_back(re);
+  };
+
+  // Primary path -- reduce the matrix-polynomial eigenproblem to a STANDARD one.
+  // The monic Frobenius companion of a matrix polynomial with invertible leading
+  // coefficient is a standard 80x80 matrix whose eigenvalues are the roots of
+  // det S(u)=0; Eigen's EigenSolver (RealSchur: balancing + Hessenberg + Francis
+  // double-shift QR) solves it far more robustly than Eigen's RealQZ, which fails
+  // to converge on ~38% of these pencils. The catch is that forming Sd^-1
+  // amplifies error when the leading coefficient Sd=S[d] is ill-conditioned (the
+  // extreme-config case where roots spread toward infinity). So pick the STABLE
+  // orientation: if S[0] (constant coeff) is better-conditioned than S[d], solve
+  // the reversed polynomial Q(y) = y^d S(1/y) (whose leading coeff is S[0]) and
+  // invert the roots u = 1/y. RealQZ remains the fallback when the chosen leading
+  // coefficient is singular (a genuine degree drop / infinite eigenvalues).
+  auto rcond = [](const Mat10& m) {
+    Eigen::JacobiSVD<Mat10> svd(m);
+    const double smax = svd.singularValues()(0), smin = svd.singularValues()(n - 1);
+    return smax > 0.0 ? smin / smax : 0.0;  // reciprocal condition (1 well, 0 singular)
+  };
+  const bool reversed = rcond(s_eq[0]) > rcond(s_eq[d]);
+  // Coefficient list for the chosen orientation, leading = coeff[d].
+  std::array<Mat10, 9> coeff;
+  for (int k = 0; k <= d; ++k) coeff[k] = reversed ? s_eq[d - k] : s_eq[k];
+
+  bool solved = false;
+  Eigen::FullPivLU<Mat10> lu(coeff[d]);
+  if (lu.isInvertible()) {
+    const Mat10 lead_inv = lu.inverse();
+    Eigen::MatrixXd C = Eigen::MatrixXd::Zero(nd, nd);
+    for (int k = 0; k < d - 1; ++k) C.block<n, n>(k * n, (k + 1) * n).setIdentity();
+    for (int k = 0; k < d; ++k) C.block<n, n>((d - 1) * n, k * n) = -(lead_inv * coeff[k]);
+    Eigen::EigenSolver<Eigen::MatrixXd> es;
+    es.compute(C, /*computeEigenvectors=*/false);
+    if (es.info() == Eigen::Success) {
+      const auto eig = es.eigenvalues();
+      for (int i = 0; i < eig.size(); ++i) {
+        // Reversed solves for y = 1/u; invert (skip y ~ 0, i.e. u -> infinity).
+        if (reversed) {
+          const std::complex<double> y = eig(i);
+          if (std::abs(y) > 1e-300) keep(std::complex<double>(1.0, 0.0) / y);
+        } else {
+          keep(eig(i));
+        }
+      }
+      solved = true;
+    }
+  }
+
+  if (!solved) {
+    // Fallback: the generalized pencil via RealQZ. Read the Schur factors S, T
+    // directly (never the asserting eigenvalues()/alphas() accessors, which abort
+    // on a non-converged QZ) and extract eigenvalues from the 1x1/2x2 blocks: a
+    // 1x1 gives real S(i,i)/T(i,i); a 2x2 gives the roots of det(S_b - x T_b)=0.
+    Eigen::MatrixXd A, B;
+    build_frobenius(s_eq, A, B);
+    Eigen::RealQZ<Eigen::MatrixXd> qz(nd);
+    qz.setMaxIterations(400 * nd);
+    qz.compute(A, B, /*computeQZ=*/false);
+    const Eigen::MatrixXd& S = qz.matrixS();
+    const Eigen::MatrixXd& T = qz.matrixT();
+    for (int i = 0; i < nd;) {
+      if (i + 1 < nd && S(i + 1, i) != 0.0) {
+        const double s00 = S(i, i), s01 = S(i, i + 1), s10 = S(i + 1, i), s11 = S(i + 1, i + 1);
+        const double t00 = T(i, i), t01 = T(i, i + 1), t11 = T(i + 1, i + 1);
+        const double qa = t00 * t11;
+        const double qb = -(s00 * t11 + s11 * t00 - s10 * t01);
+        const double qc = s00 * s11 - s10 * s01;
+        if (qa == 0.0) {
+          if (qb != 0.0) keep(std::complex<double>(-qc / qb, 0.0));
+        } else {
+          const double disc = qb * qb - 4.0 * qa * qc;
+          if (disc >= 0.0) {
+            const double sq = std::sqrt(disc);
+            keep(std::complex<double>((-qb + sq) / (2.0 * qa), 0.0));
+            keep(std::complex<double>((-qb - sq) / (2.0 * qa), 0.0));
+          } else {
+            const double sq = std::sqrt(-disc);
+            keep(std::complex<double>(-qb / (2.0 * qa), sq / (2.0 * qa)));
+            keep(std::complex<double>(-qb / (2.0 * qa), -sq / (2.0 * qa)));
+          }
+        }
+        i += 2;
+      } else {
+        const double beta = T(i, i);
+        if (beta != 0.0) keep(std::complex<double>(S(i, i) / beta, 0.0));
+        i += 1;
+      }
+    }
+  }
+  std::sort(out.begin(), out.end());
+  return out;
 }
 
 }  // namespace hp_detail
