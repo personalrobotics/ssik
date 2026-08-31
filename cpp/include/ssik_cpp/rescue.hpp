@@ -54,7 +54,11 @@ struct RescueParams {
   std::array<double, 4> scale_multipliers = {1.0, 2.0, 4.0, 10.0};
   double fk_atol = 1e-8;
   int refinement_max_iters = 20;
-  double dedup_atol = 1e-4;
+  // Match the solver's dedup tolerance (subproblem_dedup, 1e-3): a tighter rescue
+  // dedup leaked near-duplicate pairs in (1e-4, 1e-3) into the returned set, since
+  // finalize does not re-dedup (#534). Two solutions the solver considers the same
+  // (< 1e-3 wrap-to-pi) must not both survive the rescue.
+  double dedup_atol = 1e-3;
   std::uint64_t seed = 20260608;
 };
 

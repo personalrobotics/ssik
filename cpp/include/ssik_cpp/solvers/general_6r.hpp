@@ -351,8 +351,21 @@ std::vector<Solution<6>> general_6r_artifact_solve(const JointConsts<6>& c, cons
   // polishes marginal near-double-root candidates, so the native set matches the
   // Python oracle.
   const auto core = [&](const Pose& tp) {
-    return general_6r_core(c, rr, coeffs, tp, kGeneral6rFkAtol, kGeneral6rDedupAtol,
-                           /*allow_refinement=*/true, p.refinement_max_iters);
+    auto sols = general_6r_core(c, rr, coeffs, tp, kGeneral6rFkAtol, kGeneral6rDedupAtol,
+                               /*allow_refinement=*/true, p.refinement_max_iters);
+    // POE-FK re-verify (#533): general_6r_core filters the DH-frame residual, but
+    // the rigid poe_to_dh bridge is slightly inconsistent at degenerate geometry
+    // (DH-FK closes, POE-FK does not). Re-verify against the actual POE target,
+    // as every other family does; drop candidates that miss it.
+    std::vector<Solution<6>> verified;
+    for (auto& s : sols) {
+      const double poe_fk = (fk<6>(c, s.q) - tp).norm();
+      if (poe_fk <= kGeneral6rFkAtol) {
+        s.fk_residual = poe_fk;
+        verified.push_back(s);
+      }
+    }
+    return verified;
   };
 
   // Limit pass only (no seed/tolerance/truncate): the rescue gate is "no

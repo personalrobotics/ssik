@@ -65,7 +65,7 @@ def rescue_via_T_perturbation(
     scale_multipliers: tuple[float, ...] = (1.0, 2.0, 4.0, 10.0),
     fk_atol: float = 1e-8,
     refinement_max_iters: int = 20,
-    dedup_atol: float = 1e-4,
+    dedup_atol: float = 1e-3,
     seed: int = 20260608,
     jacobian_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]] | None = None,
 ) -> list[Solution]:
@@ -114,7 +114,12 @@ def rescue_via_T_perturbation(
         candidate. Default 20 -- empirically converges in 3-8 iters
         on Group A reproducers.
     :param dedup_atol: wrap-to-pi joint-angle tolerance for
-        collapsing equivalent solutions. Default 1e-4 rad.
+        collapsing equivalent solutions. Default 1e-3 rad, matching the
+        solvers' ``subproblem_dedup`` (#534): the shared finalize does not
+        re-dedup, so a tighter rescue dedup leaked near-duplicate pairs in
+        ``(1e-4, 1e-3)`` -- pairs the solver already treats as one -- into the
+        returned set. Deduping at the solver's own tolerance cannot drop a
+        genuinely-distinct solution.
     :param seed: RNG seed for the perturbation directions.
         Deterministic by default so test fingerprints are stable.
     :param jacobian_fn: optional analytical spatial Jacobian for the
