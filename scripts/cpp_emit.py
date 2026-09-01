@@ -136,11 +136,14 @@ def _render_srs_solve(kb: KinBody) -> tuple[str, list[str]] | None:
     )
 
 
-def _render_rr_unit(kb: KinBody, suffix: str = "") -> list[str]:
+def _render_rr_unit(kb: KinBody, suffix: str = "", zero_threshold: float = 0.0) -> list[str]:
     """Render ``rr_consts<suffix>()`` + ``rr_coeffs<suffix>(...)`` for one 6R
     KinBody: the baked DH bridge + AE-3 leftvar (RrConsts) + the CSE'd coefficient
     function. Shared by the general_6r artifact and the jointlock per-sample fan-
-    out (each locked 6R sub-chain is its own RR unit)."""
+    out (each locked 6R sub-chain is its own RR unit).
+
+    ``zero_threshold`` is passed to render_rr_coeffs to drop numerical-noise
+    coefficients (jointlock degenerate sub-chains, #536); general_6r leaves it 0."""
     from _rr_emit import render_rr_coeffs
 
     from ssik.kinematics.poe_to_dh import poe_to_dh
@@ -176,7 +179,7 @@ def _render_rr_unit(kb: KinBody, suffix: str = "") -> list[str]:
         "  return r;",
         "}",
         "",
-        *render_rr_coeffs(meta, name=f"rr_coeffs{suffix}"),
+        *render_rr_coeffs(meta, name=f"rr_coeffs{suffix}", zero_threshold=zero_threshold),
     ]
 
 
@@ -323,7 +326,12 @@ def _render_jointlock_solve(arm: str, kb: KinBody) -> tuple[str, list[str]] | No
     ]
     for i, q_lock in enumerate(samples):
         body += ["", f"// --- lock sample {i} (q_lock = {_f(q_lock)}) ---"]
-        body += _render_rr_unit(_lock_joint(kb, lock, float(q_lock)), f"_{i}")
+        # zero_threshold: degenerate lock samples (near-parallel axes) push
+        # poe_to_dh coefficient products down to ~1e-18 noise whose low bits are
+        # BLAS-backend-sensitive; drop them so the emitted header is byte-
+        # deterministic across platforms (#536). 1e-12 relative is far below any
+        # genuine RR coefficient (DH products, O(1e-3)..O(1)).
+        body += _render_rr_unit(_lock_joint(kb, lock, float(q_lock)), f"_{i}", zero_threshold=1e-12)
     body += [
         "",
         "inline std::array<RrConsts, 16> jl_rr() {",

@@ -33,12 +33,25 @@ class _RrPrinter(CXX11CodePrinter):  # type: ignore[misc]  # sympy is untyped
         return str(super()._print_Pow(expr))
 
 
-def render_rr_coeffs(meta: dict[str, object], name: str = "rr_coeffs") -> list[str]:
+def render_rr_coeffs(
+    meta: dict[str, object], name: str = "rr_coeffs", zero_threshold: float = 0.0
+) -> list[str]:
     """Render the ``<name>`` C++ coefficient function from the derivation metadata.
 
     CSE runs across all four matrices jointly so subexpressions shared between
     P_sin/P_cos/P_one/Q collapse to one temporary. Only non-zero entries are
     assigned (the matrices are zeroed first), matching the sparse RR structure.
+
+    ``zero_threshold`` (relative to the largest coefficient magnitude across all
+    four matrices) drops numerical-noise coefficients before CSE. A well-posed
+    arm produces none, but a jointlock arm's DEGENERATE locked sub-chains (near-
+    parallel axes at some lock samples) push poe_to_dh products down to ~1e-18 to
+    ~1e-49 -- values that are numerically zero but whose exact low bits (and
+    whether they land at exactly 0) are BLAS-backend-sensitive. Left in, they make
+    the CSE temporary set platform-dependent, so the emitted header structure
+    differs macOS vs Linux and trips the --check drift guard (#536). Thresholding
+    them to 0 makes the CSE -- and thus the whole header -- byte-deterministic.
+    Default 0.0 (off) leaves the general_6r arms exactly as committed.
     """
     printer = _RrPrinter({"user_functions": {}})
     t_syms = list(meta["_sym_t_target"])  # type: ignore[call-overload]
@@ -49,10 +62,34 @@ def render_rr_coeffs(meta: dict[str, object], name: str = "rr_coeffs") -> list[s
         ("q", meta["_sym_q"]),
     ]
 
+    sp_mats = [(mat_name, sp.Matrix(mat)) for mat_name, mat in mats]
+    if zero_threshold > 0.0:
+        scale = max(
+            (abs(float(f)) for _, m in sp_mats for e in m for f in e.atoms(sp.Float)),
+            default=0.0,
+        )
+        # Floor the scale at 1.0: RR coefficients are DH products (O(1)), so 1.0 is
+        # a physical upper bound on a genuine coefficient's scale. A DEGENERATE
+        # locked sub-chain can have its entire coefficient matrix be ~1e-18 noise
+        # (scale ~1e-18); a purely relative cutoff would then be ~1e-30 and drop
+        # nothing. Flooring keeps the cutoff at zero_threshold (1e-12) so the noise
+        # is zeroed regardless -- such a sub-chain's RR unit collapses to all-zero
+        # (deterministic), and its (spurious) solutions are dropped by the 7R
+        # re-verify anyway.
+        cutoff = zero_threshold * max(scale, 1.0)
+        if cutoff > 0.0:
+            drop = {
+                f: sp.Integer(0)
+                for _, m in sp_mats
+                for e in m
+                for f in e.atoms(sp.Float)
+                if abs(float(f)) < cutoff
+            }
+            sp_mats = [(mat_name, m.xreplace(drop)) for mat_name, m in sp_mats]
+
     exprs: list[sp.Expr] = []
     layout: list[tuple[str, int, int]] = []
-    for mat_name, mat in mats:
-        m = sp.Matrix(mat)
+    for mat_name, m in sp_mats:
         for r in range(m.rows):
             for c in range(m.cols):
                 layout.append((mat_name, r, c))
