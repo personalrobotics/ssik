@@ -34,7 +34,10 @@ class _RrPrinter(CXX11CodePrinter):  # type: ignore[misc]  # sympy is untyped
 
 
 def render_rr_coeffs(
-    meta: dict[str, object], name: str = "rr_coeffs", zero_threshold: float = 0.0
+    meta: dict[str, object],
+    name: str = "rr_coeffs",
+    zero_threshold: float = 0.0,
+    use_cse: bool = True,
 ) -> list[str]:
     """Render the ``<name>`` C++ coefficient function from the derivation metadata.
 
@@ -95,7 +98,19 @@ def render_rr_coeffs(
                 layout.append((mat_name, r, c))
                 exprs.append(m[r, c])
 
-    replacements, reduced = sp.cse(exprs, symbols=sp.numbered_symbols("_t"), optimizations="basic")
+    if use_cse:
+        replacements, reduced = sp.cse(
+            exprs, symbols=sp.numbered_symbols("_t"), optimizations="basic"
+        )
+    else:
+        # No CSE: emit each non-zero entry's full polynomial inline. sp.cse shares
+        # subexpressions by EXACT Float equality, so backend-variant low bits break
+        # a share on one platform but not the other -> the temp set (and header
+        # structure) is not byte-portable, which no threshold/snap fully fixes
+        # (#536). Without sharing the structure is exactly the non-zero-coefficient
+        # set, which the zero_threshold makes deterministic. Used on the jointlock
+        # path (degenerate sub-chains); general_6r keeps CSE (byte-stable there).
+        replacements, reduced = [], exprs
 
     lines = [
         "// Elimination coefficients P_sin/P_cos/P_one (14x9) + Q (14x8) as CSE'd",

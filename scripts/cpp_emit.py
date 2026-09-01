@@ -136,6 +136,30 @@ def _render_srs_solve(kb: KinBody) -> tuple[str, list[str]] | None:
     )
 
 
+def _snap_dh(vals: np.ndarray, canonicals: tuple[float, ...], atol: float = 1e-6) -> np.ndarray:
+    """Snap DH values within ``atol`` of a canonical value to exactly that value.
+
+    A degenerate locked sub-chain (near-parallel axes at some lock samples) has a
+    twist that is geometrically exactly 0 or +/-pi and a link length exactly 0,
+    but poe_to_dh returns them as canonical +/- ~1e-8 numeric error whose low bits
+    differ across BLAS backends. Left raw, that error propagates into the RR
+    derivation as ~1e-8..1e-12 noise coefficients that straddle the CSE
+    zero-threshold across platforms -> non-deterministic header structure (#536).
+    Snapping the SOURCE to exact collapses those products (0.0*x is exactly 0;
+    sin(exact pi) is ~1e-16, well below the threshold), so the emit is
+    backend-deterministic. atol=1e-6 >> the ~1e-8 numeric error but << any genuine
+    DH spacing, so a real near-canonical design value is never touched. Only the
+    degenerate samples' spurious solutions are affected, and those are dropped by
+    the 7R re-verify regardless."""
+    out = np.array(vals, dtype=float)
+    for i in range(out.size):
+        for c in canonicals:
+            if abs(out[i] - c) < atol:
+                out[i] = c
+                break
+    return out
+
+
 def _render_rr_unit(kb: KinBody, suffix: str = "", zero_threshold: float = 0.0) -> list[str]:
     """Render ``rr_consts<suffix>()`` + ``rr_coeffs<suffix>(...)`` for one 6R
     KinBody: the baked DH bridge + AE-3 leftvar (RrConsts) + the CSE'd coefficient
@@ -143,7 +167,10 @@ def _render_rr_unit(kb: KinBody, suffix: str = "", zero_threshold: float = 0.0) 
     out (each locked 6R sub-chain is its own RR unit).
 
     ``zero_threshold`` is passed to render_rr_coeffs to drop numerical-noise
-    coefficients (jointlock degenerate sub-chains, #536); general_6r leaves it 0."""
+    coefficients (jointlock degenerate sub-chains, #536); general_6r leaves it 0.
+    When set, DH values near a canonical (0, +/-pi/2, +/-pi) are also snapped to
+    exact at the source, which is what makes the noise land firmly below the
+    threshold on every backend rather than straddle it."""
     from _rr_emit import render_rr_coeffs
 
     from ssik.kinematics.poe_to_dh import poe_to_dh
@@ -151,6 +178,13 @@ def _render_rr_unit(kb: KinBody, suffix: str = "", zero_threshold: float = 0.0) 
 
     dh = poe_to_dh(kb)
     alpha, a, d = dh.to_dh_tuple()
+    theta_offset = np.array(dh.theta_offset, dtype=float)
+    if zero_threshold > 0.0:
+        angles = (0.0, np.pi / 2, -np.pi / 2, np.pi, -np.pi)
+        alpha = _snap_dh(alpha, angles)
+        theta_offset = _snap_dh(theta_offset, angles)
+        a = _snap_dh(a, (0.0,))
+        d = _snap_dh(d, (0.0,))
     at, bt, dt = tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())
     lin = int(_cached_best_leftvar(at, bt, dt))
     # Derive directly (not _cached_derivation): importing a jointlock arm primes
@@ -169,7 +203,7 @@ def _render_rr_unit(kb: KinBody, suffix: str = "", zero_threshold: float = 0.0) 
         f"  r.alpha = {{{', '.join(_f(v) for v in alpha)}}};",
         f"  r.a = {{{', '.join(_f(v) for v in a)}}};",
         f"  r.d = {{{', '.join(_f(v) for v in d)}}};",
-        f"  r.theta_offset = {{{', '.join(_f(v) for v in dh.theta_offset)}}};",
+        f"  r.theta_offset = {{{', '.join(_f(v) for v in theta_offset)}}};",
         f"  r.t_pre_inv = {_mat4(t_pre_inv)};",
         f"  r.t_post_inv = {_mat4(t_post_inv)};",
         f"  r.linearity_joint = {lin};",
@@ -179,7 +213,19 @@ def _render_rr_unit(kb: KinBody, suffix: str = "", zero_threshold: float = 0.0) 
         "  return r;",
         "}",
         "",
-        *render_rr_coeffs(meta, name=f"rr_coeffs{suffix}", zero_threshold=zero_threshold),
+        # No CSE on the jointlock path (zero_threshold > 0): sympy.cse shares
+        # subexpressions by exact float equality, and a degenerate sub-chain's
+        # backend-variant coefficient low bits break a share on one platform but
+        # not another -> non-portable temp set (#536). Without CSE the emitted
+        # structure is exactly the (threshold-stabilised) non-zero-coefficient set,
+        # which IS backend-deterministic; and after the threshold the polynomials
+        # are short enough that no-CSE is also smaller than the CSE'd form.
+        *render_rr_coeffs(
+            meta,
+            name=f"rr_coeffs{suffix}",
+            zero_threshold=zero_threshold,
+            use_cse=(zero_threshold == 0.0),
+        ),
     ]
 
 
