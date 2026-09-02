@@ -573,6 +573,40 @@ py::array_t<double> hp_back_substitute_test_py(py::array_t<double> t_u_arr,
   return out;
 }
 
+// HP solve_ik parity (#539): baked T_u/T_w_pre + sigma_E + DH + flags -> the
+// (n,6) v-tuple candidates, as _back_substitute.solve_ik.
+py::array_t<double> hp_solve_ik_test_py(py::array_t<double> t_u_arr, py::array_t<double> t_w_pre_arr,
+                                        py::array_t<double> sigma_e_arr, py::array_t<double> dh_a,
+                                        py::array_t<double> dh_l, py::array_t<double> dh_d,
+                                        int right_parametric_var) {
+  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
+    auto u3 = a.unchecked<3>();
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 8; ++j)
+        for (int k = 0; k < 2; ++k) dst[k](i, j) = u3(i, j, k);
+  };
+  ssik::HpConsts hp;
+  load(t_u_arr, hp.t_u);
+  load(t_w_pre_arr, hp.t_w_pre);
+  hp.right_parametric_var = right_parametric_var;
+  auto av = dh_a.unchecked<1>(), lv = dh_l.unchecked<1>(), dv = dh_d.unchecked<1>();
+  for (int i = 0; i < 5; ++i) {
+    hp.a[i + 1] = av(i);
+    hp.l[i + 1] = lv(i);
+  }
+  for (int i = 0; i < 4; ++i) hp.d[i + 2] = dv(i);
+  auto se = sigma_e_arr.unchecked<1>();
+  ssik::Vec8 sigma_E;
+  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+
+  const auto sols = ssik::hp_detail::solve_ik(hp, sigma_E);
+  py::array_t<double> out({static_cast<py::ssize_t>(sols.size()), py::ssize_t{6}});
+  auto om = out.mutable_unchecked<2>();
+  for (std::size_t i = 0; i < sols.size(); ++i)
+    for (int j = 0; j < 6; ++j) om(static_cast<py::ssize_t>(i), j) = sols[i][j];
+  return out;
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
@@ -586,6 +620,9 @@ PYBIND11_MODULE(_ssik_native, m) {
   m.def("hp_back_substitute_test", &hp_back_substitute_test_py, py::arg("t_u"), py::arg("t_w_pre"),
         py::arg("sigma_e"), py::arg("u"), py::arg("w"), py::arg("dh_a"), py::arg("dh_l"),
         py::arg("dh_d"), py::arg("right_parametric_var"), py::arg("drop_idx") = 7);
+  m.def("hp_solve_ik_test", &hp_solve_ik_test_py, py::arg("t_u"), py::arg("t_w_pre"),
+        py::arg("sigma_e"), py::arg("dh_a"), py::arg("dh_l"), py::arg("dh_d"),
+        py::arg("right_parametric_var"));
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);

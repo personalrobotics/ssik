@@ -658,5 +658,17 @@ inline JointTuple back_substitute_one(const HpConsts& hp, const Vec8& sigma_E, d
   return {v_1, v_2, v_3, v_4, v_5, v_6};
 }
 
+// Full HP IK kernel: refined (u,w) pairs -> back-substitute each -> the
+// (v_1..v_6) tan-half-angle candidates (_back_substitute.solve_ik). The
+// projective Study-DQ FK-closure filter is intentionally omitted: HP general_6r
+// runs the FK check downstream in POE space (verify_candidates), matching the
+// Python solve_ik(fk_tol=0.5) fast path.
+inline std::vector<JointTuple> solve_ik(const HpConsts& hp, const Vec8& sigma_E) {
+  std::vector<JointTuple> out;
+  for (const auto& uw : eliminate_uw_pairs(hp, sigma_E))
+    out.push_back(back_substitute_one(hp, sigma_E, uw[0], uw[1]));
+  return out;
+}
+
 }  // namespace hp_detail
 }  // namespace ssik
