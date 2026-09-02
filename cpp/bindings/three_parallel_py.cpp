@@ -507,6 +507,34 @@ py::array_t<double> hp_pencil_roots_test_py(py::array_t<double> f_arr, py::array
   return out;
 }
 
+// HP (u,w) refinement parity (#539): given baked T_u/T_w_pre + sigma_E, return
+// the refined (u,w) pairs, as _eliminate.eliminate_uw_pairs.
+py::array_t<double> hp_eliminate_uw_pairs_test_py(py::array_t<double> t_u_arr,
+                                                  py::array_t<double> t_w_pre_arr,
+                                                  py::array_t<double> sigma_e_arr,
+                                                  double accept_residue_tol) {
+  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
+    auto u = a.unchecked<3>();
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 8; ++j)
+        for (int k = 0; k < 2; ++k) dst[k](i, j) = u(i, j, k);
+  };
+  ssik::HpConsts hp;
+  load(t_u_arr, hp.t_u);
+  load(t_w_pre_arr, hp.t_w_pre);
+  auto se = sigma_e_arr.unchecked<1>();
+  ssik::Vec8 sigma_E;
+  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+  const auto pairs = ssik::hp_detail::eliminate_uw_pairs(hp, sigma_E, {7, 4, 0}, accept_residue_tol);
+  py::array_t<double> out({static_cast<py::ssize_t>(pairs.size()), py::ssize_t{2}});
+  auto om = out.mutable_unchecked<2>();
+  for (std::size_t i = 0; i < pairs.size(); ++i) {
+    om(static_cast<py::ssize_t>(i), 0) = pairs[i][0];
+    om(static_cast<py::ssize_t>(i), 1) = pairs[i][1];
+  }
+  return out;
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
@@ -515,6 +543,8 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("sigma_e"), py::arg("drop_idx") = 7);
   m.def("hp_pencil_roots_test", &hp_pencil_roots_test_py, py::arg("f"), py::arg("g"),
         py::arg("real_tol") = 1e-3, py::arg("max_magnitude") = 1e10);
+  m.def("hp_eliminate_uw_pairs_test", &hp_eliminate_uw_pairs_test_py, py::arg("t_u"),
+        py::arg("t_w_pre"), py::arg("sigma_e"), py::arg("accept_residue_tol") = 1e-3);
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);

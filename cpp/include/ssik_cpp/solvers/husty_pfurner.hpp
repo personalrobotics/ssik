@@ -10,17 +10,23 @@
 // Slice 1 (#537): the f/g stage -- sigma_E injection + Cramer 5x4
 // evaluation-interpolation + 2-D convolution -> the Study quadric f(u,w) (9x7)
 // and dropped-row g(u,w) (6x5). Parity-gated vs _eliminate.compute_fg_numeric.
+// Slice 2 (#538): Sylvester pencil + 80x80 eigensolve -> candidate u roots.
+// Slice 3 (#539): (u,w) Newton refinement + back-substitution -> joint angles.
 #pragma once
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <complex>
+#include <limits>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
+#include "ssik_cpp/quartic.hpp"  // np_roots (companion-matrix roots) for _initial_w_for
 #include "ssik_cpp/study_dq.hpp"
 
 namespace ssik {
@@ -178,12 +184,19 @@ inline Mat6x5 dropped_row_g(const std::array<Mat4x8, 2>& t_u, const std::array<M
 // The full f/g stage: sigma_E injection -> Cramer -> quadric + dropped row.
 // Mirrors _eliminate.compute_fg_numeric. `f` is (9,7), `g` is (6,5), indexed
 // [u-power, w-power].
+// f/g from the (already sigma_E-injected) T_w tensor -- Cramer -> quadric +
+// dropped row (_eliminate._compute_fg_with_tw). Split out so eliminate_uw_pairs
+// hoists the drop-independent apply_sigma_e once across the drop-index loop.
+inline void compute_fg_with_tw(const std::array<Mat4x8, 2>& t_u, const std::array<Mat4x8, 2>& t_w,
+                               int drop_idx, Mat9x7& f, Mat6x5& g) {
+  const PCoef p = cramer_8vec_via_interp(t_u, t_w, drop_idx);
+  f = study_quadric_f(p);
+  g = dropped_row_g(t_u, t_w, p, drop_idx);
+}
+
 inline void compute_fg(const HpConsts& hp, const Vec8& sigma_E, int drop_idx, Mat9x7& f,
                        Mat6x5& g) {
-  const std::array<Mat4x8, 2> t_w = apply_sigma_e(hp.t_w_pre, sigma_E);
-  const PCoef p = cramer_8vec_via_interp(hp.t_u, t_w, drop_idx);
-  f = study_quadric_f(p);
-  g = dropped_row_g(hp.t_u, t_w, p, drop_idx);
+  compute_fg_with_tw(hp.t_u, apply_sigma_e(hp.t_w_pre, sigma_E), drop_idx, f, g);
 }
 
 // =============================================================================
@@ -370,6 +383,159 @@ inline std::vector<double> solve_pencil_eigenvalues(const Mat9x7& f, const Mat6x
     }
   }
   std::sort(out.begin(), out.end());
+  return out;
+}
+
+// =============================================================================
+// (u,w) refinement (#539): each pencil u-root is seeded with a w and polished by
+// a 2x2 Newton on [f(u,w); g(u,w)] = 0. Mirrors _eliminate._initial_w_for +
+// _refine_uw_inline + eliminate_uw_pairs.
+// =============================================================================
+
+inline constexpr int kHpNewtonMaxIter = 5;
+inline constexpr double kHpNewtonResidueTol = 1e-12;
+inline constexpr double kHpClusterTol = 1e-7;
+
+// Evaluate a bivariate-polynomial block p (rows = u-power, cols = w-power) and
+// its partials at (u,w); `scale` is the abs-coefficient polyval floored at the
+// block's max |coeff| (the residue normaliser, matching _refine_uw_inline).
+template <int R, int C>
+inline void eval_poly2d(const Eigen::Matrix<double, R, C>& p, double u, double w, double& val,
+                        double& du, double& dw, double& scale) {
+  double up[R], wp[C], uap[R], wap[C];
+  up[0] = wp[0] = uap[0] = wap[0] = 1.0;
+  for (int i = 1; i < R; ++i) {
+    up[i] = up[i - 1] * u;
+    uap[i] = uap[i - 1] * std::abs(u);
+  }
+  for (int j = 1; j < C; ++j) {
+    wp[j] = wp[j - 1] * w;
+    wap[j] = wap[j - 1] * std::abs(w);
+  }
+  val = du = dw = 0.0;
+  double sc = 0.0, maxc = 0.0;
+  for (int i = 0; i < R; ++i)
+    for (int j = 0; j < C; ++j) {
+      const double c = p(i, j);
+      val += c * up[i] * wp[j];
+      if (i >= 1) du += i * c * up[i - 1] * wp[j];
+      if (j >= 1) dw += j * c * up[i] * wp[j - 1];
+      sc += std::abs(c) * uap[i] * wap[j];
+      maxc = std::max(maxc, std::abs(c));
+    }
+  scale = std::max(sc, maxc);
+}
+
+// Seed w at u=u0: cross-validate the real roots of f(u0,.) and g(u0,.), take the
+// closest f/g pair's midpoint (_eliminate._initial_w_for). nullopt if neither has
+// a real root.
+inline std::optional<double> initial_w_for(const Mat9x7& f, const Mat6x5& g, double u0) {
+  Eigen::Matrix<double, 1, 7> fu = Eigen::Matrix<double, 1, 7>::Zero();
+  Eigen::Matrix<double, 1, 5> gu = Eigen::Matrix<double, 1, 5>::Zero();
+  double up = 1.0;
+  for (int i = 0; i < 9; ++i) {
+    fu += up * f.row(i);
+    if (i < 6) gu += up * g.row(i);
+    up *= u0;
+  }
+  if (fu.cwiseAbs().maxCoeff() == 0.0 || gu.cwiseAbs().maxCoeff() == 0.0) return std::nullopt;
+  // np_roots takes highest-degree-first; our row is lowest-first -> reverse.
+  auto real_roots = [](auto row, int n) {
+    std::vector<double> coeffs(n);
+    for (int k = 0; k < n; ++k) coeffs[k] = row(n - 1 - k);
+    std::vector<double> reals;
+    for (const auto& r : np_roots(coeffs))
+      if (std::abs(r.imag()) <= 1e-6 * (1.0 + std::abs(r.real()))) reals.push_back(r.real());
+    return reals;
+  };
+  const std::vector<double> rf = real_roots(fu, 7), rg = real_roots(gu, 5);
+  if (rf.empty() || rg.empty()) return std::nullopt;
+  double best_w = 0.0, best_gap = std::numeric_limits<double>::infinity();
+  for (double wf : rf)
+    for (double wg : rg)
+      if (std::abs(wf - wg) < best_gap) {
+        best_gap = std::abs(wf - wg);
+        best_w = 0.5 * (wf + wg);
+      }
+  return best_w;
+}
+
+// 2x2 Newton on [f;g]=0 with monotone-best tracking (_eliminate._refine_uw_inline).
+// Returns (u, w, best_residue).
+inline std::array<double, 3> refine_uw_inline(const Mat9x7& f, const Mat6x5& g, double u0,
+                                              double w0) {
+  double fv, gv, fdu, fdw, gdu, gdw, sf, sg;
+  double u = u0, w = w0;
+  eval_poly2d(f, u, w, fv, fdu, fdw, sf);
+  eval_poly2d(g, u, w, gv, gdu, gdw, sg);
+  double best_u = u, best_w = w;
+  double best_res = std::max(std::abs(fv) / std::max(sf, 1e-300), std::abs(gv) / std::max(sg, 1e-300));
+  for (int it = 0; it < kHpNewtonMaxIter; ++it) {
+    if (best_res < kHpNewtonResidueTol) break;
+    eval_poly2d(f, u, w, fv, fdu, fdw, sf);
+    eval_poly2d(g, u, w, gv, gdu, gdw, sg);
+    const double det = fdu * gdw - fdw * gdu;
+    if (det == 0.0 || !std::isfinite(det)) break;
+    const double inv = 1.0 / det;
+    const double d_u = -inv * (gdw * fv - fdw * gv);
+    const double d_w = -inv * (-gdu * fv + fdu * gv);
+    if (!std::isfinite(d_u) || !std::isfinite(d_w)) break;
+    u += d_u;
+    w += d_w;
+    double fn, gn, s1, s2, s3, s4, sfn, sgn;
+    eval_poly2d(f, u, w, fn, s1, s2, sfn);
+    eval_poly2d(g, u, w, gn, s3, s4, sgn);
+    const double res =
+        std::max(std::abs(fn) / std::max(sfn, 1e-300), std::abs(gn) / std::max(sgn, 1e-300));
+    if (res < best_res) {
+      best_u = u;
+      best_w = w;
+      best_res = res;
+    }
+  }
+  return {best_u, best_w, best_res};
+}
+
+// Full refinement pipeline: for each drop index, f/g -> pencil roots -> seed w ->
+// Newton, collect accepted (u,w), then 2-D cluster-merge (_eliminate.eliminate_
+// uw_pairs). drop_indices {7,4,0} cover both Tv6 and Tv4 right paths.
+// accept_residue_tol loosens the keep threshold (HP general_6r polishes downstream
+// in 6-D via lm_refine, so multi-root candidates that Newton can't push to 1e-12
+// are still valid IK).
+inline std::vector<std::array<double, 2>> eliminate_uw_pairs(
+    const HpConsts& hp, const Vec8& sigma_E, const std::vector<int>& drop_indices = {7, 4, 0},
+    double accept_residue_tol = 1e-3) {
+  const std::array<Mat4x8, 2> t_w = apply_sigma_e(hp.t_w_pre, sigma_E);
+  std::vector<std::array<double, 2>> refined;
+  for (int di : drop_indices) {
+    Mat9x7 f;
+    Mat6x5 g;
+    compute_fg_with_tw(hp.t_u, t_w, di, f, g);
+    for (double u0 : solve_pencil_eigenvalues(f, g)) {
+      const std::optional<double> w0 = initial_w_for(f, g, u0);
+      if (!w0) continue;
+      const std::array<double, 3> r = refine_uw_inline(f, g, u0, *w0);
+      if (r[2] < accept_residue_tol) refined.push_back({r[0], r[1]});
+    }
+  }
+  // 2-D cluster-merge: sort, then greedily fold points within kHpClusterTol
+  // (scaled) into the running cluster centroid.
+  std::sort(refined.begin(), refined.end());
+  std::vector<std::array<double, 2>> out;
+  for (const auto& uw : refined) {
+    bool merged = false;
+    for (auto& ref : out) {
+      const double scale = std::max({1.0, std::abs(ref[0]), std::abs(ref[1])});
+      const double d2 = (ref[0] - uw[0]) * (ref[0] - uw[0]) + (ref[1] - uw[1]) * (ref[1] - uw[1]);
+      if (d2 <= (kHpClusterTol * scale) * (kHpClusterTol * scale)) {
+        ref[0] = 0.5 * (ref[0] + uw[0]);
+        ref[1] = 0.5 * (ref[1] + uw[1]);
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) out.push_back(uw);
+  }
   return out;
 }
 
