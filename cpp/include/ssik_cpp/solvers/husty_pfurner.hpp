@@ -39,6 +39,15 @@ struct HpConsts {
   std::array<Eigen::Matrix<double, 4, 8>, 2> t_u{};
   std::array<Eigen::Matrix<double, 4, 8>, 2> t_w_pre{};
   int drop_idx = 7;
+  // Back-substitution DH (the possibly-perturbed chain), 1-indexed to match the
+  // HP naming: a[1..5] link lengths, l[1..5]=tan(alpha/2) twists, d[2..5] offsets
+  // (a[0]/l[0]/d[0]/d[1] unused; d_1 = 0 per HP convention).
+  std::array<double, 6> a{};
+  std::array<double, 6> l{};
+  std::array<double, 6> d{};
+  // Dispatch (baked at emit time from the singular-DH predicates):
+  int parametric_var = 0;        // u = 0:v_1 (Tv1) | 1:v_2 (Tv2, not yet native)
+  int right_parametric_var = 0;  // w = 0:v_6 (Tv6) | 1:v_4 (Tv4)
 };
 
 namespace hp_detail {
@@ -537,6 +546,116 @@ inline std::vector<std::array<double, 2>> eliminate_uw_pairs(
     if (!merged) out.push_back(uw);
   }
   return out;
+}
+
+// =============================================================================
+// Back-substitution (#539): from a refined (u,w) to the joint tan-half-angles
+// (v_1..v_6). Mirrors _back_substitute. Tv1 left + Tv4/Tv6 right; Tv2 left (the
+// case-keyed hyperplanes) is not yet native -- rizon/kassow reach Tv1 via the
+// build-time perturbation, so parametric_var is always 0 here.
+// =============================================================================
+
+// Elementary projective Study DQs (_back_substitute._sigma_*).
+inline Vec8 sigma_z(double v) { return (Vec8() << 1, 0, 0, v, 0, 0, 0, 0).finished(); }
+inline Vec8 sigma_tz(double d) { return (Vec8() << 1, 0, 0, 0, 0, 0, 0, 0.5 * d).finished(); }
+inline Vec8 sigma_tx(double a) { return (Vec8() << 1, 0, 0, 0, 0, 0.5 * a, 0, 0).finished(); }
+inline Vec8 sigma_rx(double ls) { return (Vec8() << 1, ls, 0, 0, 0, 0, 0, 0).finished(); }
+
+// R_z(v) T_z(d) T_x(a) R_x(ls) as a projective DQ (_sigma_joint_full).
+inline Vec8 sigma_joint_full(double v, double a, double ls, double d) {
+  using study::dq_mul;
+  return dq_mul(sigma_z(v), dq_mul(sigma_tz(d), dq_mul(sigma_tx(a), sigma_rx(ls))));
+}
+
+// Cramer cofactor 8-vec P at a single (u,w) (_back_substitute._cramer_P_at):
+// build the 8x8, drop row drop_idx, P = [det(A), x_1 det, ..] with x = A^-1(-col0).
+inline Vec8 cramer_P_at(const std::array<Mat4x8, 2>& t_u, const std::array<Mat4x8, 2>& t_w,
+                        double u, double w, int drop_idx) {
+  Mat8 full;
+  full.block<4, 8>(0, 0) = t_u[0] + u * t_u[1];
+  full.block<4, 8>(4, 0) = t_w[0] + w * t_w[1];
+  Eigen::Matrix<double, 7, 8> m7;
+  int r = 0;
+  for (int k = 0; k < 8; ++k)
+    if (k != drop_idx) m7.row(r++) = full.row(k);
+  const Eigen::Matrix<double, 7, 7> A = m7.block<7, 7>(0, 1);
+  const Eigen::Matrix<double, 7, 1> x = A.lu().solve(-m7.block<7, 1>(0, 0));
+  const double det = A.determinant();
+  Vec8 P;
+  P[0] = det;
+  for (int i = 0; i < 7; ++i) P[i + 1] = x[i] * det;
+  return P;
+}
+
+// Recover (v_a, v_b) from a 2R-chain Study DQ target by a closed-form ZXZ-like
+// rotation decomposition (_back_substitute._solve_2r_chain). d_a/d_b are
+// translation, unused by the rotation extraction. Single (v_a, v_b) solution.
+inline std::pair<double, double> solve_2r_chain(const Vec8& sigma_target, double a_a, double ls_a,
+                                                double a_b, double ls_b) {
+  (void)a_a;
+  (void)a_b;
+  const Eigen::Matrix3d R = study::rot_from_dq(sigma_target);
+
+  const double den_b = 1.0 + ls_b * ls_b;
+  const double sa_b = 2.0 * ls_b / den_b, ca_b = (1.0 - ls_b * ls_b) / den_b;
+  Eigen::Matrix3d rx_neg_b;
+  rx_neg_b << 1, 0, 0, 0, ca_b, sa_b, 0, -sa_b, ca_b;
+  const Eigen::Matrix3d rp = R * rx_neg_b;
+
+  const double den_a = 1.0 + ls_a * ls_a;
+  const double sa_a = 2.0 * ls_a / den_a, ca_a = (1.0 - ls_a * ls_a) / den_a;
+  const double rxz = rp(0, 2), ryz = rp(1, 2);
+
+  double v_a;
+  Eigen::Matrix3d r_double;
+  if (std::abs(sa_a) < 1e-12) {
+    v_a = 0.0;
+    r_double = rp;
+  } else {
+    const double sgn = sa_a > 0.0 ? 1.0 : -1.0;
+    const double th_a = std::atan2(rxz * sgn, -ryz * sgn);
+    v_a = std::tan(0.5 * th_a);
+    const double c = std::cos(th_a), s = std::sin(th_a);
+    Eigen::Matrix3d rz_neg;
+    rz_neg << c, s, 0, -s, c, 0, 0, 0, 1;
+    Eigen::Matrix3d rx_neg_a;
+    rx_neg_a << 1, 0, 0, 0, ca_a, sa_a, 0, -sa_a, ca_a;
+    r_double = rx_neg_a * rz_neg * rp;
+  }
+  const double th_b = std::atan2(r_double(1, 0), r_double(0, 0));
+  return {v_a, std::tan(0.5 * th_b)};
+}
+
+using JointTuple = std::array<double, 6>;  // (v_1..v_6) tan-half-angles
+
+// Full (v_1..v_6) for one (u,w) (_back_substitute.back_substitute_one), Tv1 left.
+inline JointTuple back_substitute_one(const HpConsts& hp, const Vec8& sigma_E, double u, double w) {
+  using study::dq_conj;
+  using study::dq_mul;
+  const std::array<Mat4x8, 2> t_w = apply_sigma_e(hp.t_w_pre, sigma_E);
+  const Vec8 P = cramer_P_at(hp.t_u, t_w, u, w, hp.drop_idx);
+
+  double v_4, v_5, v_6;
+  if (hp.right_parametric_var == 1) {  // Tv4: w = v_4
+    v_4 = w;
+    const Vec8 s4 = sigma_joint_full(v_4, hp.a[4], hp.l[4], hp.d[4]);
+    const Vec8 rhs = dq_mul(dq_conj(s4), dq_mul(dq_conj(P), sigma_E));
+    const auto [a, b] = solve_2r_chain(rhs, hp.a[5], hp.l[5], 0.0, 0.0);
+    v_5 = a;
+    v_6 = b;
+  } else {  // Tv6: w = v_6
+    v_6 = w;
+    const Vec8 rhs = dq_mul(dq_conj(P), dq_mul(sigma_E, dq_conj(sigma_z(v_6))));
+    const auto [a, b] = solve_2r_chain(rhs, hp.a[4], hp.l[4], hp.a[5], hp.l[5]);
+    v_4 = a;
+    v_5 = b;
+  }
+
+  const double v_1 = u;  // Tv1 left
+  const Vec8 s1 = sigma_joint_full(v_1, hp.a[1], hp.l[1], 0.0);
+  const Vec8 left = dq_mul(dq_conj(s1), P);
+  const auto [v_2, v_3] = solve_2r_chain(left, hp.a[2], hp.l[2], hp.a[3], hp.l[3]);
+  return {v_1, v_2, v_3, v_4, v_5, v_6};
 }
 
 }  // namespace hp_detail

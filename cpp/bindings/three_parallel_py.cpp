@@ -535,6 +535,44 @@ py::array_t<double> hp_eliminate_uw_pairs_test_py(py::array_t<double> t_u_arr,
   return out;
 }
 
+// HP back-substitution parity (#539): given baked T_u/T_w_pre + sigma_E + a
+// refined (u,w) + the DH + dispatch flags, return the (v_1..v_6) tuple, as
+// _back_substitute.back_substitute_one (Tv1 left).
+py::array_t<double> hp_back_substitute_test_py(py::array_t<double> t_u_arr,
+                                               py::array_t<double> t_w_pre_arr,
+                                               py::array_t<double> sigma_e_arr, double u, double w,
+                                               py::array_t<double> dh_a, py::array_t<double> dh_l,
+                                               py::array_t<double> dh_d, int right_parametric_var,
+                                               int drop_idx) {
+  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
+    auto u3 = a.unchecked<3>();
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 8; ++j)
+        for (int k = 0; k < 2; ++k) dst[k](i, j) = u3(i, j, k);
+  };
+  ssik::HpConsts hp;
+  load(t_u_arr, hp.t_u);
+  load(t_w_pre_arr, hp.t_w_pre);
+  hp.drop_idx = drop_idx;
+  hp.right_parametric_var = right_parametric_var;
+  auto av = dh_a.unchecked<1>(), lv = dh_l.unchecked<1>(), dv = dh_d.unchecked<1>();
+  for (int i = 0; i < 5; ++i) {  // dh_a/dh_l = [a_1..a_5] -> hp.a[1..5]
+    hp.a[i + 1] = av(i);
+    hp.l[i + 1] = lv(i);
+  }
+  for (int i = 0; i < 4; ++i) hp.d[i + 2] = dv(i);  // dh_d = [d_2..d_5] -> hp.d[2..5]
+  auto se = sigma_e_arr.unchecked<1>();
+  ssik::Vec8 sigma_E;
+  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+
+  const ssik::hp_detail::JointTuple v =
+      ssik::hp_detail::back_substitute_one(hp, sigma_E, u, w);
+  py::array_t<double> out(6);
+  auto om = out.mutable_unchecked<1>();
+  for (int i = 0; i < 6; ++i) om(i) = v[i];
+  return out;
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
@@ -545,6 +583,9 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("real_tol") = 1e-3, py::arg("max_magnitude") = 1e10);
   m.def("hp_eliminate_uw_pairs_test", &hp_eliminate_uw_pairs_test_py, py::arg("t_u"),
         py::arg("t_w_pre"), py::arg("sigma_e"), py::arg("accept_residue_tol") = 1e-3);
+  m.def("hp_back_substitute_test", &hp_back_substitute_test_py, py::arg("t_u"), py::arg("t_w_pre"),
+        py::arg("sigma_e"), py::arg("u"), py::arg("w"), py::arg("dh_a"), py::arg("dh_l"),
+        py::arg("dh_d"), py::arg("right_parametric_var"), py::arg("drop_idx") = 7);
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);

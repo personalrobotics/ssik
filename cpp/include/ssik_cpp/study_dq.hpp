@@ -34,6 +34,23 @@ inline Vec4 quat_mul(const Vec4& p, const Vec4& q) {
 // Quaternion conjugate (_study._quat_conj).
 inline Vec4 quat_conj(const Vec4& p) { return Vec4(p[0], -p[1], -p[2], -p[3]); }
 
+// Dual-quaternion product a*b = (p_a p_b) + eps(p_a q_b + q_a p_b) (_study.dq_mul).
+inline Vec8 dq_mul(const Vec8& a, const Vec8& b) {
+  const Vec4 pa = a.head<4>(), qa = a.tail<4>(), pb = b.head<4>(), qb = b.tail<4>();
+  Vec8 r;
+  r.head<4>() = quat_mul(pa, pb);
+  r.tail<4>() = quat_mul(pa, qb) + quat_mul(qa, pb);
+  return r;
+}
+
+// Dual-quaternion conjugate (p*, q*) (_study.dq_conj / _back_substitute._dq_inv).
+inline Vec8 dq_conj(const Vec8& s) {
+  Vec8 r;
+  r.head<4>() = quat_conj(s.head<4>());
+  r.tail<4>() = quat_conj(s.tail<4>());
+  return r;
+}
+
 // Shepperd (1978) unit quaternion from a 3x3 rotation (_study._quat_from_rot),
 // picking the numerically dominant branch.
 inline Vec4 quat_from_rot(const Eigen::Matrix3d& R) {
@@ -69,6 +86,22 @@ inline Vec4 quat_from_rot(const Eigen::Matrix3d& R) {
   }
   return Vec4(q0, q1, q2, q3);
 }
+
+// 3x3 rotation from a (not necessarily unit) quaternion (_study._rot_from_quat).
+inline Eigen::Matrix3d rot_from_quat(const Vec4& p) {
+  const double p0 = p[0], p1 = p[1], p2 = p[2], p3 = p[3];
+  const double n = p0 * p0 + p1 * p1 + p2 * p2 + p3 * p3;
+  if (n == 0.0) return Eigen::Matrix3d::Identity();
+  const double s = 2.0 / n;
+  Eigen::Matrix3d R;
+  R << 1.0 - s * (p2 * p2 + p3 * p3), s * (p1 * p2 - p3 * p0), s * (p1 * p3 + p2 * p0),  //
+      s * (p1 * p2 + p3 * p0), 1.0 - s * (p1 * p1 + p3 * p3), s * (p2 * p3 - p1 * p0),   //
+      s * (p1 * p3 - p2 * p0), s * (p2 * p3 + p1 * p0), 1.0 - s * (p1 * p1 + p2 * p2);
+  return R;
+}
+
+// Rotation part of se3_from_dq: R from the quaternion (primal) part.
+inline Eigen::Matrix3d rot_from_dq(const Vec8& sigma) { return rot_from_quat(sigma.head<4>()); }
 
 // SE(3) 4x4 -> 8-vec dual quaternion (_study.dq_from_se3).
 // sigma = (p, (1/2) t_quat * p), p = unit quat of R, t_quat = (0, t).
