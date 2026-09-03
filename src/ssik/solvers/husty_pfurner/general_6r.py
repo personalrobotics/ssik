@@ -189,6 +189,24 @@ def solve(
     # for the 5 inner joints.
     ls = np.tan(0.5 * dh.alpha)
 
+    # alpha ~ pi twist regularization (#539): the tan-half-angle chart is
+    # singular at alpha = pi, where l = tan(alpha/2) -> +-inf. A joint with a
+    # 180 deg twist (e.g. JACO 2 joint 2, alpha_2 = pi) gives l ~ 1.6e16, which
+    # propagates into the baked T_u/T_w tensors and blows the Cramer f/g
+    # coefficients to ~1e132. At that scale float64's 1e-16 relative precision
+    # leaves ~1e116 absolute error, swamping the smaller f/g coefficients that
+    # encode many IK roots -- the elimination silently loses branches (and two
+    # LU backends lose *different* ones, so results are backend-dependent). This
+    # is the alpha = pi pole of the same chart singularity the perturbation
+    # below handles at alpha = 0; cap |l| at _TWIST_LS_CAP so alpha stays clear
+    # of pi (|l|=1e3 -> alpha within 2e-3 rad of pi, f-scale ~1e21, well inside
+    # float64). The O(1e-3 rad) geometry error is polished out by the
+    # downstream 6-D LM on the *unperturbed* POE FK, exactly as for the alpha=0
+    # perturbation. Only the 5 inner twists feed the elimination; ls[5] (joint 6)
+    # is carried by t_joint6_offset from the exact alpha and is left untouched.
+    _TWIST_LS_CAP = 1.0e3
+    ls[:5] = np.clip(ls[:5], -_TWIST_LS_CAP, _TWIST_LS_CAP)
+
     # Singular-DH perturbation (#176): when a_2 = 0 AND no Tv3 fallback
     # (Tv3 requires a_1 != 0 AND l_1 != 0), the Tv2 case applies and
     # V_L lies entirely in the Study quadric -- the algebraic variety

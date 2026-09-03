@@ -26,7 +26,10 @@
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
+#include "ssik_cpp/finalize.hpp"
+#include "ssik_cpp/newton.hpp"   // lm_refine
 #include "ssik_cpp/quartic.hpp"  // np_roots (companion-matrix roots) for _initial_w_for
+#include "ssik_cpp/rescue.hpp"
 #include "ssik_cpp/study_dq.hpp"
 
 namespace ssik {
@@ -48,6 +51,15 @@ struct HpConsts {
   // Dispatch (baked at emit time from the singular-DH predicates):
   int parametric_var = 0;        // u = 0:v_1 (Tv1) | 1:v_2 (Tv2, not yet native)
   int right_parametric_var = 0;  // w = 0:v_6 (Tv6) | 1:v_4 (Tv4)
+  // Target -> sigma_E bridge (all baked): t_hp = t_z_neg_d1 (T_pre^-1 . T .
+  // T_post^-1) t_joint6_offset^-1, then sigma_E = dq_from_se3(t_hp). And the DH
+  // theta_offset to land recovered q back in the POE frame (q = 2 atan(v) -
+  // theta_offset).
+  Eigen::Matrix4d t_pre_inv = Eigen::Matrix4d::Identity();
+  Eigen::Matrix4d t_post_inv = Eigen::Matrix4d::Identity();
+  Eigen::Matrix4d t_z_neg_d1 = Eigen::Matrix4d::Identity();
+  Eigen::Matrix4d t_joint6_offset_inv = Eigen::Matrix4d::Identity();
+  std::array<double, 6> theta_offset{};
 };
 
 namespace hp_detail {
@@ -316,13 +328,17 @@ inline std::vector<double> solve_pencil_eigenvalues(const Mat9x7& f, const Mat6x
   // the reversed polynomial Q(y) = y^d S(1/y) (whose leading coeff is S[0]) and
   // invert the roots u = 1/y. RealQZ remains the fallback when the chosen leading
   // coefficient is singular (a genuine degree drop / infinite eigenvalues).
+  // NB: on well-conditioned HP inputs (the locked-7R sub-chains HP is dispatched
+  // for) this recovers every real root -- verified oracle-complete on clean Tv6
+  // and Tv4 DH. On pathologically ill-conditioned general-6R DH (which HP is
+  // never dispatched for) it can recover fewer roots than LAPACK's generalized
+  // eigensolver; see #544 (monic-vs-dggev completeness gap).
   auto rcond = [](const Mat10& m) {
     Eigen::JacobiSVD<Mat10> svd(m);
     const double smax = svd.singularValues()(0), smin = svd.singularValues()(n - 1);
     return smax > 0.0 ? smin / smax : 0.0;  // reciprocal condition (1 well, 0 singular)
   };
   const bool reversed = rcond(s_eq[0]) > rcond(s_eq[d]);
-  // Coefficient list for the chosen orientation, leading = coeff[d].
   std::array<Mat10, 9> coeff;
   for (int k = 0; k <= d; ++k) coeff[k] = reversed ? s_eq[d - k] : s_eq[k];
 
@@ -338,7 +354,6 @@ inline std::vector<double> solve_pencil_eigenvalues(const Mat9x7& f, const Mat6x
     if (es.info() == Eigen::Success) {
       const auto eig = es.eigenvalues();
       for (int i = 0; i < eig.size(); ++i) {
-        // Reversed solves for y = 1/u; invert (skip y ~ 0, i.e. u -> infinity).
         if (reversed) {
           const std::complex<double> y = eig(i);
           if (std::abs(y) > 1e-300) keep(std::complex<double>(1.0, 0.0) / y);
@@ -349,7 +364,6 @@ inline std::vector<double> solve_pencil_eigenvalues(const Mat9x7& f, const Mat6x
       solved = true;
     }
   }
-
   if (!solved) {
     // Fallback: the generalized pencil via RealQZ. Read the Schur factors S, T
     // directly (never the asserting eigenvalues()/alphas() accessors, which abort
@@ -670,5 +684,78 @@ inline std::vector<JointTuple> solve_ik(const HpConsts& hp, const Vec8& sigma_E)
   return out;
 }
 
+// Wrap-to-pi max-joint dedup for 6-DOF, keeping the lower-FK duplicate.
+inline std::vector<Solution<6>> dedup6(const std::vector<Solution<6>>& cands, double atol) {
+  constexpr double kPi = 3.14159265358979323846;
+  std::vector<Solution<6>> out;
+  for (const auto& cand : cands) {
+    int dup = -1;
+    for (std::size_t j = 0; j < out.size() && dup < 0; ++j) {
+      double worst = 0.0;
+      for (int i = 0; i < 6; ++i) {
+        double dd = std::fmod(cand.q[i] - out[j].q[i] + kPi, 2.0 * kPi);
+        if (dd < 0) dd += 2.0 * kPi;
+        worst = std::max(worst, std::abs(dd - kPi));
+      }
+      if (worst < atol) dup = static_cast<int>(j);
+    }
+    if (dup < 0)
+      out.push_back(cand);
+    else if (cand.fk_residual < out[dup].fk_residual)
+      out[dup] = cand;
+  }
+  return out;
+}
+
 }  // namespace hp_detail
+
+// FK-closure accept gate + dedup tolerance for the HP artifact. Algebraic /
+// back-sub seeds that already close under kHpFkAtol are accepted as-is; the rest
+// (perturbed O(epsilon) seeds, multiplicity-k roots) are lm_refined in POE space.
+inline constexpr double kHpFkAtol = 1e-7;
+inline constexpr double kHpDedupAtol = 1e-3;
+
+// Full self-contained HP universal-6R solve (#539). Bridge the POE target into
+// the HP frame (all transforms baked), run the numeric kernel, convert
+// tan-half-angles to POE q, verify FK + lm_refine, and finalize. Mirrors
+// husty_pfurner.general_6r.solve + verify_candidates, and the limit-gate ->
+// rescue -> seed skeleton of general_6r_artifact_solve.
+inline std::vector<Solution<6>> hp_artifact_solve(const JointConsts<6>& c, const HpConsts& hp,
+                                                  const JointLimits<6>& lim, const Pose& T,
+                                                  const ArtifactParams<6>& p) {
+  const auto core = [&](const Pose& tp) -> std::vector<Solution<6>> {
+    const Pose t_dh = hp.t_pre_inv * tp * hp.t_post_inv;
+    const Pose t_hp = hp.t_z_neg_d1 * t_dh * hp.t_joint6_offset_inv;
+    const Vec8 sigma_E = study::dq_from_se3(t_hp);
+    std::vector<Solution<6>> sols;
+    for (const auto& v : hp_detail::solve_ik(hp, sigma_E)) {
+      std::array<double, 6> q;
+      for (int i = 0; i < 6; ++i) q[i] = 2.0 * std::atan(v[i]) - hp.theta_offset[i];
+      const double fk_err = (fk<6>(c, q) - tp).norm();
+      if (fk_err <= kHpFkAtol) {
+        sols.push_back(Solution<6>{q, fk_err, Refinement::None});
+      } else if (fk_err < 0.1) {  // seed near the basin -> polish (perturbed / multi-root)
+        auto r = lm_refine<6>(c, q, tp, kHpFkAtol, p.refinement_max_iters);
+        if (r && r->second <= kHpFkAtol)
+          sols.push_back(Solution<6>{r->first, r->second, Refinement::Lm});
+      }
+    }
+    return hp_detail::dedup6(sols, kHpDedupAtol);
+  };
+
+  ArtifactParams<6> p_limits;
+  p_limits.respect_limits = p.respect_limits;
+  p_limits.refinement_max_iters = p.refinement_max_iters;
+  std::vector<Solution<6>> in_limits = finalize_solutions<6>(core(T), c, lim, p_limits);
+  if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
+    RescueParams rp;
+    rp.dedup_atol = kHpDedupAtol;
+    in_limits = finalize_solutions<6>(rescue_via_T_perturbation<6>(core, c, T, rp), c, lim,
+                                      p_limits);
+  }
+  ArtifactParams<6> p_seed = p;
+  p_seed.respect_limits = false;
+  return finalize_solutions<6>(std::move(in_limits), c, lim, p_seed);
+}
+
 }  // namespace ssik

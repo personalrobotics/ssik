@@ -607,6 +607,73 @@ py::array_t<double> hp_solve_ik_test_py(py::array_t<double> t_u_arr, py::array_t
   return out;
 }
 
+// HP full artifact solve (#539): JointConsts (POE FK) + baked HpConsts + target
+// -> (qs, resids), exactly what ssik::hp_artifact_solve ships.
+py::tuple hp_artifact_solve_test_py(py::array_t<double> axes, py::array_t<double> t_left,
+                                    py::array_t<double> t_right, py::array_t<int> types,
+                                    py::array_t<double> t_u_arr, py::array_t<double> t_w_pre_arr,
+                                    py::array_t<double> dh_a, py::array_t<double> dh_l,
+                                    py::array_t<double> dh_d, py::array_t<double> theta_offset,
+                                    py::array_t<double> t_pre_inv, py::array_t<double> t_post_inv,
+                                    py::array_t<double> t_z_neg_d1,
+                                    py::array_t<double> t_joint6_offset_inv, int right_parametric_var,
+                                    int drop_idx, py::array_t<double> target, bool allow_refinement) {
+  const ssik::JointConsts<6> c = make_consts_n<6>(axes, t_left, t_right, types);
+  ssik::HpConsts hp;
+  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
+    auto u3 = a.unchecked<3>();
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 8; ++j)
+        for (int k = 0; k < 2; ++k) dst[k](i, j) = u3(i, j, k);
+  };
+  load(t_u_arr, hp.t_u);
+  load(t_w_pre_arr, hp.t_w_pre);
+  auto mat4 = [](py::array_t<double> a) {
+    auto u = a.unchecked<2>();
+    Eigen::Matrix4d m;
+    for (int i = 0; i < 4; ++i)
+      for (int j = 0; j < 4; ++j) m(i, j) = u(i, j);
+    return m;
+  };
+  hp.t_pre_inv = mat4(t_pre_inv);
+  hp.t_post_inv = mat4(t_post_inv);
+  hp.t_z_neg_d1 = mat4(t_z_neg_d1);
+  hp.t_joint6_offset_inv = mat4(t_joint6_offset_inv);
+  hp.right_parametric_var = right_parametric_var;
+  hp.drop_idx = drop_idx;
+  auto av = dh_a.unchecked<1>(), lv = dh_l.unchecked<1>(), dv = dh_d.unchecked<1>();
+  auto to = theta_offset.unchecked<1>();
+  for (int i = 0; i < 5; ++i) {
+    hp.a[i + 1] = av(i);
+    hp.l[i + 1] = lv(i);
+  }
+  for (int i = 0; i < 4; ++i) hp.d[i + 2] = dv(i);
+  for (int i = 0; i < 6; ++i) hp.theta_offset[i] = to(i);
+
+  ssik::Pose T;
+  auto tm = target.unchecked<2>();
+  for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 4; ++j) T(i, j) = tm(i, j);
+
+  ssik::JointLimits<6> lim;  // no limits for the parity test
+  lim.present = {false, false, false, false, false, false};
+  (void)allow_refinement;  // HP always lm_refines seeds that miss (like general_6r force_refine)
+  ssik::ArtifactParams<6> p;
+  p.respect_limits = false;
+  p.allow_rescue = false;
+  const std::vector<ssik::Solution<6>> sols = ssik::hp_artifact_solve(c, hp, lim, T, p);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 6});
+  py::array_t<double> resids(n);
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 6; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+  }
+  return py::make_tuple(qs, resids);
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
@@ -623,6 +690,12 @@ PYBIND11_MODULE(_ssik_native, m) {
   m.def("hp_solve_ik_test", &hp_solve_ik_test_py, py::arg("t_u"), py::arg("t_w_pre"),
         py::arg("sigma_e"), py::arg("dh_a"), py::arg("dh_l"), py::arg("dh_d"),
         py::arg("right_parametric_var"));
+  m.def("hp_artifact_solve_test", &hp_artifact_solve_test_py, py::arg("axes"), py::arg("t_left"),
+        py::arg("t_right"), py::arg("types"), py::arg("t_u"), py::arg("t_w_pre"), py::arg("dh_a"),
+        py::arg("dh_l"), py::arg("dh_d"), py::arg("theta_offset"), py::arg("t_pre_inv"),
+        py::arg("t_post_inv"), py::arg("t_z_neg_d1"), py::arg("t_joint6_offset_inv"),
+        py::arg("right_parametric_var"), py::arg("drop_idx"), py::arg("target"),
+        py::arg("allow_refinement") = true);
   m.def("three_parallel_solve", &three_parallel_solve_py, py::arg("axes"), py::arg("t_left"),
         py::arg("t_right"), py::arg("types"), py::arg("target"), py::arg("allow_refinement") = false,
         py::arg("refinement_max_iters") = 15);
