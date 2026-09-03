@@ -30,6 +30,7 @@
 
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/newton.hpp"  // lm_refine
+#include "ssik_cpp/parallel.hpp"
 #include "ssik_cpp/rotation.hpp"
 
 namespace ssik {
@@ -86,14 +87,16 @@ template <int N, typename SolveFn>
 std::vector<Solution<N>> rescue_via_T_perturbation(SolveFn&& solve_fn, const JointConsts<N>& c,
                                                    const Pose& T_target,
                                                    const RescueParams& p = {}) {
+  const double tight = std::min(1e-12, p.fk_atol);
+  const int n = p.n_perturbations;
+
+  // Phase 1 (serial, cheap): draw the perturbed poses. Kept serial so the shared
+  // PRNG is consumed in the exact same order regardless of thread scheduling --
+  // the recovered set stays bit-identical to the single-threaded rescue.
   std::mt19937_64 rng(p.seed);
   std::normal_distribution<double> normal(0.0, 1.0);
-  const double tight = std::min(1e-12, p.fk_atol);
-
-  std::vector<Solution<N>> refined;
-  std::vector<std::array<double, N>> refined_qs;
-
-  for (int i = 0; i < p.n_perturbations; ++i) {
+  std::vector<Pose> T_perts(n);
+  for (int i = 0; i < n; ++i) {
     const double mult = p.scale_multipliers[i % p.scale_multipliers.size()];
     // Draw dx (translation) then w (so3), matching the Python draw order.
     Eigen::Vector3d dx, w;
@@ -105,25 +108,41 @@ std::vector<Solution<N>> rescue_via_T_perturbation(SolveFn&& solve_fn, const Joi
     Pose dT = Pose::Identity();
     dT.block<3, 3>(0, 0) = R_delta;
     dT.block<3, 1>(0, 3) = dx;
-    const Pose T_pert = T_target * dT;
+    T_perts[i] = T_target * dT;
+  }
 
-    const std::vector<Solution<N>> pert = solve_fn(T_pert);
-    for (const auto& sol : pert) {
+  // Phase 2 (parallel): the expensive part -- re-solve each perturbed pose and
+  // polish every candidate back to T_target. Perturbations are independent
+  // (solve_fn is pure; each writes its own slot), so fan out. When solve_fn is
+  // itself a parallel sweep (jointlock), parallel_for's nesting guard runs that
+  // inner sweep serially -- only this outer level threads.
+  std::vector<std::vector<Solution<N>>> per(n);
+  parallel_for(static_cast<std::size_t>(n), [&](std::size_t idx) {
+    for (const auto& sol : solve_fn(T_perts[idx])) {
       // Polish back to the ORIGINAL T_target: tight (machine precision) then a
       // loose retry for candidates that only reach fk_atol on a genuine ridge.
       auto r = lm_refine<N>(c, sol.q, T_target, tight, p.refinement_max_iters);
       if (!r) r = lm_refine<N>(c, sol.q, T_target, p.fk_atol, p.refinement_max_iters);
       if (!r || r->second > p.fk_atol) continue;
+      per[idx].push_back(Solution<N>{r->first, r->second, Refinement::Rescue});
+    }
+  });
 
+  // Phase 3 (serial): merge in perturbation order + dedup. Same order as the
+  // single-threaded loop, so the surviving set + representatives are identical.
+  std::vector<Solution<N>> refined;
+  std::vector<std::array<double, N>> refined_qs;
+  for (int i = 0; i < n; ++i) {
+    for (const auto& sol : per[i]) {
       bool dup = false;
       for (const auto& e : refined_qs)
-        if (rescue_detail::wrap_dist<N>(r->first, e) < p.dedup_atol) {
+        if (rescue_detail::wrap_dist<N>(sol.q, e) < p.dedup_atol) {
           dup = true;
           break;
         }
       if (dup) continue;
-      refined.push_back(Solution<N>{r->first, r->second, Refinement::Rescue});
-      refined_qs.push_back(r->first);
+      refined.push_back(sol);
+      refined_qs.push_back(sol.q);
     }
   }
   return refined;

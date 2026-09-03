@@ -44,6 +44,15 @@ inline unsigned parallel_worker_count(std::size_t n) {
   return static_cast<unsigned>(std::min<std::size_t>(hw, n == 0 ? 1 : n));
 }
 
+// Per-thread flag: are we already inside a parallel_for? Nested parallel loops
+// (e.g. the rescue fans out perturbations, and each perturbation runs the
+// jointlock sweep, which itself fans out) would oversubscribe the cores, so only
+// the OUTERMOST parallel_for threads -- inner ones detect the flag and run serial.
+inline bool& parallel_in_region() {
+  thread_local bool in = false;
+  return in;
+}
+
 // Run fn(i) for i in [0, n). Iterations MUST be independent: fn must only write
 // to storage private to its own i (e.g. a pre-sized per-index output slot), so
 // there is no data race and no ordering dependence. Runs serially when n < min_n
@@ -59,13 +68,17 @@ inline unsigned parallel_worker_count(std::size_t n) {
 template <class Fn>
 void parallel_for(std::size_t n, Fn&& fn, std::size_t min_n = 2) {
   if (n == 0) return;
-  const unsigned workers = n < min_n ? 1u : parallel_worker_count(n);
+  const unsigned workers = (n < min_n || parallel_in_region()) ? 1u : parallel_worker_count(n);
   if (workers <= 1) {
     for (std::size_t i = 0; i < n; ++i) fn(i);
     return;
   }
   const std::size_t chunk = (n + workers - 1) / workers;
+  // Each thread of execution marks itself in-region for the duration so a nested
+  // parallel_for on it runs serial. Spawned workers start with a fresh (false)
+  // thread_local and die after join; the calling thread saves/restores its flag.
   const auto run_range = [&fn](std::size_t lo, std::size_t hi) {
+    parallel_in_region() = true;
     for (std::size_t i = lo; i < hi; ++i) fn(i);
   };
   std::vector<std::thread> pool;
@@ -75,7 +88,9 @@ void parallel_for(std::size_t n, Fn&& fn, std::size_t min_n = 2) {
     const std::size_t hi = std::min(n, lo + chunk);
     if (lo < hi) pool.emplace_back(run_range, lo, hi);
   }
+  const bool outer = parallel_in_region();
   run_range(0, std::min(n, chunk));  // calling thread runs chunk 0
+  parallel_in_region() = outer;      // restore (spawned workers' flags die with them)
   for (auto& t : pool) t.join();
 }
 

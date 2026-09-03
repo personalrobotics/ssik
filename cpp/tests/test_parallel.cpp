@@ -62,6 +62,27 @@ int main() {
     }
   }
 
+  // 5. Nested parallel_for: inner loops run serial (region flag set) but still
+  //    cover every (outer, inner) pair exactly once.
+  ssik::set_max_threads(8);
+  {
+    const std::size_t no = 12, ni = 50;
+    std::vector<std::atomic<int>> hit(no * ni);
+    for (auto& h : hit) h.store(0);
+    std::atomic<int> inner_saw_region{0};
+    ssik::parallel_for(no, [&](std::size_t o) {
+      ssik::parallel_for(ni, [&](std::size_t i) {
+        if (ssik::parallel_in_region()) inner_saw_region.fetch_add(1, std::memory_order_relaxed);
+        hit[o * ni + i].fetch_add(1, std::memory_order_relaxed);
+      });
+    });
+    bool once = true;
+    for (auto& h : hit) once = once && (h.load() == 1);
+    check(once, "nested parallel_for covers every pair exactly once");
+    check(inner_saw_region.load() == static_cast<int>(no * ni),
+          "inner parallel_for runs inside the region flag (serial nesting)");
+  }
+
   ssik::set_max_threads(0);  // restore auto
   if (failures == 0) {
     std::printf("test_parallel: all checks passed\n");

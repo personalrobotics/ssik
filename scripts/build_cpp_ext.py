@@ -59,6 +59,10 @@ def build(out_dir: Path) -> Path:
     ]
     if sys.platform == "darwin":
         cmd += ["-undefined", "dynamic_lookup"]
+    else:
+        # parallel.hpp (rescue / jointlock sweep, #546) uses std::thread, which
+        # needs the pthread library linked on Linux (macOS has it in libSystem).
+        cmd += ["-pthread"]
 
     print("[build_cpp_ext]", " ".join(cmd))
     subprocess.run(cmd, check=True)

@@ -140,6 +140,10 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                             ],
                             language="c++",
                             extra_compile_args=["-std=c++20", "-O2"],
+                            # parallel.hpp (rescue / jointlock sweep, #546) uses
+                            # std::thread -> link pthread on Linux (macOS libSystem
+                            # already has it; this block only runs on Linux/macOS).
+                            extra_link_args=([] if sys.platform == "darwin" else ["-pthread"]),
                         ),
                     ]
                     native_built = True
