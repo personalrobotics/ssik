@@ -13,6 +13,8 @@ endif()
 # so a bare in-tree `cmake ..` still builds without Eigen3Config on the path. No
 # version pin: ssik uses only stable Eigen basics, and pinning a MAJOR (e.g. 3.3)
 # makes SameMajorVersion reject a newer Eigen (5.x on current Homebrew).
+# std::thread (parallel.hpp, #546) needs the platform thread library linked.
+find_package(Threads REQUIRED)
 find_package(Eigen3 QUIET NO_MODULE)
 if(TARGET Eigen3::Eigen)
   set(SSIK_EIGEN Eigen3::Eigen)
@@ -94,6 +96,11 @@ add_test(NAME ur5_fk COMMAND test_ur5_fk)
 add_executable(test_ur5_newton tests/test_ur5_newton.cpp)
 target_link_libraries(test_ur5_newton PRIVATE ssik_cpp)
 add_test(NAME ur5_newton COMMAND test_ur5_newton)
+
+# parallel_for primitive (#546): coverage, no-race, worker-count independence.
+add_executable(test_parallel tests/test_parallel.cpp)
+target_link_libraries(test_parallel PRIVATE ssik_cpp Threads::Threads)
+add_test(NAME parallel COMMAND test_parallel)
 
 # THE GATE (data-driven): every self-contained artifact validated against its
 # Python oracle golden, zero pybind/Python. The arm list is generated into
