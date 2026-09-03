@@ -202,6 +202,82 @@ def srs_native_geometry(kb: Any) -> dict[str, Any] | None:
     }
 
 
+def hp_native_geometry(kb: Any) -> dict[str, Any]:
+    """Baked Husty-Pfurner ``HpConsts`` fields for a 6R KinBody (any 6R works; HP
+    is universal). Single source of truth shared by the native HP artifact solve
+    and the C++ emit (``scripts/cpp_emit._hp_bake``). Mirrors the setup in
+    :func:`ssik.solvers.husty_pfurner.general_6r.solve`: the ``poe_to_dh`` bridge,
+    the ``alpha ~ pi`` twist cap, the singular-DH perturbation + Tv6/Tv4 dispatch,
+    and ``precompute_rrr_chain``.
+
+    HP is dispatched for the (well-conditioned, symmetric-DH) locked-7R sub-chains,
+    so this is called per locked 6R sub-chain when emitting a jointlock arm whose
+    inner solver is HP (kassow, #491).
+    """
+    from ssik.kinematics.poe_to_dh import poe_to_dh
+    from ssik.solvers.husty_pfurner._eliminate import precompute_rrr_chain
+    from ssik.solvers.husty_pfurner.general_6r import _se3_from_dh_offset
+
+    if len(kb.joints) != 6:
+        raise ValueError(f"hp_native_geometry requires a 6R chain, got {len(kb.joints)}")
+
+    dh = poe_to_dh(kb)
+    ls = np.tan(0.5 * dh.alpha)
+    ls[:5] = np.clip(ls[:5], -1.0e3, 1.0e3)  # alpha~pi twist cap (mirrors general_6r.solve)
+    t_z = np.eye(4)
+    t_z[2, 3] = -float(dh.d[0])
+    t_j6 = _se3_from_dh_offset(a=float(dh.a[5]), alpha=float(dh.alpha[5]), d=float(dh.d[5]))
+
+    st, ep = 1e-9, 1e-3
+    a1, l1, a2, l2 = float(dh.a[0]), float(ls[0]), float(dh.a[1]), float(ls[1])
+    a4, l4, a5, l5 = float(dh.a[3]), float(ls[3]), float(dh.a[4]), float(ls[4])
+    if not (abs(a2) > st and abs(l2) > st) and not (abs(a1) > st and abs(l1) > st):
+        if abs(a2) < st:
+            a2 = ep
+        elif abs(l2) < st:
+            l2 = ep
+    right_tv6 = abs(a4) > st and abs(l4) > st
+    right_tv4 = (abs(a4) < st or abs(l4) < st) and abs(a5) > st and abs(l5) > st
+    if not right_tv6 and not right_tv4:
+        if abs(a5) < st:
+            a5 = ep
+        elif abs(l5) < st:
+            l5 = ep
+
+    pre = precompute_rrr_chain(
+        a_1=a1,
+        l_1=l1,
+        d_2=float(dh.d[1]),
+        a_2=a2,
+        l_2=l2,
+        d_3=float(dh.d[2]),
+        a_3=float(dh.a[2]),
+        l_3=float(ls[2]),
+        d_4=float(dh.d[3]),
+        a_4=a4,
+        l_4=l4,
+        d_5=float(dh.d[4]),
+        a_5=a5,
+        l_5=l5,
+    )
+    return {
+        "t_u": np.asarray(pre.T_u, dtype=np.float64),
+        "t_w_pre": np.asarray(pre.T_w_pre, dtype=np.float64),
+        "dh_a": np.array([a1, a2, float(dh.a[2]), a4, a5], dtype=np.float64),
+        "dh_l": np.array([l1, l2, float(ls[2]), l4, l5], dtype=np.float64),
+        "dh_d": np.array(
+            [float(dh.d[1]), float(dh.d[2]), float(dh.d[3]), float(dh.d[4])], dtype=np.float64
+        ),
+        "theta_offset": np.asarray(dh.theta_offset, dtype=np.float64),
+        "t_pre_inv": np.linalg.inv(dh.t_pre),
+        "t_post_inv": np.linalg.inv(dh.t_post),
+        "t_z_neg_d1": t_z,
+        "t_joint6_offset_inv": np.linalg.inv(t_j6),
+        "right_parametric_var": 1 if pre.right_parametric_var == "v_4" else 0,
+        "drop_idx": 7,
+    }
+
+
 def _srs_native_args(kb: Any) -> dict[str, Any] | None:
     """Cached :func:`srs_native_geometry` + the marshalled JointConsts arrays for
     the binding, or None when the arm isn't SRS-class."""

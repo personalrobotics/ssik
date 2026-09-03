@@ -715,32 +715,42 @@ inline std::vector<Solution<6>> dedup6(const std::vector<Solution<6>>& cands, do
 inline constexpr double kHpFkAtol = 1e-7;
 inline constexpr double kHpDedupAtol = 1e-3;
 
-// Full self-contained HP universal-6R solve (#539). Bridge the POE target into
-// the HP frame (all transforms baked), run the numeric kernel, convert
-// tan-half-angles to POE q, verify FK + lm_refine, and finalize. Mirrors
-// husty_pfurner.general_6r.solve + verify_candidates, and the limit-gate ->
-// rescue -> seed skeleton of general_6r_artifact_solve.
+// Raw HP 6R candidates for one target: bridge the POE pose into the HP frame (all
+// transforms baked), run the numeric kernel, convert tan-half-angles to POE q,
+// FK-verify + lm_refine (perturbed O(epsilon) / multi-root seeds), dedup. No
+// limit-gate / rescue / seed finalize -- that is the artifact-solve wrapper's job.
+// Shared by hp_artifact_solve (below) and the jointlock HP sweep
+// (jointlock_hp_artifact_solve), which needs the raw per-sub-chain candidates to
+// pad to 7-DOF and re-verify against the 7R target.
+inline std::vector<Solution<6>> hp_core(const JointConsts<6>& c, const HpConsts& hp, const Pose& tp,
+                                        int refinement_max_iters) {
+  const Pose t_dh = hp.t_pre_inv * tp * hp.t_post_inv;
+  const Pose t_hp = hp.t_z_neg_d1 * t_dh * hp.t_joint6_offset_inv;
+  const Vec8 sigma_E = study::dq_from_se3(t_hp);
+  std::vector<Solution<6>> sols;
+  for (const auto& v : hp_detail::solve_ik(hp, sigma_E)) {
+    std::array<double, 6> q;
+    for (int i = 0; i < 6; ++i) q[i] = 2.0 * std::atan(v[i]) - hp.theta_offset[i];
+    const double fk_err = (fk<6>(c, q) - tp).norm();
+    if (fk_err <= kHpFkAtol) {
+      sols.push_back(Solution<6>{q, fk_err, Refinement::None});
+    } else if (fk_err < 0.1) {  // seed near the basin -> polish (perturbed / multi-root)
+      auto r = lm_refine<6>(c, q, tp, kHpFkAtol, refinement_max_iters);
+      if (r && r->second <= kHpFkAtol)
+        sols.push_back(Solution<6>{r->first, r->second, Refinement::Lm});
+    }
+  }
+  return hp_detail::dedup6(sols, kHpDedupAtol);
+}
+
+// Full self-contained HP universal-6R solve (#539). hp_core + the limit-gate ->
+// rescue -> seed finalize skeleton of general_6r_artifact_solve. Mirrors
+// husty_pfurner.general_6r.solve + verify_candidates.
 inline std::vector<Solution<6>> hp_artifact_solve(const JointConsts<6>& c, const HpConsts& hp,
                                                   const JointLimits<6>& lim, const Pose& T,
                                                   const ArtifactParams<6>& p) {
   const auto core = [&](const Pose& tp) -> std::vector<Solution<6>> {
-    const Pose t_dh = hp.t_pre_inv * tp * hp.t_post_inv;
-    const Pose t_hp = hp.t_z_neg_d1 * t_dh * hp.t_joint6_offset_inv;
-    const Vec8 sigma_E = study::dq_from_se3(t_hp);
-    std::vector<Solution<6>> sols;
-    for (const auto& v : hp_detail::solve_ik(hp, sigma_E)) {
-      std::array<double, 6> q;
-      for (int i = 0; i < 6; ++i) q[i] = 2.0 * std::atan(v[i]) - hp.theta_offset[i];
-      const double fk_err = (fk<6>(c, q) - tp).norm();
-      if (fk_err <= kHpFkAtol) {
-        sols.push_back(Solution<6>{q, fk_err, Refinement::None});
-      } else if (fk_err < 0.1) {  // seed near the basin -> polish (perturbed / multi-root)
-        auto r = lm_refine<6>(c, q, tp, kHpFkAtol, p.refinement_max_iters);
-        if (r && r->second <= kHpFkAtol)
-          sols.push_back(Solution<6>{r->first, r->second, Refinement::Lm});
-      }
-    }
-    return hp_detail::dedup6(sols, kHpDedupAtol);
+    return hp_core(c, hp, tp, p.refinement_max_iters);
   };
 
   ArtifactParams<6> p_limits;
