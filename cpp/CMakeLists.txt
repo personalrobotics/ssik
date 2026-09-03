@@ -104,6 +104,12 @@ add_executable(test_parallel tests/test_parallel.cpp)
 target_link_libraries(test_parallel PRIVATE ssik_cpp Threads::Threads)
 add_test(NAME parallel COMMAND test_parallel)
 
+# solve_batch equivalence (#546): parallel batch == serial per-pose solve.
+add_executable(test_batch tests/test_batch.cpp)
+target_link_libraries(test_batch PRIVATE ssik_cpp)
+target_include_directories(test_batch PRIVATE gen)
+add_test(NAME batch COMMAND test_batch)
+
 # THE GATE (data-driven): every self-contained artifact validated against its
 # Python oracle golden, zero pybind/Python. The arm list is generated into
 # cpp/gen/artifact_gate.hpp by cpp_emit.py, so onboarding an arm needs no edit

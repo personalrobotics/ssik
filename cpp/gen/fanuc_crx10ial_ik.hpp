@@ -4,6 +4,7 @@
 #pragma once
 
 #include <vector>
+#include "ssik_cpp/parallel.hpp"
 #include "ssik_cpp/solvers/general_6r.hpp"
 
 namespace ssik::fanuc_crx10ial_ik {
@@ -736,6 +737,14 @@ inline void rr_coeffs(const double t12[12], rr_detail::Mat14x9& p_sin,
 inline std::vector<Solution<DOF>> solve(
     const Pose& T, const ArtifactParams<DOF>& p = {}) {
   return general_6r_artifact_solve(consts(), rr_consts(), rr_coeffs, limits(), T, p);
+}
+
+// Parallel batch solve: result[i] == solve(Ts[i], p), fanned across poses.
+inline std::vector<std::vector<Solution<DOF>>> solve_batch(
+    const std::vector<Pose>& Ts, const ArtifactParams<DOF>& p = {}) {
+  std::vector<std::vector<Solution<DOF>>> out(Ts.size());
+  parallel_for(Ts.size(), [&](std::size_t i) { out[i] = solve(Ts[i], p); });
+  return out;
 }
 
 }  // namespace ssik::fanuc_crx10ial_ik

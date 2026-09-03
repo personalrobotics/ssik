@@ -4,6 +4,7 @@
 #pragma once
 
 #include <vector>
+#include "ssik_cpp/parallel.hpp"
 #include "ssik_cpp/solvers/jointlock_seven_r.hpp"
 
 namespace ssik::kassow_kr810_ik {
@@ -2223,6 +2224,14 @@ inline std::vector<Solution<DOF>> solve(
     const Pose& T, const ArtifactParams<DOF>& p = {}) {
   return jointlock_hp_artifact_solve<16>(consts(), jl_consts(), jl_hp(), jl_hp_sub(),
                                          limits(), T, p);
+}
+
+// Parallel batch solve: result[i] == solve(Ts[i], p), fanned across poses.
+inline std::vector<std::vector<Solution<DOF>>> solve_batch(
+    const std::vector<Pose>& Ts, const ArtifactParams<DOF>& p = {}) {
+  std::vector<std::vector<Solution<DOF>>> out(Ts.size());
+  parallel_for(Ts.size(), [&](std::size_t i) { out[i] = solve(Ts[i], p); });
+  return out;
 }
 
 }  // namespace ssik::kassow_kr810_ik

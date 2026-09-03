@@ -4,6 +4,7 @@
 #pragma once
 
 #include <vector>
+#include "ssik_cpp/parallel.hpp"
 #include "ssik_cpp/solvers/srs.hpp"
 
 namespace ssik::r1pro_left_ik {
@@ -129,6 +130,14 @@ inline SrsConsts srs_consts() {
 inline std::vector<Solution<DOF>> solve(
     const Pose& T, const ArtifactParams<DOF>& p = {}) {
   return srs_artifact_solve(consts(), srs_consts(), limits(), T, p);
+}
+
+// Parallel batch solve: result[i] == solve(Ts[i], p), fanned across poses.
+inline std::vector<std::vector<Solution<DOF>>> solve_batch(
+    const std::vector<Pose>& Ts, const ArtifactParams<DOF>& p = {}) {
+  std::vector<std::vector<Solution<DOF>>> out(Ts.size());
+  parallel_for(Ts.size(), [&](std::size_t i) { out[i] = solve(Ts[i], p); });
+  return out;
 }
 
 }  // namespace ssik::r1pro_left_ik

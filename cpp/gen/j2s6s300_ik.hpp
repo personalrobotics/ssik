@@ -4,6 +4,7 @@
 #pragma once
 
 #include <vector>
+#include "ssik_cpp/parallel.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 
 namespace ssik::j2s6s300_ik {
@@ -99,6 +100,14 @@ inline JointLimits<DOF> limits() {
 inline std::vector<Solution<DOF>> solve(
     const Pose& T, const ArtifactParams<DOF>& p = {}) {
   return spherical_two_parallel_artifact_solve(consts(), limits(), T, p);
+}
+
+// Parallel batch solve: result[i] == solve(Ts[i], p), fanned across poses.
+inline std::vector<std::vector<Solution<DOF>>> solve_batch(
+    const std::vector<Pose>& Ts, const ArtifactParams<DOF>& p = {}) {
+  std::vector<std::vector<Solution<DOF>>> out(Ts.size());
+  parallel_for(Ts.size(), [&](std::size_t i) { out[i] = solve(Ts[i], p); });
+  return out;
 }
 
 }  // namespace ssik::j2s6s300_ik

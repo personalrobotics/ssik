@@ -534,6 +534,24 @@ def _mat4x8_pair(tensor: np.ndarray) -> str:
     return "{\n      " + _mat4x8(t[:, :, 0]) + ",\n      " + _mat4x8(t[:, :, 1]) + "}"
 
 
+def _render_batch() -> list[str]:
+    """Family-agnostic parallel batch solve: solve() over many targets, one
+    independent solve per target fanned out through parallel_for (#546). For the
+    fast 6R/SRS arms (no internal sweep) this is where threading pays off; for the
+    jointlock arms the nesting guard runs each solve's sweep serially, so batching
+    parallelizes across poses instead (better load balance). Result[i] == solve(
+    Ts[i], p), so it is exactly equivalent to a serial loop of solve()."""
+    return [
+        "// Parallel batch solve: result[i] == solve(Ts[i], p), fanned across poses.",
+        "inline std::vector<std::vector<Solution<DOF>>> solve_batch(",
+        "    const std::vector<Pose>& Ts, const ArtifactParams<DOF>& p = {}) {",
+        "  std::vector<std::vector<Solution<DOF>>> out(Ts.size());",
+        "  parallel_for(Ts.size(), [&](std::size_t i) { out[i] = solve(Ts[i], p); });",
+        "  return out;",
+        "}",
+    ]
+
+
 def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
     mod = importlib.import_module(f"ssik.prebuilt.{arm}")
     kb = mod._KB
@@ -557,6 +575,7 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
         "#pragma once",
         "",
         "#include <vector>" if rendered_solve else "",
+        '#include "ssik_cpp/parallel.hpp"' if rendered_solve else "",  # solve_batch
         header_include,
         "",
         f"namespace ssik::{ns} {{",
@@ -576,7 +595,7 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
         lines.append(f"  c.type[{i}] = JointType::{jt};")
     lines += ["  return c;", "}"]
     if rendered_solve:
-        lines += ["", *_render_limits(joints), "", *rendered_solve[1]]
+        lines += ["", *_render_limits(joints), "", *rendered_solve[1], "", *_render_batch()]
     lines += ["", f"}}  // namespace ssik::{ns}", ""]
     art = out_dir / f"{arm}.hpp"
     art.write_text("\n".join(lines))
