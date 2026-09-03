@@ -1,10 +1,12 @@
 @PACKAGE_INIT@
 
-# ssik_cpp is header-only; its only dependency is Eigen (also header-only). The
-# exported ssik::ssik_cpp target links Eigen3::Eigen, so a consumer needs Eigen3
-# findable (brew install eigen / apt install libeigen3-dev).
+# ssik_cpp is header-only. It links Eigen (header-only) and the platform thread
+# library (parallel.hpp uses std::thread, #546), so the exported ssik::ssik_cpp
+# target references Eigen3::Eigen and Threads::Threads -- a consumer needs both
+# findable (brew install eigen / apt install libeigen3-dev; Threads is built in).
 include(CMakeFindDependencyMacro)
 find_dependency(Eigen3 NO_MODULE)
+find_dependency(Threads)
 
 include("${CMAKE_CURRENT_LIST_DIR}/ssik_cppTargets.cmake")
 
