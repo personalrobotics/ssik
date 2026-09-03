@@ -68,6 +68,10 @@ def _render_solve(solver: str, kb: KinBody, arm: str = "") -> tuple[str, list[st
         return _render_srs_solve(kb)
     if solver == "seven_r.srs_polished":
         return _render_srs_polished_solve(kb)
+    if solver == "seven_r.spherical_shoulder":
+        return _render_spherical_shoulder_solve(kb, polished=False)
+    if solver == "seven_r.spherical_shoulder_polished":
+        return _render_spherical_shoulder_solve(kb, polished=True)
     if solver == "ikgeo.general_6r":
         return _render_general_6r_solve(kb)
     if solver == "jointlock.seven_r":
@@ -568,6 +572,44 @@ def _mat4x8_pair(tensor: np.ndarray) -> str:
     return "{\n      " + _mat4x8(t[:, :, 0]) + ",\n      " + _mat4x8(t[:, :, 1]) + "}"
 
 
+def _mat3x48(m: np.ndarray) -> str:
+    """Emit a (3,48) coefficient matrix as (Eigen::Matrix<double,3,48>() << ...)."""
+    m = np.asarray(m, dtype=np.float64).reshape(3, 48)
+    rows = ",\n       ".join(", ".join(_f(v) for v in row) for row in m)
+    return f"(Eigen::Matrix<double, 3, 48>() <<\n       {rows}).finished()"
+
+
+def _render_spherical_shoulder_solve(
+    kb: KinBody, *, polished: bool
+) -> tuple[str, list[str]] | None:
+    """Self-contained spherical_shoulder{,_polished} solve(): bakes the (3,48)
+    reversed-lock-6 affine coefficients + composes spherical_shoulder_artifact_
+    solve (base = FK-gate; polished = LM-polish). None outside the class."""
+    from ssik._native import spherical_shoulder_native_geometry
+
+    g = spherical_shoulder_native_geometry(kb, polished=polished)
+    if g is None:
+        return None
+    return (
+        '#include "ssik_cpp/solvers/spherical_shoulder.hpp"',
+        [
+            "// Baked reversed-lock-6 affine geometry (3,48), zero runtime Python.",
+            "inline SphericalShoulderConsts sh_consts() {",
+            "  SphericalShoulderConsts s;",
+            f"  s.coef = {_mat3x48(g['coef'])};",
+            "  return s;",
+            "}",
+            "",
+            "// Self-contained IK solve -- header-only C++, no Python runtime.",
+            "inline std::vector<Solution<DOF>> solve(",
+            "    const Pose& T, const ArtifactParams<DOF>& p = {}) {",
+            f"  return spherical_shoulder_artifact_solve(consts(), sh_consts(), limits(), T, p, "
+            f"/*polished=*/{'true' if polished else 'false'});",
+            "}",
+        ],
+    )
+
+
 def _render_batch() -> list[str]:
     """Family-agnostic parallel batch solve: solve() over many targets, one
     independent solve per target fanned out through parallel_for (#546). For the
@@ -928,6 +970,16 @@ _ARM_MAX_INCOMPLETE = {
     "rm75_ik": 5,
     "yumi_left_ik": 12,
     "yumi_right_ik": 12,
+    # spherical_shoulder (#551): the q6 redundancy is sampled over an SP3-margin
+    # reachability bracket (90-pt grid); at a pose whose bracket edge falls near a
+    # grid point, native and numpy place the interval a step apart and sample
+    # different (both exact, FK 1e-13) q6 on the continuum. franka is bracket-
+    # stable (0); fr3 has a few edge poses; the polished xarm7/gen72 over-sample
+    # (large sound extensions) but cover the oracle. Small margin for robustness.
+    "franka_panda_ik": 6,
+    "fr3_ik": 6,
+    "xarm7_ik": 6,
+    "gen72_ik": 6,
 }
 
 

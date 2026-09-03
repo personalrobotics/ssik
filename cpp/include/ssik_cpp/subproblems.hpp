@@ -87,4 +87,39 @@ inline std::pair<std::vector<double>, bool> sp3(const Eigen::Vector3d& k, const 
   return sp4(q, k, p, target, tol);
 }
 
+// SP2 (Paden-Kahan 2): angles (theta1, theta2) with
+// rot(k1, theta1) p == rot(k2, theta2) q. Returns {solutions (1 or 2), is_ls}.
+// Mirrors ssik.subproblems.sp2.solve (parallel-axis fallback, tangent/LS single
+// representative, else two intersection branches via sp1 to the two z points).
+inline std::pair<std::vector<std::pair<double, double>>, bool> sp2(
+    const Eigen::Vector3d& k1, const Eigen::Vector3d& k2, const Eigen::Vector3d& p,
+    const Eigen::Vector3d& q, const Tolerances& tol = {}) {
+  const double c = k1.dot(k2);
+  const double s_sq = 1.0 - c * c;
+  if (s_sq < tol.degeneracy) {  // parallel axes: canonical single choice
+    const double th1 = sp1(k1, p, q, tol).first;
+    return {{{th1, 0.0}}, true};
+  }
+  const double d1 = k1.dot(p), d2 = k2.dot(q);
+  const double alpha = (d1 - c * d2) / s_sq;
+  const double beta = (d2 - c * d1) / s_sq;
+  const Eigen::Vector3d kxk = k1.cross(k2);  // |kxk|^2 = s_sq
+  const double pp = p.dot(p), qq = q.dot(q);
+  const double gamma_sq_scaled =
+      0.5 * (pp + qq) - alpha * alpha - beta * beta - 2.0 * alpha * beta * c;
+  const bool is_ls =
+      std::abs(pp - qq) > tol.feasibility || gamma_sq_scaled < -tol.feasibility;
+
+  if (gamma_sq_scaled <= 0.0) {  // tangent / LS: single representative z (gamma 0)
+    const Eigen::Vector3d z = alpha * k1 + beta * k2;
+    return {{{sp1(k1, p, z, tol).first, sp1(k2, q, z, tol).first}}, is_ls};
+  }
+  const double gamma = std::sqrt(gamma_sq_scaled / s_sq);
+  const Eigen::Vector3d z_a = alpha * k1 + beta * k2 + gamma * kxk;
+  const Eigen::Vector3d z_b = alpha * k1 + beta * k2 - gamma * kxk;
+  return {{{sp1(k1, p, z_a, tol).first, sp1(k2, q, z_a, tol).first},
+           {sp1(k1, p, z_b, tol).first, sp1(k2, q, z_b, tol).first}},
+          is_ls};
+}
+
 }  // namespace ssik

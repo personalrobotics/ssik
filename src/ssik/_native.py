@@ -230,6 +230,30 @@ def srs_polished_native_geometry(kb: Any) -> dict[str, Any] | None:
     return srs_native_geometry(kb, policy=relaxed)
 
 
+def spherical_shoulder_native_geometry(kb: Any, *, polished: bool) -> dict[str, Any] | None:
+    """Baked (3,48) affine coefficients for a spherical-shoulder + offset-wrist 7R
+    arm (franka/fr3 exact; xarm7/gen72 approximate), or None when the arm isn't in
+    the class. Delegates the gate + the reversed-lock-6 coefficient bake to
+    ssik.solvers.seven_r.spherical_shoulder (the emit-time compiler step; the
+    reverse-chain machinery stays Python-only). ``polished`` selects the drift
+    gate (approximate arms) vs the exact gate."""
+    from ssik.solvers.seven_r import spherical_shoulder as sh
+
+    if len(kb.joints) != 7:
+        return None
+    if polished:
+        from ssik.solvers.seven_r.spherical_shoulder_polished import (
+            is_approximately_spherical_shoulder_7r,
+        )
+
+        ok = is_approximately_spherical_shoulder_7r(kb)
+    else:
+        ok = sh.is_spherical_shoulder_7r(kb)
+    if not ok:
+        return None
+    return {"coef": np.asarray(sh._bake(kb), dtype=np.float64)}  # (3, 48)
+
+
 def hp_native_geometry(kb: Any) -> dict[str, Any]:
     """Baked Husty-Pfurner ``HpConsts`` fields for a 6R KinBody (any 6R works; HP
     is universal). Single source of truth shared by the native HP artifact solve
