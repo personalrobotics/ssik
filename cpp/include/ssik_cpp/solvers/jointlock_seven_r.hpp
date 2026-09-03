@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "ssik_cpp/finalize.hpp"
+#include "ssik_cpp/parallel.hpp"
 #include "ssik_cpp/solvers/general_6r.hpp"
 #include "ssik_cpp/solvers/husty_pfurner.hpp"
 
@@ -71,15 +72,17 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
                                                   const std::array<RrConsts, NSamples>& rr,
                                                   const CoeffFns& coeffs, const JointLimits<7>& lim,
                                                   const Pose& T, const ArtifactParams<7>& p) {
-  // core: sweep the locked joint, RR-solve each 6R sub-chain, pad to 7-DOF.
+  // core: sweep the locked joint, RR-solve each 6R sub-chain, pad to 7-DOF. The
+  // NSamples RR solves are independent; fan out with each sample writing its own
+  // slot -> no race, merged in sample order (identical dedup to the serial path).
   const auto core = [&](const Pose& tp) {
-    std::vector<Solution<7>> all;
     // Sub-chain JointConsts (POE) is only touched by the 6R refiner, which is off
     // here (the locked sub-chains solve cleanly for the RR-covered arms); a
     // default suffices. If a degenerate sub-chain ever needs the 6R polish, the
     // emitter bakes the 16 sub-chain JointConsts and this passes them.
     static const JointConsts<6> kNoRefineConsts{};
-    for (int i = 0; i < NSamples; ++i) {
+    std::array<std::vector<Solution<7>>, NSamples> per;
+    parallel_for(NSamples, [&](std::size_t i) {
       const auto sub = general_6r_core(kNoRefineConsts, rr[i], coeffs[i], tp, kGeneral6rFkAtol,
                                        kGeneral6rDedupAtol, /*allow_refinement=*/false, 15);
       for (const auto& s6 : sub) {
@@ -94,9 +97,12 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
         s7.fk_residual = (fk<7>(c, s7.q) - tp).norm();
         if (s7.fk_residual > kGeneral6rFkAtol) continue;
         s7.refinement = s6.refinement;
-        all.push_back(s7);
+        per[i].push_back(s7);
       }
-    }
+    });
+    std::vector<Solution<7>> all;
+    for (auto& v : per)
+      for (auto& s : v) all.push_back(std::move(s));
     return jointlock_detail::dedup7(all, kGeneral6rDedupAtol);
   };
 
@@ -140,8 +146,11 @@ std::vector<Solution<7>> jointlock_hp_artifact_solve(
     const std::array<HpConsts, NSamples>& hp, const std::array<JointConsts<6>, NSamples>& sub,
     const JointLimits<7>& lim, const Pose& T, const ArtifactParams<7>& p) {
   const auto core = [&](const Pose& tp) {
-    std::vector<Solution<7>> all;
-    for (int i = 0; i < NSamples; ++i) {
+    // The NSamples sub-chain solves are independent (hp_core is pure, reads only
+    // baked consts); fan out with each sample writing its own slot -> no race.
+    // Merge in sample order so dedup7 sees the same order as the serial path.
+    std::array<std::vector<Solution<7>>, NSamples> per;
+    parallel_for(NSamples, [&](std::size_t i) {
       for (const auto& s6 : hp_core(sub[i], hp[i], tp, p.refinement_max_iters)) {
         Solution<7> s7;
         int j = 0;
@@ -152,9 +161,12 @@ std::vector<Solution<7>> jointlock_hp_artifact_solve(
         s7.fk_residual = (fk<7>(c, s7.q) - tp).norm();
         if (s7.fk_residual > kGeneral6rFkAtol) continue;
         s7.refinement = s6.refinement;
-        all.push_back(s7);
+        per[i].push_back(s7);
       }
-    }
+    });
+    std::vector<Solution<7>> all;
+    for (auto& v : per)
+      for (auto& s : v) all.push_back(std::move(s));
     return jointlock_detail::dedup7(all, kGeneral6rDedupAtol);
   };
 

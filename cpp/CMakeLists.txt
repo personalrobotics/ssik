@@ -40,7 +40,9 @@ target_include_directories(ssik_cpp INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/gen>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-target_link_libraries(ssik_cpp INTERFACE ${SSIK_EIGEN})
+# parallel.hpp uses std::thread (jointlock sweep / rescue / batch, #546), so every
+# consumer of the headers links the platform thread library.
+target_link_libraries(ssik_cpp INTERFACE ${SSIK_EIGEN} Threads::Threads)
 target_compile_features(ssik_cpp INTERFACE cxx_std_20)
 
 # Install + export the header-only package so a downstream C++/MoveIt project can
