@@ -87,14 +87,27 @@ Eigen::Matrix<double, 6, N> spatial_jacobian(const JointConsts<N>& c,
 // ssik.refinement.lm_refine (step clip, divergence + stall guards, Tikhonov
 // fallback only on an exactly-singular Jacobian -- the parity of np.linalg.solve
 // raising LinAlgError).
+// divergence_factor / divergence_min_iters default to the ssik.refinement.lm_refine
+// values (5.0 / 4). The srs_polished / spherical_shoulder_polished batch polish
+// uses ssik.refinement.lm_refine_batch's tighter guard (2.0 / 2), which keeps a
+// seed from wandering off its local branch on a redundant manifold -- pass those
+// to reproduce that solver's solution set.
+// fixed_damping < 0 (default) reproduces ssik.refinement.lm_refine's ADAPTIVE
+// Tikhonov damping max(1e-9, 1e-6*fro) (+ the N==6 direct-LU fast path). A value
+// >= 0 reproduces ssik.refinement.lm_refine_batch's FIXED damping (1e-9) and
+// always-normal-equations step -- the batch polish srs_polished /
+// spherical_shoulder_polished use, whose basin selection on the redundant 7R
+// manifold differs from the adaptive single refine.
 template <int N>
 std::optional<std::pair<std::array<double, N>, double>> lm_refine(
     const JointConsts<N>& c, const std::array<double, N>& q_seed, const Pose& t_target,
-    double fk_atol = 1e-9, int max_iters = 15) {
+    double fk_atol = 1e-9, int max_iters = 15, double divergence_factor = 5.0,
+    int divergence_min_iters = 4, double fixed_damping = -1.0) {
   constexpr double step_clip = 0.5;
-  constexpr double divergence_factor = 5.0;
-  constexpr int divergence_min_iters = 4;
-  constexpr int stall_patience = 5;
+  // Single refine aborts after stall_patience non-improving iters; lm_refine_batch
+  // has no stall guard (only divergence), so the batch path (fixed_damping >= 0)
+  // disables it -- a seed that plateaus then converges must not be dropped.
+  const int stall_patience = fixed_damping >= 0.0 ? std::numeric_limits<int>::max() : 5;
 
   std::array<double, N> q = q_seed;
   double r_best = std::numeric_limits<double>::infinity();
@@ -118,17 +131,21 @@ std::optional<std::pair<std::array<double, N>, double>> lm_refine(
 
     Eigen::Matrix<double, N, 1> dq;
     bool use_tikhonov = true;
+    // The direct-LU fast path is the single-refine (adaptive) behavior only; the
+    // batch refine (fixed_damping >= 0) always uses the damped normal equations.
     if constexpr (N == 6) {
-      const Eigen::Matrix<double, 6, 6> jsq = js;
-      // np.linalg.solve raises only on an exactly-singular matrix; a nonzero
-      // determinant takes the direct (LU) path, matching Python.
-      if (jsq.determinant() != 0.0) {
-        dq = jsq.partialPivLu().solve(res);
-        use_tikhonov = false;
+      if (fixed_damping < 0.0) {
+        const Eigen::Matrix<double, 6, 6> jsq = js;
+        // np.linalg.solve raises only on an exactly-singular matrix; a nonzero
+        // determinant takes the direct (LU) path, matching Python.
+        if (jsq.determinant() != 0.0) {
+          dq = jsq.partialPivLu().solve(res);
+          use_tikhonov = false;
+        }
       }
     }
     if (use_tikhonov) {
-      const double damping = std::max(1e-9, 1e-6 * fro);
+      const double damping = fixed_damping >= 0.0 ? fixed_damping : std::max(1e-9, 1e-6 * fro);
       const Eigen::Matrix<double, N, N> jtj =
           js.transpose() * js + damping * Eigen::Matrix<double, N, N>::Identity();
       dq = jtj.ldlt().solve(js.transpose() * res);

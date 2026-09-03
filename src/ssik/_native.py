@@ -152,7 +152,7 @@ def try_native_solve(
 _srs_cache: dict[int, dict[str, Any] | None] = {}
 
 
-def srs_native_geometry(kb: Any) -> dict[str, Any] | None:
+def srs_native_geometry(kb: Any, policy: Any = None) -> dict[str, Any] | None:
     """Baked SRS geometry (the SrsConsts fields + the canonical/general dispatch
     flag) for ANY concurrent-axis SRS 7R arm, or None when the arm is not
     SRS-class. Single source of truth shared by the runtime native path
@@ -165,12 +165,18 @@ def srs_native_geometry(kb: Any) -> dict[str, Any] | None:
     == 0): canonical-ZYZ + offset-free wrist -> the canonical fast-path core,
     everything else (non-ZYZ shoulder/wrist, laterally-offset wrist) -> the
     general Davenport core (#354). Both are native.
+
+    ``policy`` defaults to the strict tolerance policy; :func:`srs_polished_native_
+    geometry` passes a relaxed one (axis_intersect = max_drift) so the approximate-
+    SRS arms classify.
     """
-    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY as _POL
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
     from ssik.solvers.seven_r.srs import (  # type: ignore[attr-defined]
         _arm_constants,
         _classify_srs_7r_geometric,
     )
+
+    _POL = policy if policy is not None else DEFAULT_TOLERANCE_POLICY
 
     cls = _classify_srs_7r_geometric(kb, _POL)
     if cls is None or len(kb.joints) != 7:
@@ -200,6 +206,28 @@ def srs_native_geometry(kb: Any) -> dict[str, Any] | None:
         "forearm_home": np.asarray(cls.wrist_pivot - origins[cls.elbow_index], dtype=np.float64),
         "general_path": not (canonical and offset_free),
     }
+
+
+# srs_polished refusal gate (ssik.solvers.seven_r.srs_polished._DEFAULT_MAX_DRIFT_M).
+_SRS_POLISHED_MAX_DRIFT_M = 0.04
+
+
+def srs_polished_native_geometry(kb: Any) -> dict[str, Any] | None:
+    """Baked SrsConsts for an approximate-SRS arm (seven_r.srs_polished: gen3,
+    j2s7s300, rm75, yumi L/R), or None when not approximately-SRS. Same geometry
+    as :func:`srs_native_geometry` but classified under a RELAXED policy
+    (axis_intersect = max_drift), mirroring srs_polished.solve's relaxed_policy so
+    the small-drift pivots pass the concurrency gate. The C++ srs_polished artifact
+    then LM-polishes the resulting cm-off algebraic candidates against the true FK."""
+    from dataclasses import replace
+
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+    relaxed = replace(
+        DEFAULT_TOLERANCE_POLICY,
+        axis_intersect=max(_SRS_POLISHED_MAX_DRIFT_M, DEFAULT_TOLERANCE_POLICY.axis_intersect),
+    )
+    return srs_native_geometry(kb, policy=relaxed)
 
 
 def hp_native_geometry(kb: Any) -> dict[str, Any]:

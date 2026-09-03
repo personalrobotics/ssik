@@ -71,23 +71,44 @@ inline void shoulder_angles_zyz(const Eigen::Vector3d& d, int q1_sign, double& q
 
 // Canonical-path SRS solve. Returns FK-verified, deduped 7-DOF solutions.
 // Assumes a canonical-ZYZ, offset-free-wrist SRS arm (the dispatch gates this).
+//
+// reach_slack / fk_keep_threshold default to the strict SRS behavior (0 / 1e-5),
+// exactly reproducing the iiwa-class path. The approximate-SRS caller
+// (srs_polished, #550) passes reach_slack = 2*max_drift so borderline elbow-
+// singular poses aren't rejected by the exact cosine-rule envelope, plus clamps
+// d_sw strictly inside the envelope (r_circle > 0), and a huge fk_keep_threshold
+// so ALL cm-off algebraic candidates survive to be LM-polished by the caller
+// (mirrors srs.solve(reach_slack=..., fk_atol=10.0)).
 inline std::vector<Solution<7>> srs_canonical_solve(const JointConsts<7>& c, const SrsConsts& s,
-                                                    const Pose& T) {
+                                                    const Pose& T, double reach_slack = 0.0,
+                                                    double fk_keep_threshold = kSrsFkThreshold) {
+  constexpr double kSingularEps = 1e-6;  // srs.py _SINGULAR_EPS (d_sw clamp margin)
   const Eigen::Matrix3d R_target = T.block<3, 3>(0, 0);
   const Eigen::Vector3d p_target = T.block<3, 1>(0, 3);
   const Eigen::Vector3d W_t = p_target - R_target * s.ee_offset_local;
 
   const Eigen::Vector3d SW = W_t - s.shoulder_pivot;
   const double d_sw = SW.norm();
-  if (d_sw > s.l_se + s.l_ew || d_sw < std::abs(s.l_se - s.l_ew) || d_sw < 1e-12) return {};
+  if (d_sw > s.l_se + s.l_ew + reach_slack ||
+      d_sw < std::max(0.0, std::abs(s.l_se - s.l_ew) - reach_slack) || d_sw < 1e-12)
+    return {};
   const Eigen::Vector3d u_sw = SW / d_sw;
 
-  const double cos_int = std::max(
-      -1.0, std::min(1.0, (s.l_se * s.l_se + s.l_ew * s.l_ew - d_sw * d_sw) / (2.0 * s.l_se * s.l_ew)));
+  // Clamp d_sw strictly inside the cosine-rule envelope for approximate-SRS
+  // callers (reach_slack > 0) so r_circle stays > 0 at the elbow singularity;
+  // strict callers use d_sw unchanged (a 1e-6 offset would add ~3e-7 FK drift).
+  const double d_sw_eff =
+      reach_slack > 0.0 ? std::max(std::abs(s.l_se - s.l_ew) + kSingularEps,
+                                   std::min(d_sw, s.l_se + s.l_ew - kSingularEps))
+                        : d_sw;
+
+  const double cos_int =
+      std::max(-1.0, std::min(1.0, (s.l_se * s.l_se + s.l_ew * s.l_ew - d_sw_eff * d_sw_eff) /
+                                       (2.0 * s.l_se * s.l_ew)));
   const double base_q3 = M_PI - std::acos(cos_int);
   const std::array<double, 2> q3_branches = {base_q3, -base_q3};
 
-  const double x_c = (s.l_se * s.l_se - s.l_ew * s.l_ew + d_sw * d_sw) / (2.0 * d_sw);
+  const double x_c = (s.l_se * s.l_se - s.l_ew * s.l_ew + d_sw_eff * d_sw_eff) / (2.0 * d_sw_eff);
   const double r_circle = std::sqrt(std::max(s.l_se * s.l_se - x_c * x_c, 0.0));
   Eigen::Vector3d u_perp1, u_perp2;
   srs_detail::swivel_basis(u_sw, u_perp1, u_perp2);
@@ -95,11 +116,20 @@ inline std::vector<Solution<7>> srs_canonical_solve(const JointConsts<7>& c, con
   const Eigen::Matrix3d R_post = s.r_post_wrist;
   const Eigen::Vector3d S = s.shoulder_pivot;
 
+  // Near-kinematic-singularity (r_circle small): for approximate-SRS callers
+  // (reach_slack > 0) the swivel circle collapses and the wrist-pivot SP1 for q2
+  // is numerically unstable, so sweep q2 directly over the swivel grid instead --
+  // a 1-parameter family the caller's LM polish closes (srs.py #223 layer 3).
+  // Strict callers keep the SP1 atan2 (exact to 1e-13, no offset to compound).
+  constexpr double kSingularRCircle = 1e-2;  // srs.py _SINGULAR_R_CIRCLE
+  const bool is_singular = reach_slack > 0.0 && r_circle < kSingularRCircle;
+
   // Per-swivel elbow placement.
   std::array<Eigen::Vector3d, kSrsSwivelSamples> E_t, d_dir;
+  std::array<double, kSrsSwivelSamples> swivel;
   for (int n = 0; n < kSrsSwivelSamples; ++n) {
-    const double sw = -M_PI + (2.0 * M_PI) * n / kSrsSwivelSamples;  // linspace endpoint=False
-    E_t[n] = S + x_c * u_sw + r_circle * (std::cos(sw) * u_perp1 + std::sin(sw) * u_perp2);
+    swivel[n] = -M_PI + (2.0 * M_PI) * n / kSrsSwivelSamples;  // linspace endpoint=False
+    E_t[n] = S + x_c * u_sw + r_circle * (std::cos(swivel[n]) * u_perp1 + std::sin(swivel[n]) * u_perp2);
     d_dir[n] = (E_t[n] - S) / s.l_se;
   }
 
@@ -118,14 +148,20 @@ inline std::vector<Solution<7>> srs_canonical_solve(const JointConsts<7>& c, con
         std::array<double, 7> q_partial = {q0, q1, 0.0, q3, 0.0, 0.0, 0.0};
         const auto [R5, W_at_q2_zero] = frame_at_joint<7>(c, q_partial, 5);
 
-        // SP1 for q2 (upper-arm roll mapping the q2=0 wrist pivot onto W_t).
-        const Eigen::Vector3d p_from = W_at_q2_zero - E_t[n];
-        const Eigen::Vector3d p_to = W_t - E_t[n];
-        const double up_pf = d.dot(p_from);
-        const double up_pt = d.dot(p_to);
-        const double num = d.dot(p_from.cross(p_to));
-        const double den = p_from.dot(p_to) - up_pf * up_pt;
-        const double q2 = std::atan2(num, den);
+        double q2;
+        if (is_singular) {
+          q2 = swivel[n];  // direct q2-sweep at the singularity (LM polishes it)
+        } else {
+          // SP1 for q2 (upper-arm roll mapping the q2=0 wrist pivot onto W_t).
+          const Eigen::Vector3d p_from = W_at_q2_zero - E_t[n];
+          const Eigen::Vector3d p_to = W_t - E_t[n];
+          const double up_pf = d.dot(p_from);
+          const double up_pt = d.dot(p_to);
+          const double num = d.dot(p_from.cross(p_to));
+          const double den = p_from.dot(p_to) - up_pf * up_pt;
+          q2 = std::atan2(num, den);
+        }
+        (void)R5;
 
         std::array<double, 7> q_post = {q0, q1, q2, q3, 0.0, 0.0, 0.0};
         const auto [R_pre_wrist, p4] = frame_at_joint<7>(c, q_post, 4);
@@ -186,7 +222,8 @@ inline std::vector<Solution<7>> srs_canonical_solve(const JointConsts<7>& c, con
   std::vector<Solution<7>> verified;
   for (const auto& cand : deduped) {
     const double resid = (fk<7>(c, cand.q) - T).norm();
-    if (resid <= kSrsFkThreshold) verified.push_back(Solution<7>{cand.q, resid, Refinement::None});
+    if (resid <= fk_keep_threshold)
+      verified.push_back(Solution<7>{cand.q, resid, Refinement::None});
   }
   return verified;
 }
