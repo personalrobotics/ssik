@@ -187,7 +187,7 @@ def _render_thin_wrapper(
     # early on success, else falls back silently to the Python path below.
     emit_native = plan.solver_name in _NATIVE_SOLVER_FAMILIES
     if emit_native:
-        buf.write("from ssik._native import try_native_srs_solve as _try_native_srs_solve\n")
+        buf.write("from ssik._native import try_native_solve_7r as _try_native_solve_7r\n")
     buf.write("\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -1627,7 +1627,7 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
             "    if seed_tolerance is not None and q_seed is None:\n"
             '        raise ValueError("seed_tolerance requires q_seed")\n'
             "    if native:\n"
-            "        _native_sols = _try_native_srs_solve(\n"
+            "        _native_sols = _try_native_solve_7r(\n"
             "            SOLVER_NAME,\n"
             "            _KB,\n"
             "            T_target,\n"

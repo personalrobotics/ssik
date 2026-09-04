@@ -16,6 +16,7 @@
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/general_6r.hpp"
 #include "ssik_cpp/solvers/husty_pfurner.hpp"
+#include "ssik_cpp/solvers/spherical_shoulder.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
@@ -418,6 +419,68 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   const std::vector<ssik::Solution<7>> sols =
       polished ? ssik::srs_polished_artifact_solve(c, s, lim, T, p)
                : ssik::srs_artifact_solve(c, s, lim, T, p);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 7});
+  py::array_t<double> resids(n);
+  py::array_t<int> refine(n);
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  auto fm = refine.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 7; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+    fm(i) = sols[i].refinement == ssik::Refinement::None ? 0 : 1;
+  }
+  return py::make_tuple(qs, resids, refine);
+}
+
+// Full native spherical_shoulder{,_polished} artifact solve (#553): the whole
+// <arm>.solve() contract in C++ for a spherical-shoulder + offset-wrist 7R arm
+// (franka/fr3 exact; xarm7/gen72 approximate -> polished LM-refine). Takes the
+// baked (3,48) reversed-lock-6 affine coefficients + the ArtifactParams surface.
+py::tuple spherical_shoulder_artifact_solve_py(
+    py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
+    py::array_t<int> types, py::array_t<double> coef, py::array_t<double> lo, py::array_t<double> hi,
+    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
+    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
+    bool polished) {
+  const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  ssik::SphericalShoulderConsts sh;
+  auto cf = coef.unchecked<2>();  // (3, 48)
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 48; ++j) sh.coef(i, j) = cf(i, j);
+
+  ssik::JointLimits<7> lim;
+  auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+  auto hl_u = has_limits.unchecked<1>();
+  for (int i = 0; i < 7; ++i) {
+    lim.lo[i] = lo_u(i);
+    lim.hi[i] = hi_u(i);
+    lim.present[i] = hl_u(i) != 0;
+  }
+
+  ssik::ArtifactParams<7> p;
+  p.respect_limits = respect_limits;
+  p.has_seed = has_seed;
+  if (has_seed) {
+    auto qs_u = q_seed.unchecked<1>();
+    for (int i = 0; i < 7; ++i) p.q_seed[i] = qs_u(i);
+  }
+  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
+  p.has_seed_tolerance = has_seed_tolerance;
+  p.seed_tolerance = seed_tolerance;
+  p.max_solutions = max_solutions;
+  p.allow_rescue = allow_rescue;
+  p.refinement_max_iters = refinement_max_iters;
+
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const std::vector<ssik::Solution<7>> sols =
+      ssik::spherical_shoulder_artifact_solve(c, sh, lim, T, p, polished);
   const int n = static_cast<int>(sols.size());
   py::array_t<double> qs({n, 7});
   py::array_t<double> resids(n);
@@ -977,6 +1040,13 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
         py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15,
         py::arg("polished") = false);
+  m.def("spherical_shoulder_artifact_solve", &spherical_shoulder_artifact_solve_py, py::arg("axes"),
+        py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("coef"), py::arg("lo"),
+        py::arg("hi"), py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
+        py::arg("has_seed") = false, py::arg("q_seed"), py::arg("seed_metric") = "wrap_linf",
+        py::arg("has_seed_tolerance") = false, py::arg("seed_tolerance") = 0.0,
+        py::arg("max_solutions") = -1, py::arg("allow_rescue") = true,
+        py::arg("refinement_max_iters") = 15, py::arg("polished") = false);
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,

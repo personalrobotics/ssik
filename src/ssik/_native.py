@@ -30,6 +30,8 @@ _NATIVE_SOLVERS = frozenset(
         "ikgeo.spherical_two_parallel",
         "seven_r.srs",
         "seven_r.srs_polished",
+        "seven_r.spherical_shoulder",
+        "seven_r.spherical_shoulder_polished",
         "ikgeo.general_6r",
     }
 )
@@ -679,3 +681,110 @@ def try_native_srs_solve(
         )
         for i in range(len(qs))
     ]
+
+
+# Per-KinBody native spherical_shoulder args (baked (3,48) coef + JointConsts) or
+# None. Geometry-only, cached per-arm.
+_sh_cache: dict[int, dict[str, Any] | None] = {}
+
+
+def _sh_native_args(kb: Any, *, polished: bool) -> dict[str, Any] | None:
+    """Cached :func:`spherical_shoulder_native_geometry` + marshalled JointConsts /
+    limits for the binding, or None when the arm isn't spherical-shoulder class."""
+    if id(kb) in _sh_cache:
+        return _sh_cache[id(kb)]
+    geom = spherical_shoulder_native_geometry(kb, polished=polished)
+    result: dict[str, Any] | None = None
+    if geom is not None:
+        j = kb.joints
+        result = {
+            "axes": np.array([jt.axis for jt in j], dtype=np.float64),
+            "t_left": np.array([jt.T_left for jt in j], dtype=np.float64),
+            "t_right": np.array([jt.T_right for jt in j], dtype=np.float64),
+            "types": np.array(
+                [0 if jt.joint_type == "revolute" else 1 for jt in j], dtype=np.int32
+            ),
+            "lo": np.array([jt.limits[0] if jt.limits else 0.0 for jt in j], dtype=np.float64),
+            "hi": np.array([jt.limits[1] if jt.limits else 0.0 for jt in j], dtype=np.float64),
+            "has_limits": np.array([1 if jt.limits else 0 for jt in j], dtype=np.int32),
+            "coef": np.asarray(geom["coef"], dtype=np.float64),
+        }
+    _sh_cache[id(kb)] = result
+    return result
+
+
+def try_native_spherical_shoulder_solve(
+    solver_name: str,
+    kb: Any,
+    t_target: NDArray[np.float64],
+    *,
+    respect_limits: bool = True,
+    q_seed: NDArray[np.float64] | None = None,
+    seed_metric: str = "wrap_linf",
+    seed_tolerance: float | None = None,
+    max_solutions: int | None = None,
+    allow_rescue: bool = True,
+    refinement_max_iters: int = 15,
+) -> list[Solution] | None:
+    """FULL native spherical_shoulder{,_polished} artifact solve (#553), or ``None``
+    to fall back. ``_polished`` (xarm7/gen72) LM-refines the approximate candidates;
+    the exact arms (franka/fr3) FK-gate. Redundant 7R, so the runtime contract is
+    relative-completeness (soundness + coverage), same as srs_polished."""
+    polished = solver_name == "seven_r.spherical_shoulder_polished"
+    if solver_name not in ("seven_r.spherical_shoulder", "seven_r.spherical_shoulder_polished"):
+        return None
+    ext = _load_ext()
+    if ext is None:
+        return None
+    a = _sh_native_args(kb, polished=polished)
+    if a is None:
+        return None
+    has_seed = q_seed is not None
+    seed_arr = np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(7, np.float64)
+    qs, resids, refine = ext.spherical_shoulder_artifact_solve(
+        a["axes"],
+        a["t_left"],
+        a["t_right"],
+        a["types"],
+        a["coef"],
+        a["lo"],
+        a["hi"],
+        a["has_limits"],
+        np.asarray(t_target, dtype=np.float64),
+        respect_limits,
+        has_seed,
+        seed_arr,
+        seed_metric,
+        seed_tolerance is not None,
+        seed_tolerance if seed_tolerance is not None else 0.0,
+        max_solutions if max_solutions is not None else -1,
+        allow_rescue,
+        refinement_max_iters,
+        polished,
+    )
+    return [
+        Solution(
+            q=np.asarray(qs[i], dtype=np.float64),
+            fk_residual=float(resids[i]),
+            refinement_used="lm" if int(refine[i]) == 1 else "none",
+        )
+        for i in range(len(qs))
+    ]
+
+
+def try_native_solve_7r(
+    solver_name: str,
+    kb: Any,
+    t_target: NDArray[np.float64],
+    **kwargs: Any,
+) -> list[Solution] | None:
+    """Unified native entry for the thin-wrapper 7R families (the artifact hook
+    calls this). Routes by ``solver_name`` to the focused per-family solve, or
+    returns ``None`` to fall back to Python: SRS + srs_polished ->
+    :func:`try_native_srs_solve`; spherical_shoulder{,_polished} ->
+    :func:`try_native_spherical_shoulder_solve`."""
+    if solver_name in ("seven_r.srs", "seven_r.srs_polished"):
+        return try_native_srs_solve(solver_name, kb, t_target, **kwargs)
+    if solver_name in ("seven_r.spherical_shoulder", "seven_r.spherical_shoulder_polished"):
+        return try_native_spherical_shoulder_solve(solver_name, kb, t_target, **kwargs)
+    return None
