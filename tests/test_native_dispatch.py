@@ -24,7 +24,21 @@ from ssik import _native
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
 
-_ARMS = [arm.name for arm in load_manifest().values() if arm.solver in _native._NATIVE_SOLVERS]
+# Redundant / approximate 7R families: native samples the self-motion manifold via
+# a different (sound) enumeration than Python, so exact set-match is not the runtime
+# contract -- oracle-coverage completeness is validated by the standalone artifact
+# gate (#550/#487), and the runtime path is the SAME C++ function. The runtime gate
+# here is soundness + non-emptiness (test_native_relative_completeness).
+_RELATIVE_NATIVE_SOLVERS = frozenset({"seven_r.srs_polished"})
+
+_ARMS = [
+    arm.name
+    for arm in load_manifest().values()
+    if arm.solver in _native._NATIVE_SOLVERS and arm.solver not in _RELATIVE_NATIVE_SOLVERS
+]
+_RELATIVE_ARMS = [
+    arm.name for arm in load_manifest().values() if arm.solver in _RELATIVE_NATIVE_SOLVERS
+]
 
 
 def _wrap(a: float) -> float:
@@ -108,3 +122,50 @@ def test_native_matches_python(arm_name: str) -> None:
         assert len(py_sm) == len(nat_sm), f"{arm_name}: seed+max count"
         if nat_sm:
             assert _close(py_sm[0].q, nat_sm[0].q), f"{arm_name}: seed+max nearest"
+
+
+@pytest.mark.skipif(
+    not _native.native_available(),
+    reason="ssik._ssik_native not built (see scripts/build_cpp_ext.py --out-dir src/ssik)",
+)
+@pytest.mark.parametrize("arm_name", _RELATIVE_ARMS)
+def test_native_relative_completeness(arm_name: str) -> None:
+    """Redundant/approximate 7R runtime contract (#554): native=True returns SOUND
+    solutions (every returned q is a real IK) and is non-empty exactly when the
+    Python path is, on stable (non-continuum) poses. It may sample the self-motion
+    manifold differently from native=False -- oracle-coverage is the standalone
+    artifact gate's job (#550), and the runtime calls the same C++ solve."""
+    mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
+    kb = mod._KB
+    ranges = [
+        (float(j.limits[0]), float(j.limits[1])) if j.limits else (-np.pi, np.pi) for j in kb.joints
+    ]
+    rng = np.random.default_rng(2)
+    kept = 0
+    attempts = 0
+    while kept < 15 and attempts < 800:
+        attempts += 1
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        t = np.asarray(poe_forward_kinematics(kb, q), dtype=np.float64)
+        py = mod.solve(t)
+        # Drop near-continuum / near-singular poses (mirror the standalone golden:
+        # count <= 130 and stable under a 1e-6 perturbation), where native and
+        # Python legitimately return different sound subsets of the manifold.
+        if len(py) > 130:
+            continue
+        stable = all(
+            len(mod.solve(np.asarray(poe_forward_kinematics(kb, q + dq), dtype=np.float64)))
+            == len(py)
+            for dq in (rng.uniform(-1e-6, 1e-6, len(q)), rng.uniform(-1e-6, 1e-6, len(q)))
+        )
+        if not stable:
+            continue
+        kept += 1
+        nat = mod.solve(t, native=True)
+        for s in nat:  # soundness: every native solution is a real IK
+            assert np.linalg.norm(poe_forward_kinematics(kb, s.q) - t) <= 1e-6, (
+                f"{arm_name}: native returned an unsound solution"
+            )
+        # non-emptiness parity: native finds solutions exactly when Python does.
+        assert bool(nat) == bool(py), f"{arm_name}: native/python emptiness disagree"
+    assert kept >= 10, f"{arm_name}: too few stable poses sampled ({kept})"
