@@ -50,6 +50,7 @@ from ssik.refinement import seeded_track as _seeded_track
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.solvers.seven_r.spherical_shoulder_polished import resolve_in_limits as _resolve_in_limits
 from ssik.solvers.seven_r.spherical_shoulder_polished import solve as _solver_solve
+from ssik._native import try_native_solve_7r as _try_native_solve_7r
 
 SOLVER_NAME = "seven_r.spherical_shoulder_polished"
 SOLVER_TIER = 0
@@ -163,6 +164,7 @@ def solve(
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
+    native: bool = False,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -210,6 +212,21 @@ def solve(
     """
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
+    if native:
+        _native_sols = _try_native_solve_7r(
+            SOLVER_NAME,
+            _KB,
+            T_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+        )
+        if _native_sols is not None:
+            return _native_sols
     # Seeded numerical-tracking fast path (#380): the caller gave a seed
     # and wants a single IK -- the trajectory-tracking idiom. Newton-
     # continue from the seed (~0.2 ms) instead of resolving the whole

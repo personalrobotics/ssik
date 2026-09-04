@@ -29,7 +29,13 @@ from ssik.prebuilt._manifest import load_manifest
 # contract -- oracle-coverage completeness is validated by the standalone artifact
 # gate (#550/#487), and the runtime path is the SAME C++ function. The runtime gate
 # here is soundness + non-emptiness (test_native_relative_completeness).
-_RELATIVE_NATIVE_SOLVERS = frozenset({"seven_r.srs_polished"})
+_RELATIVE_NATIVE_SOLVERS = frozenset(
+    {
+        "seven_r.srs_polished",
+        "seven_r.spherical_shoulder",
+        "seven_r.spherical_shoulder_polished",
+    }
+)
 
 _ARMS = [
     arm.name

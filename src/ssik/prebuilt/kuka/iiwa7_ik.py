@@ -50,7 +50,7 @@ from ssik.refinement import seeded_track as _seeded_track
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.solvers.seven_r._swivel_limits import resolve_in_limits as _resolve_in_limits
 from ssik.solvers.seven_r.srs import solve as _solver_solve
-from ssik._native import try_native_srs_solve as _try_native_srs_solve
+from ssik._native import try_native_solve_7r as _try_native_solve_7r
 
 SOLVER_NAME = "seven_r.srs"
 SOLVER_TIER = 0
@@ -213,7 +213,7 @@ def solve(
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
     if native:
-        _native_sols = _try_native_srs_solve(
+        _native_sols = _try_native_solve_7r(
             SOLVER_NAME,
             _KB,
             T_target,
