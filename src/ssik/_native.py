@@ -25,7 +25,13 @@ from ssik.core.solution import Solution
 # artifact via try_native_srs_solve (seeded-track + canonical/general core +
 # finalize + in-limits fallback, all native).
 _NATIVE_SOLVERS = frozenset(
-    {"ikgeo.three_parallel", "ikgeo.spherical_two_parallel", "seven_r.srs", "ikgeo.general_6r"}
+    {
+        "ikgeo.three_parallel",
+        "ikgeo.spherical_two_parallel",
+        "seven_r.srs",
+        "seven_r.srs_polished",
+        "ikgeo.general_6r",
+    }
 )
 
 _ext: Any = None
@@ -572,12 +578,17 @@ def hp_native_geometry(kb: Any) -> dict[str, Any]:
     }
 
 
-def _srs_native_args(kb: Any) -> dict[str, Any] | None:
-    """Cached :func:`srs_native_geometry` + the marshalled JointConsts arrays for
-    the binding, or None when the arm isn't SRS-class."""
+def _srs_native_args(kb: Any, solver_name: str = "seven_r.srs") -> dict[str, Any] | None:
+    """Cached SRS geometry (strict for ``seven_r.srs``, relaxed/approximate for
+    ``seven_r.srs_polished``) + the marshalled JointConsts arrays for the binding,
+    or None when the arm isn't SRS-class under that classifier."""
     if id(kb) in _srs_cache:
         return _srs_cache[id(kb)]
-    geom = srs_native_geometry(kb)
+    geom = (
+        srs_polished_native_geometry(kb)
+        if solver_name == "seven_r.srs_polished"
+        else srs_native_geometry(kb)
+    )
     result: dict[str, Any] | None = None
     if geom is not None:
         j = kb.joints
@@ -621,12 +632,12 @@ def try_native_srs_solve(
     as the 6R native path. Parity with the Python solve is validated across the
     full contract in tests/test_srs_artifact_cpp.py + test_srs_general_cpp.py.
     """
-    if solver_name != "seven_r.srs":
+    if solver_name not in ("seven_r.srs", "seven_r.srs_polished"):
         return None
     ext = _load_ext()
     if ext is None:
         return None
-    a = _srs_native_args(kb)
+    a = _srs_native_args(kb, solver_name)
     if a is None:
         return None
     has_seed = q_seed is not None
@@ -658,6 +669,7 @@ def try_native_srs_solve(
         max_solutions if max_solutions is not None else -1,
         allow_rescue,
         refinement_max_iters,
+        polished=(solver_name == "seven_r.srs_polished"),
     )
     return [
         Solution(

@@ -19,6 +19,7 @@
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
+#include "ssik_cpp/solvers/srs_polished.hpp"
 #include "ssik_cpp/solvers/three_parallel.hpp"
 
 namespace py = pybind11;
@@ -363,7 +364,7 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
                                 bool has_seed, py::array_t<double> q_seed,
                                 const std::string& seed_metric, bool has_seed_tolerance,
                                 double seed_tolerance, int max_solutions, bool allow_rescue,
-                                int refinement_max_iters) {
+                                int refinement_max_iters, bool polished) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
   ssik::SrsConsts s;
   s.l_se = l_se;
@@ -412,7 +413,11 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   for (int r = 0; r < 4; ++r)
     for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
 
-  const std::vector<ssik::Solution<7>> sols = ssik::srs_artifact_solve(c, s, lim, T, p);
+  // srs_polished (#550): exact SRS canonical core -> LM-polish cm-off candidates
+  // against true FK -> dedup, for approximately-SRS arms (relaxed classifier).
+  const std::vector<ssik::Solution<7>> sols =
+      polished ? ssik::srs_polished_artifact_solve(c, s, lim, T, p)
+               : ssik::srs_artifact_solve(c, s, lim, T, p);
   const int n = static_cast<int>(sols.size());
   py::array_t<double> qs({n, 7});
   py::array_t<double> resids(n);
@@ -970,7 +975,8 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("respect_limits") = true, py::arg("has_seed") = false, py::arg("q_seed"),
         py::arg("seed_metric") = "wrap_linf", py::arg("has_seed_tolerance") = false,
         py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
-        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15);
+        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15,
+        py::arg("polished") = false);
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
