@@ -66,3 +66,71 @@ def test_rr_tensor_matches_lambdified(arm: str) -> None:
         for c, r in zip(got, ref, strict=True):
             worst = max(worst, float(np.max(np.abs(np.asarray(c) - r))))
     assert worst < 1e-9, f"{arm}: C++ rr_eval_coeffs vs lambdified worst diff {worst:.2e}"
+
+
+@pytest.mark.parametrize("arm", ["jaco2_ik", "piper_ik"])
+def test_rr_tensor_full_solve_matches_python(arm: str) -> None:
+    """The whole native general_6r solve via the baked tensor recovers every
+    Python general_6r solution (relative-completeness + soundness)."""
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+
+    ext = _load_ext()
+    mod = importlib.import_module(f"ssik.prebuilt.{arm}")
+    kb = mod._KB
+    if len(kb.joints) != 6:
+        pytest.skip("6R only")
+    g = rr_native_geometry(kb)
+    axes = np.array([j.axis for j in kb.joints], dtype=np.float64)
+    tl = np.array([j.T_left for j in kb.joints], dtype=np.float64)
+    tr = np.array([j.T_right for j in kb.joints], dtype=np.float64)
+    ty = np.array([0 if j.joint_type == "revolute" else 1 for j in kb.joints], dtype=np.int32)
+    po_r, po_c, po_m, po_co = g["po_coo"]
+    q_r, q_c, q_m, q_co = g["q_coo"]
+    po_rc = np.stack([po_r, po_c], axis=1).astype(np.int32)
+    q_rc = np.stack([q_r, q_c], axis=1).astype(np.int32)
+
+    def native(t: np.ndarray) -> list[np.ndarray]:
+        (qs,) = ext.general_6r_tensor_solve(
+            axes,
+            tl,
+            tr,
+            ty,
+            g["alpha"],
+            g["a"],
+            g["d"],
+            g["theta_offset"],
+            g["t_pre_inv"],
+            g["t_post_inv"],
+            g["linearity_joint"],
+            g["left_bilinear"],
+            g["right_bilinear"],
+            g["drop_joint"],
+            g["p_sin"],
+            g["p_cos"],
+            g["mono_factors"],
+            po_rc,
+            po_m,
+            po_co,
+            q_rc,
+            q_m,
+            q_co,
+            t,
+        )
+        return [np.asarray(r) for r in np.asarray(qs).reshape(-1, 6)]
+
+    def wrap_close(x: np.ndarray, y: np.ndarray) -> bool:
+        return bool(np.max(np.abs((x - y + np.pi) % (2 * np.pi) - np.pi)) < 1e-4)
+
+    rng = np.random.default_rng(7)
+    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in kb.joints]
+    worst_fk = 0.0
+    for _ in range(60):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        T = np.asarray(poe_forward_kinematics(kb, q), dtype=np.float64)
+        nsols = native(T)
+        for s in nsols:
+            worst_fk = max(worst_fk, float(np.linalg.norm(poe_forward_kinematics(kb, s) - T)))
+        oracle = mod.solve(T)  # Python general_6r (this family isn't native-wired yet)
+        for o in oracle:
+            assert any(wrap_close(o.q, s) for s in nsols), f"{arm}: native RR-tensor missed a sol"
+    assert worst_fk <= 1e-6, f"{arm}: native RR-tensor worst FK {worst_fk:.2e}"

@@ -456,17 +456,19 @@ py::list decompose_3axis_test_py(py::array_t<double> R_arr, py::array_t<double> 
 // HP f/g kernel parity (#537): given the baked (4,8,2) tensors T_u / T_w_pre,
 // the target's Study DQ sigma_E, and drop_idx, return (f (9,7), g (6,5)) exactly
 // as _eliminate.compute_fg_numeric. Validates the sigma_E injection + Cramer
-// RR numeric-tensor evaluator parity (#555): build an RrCoeffTensor from the
-// baked arrays (ssik._native.rr_native_geometry) + a target t12, run the generic
-// rr_eval_coeffs, return (p_sin, p_cos, p_one, q) to compare against the Python
-// lambdified reference / the emitted rr_coeffs fn.
-py::tuple rr_eval_coeffs_test_py(py::array_t<double> p_sin, py::array_t<double> p_cos,
-                                 py::array_t<int> mono_factors, py::array_t<int> po_rc,
-                                 py::array_t<int> po_mono, py::array_t<double> po_coeff,
-                                 py::array_t<int> q_rc, py::array_t<int> q_mono,
-                                 py::array_t<double> q_coeff, py::array_t<double> t12_arr) {
+// Build an RrCoeffTensor from the baked arrays (ssik._native.rr_native_geometry).
+ssik::rr_detail::RrCoeffTensor make_rr_tensor(const py::array_t<double>& p_sin,
+                                              const py::array_t<double>& p_cos,
+                                              const py::array_t<int>& mono_factors,
+                                              const py::array_t<int>& po_rc,
+                                              const py::array_t<int>& po_mono,
+                                              const py::array_t<double>& po_coeff,
+                                              const py::array_t<int>& q_rc,
+                                              const py::array_t<int>& q_mono,
+                                              const py::array_t<double>& q_coeff) {
   ssik::rr_detail::RrCoeffTensor t;
-  auto ps = p_sin.unchecked<2>(), pc = p_cos.unchecked<2>();
+  auto ps = p_sin.unchecked<2>();
+  auto pc = p_cos.unchecked<2>();
   for (int r = 0; r < 14; ++r)
     for (int c = 0; c < 9; ++c) {
       t.p_sin(r, c) = ps(r, c);
@@ -475,9 +477,9 @@ py::tuple rr_eval_coeffs_test_py(py::array_t<double> p_sin, py::array_t<double> 
   auto mf = mono_factors.unchecked<2>();  // (n_mono, 3)
   for (py::ssize_t m = 0; m < mf.shape(0); ++m)
     t.mono_factors.push_back({mf(m, 0), mf(m, 1), mf(m, 2)});
-  auto load_coo = [](py::array_t<int>& rc, py::array_t<int>& mono, py::array_t<double>& coeff,
-                     std::vector<int>& rows, std::vector<int>& cols, std::vector<int>& mo,
-                     std::vector<double>& co) {
+  auto load_coo = [](const py::array_t<int>& rc, const py::array_t<int>& mono,
+                     const py::array_t<double>& coeff, std::vector<int>& rows, std::vector<int>& cols,
+                     std::vector<int>& mo, std::vector<double>& co) {
     auto rcm = rc.unchecked<2>();  // rc (n,2)
     auto mm = mono.unchecked<1>();
     auto cc = coeff.unchecked<1>();
@@ -490,6 +492,20 @@ py::tuple rr_eval_coeffs_test_py(py::array_t<double> p_sin, py::array_t<double> 
   };
   load_coo(po_rc, po_mono, po_coeff, t.po_row, t.po_col, t.po_mono, t.po_coeff);
   load_coo(q_rc, q_mono, q_coeff, t.q_row, t.q_col, t.q_mono, t.q_coeff);
+  return t;
+}
+
+// RR numeric-tensor evaluator parity (#555): build an RrCoeffTensor from the
+// baked arrays (ssik._native.rr_native_geometry) + a target t12, run the generic
+// rr_eval_coeffs, return (p_sin, p_cos, p_one, q) to compare against the Python
+// lambdified reference / the emitted rr_coeffs fn.
+py::tuple rr_eval_coeffs_test_py(py::array_t<double> p_sin, py::array_t<double> p_cos,
+                                 py::array_t<int> mono_factors, py::array_t<int> po_rc,
+                                 py::array_t<int> po_mono, py::array_t<double> po_coeff,
+                                 py::array_t<int> q_rc, py::array_t<int> q_mono,
+                                 py::array_t<double> q_coeff, py::array_t<double> t12_arr) {
+  const ssik::rr_detail::RrCoeffTensor t =
+      make_rr_tensor(p_sin, p_cos, mono_factors, po_rc, po_mono, po_coeff, q_rc, q_mono, q_coeff);
   double t12[12];
   auto tv = t12_arr.unchecked<1>();
   for (int i = 0; i < 12; ++i) t12[i] = tv(i);
@@ -507,6 +523,69 @@ py::tuple rr_eval_coeffs_test_py(py::array_t<double> p_sin, py::array_t<double> 
     for (int c = 0; c < 8; ++c) qo(r, c) = pq.q(r, c);
   }
   return py::make_tuple(ps_o, pc_o, po_o, q_o);
+}
+
+// Full native general_6r artifact solve via the baked RR tensor (#555): the RR
+// runtime path a single shipped ext would take. Marshals JointConsts<6> +
+// RrConsts + RrCoeffTensor, then general_6r_artifact_solve with a tensor lambda.
+// Validated against Python general_6r.solve in tests/test_rr_tensor_cpp.
+py::tuple general_6r_tensor_solve_py(
+    py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
+    py::array_t<int> types, py::array_t<double> alpha, py::array_t<double> a, py::array_t<double> d,
+    py::array_t<double> theta_offset, py::array_t<double> t_pre_inv, py::array_t<double> t_post_inv,
+    int linearity_joint, py::array_t<int> left_bilinear, py::array_t<int> right_bilinear,
+    int drop_joint, py::array_t<double> p_sin, py::array_t<double> p_cos,
+    py::array_t<int> mono_factors, py::array_t<int> po_rc, py::array_t<int> po_mono,
+    py::array_t<double> po_coeff, py::array_t<int> q_rc, py::array_t<int> q_mono,
+    py::array_t<double> q_coeff, py::array_t<double> target) {
+  const ssik::JointConsts<6> c = make_consts_n<6>(axes, t_left, t_right, types);
+  ssik::RrConsts rr;
+  auto al = alpha.unchecked<1>(), av = a.unchecked<1>(), dv = d.unchecked<1>(),
+       to = theta_offset.unchecked<1>();
+  for (int i = 0; i < 6; ++i) {
+    rr.alpha[i] = al(i);
+    rr.a[i] = av(i);
+    rr.d[i] = dv(i);
+    rr.theta_offset[i] = to(i);
+  }
+  auto tpi = t_pre_inv.unchecked<2>(), tpo = t_post_inv.unchecked<2>();
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) {
+      rr.t_pre_inv(r, col) = tpi(r, col);
+      rr.t_post_inv(r, col) = tpo(r, col);
+    }
+  rr.linearity_joint = linearity_joint;
+  rr.drop_joint = drop_joint;
+  auto lb = left_bilinear.unchecked<1>(), rb = right_bilinear.unchecked<1>();
+  rr.left_bilinear = {lb(0), lb(1)};
+  rr.right_bilinear = {rb(0), rb(1)};
+  const ssik::rr_detail::RrCoeffTensor tensor =
+      make_rr_tensor(p_sin, p_cos, mono_factors, po_rc, po_mono, po_coeff, q_rc, q_mono, q_coeff);
+  auto coeff_fn = [&tensor](const double t12[12], ssik::rr_detail::Mat14x9& ps,
+                            ssik::rr_detail::Mat14x9& pc, ssik::rr_detail::Mat14x9& po,
+                            ssik::rr_detail::Mat14x8& q) {
+    ssik::rr_detail::PqCoeffs pq;
+    ssik::rr_detail::rr_eval_coeffs(tensor, t12, pq);
+    ps = pq.p_sin;
+    pc = pq.p_cos;
+    po = pq.p_one;
+    q = pq.q;
+  };
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  ssik::JointLimits<6> lim;  // no limits (respect_limits=false path)
+  ssik::ArtifactParams<6> p;
+  p.respect_limits = false;
+  const std::vector<ssik::Solution<6>> sols =
+      ssik::general_6r_artifact_solve(c, rr, coeff_fn, lim, T, p);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 6});
+  auto qm = qs.mutable_unchecked<2>();
+  for (int i = 0; i < n; ++i)
+    for (int j = 0; j < 6; ++j) qm(i, j) = sols[i].q[j];
+  return py::make_tuple(qs);
 }
 
 // interpolation + convolution stage bit-for-bit against Python.
@@ -737,6 +816,13 @@ PYBIND11_MODULE(_ssik_native, m) {
   m.def("rr_eval_coeffs_test", &rr_eval_coeffs_test_py, py::arg("p_sin"), py::arg("p_cos"),
         py::arg("mono_factors"), py::arg("po_rc"), py::arg("po_mono"), py::arg("po_coeff"),
         py::arg("q_rc"), py::arg("q_mono"), py::arg("q_coeff"), py::arg("t12"));
+  m.def("general_6r_tensor_solve", &general_6r_tensor_solve_py, py::arg("axes"), py::arg("t_left"),
+        py::arg("t_right"), py::arg("types"), py::arg("alpha"), py::arg("a"), py::arg("d"),
+        py::arg("theta_offset"), py::arg("t_pre_inv"), py::arg("t_post_inv"),
+        py::arg("linearity_joint"), py::arg("left_bilinear"), py::arg("right_bilinear"),
+        py::arg("drop_joint"), py::arg("p_sin"), py::arg("p_cos"), py::arg("mono_factors"),
+        py::arg("po_rc"), py::arg("po_mono"), py::arg("po_coeff"), py::arg("q_rc"), py::arg("q_mono"),
+        py::arg("q_coeff"), py::arg("target"));
   m.def("hp_pencil_roots_test", &hp_pencil_roots_test_py, py::arg("f"), py::arg("g"),
         py::arg("real_tol") = 1e-3, py::arg("max_magnitude") = 1e10);
   m.def("hp_eliminate_uw_pairs_test", &hp_eliminate_uw_pairs_test_py, py::arg("t_u"),
