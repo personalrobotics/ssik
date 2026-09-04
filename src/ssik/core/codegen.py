@@ -255,7 +255,12 @@ def _render_specialised(
     # Opt-in native (C++) dispatch (#507/#510), emitted only for families with a
     # native implementation: solve(..., native=True) tries ssik._ssik_native and
     # silently falls back to the Python path below when it is unavailable.
-    if plan.solver_name in _NATIVE_SOLVER_FAMILIES:
+    if plan.solver_name == "jointlock.seven_r":
+        buf.write(
+            "from ssik._native import try_native_jointlock_solve as _try_native_jointlock_solve\n"
+        )
+        buf.write("from pathlib import Path as _Path\n")
+    elif plan.solver_name in _NATIVE_SOLVER_FAMILIES:
         buf.write("from ssik._native import try_native_solve as _try_native_solve\n")
     if plan.solver_name == "ikgeo.general_6r":
         buf.write("from pathlib import Path as _Path\n")
@@ -274,6 +279,9 @@ def _render_specialised(
     if plan.solver_name == "ikgeo.general_6r":
         buf.write(_render_rr_native_loader())
         buf.write("\n")
+    if plan.solver_name == "jointlock.seven_r":
+        buf.write(_render_jointlock_native_loader())
+        buf.write("\n")
     buf.write(algebraic_body)
     buf.write("\n")
     # 7R artifacts get a different orchestrator: their public ``solve()``
@@ -283,7 +291,7 @@ def _render_specialised(
     # short-circuit, and these args would just postprocess (which is what
     # ``ssik.postprocess`` is for).
     if plan.solver_name == "jointlock.seven_r":
-        buf.write(_render_specialised_solve_orchestrator_7r())
+        buf.write(_render_specialised_solve_orchestrator_7r(emit_native=True))
     else:
         _spec = SOLVERS[plan.solver_name]
         buf.write(
@@ -372,6 +380,38 @@ _NATIVE_DOC = """\
         to the Python path when the native extension isn't available
         (Windows / source installs). Default ``False``.
 """
+
+
+def _render_jointlock_native_loader() -> str:
+    """Module-scope lazy loader for the baked jointlock sidecar ``<arm>_jl.npz``
+    (#554), emitted only for jointlock.seven_r artifacts. Cached; ``None`` when the
+    sidecar is absent so ``native=True`` falls back to Python."""
+    return textwrap.dedent(
+        """\
+
+        # Baked jointlock native geometry (16-sample lock sweep: per-sample RR
+        # tensors, or HP Study-quaternion consts for kassow), loaded lazily from
+        # the sidecar ``.npz`` beside this module (build-time bake). Cached;
+        # ``None`` when absent so ``native=True`` silently falls back to Python.
+        _JL_NATIVE_NPZ = _Path(__file__).with_name(
+            _Path(__file__).stem.removesuffix("_ik") + "_jl.npz"
+        )
+        _jl_native_geometry_cache = None
+        _jl_native_geometry_loaded = False
+
+
+        def _jointlock_native_geometry():
+            global _jl_native_geometry_cache, _jl_native_geometry_loaded
+            if not _jl_native_geometry_loaded:
+                _jl_native_geometry_loaded = True
+                if _JL_NATIVE_NPZ.exists():
+                    from ssik._native import load_jointlock_native_geometry
+
+                    _jl_native_geometry_cache = load_jointlock_native_geometry(str(_JL_NATIVE_NPZ))
+            return _jl_native_geometry_cache
+
+    """
+    )
 
 
 def _render_specialised_solve_orchestrator(
@@ -820,7 +860,27 @@ def _render_specialised_solve_orchestrator(
     return template
 
 
-def _render_specialised_solve_orchestrator_7r() -> str:
+_JOINTLOCK_NATIVE_HOOK = """\
+    if native:
+        _native_sols = _try_native_jointlock_solve(
+            SOLVER_NAME,
+            _KB,
+            T_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+            jointlock_geometry=_jointlock_native_geometry(),
+        )
+        if _native_sols is not None:
+            return _native_sols
+"""
+
+
+def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
     """Render ``solve()`` for 7R artifacts (jointlock.seven_r).
 
     Extends the 6R orchestrator with ``max_solutions`` and ``q_seed``
@@ -828,7 +888,7 @@ def _render_specialised_solve_orchestrator_7r() -> str:
     lock-sweep can short-circuit -- see #142). Defaults preserve the
     exhaustive-search semantic; the early-exit is opt-in.
     """
-    return textwrap.dedent(
+    template = textwrap.dedent(
         '''\
 
         # Cached 4x4 identity reused inside ``_fk`` / ``_spatial_jacobian``
@@ -1241,6 +1301,25 @@ def _render_specialised_solve_orchestrator_7r() -> str:
             )
         '''
     )
+    if emit_native:
+        # Add the `native` kwarg + early native dispatch (jointlock: RR tensors or
+        # HP kernel, from the sidecar .npz). Only fires when native=True.
+        template = template.replace(
+            "    seed_tolerance: float | None = None,\n):",
+            "    seed_tolerance: float | None = None,\n    native: bool = False,\n):",
+        )
+        template = template.replace(
+            '        raise ValueError("seed_tolerance requires q_seed")\n'
+            "    T = np.asarray(T_target, dtype=np.float64)",
+            '        raise ValueError("seed_tolerance requires q_seed")\n'
+            + _JOINTLOCK_NATIVE_HOOK
+            + "    T = np.asarray(T_target, dtype=np.float64)",
+        )
+        template = template.replace(
+            "    :returns: list of :class:`Solution`; empty list iff no IK",
+            _NATIVE_DOC + "    :returns: list of :class:`Solution`; empty list iff no IK",
+        )
+    return template
 
 
 def _kb_digest(kb: KinBody) -> str:

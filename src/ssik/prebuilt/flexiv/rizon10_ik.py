@@ -51,12 +51,9 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
 import functools as _functools
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
-from ssik.postprocess import (
-    nearest_to_seed as _ps_nearest_to_seed,
-    respect_limits as _ps_respect_limits,
-    within_seed_tolerance as _ps_within_seed_tolerance,
-    wrap_to_limits as _ps_wrap_to_limits,
-)
+from ssik.postprocess import finalize_solutions as _ps_finalize
+from ssik._native import try_native_jointlock_solve as _try_native_jointlock_solve
+from pathlib import Path as _Path
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "jointlock.seven_r"
@@ -157,6 +154,29 @@ def _build_kb() -> KinBody:
 
 
 _KB = _build_kb()
+
+
+
+# Baked jointlock native geometry (16-sample lock sweep: per-sample RR
+# tensors, or HP Study-quaternion consts for kassow), loaded lazily from
+# the sidecar ``.npz`` beside this module (build-time bake). Cached;
+# ``None`` when absent so ``native=True`` silently falls back to Python.
+_JL_NATIVE_NPZ = _Path(__file__).with_name(
+    _Path(__file__).stem.removesuffix("_ik") + "_jl.npz"
+)
+_jl_native_geometry_cache = None
+_jl_native_geometry_loaded = False
+
+
+def _jointlock_native_geometry():
+    global _jl_native_geometry_cache, _jl_native_geometry_loaded
+    if not _jl_native_geometry_loaded:
+        _jl_native_geometry_loaded = True
+        if _JL_NATIVE_NPZ.exists():
+            from ssik._native import load_jointlock_native_geometry
+
+            _jl_native_geometry_cache = load_jointlock_native_geometry(str(_JL_NATIVE_NPZ))
+    return _jl_native_geometry_cache
 
 
 # --- 7R via joint-lock ---
@@ -754,7 +774,13 @@ def _spatial_jacobian(q):
         axis_unit = _JOINT_AXES[i] / np.linalg.norm(_JOINT_AXES[i])
         z_i = t_pre[:3, :3] @ axis_unit
         p_i = t_pre[:3, 3]
-        J[:3, i] = np.cross(p_i, z_i)
+        # Scalar cross product p_i x z_i: bit-identical to np.cross but
+        # ~11x faster for 3-vectors (np.cross's moveaxis / axis-normalize
+        # overhead dominates the LM-refine loop). Mirrors the live
+        # kinbody_jacobian, which is already scalar-inlined.
+        J[0, i] = p_i[1] * z_i[2] - p_i[2] * z_i[1]
+        J[1, i] = p_i[2] * z_i[0] - p_i[0] * z_i[2]
+        J[2, i] = p_i[0] * z_i[1] - p_i[1] * z_i[0]
         J[3:, i] = z_i
     return J
 
@@ -809,6 +835,7 @@ def solve(
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
+    native: bool = False,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -869,6 +896,22 @@ def solve(
     """
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
+    if native:
+        _native_sols = _try_native_jointlock_solve(
+            SOLVER_NAME,
+            _KB,
+            T_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+            jointlock_geometry=_jointlock_native_geometry(),
+        )
+        if _native_sols is not None:
+            return _native_sols
     T = np.asarray(T_target, dtype=np.float64)
     # Lock-sweep filters limits in-flight (#238 review): the
     # short-circuit fires on the first in-limits valid IK, not
@@ -896,6 +939,16 @@ def solve(
             verified.append((q, residual, "none", 0))
             continue
         if not allow_refinement:
+            continue
+        # Refine only NEAR-misses. An algebraic candidate whose FK is
+        # already >0.1 off (Frobenius) is an eigensolve root that does not
+        # correspond to a real IK solution here (genuine near-double-root
+        # marginals sit at ~1e-4); polishing it just burns Newton iters
+        # that stall out and add nothing (#490: force_refine was 5-10x on
+        # degenerate arms doing exactly this). 0.1 is 100x looser than the
+        # 1e-3 band that once dropped genuine piper solutions -- it only
+        # skips candidates clearly not near any solution.
+        if residual >= 0.1:
             continue
         # Newton polish using the per-arm spatial Jacobian.
         refined = _lm_refine(
@@ -961,35 +1014,33 @@ def solve(
                 T,
                 jacobian_fn=_spatial_jacobian,
             )
-            if respect_limits:
-                solutions = _ps_wrap_to_limits(solutions, _KB)
-                solutions = _ps_respect_limits(solutions, _KB)
-            if q_seed is not None:
-                if seed_tolerance is not None:
-                    solutions = _ps_within_seed_tolerance(
-                        solutions, q_seed, seed_tolerance
-                    )
-                solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
+            # Rescued candidates were not limit-filtered; run the shared
+            # pipeline (limits + seed) over them.
+            solutions = _ps_finalize(
+                solutions,
+                _KB,
+                respect_limits=respect_limits,
+                q_seed=q_seed,
+                seed_metric=seed_metric,
+                seed_tolerance=seed_tolerance,
+            )
 
-    # No orchestrator-level respect_limits pass on the analytical
-    # result: the inner ``_solve_algebraic`` already filtered in-flight
-    # when respect_limits=True, so candidates here are guaranteed
-    # in-limits.
-    #
-    # Seeded ranking (#331): the lock-sweep returns candidates from the
-    # window of lock samples nearest ``q_seed[lock_idx]`` (in seed
-    # order), but the genuinely-nearest config -- and the
-    # branch-continuous one for tracking -- needs an explicit rank by
-    # ``seed_metric`` (default L-infinity) over that window before the
-    # cap. Without this the cap would keep the nearest *lock samples*,
-    # not the nearest *configs*.
-    if q_seed is not None:
-        if seed_tolerance is not None:
-            solutions = _ps_within_seed_tolerance(solutions, q_seed, seed_tolerance)
-        solutions = _ps_nearest_to_seed(solutions, q_seed, metric=seed_metric)
-    if max_solutions is not None and len(solutions) > max_solutions:
-        solutions = solutions[:max_solutions]
-    return solutions
+    # No orchestrator-level respect_limits pass on the analytical result:
+    # the inner ``_solve_algebraic`` already filtered in-flight when
+    # respect_limits=True (hence respect_limits=False here). Seeded
+    # ranking (#331) still needs an explicit rank by ``seed_metric`` over
+    # the lock-sample window before the cap, so the cap keeps the nearest
+    # *configs*, not the nearest *lock samples*. Shared pipeline again;
+    # the seed re-rank is idempotent for the already-ranked rescue set.
+    return _ps_finalize(
+        solutions,
+        _KB,
+        respect_limits=False,
+        q_seed=q_seed,
+        seed_metric=seed_metric,
+        seed_tolerance=seed_tolerance,
+        max_solutions=max_solutions,
+    )
 
 fk = _fk
 

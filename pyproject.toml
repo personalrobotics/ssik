@@ -128,7 +128,7 @@ packages = ["src/ssik"]
 # prebuilt artifacts so the native (C++) backend covers those arms; the emitted
 # _rr_native_geometry() loads them lazily. Committed data, but declare explicitly
 # so a future .gitignore rule can't silently drop them from the wheel.
-artifacts = ["src/ssik/prebuilt/**/*_rr.npz"]
+artifacts = ["src/ssik/prebuilt/**/*_rr.npz", "src/ssik/prebuilt/**/*_jl.npz"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
@@ -192,6 +192,9 @@ test-command = [
     # ship in the wheel so the shipped ext covers RR arms. On non-Windows assert
     # the tensor loaded (npz present) and native=True solves; Windows has no ext.
     'python -c "import sys, numpy as np; from ssik.prebuilt.kinova import jaco2_ik; T = jaco2_ik.fk(np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3])); assert jaco2_ik.solve(T, native=(sys.platform != \"win32\")), \"jaco2 native solve failed\"; assert sys.platform == \"win32\" or jaco2_ik._rr_native_geometry() is not None, \"jaco2 RR tensor .npz missing from wheel\""',
+    # Jointlock native backend (#554): the sidecar _jl.npz (RR-tensor / HP sweep)
+    # must ship. rizon4 is RR-inner; assert the geometry loaded + native solves.
+    'python -c "import sys, numpy as np; from ssik.prebuilt.flexiv import rizon4_ik; T = rizon4_ik.fk(np.array([0.2, 0.3, -0.4, 0.9, 0.1, 0.7, -0.2])); assert rizon4_ik.solve(T, native=(sys.platform != \"win32\")), \"rizon4 native solve failed\"; assert sys.platform == \"win32\" or rizon4_ik._jointlock_native_geometry() is not None, \"rizon4 jointlock .npz missing from wheel\""',
     # Vendor subpackages are in the wheel + the catalog works + the hierarchical
     # import path resolves (#421); the flat aliases above cover backward-compat.
     'python -c "import ssik; assert len(ssik.list_arms()) >= 36, \"catalog empty\"; from ssik.prebuilt.universal_robots import ur5_ik; import numpy as np; assert ur5_ik.solve(ur5_ik.fk(np.zeros(6))), \"hierarchical ur5 import/solve failed\""',
