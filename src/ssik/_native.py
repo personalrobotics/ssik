@@ -33,6 +33,7 @@ _NATIVE_SOLVERS = frozenset(
         "seven_r.spherical_shoulder",
         "seven_r.spherical_shoulder_polished",
         "ikgeo.general_6r",
+        "jointlock.seven_r",
     }
 )
 
@@ -578,6 +579,314 @@ def hp_native_geometry(kb: Any) -> dict[str, Any]:
         "right_parametric_var": 1 if pre.right_parametric_var == "v_4" else 0,
         "drop_idx": 7,
     }
+
+
+def jointlock_hp_native_geometry(kb: Any) -> dict[str, Any]:
+    """Baked geometry for an HP-inner jointlock 7R arm (kassow, #491/#554): the
+    16-sample lock schedule + per-sample HpConsts (Study-quaternion kernel) + the
+    locked 6R sub-chain's JointConsts<6>. All numeric (no per-arm code), stacked
+    for the ``jointlock_hp_artifact_solve`` binding. Single source shared by the
+    runtime native path and (via _hp_bake) the standalone emit."""
+    from ssik.solvers.jointlock.seven_r import _lock_joint, choose_lock_joint
+
+    if len(kb.joints) != 7:
+        raise ValueError(f"jointlock_hp_native_geometry requires a 7R chain, got {len(kb.joints)}")
+    lock = int(choose_lock_joint(kb))
+    lo0, hi0 = kb.joints[lock].limits if kb.joints[lock].limits else (-np.pi, np.pi)
+    samples = np.linspace(lo0, hi0, 16, endpoint=False)
+    hps, subs = [], []
+    for q_lock in samples:
+        sub = _lock_joint(kb, lock, float(q_lock))
+        hps.append(hp_native_geometry(sub))
+        subs.append(sub)
+
+    def _stack(key: str) -> NDArray[np.float64]:
+        return np.stack([np.asarray(h[key], dtype=np.float64) for h in hps])
+
+    j7 = kb.joints
+    return {
+        "lock_idx": lock,
+        "q_lock": np.asarray(samples, dtype=np.float64),
+        "t_u": _stack("t_u"),
+        "t_w_pre": _stack("t_w_pre"),
+        "dh_a": _stack("dh_a"),
+        "dh_l": _stack("dh_l"),
+        "dh_d": _stack("dh_d"),
+        "theta_offset": _stack("theta_offset"),
+        "t_pre_inv": _stack("t_pre_inv"),
+        "t_post_inv": _stack("t_post_inv"),
+        "t_z_neg_d1": _stack("t_z_neg_d1"),
+        "t_joint6_offset_inv": _stack("t_joint6_offset_inv"),
+        "right_pv": np.array([int(h["right_parametric_var"]) for h in hps], dtype=np.int32),
+        "drop_idx": np.array([int(h["drop_idx"]) for h in hps], dtype=np.int32),
+        "sub_axes": np.stack([np.array([jt.axis for jt in s.joints], np.float64) for s in subs]),
+        "sub_t_left": np.stack(
+            [np.array([jt.T_left for jt in s.joints], np.float64) for s in subs]
+        ),
+        "sub_t_right": np.stack(
+            [np.array([jt.T_right for jt in s.joints], np.float64) for s in subs]
+        ),
+        "sub_types": np.stack(
+            [
+                np.array([0 if jt.joint_type == "revolute" else 1 for jt in s.joints], np.int32)
+                for s in subs
+            ]
+        ),
+        "lo": np.array([jt.limits[0] if jt.limits else 0.0 for jt in j7], dtype=np.float64),
+        "hi": np.array([jt.limits[1] if jt.limits else 0.0 for jt in j7], dtype=np.float64),
+        "has_limits": np.array([1 if jt.limits else 0 for jt in j7], dtype=np.int32),
+        "axes": np.array([jt.axis for jt in j7], dtype=np.float64),
+        "t_left": np.array([jt.T_left for jt in j7], dtype=np.float64),
+        "t_right": np.array([jt.T_right for jt in j7], dtype=np.float64),
+        "types": np.array([0 if jt.joint_type == "revolute" else 1 for jt in j7], dtype=np.int32),
+    }
+
+
+def jointlock_rr_native_geometry(kb: Any) -> dict[str, Any]:
+    """Baked geometry for an RR-inner jointlock 7R arm (rizon4/rizon10, #554): the
+    16-sample lock schedule + per-sample RR numeric tensor (:func:`rr_native_
+    geometry` on each locked 6R sub-chain). Fixed-size RrConsts are stacked;
+    the variable-length COO tensors are returned as length-16 lists for the
+    ``jointlock_rr_artifact_solve`` binding. The ~30s/sub-chain sympy derivation
+    (x16) is BUILD-time only. No zero_threshold here: numerical-noise coeffs are
+    harmless at runtime (evaluated, not byte-compared like the emit)."""
+    from ssik.solvers.jointlock.seven_r import _lock_joint, choose_lock_joint
+
+    if len(kb.joints) != 7:
+        raise ValueError(f"jointlock_rr_native_geometry requires a 7R chain, got {len(kb.joints)}")
+    lock = int(choose_lock_joint(kb))
+    lo0, hi0 = kb.joints[lock].limits if kb.joints[lock].limits else (-np.pi, np.pi)
+    samples = np.linspace(lo0, hi0, 16, endpoint=False)
+    subs = [rr_native_geometry(_lock_joint(kb, lock, float(q))) for q in samples]
+
+    def _stack(key: str) -> NDArray[np.float64]:
+        return np.stack([np.asarray(s[key], dtype=np.float64) for s in subs])
+
+    j7 = kb.joints
+    return {
+        "lock_idx": lock,
+        "q_lock": np.asarray(samples, dtype=np.float64),
+        "alpha": _stack("alpha"),
+        "a": _stack("a"),
+        "d": _stack("d"),
+        "theta_offset": _stack("theta_offset"),
+        "t_pre_inv": _stack("t_pre_inv"),
+        "t_post_inv": _stack("t_post_inv"),
+        "linearity_joint": np.array([int(s["linearity_joint"]) for s in subs], dtype=np.int32),
+        "left_bilinear": np.stack([np.asarray(s["left_bilinear"], np.int32) for s in subs]),
+        "right_bilinear": np.stack([np.asarray(s["right_bilinear"], np.int32) for s in subs]),
+        "drop_joint": np.array([int(s["drop_joint"]) for s in subs], dtype=np.int32),
+        # Variable-length per sample -> lists (the binding takes py::list).
+        "p_sin": [np.asarray(s["p_sin"], np.float64) for s in subs],
+        "p_cos": [np.asarray(s["p_cos"], np.float64) for s in subs],
+        "mono_factors": [np.asarray(s["mono_factors"], np.int32) for s in subs],
+        "po_rc": [
+            np.stack([s["po_coo"][0], s["po_coo"][1]], axis=1).astype(np.int32) for s in subs
+        ],
+        "po_mono": [np.asarray(s["po_coo"][2], np.int32) for s in subs],
+        "po_coeff": [np.asarray(s["po_coo"][3], np.float64) for s in subs],
+        "q_rc": [np.stack([s["q_coo"][0], s["q_coo"][1]], axis=1).astype(np.int32) for s in subs],
+        "q_mono": [np.asarray(s["q_coo"][2], np.int32) for s in subs],
+        "q_coeff": [np.asarray(s["q_coo"][3], np.float64) for s in subs],
+        "axes": np.array([jt.axis for jt in j7], dtype=np.float64),
+        "t_left": np.array([jt.T_left for jt in j7], dtype=np.float64),
+        "t_right": np.array([jt.T_right for jt in j7], dtype=np.float64),
+        "types": np.array([0 if jt.joint_type == "revolute" else 1 for jt in j7], dtype=np.int32),
+        "lo": np.array([jt.limits[0] if jt.limits else 0.0 for jt in j7], dtype=np.float64),
+        "hi": np.array([jt.limits[1] if jt.limits else 0.0 for jt in j7], dtype=np.float64),
+        "has_limits": np.array([1 if jt.limits else 0 for jt in j7], dtype=np.int32),
+    }
+
+
+# HP-inner jointlock arms (RR-incomplete symmetric-DH sub-chains -> Study-quaternion
+# kernel); everything else in the family is RR-inner. Mirrors scripts.cpp_emit.
+_HP_JOINTLOCK_ARMS = frozenset({"kassow_kr810_ik"})
+
+# Variable-length (per lock sample) RR tensor COO components, flattened to
+# per-sample keys in the sidecar .npz (npz has no ragged arrays).
+_JL_RR_RAGGED = ("mono_factors", "po_rc", "po_mono", "po_coeff", "q_rc", "q_mono", "q_coeff")
+_JL_HP_KEYS = (
+    "t_u",
+    "t_w_pre",
+    "dh_a",
+    "dh_l",
+    "dh_d",
+    "theta_offset",
+    "t_pre_inv",
+    "t_post_inv",
+    "t_z_neg_d1",
+    "t_joint6_offset_inv",
+    "right_pv",
+    "drop_idx",
+    "sub_axes",
+    "sub_t_left",
+    "sub_t_right",
+    "sub_types",
+)
+_JL_RR_STACKED = (
+    "alpha",
+    "a",
+    "d",
+    "theta_offset",
+    "t_pre_inv",
+    "t_post_inv",
+    "linearity_joint",
+    "left_bilinear",
+    "right_bilinear",
+    "drop_joint",
+)
+_JL_COMMON = ("axes", "t_left", "t_right", "types", "lo", "hi", "has_limits")
+
+
+def bake_jointlock_npz(kb: Any, path: str, *, use_hp: bool) -> None:
+    """Serialize the jointlock native geometry to a sidecar ``.npz`` (#554). RR
+    arms (rizon4/rizon10) run 16 ~30s sympy derivations here at BUILD time; kassow
+    (HP) is fast. The emitted ``_jointlock_native_geometry()`` loads it lazily."""
+    if use_hp:
+        g = jointlock_hp_native_geometry(kb)
+        np.savez_compressed(
+            path,
+            kind=np.bytes_(b"hp"),
+            lock_idx=np.int32(g["lock_idx"]),
+            q_lock=g["q_lock"],
+            **{k: g[k] for k in _JL_HP_KEYS + _JL_COMMON},
+        )
+    else:
+        g = jointlock_rr_native_geometry(kb)
+        flat = {f"{k}_{i}": arr for k in _JL_RR_RAGGED for i, arr in enumerate(g[k])}
+        np.savez_compressed(
+            path,
+            kind=np.bytes_(b"rr"),
+            lock_idx=np.int32(g["lock_idx"]),
+            q_lock=g["q_lock"],
+            p_sin=np.stack(g["p_sin"]),
+            p_cos=np.stack(g["p_cos"]),
+            **{k: g[k] for k in _JL_RR_STACKED + _JL_COMMON},
+            **flat,
+        )
+
+
+def load_jointlock_native_geometry(path: str) -> dict[str, Any]:
+    """Load a baked jointlock sidecar (:func:`bake_jointlock_npz`), reassembling
+    the per-sample lists the RR binding needs."""
+    with np.load(path) as z:
+        kind = bytes(z["kind"]).decode()
+        d: dict[str, Any] = {
+            "kind": kind,
+            "lock_idx": int(z["lock_idx"]),
+            "q_lock": z["q_lock"],
+            **{k: z[k] for k in _JL_COMMON},
+        }
+        if kind == "hp":
+            d.update({k: z[k] for k in _JL_HP_KEYS})
+        else:
+            d.update({k: z[k] for k in _JL_RR_STACKED})
+            d["p_sin"] = list(z["p_sin"])
+            d["p_cos"] = list(z["p_cos"])
+            for k in _JL_RR_RAGGED:
+                d[k] = [z[f"{k}_{i}"] for i in range(16)]
+    return d
+
+
+def try_native_jointlock_solve(
+    solver_name: str,
+    kb: Any,
+    t_target: NDArray[np.float64],
+    *,
+    respect_limits: bool = True,
+    q_seed: NDArray[np.float64] | None = None,
+    seed_metric: str = "wrap_linf",
+    seed_tolerance: float | None = None,
+    max_solutions: int | None = None,
+    allow_rescue: bool = True,
+    refinement_max_iters: int = 15,
+    jointlock_geometry: dict[str, Any] | None = None,
+) -> list[Solution] | None:
+    """FULL native jointlock.seven_r artifact solve (#554), or ``None`` to fall
+    back. Dispatches by the baked ``kind``: RR-inner (rizon4/rizon10) via the
+    16 numeric RR tensors; HP-inner (kassow) via the Study-quaternion kernel.
+    Redundant 7R sampling solver -> relative-completeness contract."""
+    if solver_name != "jointlock.seven_r" or jointlock_geometry is None:
+        return None
+    ext = _load_ext()
+    if ext is None:
+        return None
+    g = jointlock_geometry
+    has_seed = q_seed is not None
+    seed_arr = np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(7, np.float64)
+    tail = (
+        respect_limits,
+        has_seed,
+        seed_arr,
+        seed_metric,
+        seed_tolerance is not None,
+        seed_tolerance if seed_tolerance is not None else 0.0,
+        max_solutions if max_solutions is not None else -1,
+        allow_rescue,
+        refinement_max_iters,
+    )
+    common = (g["axes"], g["t_left"], g["t_right"], g["types"], int(g["lock_idx"]), g["q_lock"])
+    if g["kind"] == "hp":
+        qs, resids, refine = ext.jointlock_hp_artifact_solve(
+            *common,
+            g["t_u"],
+            g["t_w_pre"],
+            g["dh_a"],
+            g["dh_l"],
+            g["dh_d"],
+            g["theta_offset"],
+            g["t_pre_inv"],
+            g["t_post_inv"],
+            g["t_z_neg_d1"],
+            g["t_joint6_offset_inv"],
+            g["right_pv"],
+            g["drop_idx"],
+            g["sub_axes"],
+            g["sub_t_left"],
+            g["sub_t_right"],
+            g["sub_types"],
+            g["lo"],
+            g["hi"],
+            g["has_limits"],
+            np.asarray(t_target, np.float64),
+            *tail,
+        )
+    else:
+        qs, resids, refine = ext.jointlock_rr_artifact_solve(
+            *common,
+            g["alpha"],
+            g["a"],
+            g["d"],
+            g["theta_offset"],
+            g["t_pre_inv"],
+            g["t_post_inv"],
+            g["linearity_joint"],
+            g["left_bilinear"],
+            g["right_bilinear"],
+            g["drop_joint"],
+            g["p_sin"],
+            g["p_cos"],
+            g["mono_factors"],
+            g["po_rc"],
+            g["po_mono"],
+            g["po_coeff"],
+            g["q_rc"],
+            g["q_mono"],
+            g["q_coeff"],
+            g["lo"],
+            g["hi"],
+            g["has_limits"],
+            np.asarray(t_target, np.float64),
+            *tail,
+        )
+    return [
+        Solution(
+            q=np.asarray(qs[i], dtype=np.float64),
+            fk_residual=float(resids[i]),
+            refinement_used="lm" if int(refine[i]) == 1 else "none",
+        )
+        for i in range(len(qs))
+    ]
 
 
 def _srs_native_args(kb: Any, solver_name: str = "seven_r.srs") -> dict[str, Any] | None:

@@ -34,6 +34,7 @@ _RELATIVE_NATIVE_SOLVERS = frozenset(
         "seven_r.srs_polished",
         "seven_r.spherical_shoulder",
         "seven_r.spherical_shoulder_polished",
+        "jointlock.seven_r",
     }
 )
 

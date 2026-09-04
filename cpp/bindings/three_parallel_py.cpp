@@ -16,6 +16,8 @@
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/general_6r.hpp"
 #include "ssik_cpp/solvers/husty_pfurner.hpp"
+#include <functional>
+#include "ssik_cpp/solvers/jointlock_seven_r.hpp"
 #include "ssik_cpp/solvers/spherical_shoulder.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs.hpp"
@@ -968,6 +970,261 @@ py::tuple hp_artifact_solve_test_py(py::array_t<double> axes, py::array_t<double
   return py::make_tuple(qs, resids);
 }
 
+// Build one HpConsts from the (i-th slice of) stacked baked arrays. Shared by the
+// HP-jointlock sweep binding. t_u/t_w_pre slices are (4,8,2).
+static ssik::HpConsts make_hp_consts_slice(
+    const py::detail::unchecked_reference<double, 4>& t_u,
+    const py::detail::unchecked_reference<double, 4>& t_w_pre,
+    const py::detail::unchecked_reference<double, 2>& dh_a,
+    const py::detail::unchecked_reference<double, 2>& dh_l,
+    const py::detail::unchecked_reference<double, 2>& dh_d,
+    const py::detail::unchecked_reference<double, 2>& theta_offset,
+    const py::detail::unchecked_reference<double, 3>& t_pre_inv,
+    const py::detail::unchecked_reference<double, 3>& t_post_inv,
+    const py::detail::unchecked_reference<double, 3>& t_z_neg_d1,
+    const py::detail::unchecked_reference<double, 3>& t_joint6_offset_inv,
+    const py::detail::unchecked_reference<int, 1>& right_pv,
+    const py::detail::unchecked_reference<int, 1>& drop_idx, int i) {
+  ssik::HpConsts hp;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 8; ++col)
+      for (int k = 0; k < 2; ++k) {
+        hp.t_u[k](r, col) = t_u(i, r, col, k);
+        hp.t_w_pre[k](r, col) = t_w_pre(i, r, col, k);
+      }
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) {
+      hp.t_pre_inv(r, col) = t_pre_inv(i, r, col);
+      hp.t_post_inv(r, col) = t_post_inv(i, r, col);
+      hp.t_z_neg_d1(r, col) = t_z_neg_d1(i, r, col);
+      hp.t_joint6_offset_inv(r, col) = t_joint6_offset_inv(i, r, col);
+    }
+  for (int k = 0; k < 5; ++k) {
+    hp.a[k + 1] = dh_a(i, k);
+    hp.l[k + 1] = dh_l(i, k);
+  }
+  for (int k = 0; k < 4; ++k) hp.d[k + 2] = dh_d(i, k);
+  for (int k = 0; k < 6; ++k) hp.theta_offset[k] = theta_offset(i, k);
+  hp.right_parametric_var = right_pv(i);
+  hp.drop_idx = drop_idx(i);
+  return hp;
+}
+
+// Full native HP-jointlock artifact solve (kassow, #491/#554): the 16-sample lock
+// sweep with each locked 6R sub-chain solved by the HP Study-quaternion kernel.
+// All geometry baked (ssik._native.jointlock_hp_native_geometry): the 7R
+// JointConsts + JointlockConsts<16> + 16 HpConsts + 16 sub-chain JointConsts<6>.
+py::tuple jointlock_hp_artifact_solve_py(
+    py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
+    py::array_t<int> types, int lock_idx, py::array_t<double> q_lock, py::array_t<double> t_u,
+    py::array_t<double> t_w_pre, py::array_t<double> dh_a, py::array_t<double> dh_l,
+    py::array_t<double> dh_d, py::array_t<double> theta_offset, py::array_t<double> t_pre_inv,
+    py::array_t<double> t_post_inv, py::array_t<double> t_z_neg_d1,
+    py::array_t<double> t_joint6_offset_inv, py::array_t<int> right_pv, py::array_t<int> drop_idx,
+    py::array_t<double> sub_axes, py::array_t<double> sub_t_left, py::array_t<double> sub_t_right,
+    py::array_t<int> sub_types, py::array_t<double> lo, py::array_t<double> hi,
+    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
+    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters) {
+  constexpr int N = 16;
+  const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  ssik::JointlockConsts<N> jl;
+  jl.lock_idx = lock_idx;
+  auto ql = q_lock.unchecked<1>();
+  for (int i = 0; i < N; ++i) jl.q_lock[i] = ql(i);
+
+  auto tu = t_u.unchecked<4>(), tw = t_w_pre.unchecked<4>();
+  auto da = dh_a.unchecked<2>(), dl = dh_l.unchecked<2>(), dd = dh_d.unchecked<2>(),
+       to = theta_offset.unchecked<2>();
+  auto tpi = t_pre_inv.unchecked<3>(), tpo = t_post_inv.unchecked<3>(),
+       tz = t_z_neg_d1.unchecked<3>(), tj = t_joint6_offset_inv.unchecked<3>();
+  auto rpv = right_pv.unchecked<1>(), di = drop_idx.unchecked<1>();
+  std::array<ssik::HpConsts, N> hp;
+  for (int i = 0; i < N; ++i)
+    hp[i] = make_hp_consts_slice(tu, tw, da, dl, dd, to, tpi, tpo, tz, tj, rpv, di, i);
+
+  // 16 sub-chain JointConsts<6> (hp_core FK-verify + lm_refine).
+  auto sax = sub_axes.unchecked<3>();
+  auto stl = sub_t_left.unchecked<4>();
+  auto str = sub_t_right.unchecked<4>();
+  auto sty = sub_types.unchecked<2>();
+  std::array<ssik::JointConsts<6>, N> sub;
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < 6; ++j) {
+      for (int k = 0; k < 3; ++k) sub[i].axis[j][k] = sax(i, j, k);
+      for (int r = 0; r < 4; ++r)
+        for (int col = 0; col < 4; ++col) {
+          sub[i].t_left[j](r, col) = stl(i, j, r, col);
+          sub[i].t_right[j](r, col) = str(i, j, r, col);
+        }
+      sub[i].type[j] = sty(i, j) == 0 ? ssik::JointType::Revolute : ssik::JointType::Prismatic;
+    }
+  }
+
+  ssik::JointLimits<7> lim;
+  auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+  auto hl_u = has_limits.unchecked<1>();
+  for (int i = 0; i < 7; ++i) {
+    lim.lo[i] = lo_u(i);
+    lim.hi[i] = hi_u(i);
+    lim.present[i] = hl_u(i) != 0;
+  }
+  ssik::ArtifactParams<7> p;
+  p.respect_limits = respect_limits;
+  p.has_seed = has_seed;
+  if (has_seed) {
+    auto qs_u = q_seed.unchecked<1>();
+    for (int i = 0; i < 7; ++i) p.q_seed[i] = qs_u(i);
+  }
+  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
+  p.has_seed_tolerance = has_seed_tolerance;
+  p.seed_tolerance = seed_tolerance;
+  p.max_solutions = max_solutions;
+  p.allow_rescue = allow_rescue;
+  p.refinement_max_iters = refinement_max_iters;
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const std::vector<ssik::Solution<7>> sols =
+      ssik::jointlock_hp_artifact_solve<N>(c, jl, hp, sub, lim, T, p);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 7});
+  py::array_t<double> resids(n);
+  py::array_t<int> refine(n);
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  auto fm = refine.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 7; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+    fm(i) = sols[i].refinement == ssik::Refinement::None ? 0 : 1;
+  }
+  return py::make_tuple(qs, resids, refine);
+}
+
+// Full native RR-jointlock artifact solve (rizon4/rizon10, #554): the 16-sample
+// lock sweep with each locked 6R sub-chain solved by Raghavan-Roth via the baked
+// numeric TENSOR (the same per-arm-code-free trick as general_6r, x16 sub-chains).
+// RrCoeffFn is a raw fn-ptr so tensor lambdas can't fill a std::array<lambda>;
+// type-erase through std::function. jointlock_artifact_solve is templated on the
+// coeff-array type, so this works. Fixed-size RrConsts come stacked; the variable-
+// length COO tensors come as 9 py::lists (length 16).
+using TensorCoeffFn = std::function<void(const double[12], ssik::rr_detail::Mat14x9&,
+                                         ssik::rr_detail::Mat14x9&, ssik::rr_detail::Mat14x9&,
+                                         ssik::rr_detail::Mat14x8&)>;
+
+py::tuple jointlock_rr_artifact_solve_py(
+    py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
+    py::array_t<int> types, int lock_idx, py::array_t<double> q_lock, py::array_t<double> alpha,
+    py::array_t<double> a, py::array_t<double> d, py::array_t<double> theta_offset,
+    py::array_t<double> t_pre_inv, py::array_t<double> t_post_inv, py::array_t<int> linearity_joint,
+    py::array_t<int> left_bilinear, py::array_t<int> right_bilinear, py::array_t<int> drop_joint,
+    const py::list& p_sin, const py::list& p_cos, const py::list& mono_factors,
+    const py::list& po_rc, const py::list& po_mono, const py::list& po_coeff, const py::list& q_rc,
+    const py::list& q_mono, const py::list& q_coeff, py::array_t<double> lo, py::array_t<double> hi,
+    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
+    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters) {
+  constexpr int N = 16;
+  const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  ssik::JointlockConsts<N> jl;
+  jl.lock_idx = lock_idx;
+  auto ql = q_lock.unchecked<1>();
+  for (int i = 0; i < N; ++i) jl.q_lock[i] = ql(i);
+
+  // 16 RrConsts from the stacked fixed-size arrays.
+  auto al = alpha.unchecked<2>(), av = a.unchecked<2>(), dv = d.unchecked<2>(),
+       to = theta_offset.unchecked<2>();
+  auto tpi = t_pre_inv.unchecked<3>(), tpo = t_post_inv.unchecked<3>();
+  auto lin = linearity_joint.unchecked<1>(), dj = drop_joint.unchecked<1>();
+  auto lb = left_bilinear.unchecked<2>(), rb = right_bilinear.unchecked<2>();
+  std::array<ssik::RrConsts, N> rr;
+  for (int i = 0; i < N; ++i) {
+    for (int k = 0; k < 6; ++k) {
+      rr[i].alpha[k] = al(i, k);
+      rr[i].a[k] = av(i, k);
+      rr[i].d[k] = dv(i, k);
+      rr[i].theta_offset[k] = to(i, k);
+    }
+    for (int r = 0; r < 4; ++r)
+      for (int col = 0; col < 4; ++col) {
+        rr[i].t_pre_inv(r, col) = tpi(i, r, col);
+        rr[i].t_post_inv(r, col) = tpo(i, r, col);
+      }
+    rr[i].linearity_joint = lin(i);
+    rr[i].drop_joint = dj(i);
+    rr[i].left_bilinear = {lb(i, 0), lb(i, 1)};
+    rr[i].right_bilinear = {rb(i, 0), rb(i, 1)};
+  }
+
+  // 16 RrCoeffTensors from the variable-length COO py::lists; type-erase each into
+  // a std::function bound to its tensor (tensors[] outlives the solve).
+  std::array<ssik::rr_detail::RrCoeffTensor, N> tensors;
+  std::array<TensorCoeffFn, N> coeffs;
+  for (int i = 0; i < N; ++i) {
+    tensors[i] = make_rr_tensor(
+        p_sin[i].cast<py::array_t<double>>(), p_cos[i].cast<py::array_t<double>>(),
+        mono_factors[i].cast<py::array_t<int>>(), po_rc[i].cast<py::array_t<int>>(),
+        po_mono[i].cast<py::array_t<int>>(), po_coeff[i].cast<py::array_t<double>>(),
+        q_rc[i].cast<py::array_t<int>>(), q_mono[i].cast<py::array_t<int>>(),
+        q_coeff[i].cast<py::array_t<double>>());
+    coeffs[i] = [&t = tensors[i]](const double t12[12], ssik::rr_detail::Mat14x9& ps,
+                                  ssik::rr_detail::Mat14x9& pc, ssik::rr_detail::Mat14x9& po,
+                                  ssik::rr_detail::Mat14x8& q) {
+      ssik::rr_detail::PqCoeffs pq;
+      ssik::rr_detail::rr_eval_coeffs(t, t12, pq);
+      ps = pq.p_sin;
+      pc = pq.p_cos;
+      po = pq.p_one;
+      q = pq.q;
+    };
+  }
+
+  ssik::JointLimits<7> lim;
+  auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+  auto hl_u = has_limits.unchecked<1>();
+  for (int i = 0; i < 7; ++i) {
+    lim.lo[i] = lo_u(i);
+    lim.hi[i] = hi_u(i);
+    lim.present[i] = hl_u(i) != 0;
+  }
+  ssik::ArtifactParams<7> p;
+  p.respect_limits = respect_limits;
+  p.has_seed = has_seed;
+  if (has_seed) {
+    auto qs_u = q_seed.unchecked<1>();
+    for (int i = 0; i < 7; ++i) p.q_seed[i] = qs_u(i);
+  }
+  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
+  p.has_seed_tolerance = has_seed_tolerance;
+  p.seed_tolerance = seed_tolerance;
+  p.max_solutions = max_solutions;
+  p.allow_rescue = allow_rescue;
+  p.refinement_max_iters = refinement_max_iters;
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+
+  const std::vector<ssik::Solution<7>> sols =
+      ssik::jointlock_artifact_solve<N>(c, jl, rr, coeffs, lim, T, p);
+  const int n = static_cast<int>(sols.size());
+  py::array_t<double> qs({n, 7});
+  py::array_t<double> resids(n);
+  py::array_t<int> refine(n);
+  auto qm = qs.mutable_unchecked<2>();
+  auto rm = resids.mutable_unchecked<1>();
+  auto fm = refine.mutable_unchecked<1>();
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < 7; ++j) qm(i, j) = sols[i].q[j];
+    rm(i) = sols[i].fk_residual;
+    fm(i) = sols[i].refinement == ssik::Refinement::None ? 0 : 1;
+  }
+  return py::make_tuple(qs, resids, refine);
+}
+
 PYBIND11_MODULE(_ssik_native, m) {
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
@@ -1047,6 +1304,29 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("has_seed_tolerance") = false, py::arg("seed_tolerance") = 0.0,
         py::arg("max_solutions") = -1, py::arg("allow_rescue") = true,
         py::arg("refinement_max_iters") = 15, py::arg("polished") = false);
+  m.def("jointlock_hp_artifact_solve", &jointlock_hp_artifact_solve_py, py::arg("axes"),
+        py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lock_idx"),
+        py::arg("q_lock"), py::arg("t_u"), py::arg("t_w_pre"), py::arg("dh_a"), py::arg("dh_l"),
+        py::arg("dh_d"), py::arg("theta_offset"), py::arg("t_pre_inv"), py::arg("t_post_inv"),
+        py::arg("t_z_neg_d1"), py::arg("t_joint6_offset_inv"), py::arg("right_pv"),
+        py::arg("drop_idx"), py::arg("sub_axes"), py::arg("sub_t_left"), py::arg("sub_t_right"),
+        py::arg("sub_types"), py::arg("lo"), py::arg("hi"), py::arg("has_limits"), py::arg("target"),
+        py::arg("respect_limits") = true, py::arg("has_seed") = false, py::arg("q_seed"),
+        py::arg("seed_metric") = "wrap_linf", py::arg("has_seed_tolerance") = false,
+        py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
+        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15);
+  m.def("jointlock_rr_artifact_solve", &jointlock_rr_artifact_solve_py, py::arg("axes"),
+        py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lock_idx"),
+        py::arg("q_lock"), py::arg("alpha"), py::arg("a"), py::arg("d"), py::arg("theta_offset"),
+        py::arg("t_pre_inv"), py::arg("t_post_inv"), py::arg("linearity_joint"),
+        py::arg("left_bilinear"), py::arg("right_bilinear"), py::arg("drop_joint"),
+        py::arg("p_sin"), py::arg("p_cos"), py::arg("mono_factors"), py::arg("po_rc"),
+        py::arg("po_mono"), py::arg("po_coeff"), py::arg("q_rc"), py::arg("q_mono"),
+        py::arg("q_coeff"), py::arg("lo"), py::arg("hi"), py::arg("has_limits"), py::arg("target"),
+        py::arg("respect_limits") = true, py::arg("has_seed") = false, py::arg("q_seed"),
+        py::arg("seed_metric") = "wrap_linf", py::arg("has_seed_tolerance") = false,
+        py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
+        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15);
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,

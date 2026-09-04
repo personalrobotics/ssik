@@ -152,6 +152,11 @@ def _emit_arm(arm: Arm) -> None:
 
         npz = vendor_dir / f"{arm.module_basename.removesuffix('_ik')}_rr.npz"
         bake_rr_tensor_npz(kb, str(npz))
+    if plan.solver_name == "jointlock.seven_r":
+        from ssik._native import _HP_JOINTLOCK_ARMS, bake_jointlock_npz
+
+        npz = vendor_dir / f"{arm.module_basename.removesuffix('_ik')}_jl.npz"
+        bake_jointlock_npz(kb, str(npz), use_hp=arm.name in _HP_JOINTLOCK_ARMS)
     elapsed = time.perf_counter() - t
     size_kb = out.stat().st_size / 1024
     print(
