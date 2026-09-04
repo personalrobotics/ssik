@@ -81,6 +81,50 @@ struct PqCoeffs {
   Mat14x8 q;
 };
 
+// Baked RR elimination coefficients as a NUMERIC TENSOR -- the HP-style
+// alternative to a per-arm emitted rr_coeffs() function (#555). p_sin / p_cos are
+// constant in the target; p_one (14x9) and q (14x8) are degree-<=3 polynomials in
+// the 12 target entries, baked SPARSE over a shared monomial basis (~800-2400
+// nonzero coeffs/arm). rr_eval_coeffs (below) evaluates them at solve time, so a
+// SINGLE compiled binary covers every RR arm with zero per-arm code -- unblocking
+// native=True through the one shipped ext (#554), and removing the per-arm CSE
+// (and its cross-BLAS drift, #536). Baked by ssik._native.rr_native_geometry;
+// mathematically identical to the emitted fn (parity-gated).
+struct RrCoeffTensor {
+  Mat14x9 p_sin = Mat14x9::Zero();
+  Mat14x9 p_cos = Mat14x9::Zero();
+  // Shared monomial basis: each monomial is a product of up to 3 target-entry
+  // factors (variable indices 0..11, -1 = padding); the empty product is the
+  // constant 1.
+  std::vector<std::array<int, 3>> mono_factors;
+  // COO sparse entries for p_one and q: parallel (row, col, monomial, coeff).
+  std::vector<int> po_row, po_col, po_mono;
+  std::vector<double> po_coeff;
+  std::vector<int> q_row, q_col, q_mono;
+  std::vector<double> q_coeff;
+};
+
+// Generic RR coefficient evaluator: fill a PqCoeffs from a baked RrCoeffTensor at
+// target t12. Replaces the per-arm emitted rr_coeffs() with one hand-written
+// routine over baked numbers (the HP kernel pattern).
+inline void rr_eval_coeffs(const RrCoeffTensor& t, const double t12[12], PqCoeffs& pq) {
+  pq.p_sin = t.p_sin;
+  pq.p_cos = t.p_cos;
+  pq.p_one.setZero();
+  pq.q.setZero();
+  std::vector<double> mv(t.mono_factors.size());
+  for (std::size_t m = 0; m < t.mono_factors.size(); ++m) {
+    double v = 1.0;
+    for (int f : t.mono_factors[m])
+      if (f >= 0) v *= t12[f];
+    mv[m] = v;
+  }
+  for (std::size_t i = 0; i < t.po_coeff.size(); ++i)
+    pq.p_one(t.po_row[i], t.po_col[i]) += t.po_coeff[i] * mv[t.po_mono[i]];
+  for (std::size_t i = 0; i < t.q_coeff.size(); ++i)
+    pq.q(t.q_row[i], t.q_col[i]) += t.q_coeff[i] * mv[t.q_mono[i]];
+}
+
 // Constant Weierstrass transform W (v_left_trig*(1+x3^2)(1+x4^2) = W @ v_left_x),
 // _W_TRIG_TO_X from the Python. Rows: s3s4, s3c4, c3s4, c3c4, s3, c3, s4, c4, 1.
 inline const Eigen::Matrix<double, 9, 9>& weierstrass_w() {

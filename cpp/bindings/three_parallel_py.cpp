@@ -14,6 +14,7 @@
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
 #include "ssik_cpp/generalized_euler.hpp"
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
+#include "ssik_cpp/solvers/general_6r.hpp"
 #include "ssik_cpp/solvers/husty_pfurner.hpp"
 #include "ssik_cpp/solvers/spherical_two_parallel.hpp"
 #include "ssik_cpp/solvers/srs.hpp"
@@ -455,6 +456,59 @@ py::list decompose_3axis_test_py(py::array_t<double> R_arr, py::array_t<double> 
 // HP f/g kernel parity (#537): given the baked (4,8,2) tensors T_u / T_w_pre,
 // the target's Study DQ sigma_E, and drop_idx, return (f (9,7), g (6,5)) exactly
 // as _eliminate.compute_fg_numeric. Validates the sigma_E injection + Cramer
+// RR numeric-tensor evaluator parity (#555): build an RrCoeffTensor from the
+// baked arrays (ssik._native.rr_native_geometry) + a target t12, run the generic
+// rr_eval_coeffs, return (p_sin, p_cos, p_one, q) to compare against the Python
+// lambdified reference / the emitted rr_coeffs fn.
+py::tuple rr_eval_coeffs_test_py(py::array_t<double> p_sin, py::array_t<double> p_cos,
+                                 py::array_t<int> mono_factors, py::array_t<int> po_rc,
+                                 py::array_t<int> po_mono, py::array_t<double> po_coeff,
+                                 py::array_t<int> q_rc, py::array_t<int> q_mono,
+                                 py::array_t<double> q_coeff, py::array_t<double> t12_arr) {
+  ssik::rr_detail::RrCoeffTensor t;
+  auto ps = p_sin.unchecked<2>(), pc = p_cos.unchecked<2>();
+  for (int r = 0; r < 14; ++r)
+    for (int c = 0; c < 9; ++c) {
+      t.p_sin(r, c) = ps(r, c);
+      t.p_cos(r, c) = pc(r, c);
+    }
+  auto mf = mono_factors.unchecked<2>();  // (n_mono, 3)
+  for (py::ssize_t m = 0; m < mf.shape(0); ++m)
+    t.mono_factors.push_back({mf(m, 0), mf(m, 1), mf(m, 2)});
+  auto load_coo = [](py::array_t<int>& rc, py::array_t<int>& mono, py::array_t<double>& coeff,
+                     std::vector<int>& rows, std::vector<int>& cols, std::vector<int>& mo,
+                     std::vector<double>& co) {
+    auto rcm = rc.unchecked<2>();  // rc (n,2)
+    auto mm = mono.unchecked<1>();
+    auto cc = coeff.unchecked<1>();
+    for (py::ssize_t i = 0; i < rcm.shape(0); ++i) {
+      rows.push_back(rcm(i, 0));
+      cols.push_back(rcm(i, 1));
+      mo.push_back(mm(i));
+      co.push_back(cc(i));
+    }
+  };
+  load_coo(po_rc, po_mono, po_coeff, t.po_row, t.po_col, t.po_mono, t.po_coeff);
+  load_coo(q_rc, q_mono, q_coeff, t.q_row, t.q_col, t.q_mono, t.q_coeff);
+  double t12[12];
+  auto tv = t12_arr.unchecked<1>();
+  for (int i = 0; i < 12; ++i) t12[i] = tv(i);
+  ssik::rr_detail::PqCoeffs pq;
+  ssik::rr_detail::rr_eval_coeffs(t, t12, pq);
+  py::array_t<double> ps_o({14, 9}), pc_o({14, 9}), po_o({14, 9}), q_o({14, 8});
+  auto pso = ps_o.mutable_unchecked<2>(), pco = pc_o.mutable_unchecked<2>(),
+       poo = po_o.mutable_unchecked<2>(), qo = q_o.mutable_unchecked<2>();
+  for (int r = 0; r < 14; ++r) {
+    for (int c = 0; c < 9; ++c) {
+      pso(r, c) = pq.p_sin(r, c);
+      pco(r, c) = pq.p_cos(r, c);
+      poo(r, c) = pq.p_one(r, c);
+    }
+    for (int c = 0; c < 8; ++c) qo(r, c) = pq.q(r, c);
+  }
+  return py::make_tuple(ps_o, pc_o, po_o, q_o);
+}
+
 // interpolation + convolution stage bit-for-bit against Python.
 py::tuple hp_compute_fg_test_py(py::array_t<double> t_u_arr, py::array_t<double> t_w_pre_arr,
                                 py::array_t<double> sigma_e_arr, int drop_idx) {
@@ -680,6 +734,9 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("n2"), py::arg("n3"));
   m.def("hp_compute_fg_test", &hp_compute_fg_test_py, py::arg("t_u"), py::arg("t_w_pre"),
         py::arg("sigma_e"), py::arg("drop_idx") = 7);
+  m.def("rr_eval_coeffs_test", &rr_eval_coeffs_test_py, py::arg("p_sin"), py::arg("p_cos"),
+        py::arg("mono_factors"), py::arg("po_rc"), py::arg("po_mono"), py::arg("po_coeff"),
+        py::arg("q_rc"), py::arg("q_mono"), py::arg("q_coeff"), py::arg("t12"));
   m.def("hp_pencil_roots_test", &hp_pencil_roots_test_py, py::arg("f"), py::arg("g"),
         py::arg("real_tol") = 1e-3, py::arg("max_magnitude") = 1e10);
   m.def("hp_eliminate_uw_pairs_test", &hp_eliminate_uw_pairs_test_py, py::arg("t_u"),

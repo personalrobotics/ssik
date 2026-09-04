@@ -13,7 +13,7 @@ The generated artifacts call this from ``solve(..., native=True)``; passing
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -228,6 +228,93 @@ def srs_polished_native_geometry(kb: Any) -> dict[str, Any] | None:
         axis_intersect=max(_SRS_POLISHED_MAX_DRIFT_M, DEFAULT_TOLERANCE_POLICY.axis_intersect),
     )
     return srs_native_geometry(kb, policy=relaxed)
+
+
+def rr_native_geometry(kb: Any) -> dict[str, Any]:
+    """Baked Raghavan-Roth constants + the elimination-coefficient NUMERIC TENSOR
+    for a 6R KinBody (#555). The per-arm sympy->C emitted rr_coeffs() is replaced
+    by a sparse tensor: p_sin/p_cos are constant in the target; p_one (14x9) and q
+    (14x8) are degree-<=3 polynomials in the 12 target entries, baked as COO over a
+    shared monomial basis (each monomial = up to 3 target-entry factor indices).
+    A generic C++ rr_eval_coeffs evaluates them, so the single shipped ext covers
+    every RR arm with no per-arm code. Single source shared by the runtime native
+    path and (eventually) the emit; mathematically identical to the lambdified RR
+    (validated ~1e-14)."""
+    import sympy as sp
+
+    from ssik.kinematics.poe_to_dh import poe_to_dh
+    from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar, _derive_pq_for_arm
+
+    if len(kb.joints) != 6:
+        raise ValueError(f"rr_native_geometry requires a 6R chain, got {len(kb.joints)}")
+    dh = poe_to_dh(kb)
+    alpha, a, d = dh.to_dh_tuple()
+    at, bt, dt = tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())
+    lin = int(_cached_best_leftvar(at, bt, dt))
+    *_fns, meta = _derive_pq_for_arm(at, bt, dt, linearity_joint=lin)
+    tsyms = list(cast("list[Any]", meta["_sym_t_target"]))
+
+    # Shared monomial basis: exponent tuple -> index; stored as up to-3 factor
+    # variable indices (a degree-k monomial repeats a var index k times), -1 pad.
+    basis: dict[tuple[int, ...], int] = {}
+
+    def _idx(mono: tuple[int, ...]) -> int:
+        if mono not in basis:
+            basis[mono] = len(basis)
+        return basis[mono]
+
+    def _coo(matrix: Any) -> tuple[list[int], list[int], list[int], list[float]]:
+        rows, cols, monos, coeffs = [], [], [], []
+        for r in range(matrix.shape[0]):
+            for c in range(matrix.shape[1]):
+                e = matrix[r, c]
+                if e == 0:
+                    continue
+                poly = sp.Poly(e, *tsyms)
+                for mono, co in zip(poly.monoms(), poly.coeffs(), strict=True):
+                    rows.append(r)
+                    cols.append(c)
+                    monos.append(_idx(mono))
+                    coeffs.append(float(co))
+        return rows, cols, monos, coeffs
+
+    po_row, po_col, po_mono, po_coeff = _coo(meta["_sym_p_one"])
+    q_row, q_col, q_mono, q_coeff = _coo(meta["_sym_q"])
+    # Monomial factor table (n_mono, 3): the (up to 3) target-var indices whose
+    # product is the monomial, -1 padded. basis order == index order.
+    factors = np.full((len(basis), 3), -1, dtype=np.int32)
+    for mono, i in basis.items():
+        f = [v for v, p in enumerate(mono) for _ in range(p)]  # repeat var per power
+        factors[i, : len(f)] = f
+    lb = cast("tuple[int, int]", meta["left_bilinear"])
+    rb = cast("tuple[int, int]", meta["right_bilinear"])
+    return {
+        "alpha": np.asarray(alpha, dtype=np.float64),
+        "a": np.asarray(a, dtype=np.float64),
+        "d": np.asarray(d, dtype=np.float64),
+        "theta_offset": np.asarray(dh.theta_offset, dtype=np.float64),
+        "t_pre_inv": np.linalg.inv(dh.t_pre),
+        "t_post_inv": np.linalg.inv(dh.t_post),
+        "linearity_joint": lin,
+        "left_bilinear": np.array(lb, dtype=np.int32),
+        "right_bilinear": np.array(rb, dtype=np.int32),
+        "drop_joint": int(cast(int, meta["drop_joint"])),
+        "p_sin": np.array(meta["_sym_p_sin"], dtype=np.float64),
+        "p_cos": np.array(meta["_sym_p_cos"], dtype=np.float64),
+        "mono_factors": factors,
+        "po_coo": (
+            np.array(po_row, np.int32),
+            np.array(po_col, np.int32),
+            np.array(po_mono, np.int32),
+            np.array(po_coeff, np.float64),
+        ),
+        "q_coo": (
+            np.array(q_row, np.int32),
+            np.array(q_col, np.int32),
+            np.array(q_mono, np.int32),
+            np.array(q_coeff, np.float64),
+        ),
+    }
 
 
 def spherical_shoulder_native_geometry(kb: Any, *, polished: bool) -> dict[str, Any] | None:
