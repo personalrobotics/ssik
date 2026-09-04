@@ -134,3 +134,44 @@ def test_rr_tensor_full_solve_matches_python(arm: str) -> None:
         for o in oracle:
             assert any(wrap_close(o.q, s) for s in nsols), f"{arm}: native RR-tensor missed a sol"
     assert worst_fk <= 1e-6, f"{arm}: native RR-tensor worst FK {worst_fk:.2e}"
+
+
+@pytest.mark.parametrize("arm", ["jaco2_ik", "piper_ik"])
+def test_rr_tensor_production_path_matches_python(arm: str, tmp_path) -> None:
+    """The full production runtime path -- bake to a sidecar .npz, load it, then
+    ``try_native_solve`` with limits -- recovers every in-limits Python solution
+    (relative-completeness + soundness). This exercises the exact code the
+    regenerated general_6r artifacts will run under ``native=True``."""
+    from ssik._native import bake_rr_tensor_npz, load_rr_native_geometry, try_native_solve
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+
+    if not cpp_available():
+        pytest.skip("native extension not built")
+    mod = importlib.import_module(f"ssik.prebuilt.{arm}")
+    kb = mod._KB
+    if len(kb.joints) != 6:
+        pytest.skip("6R only")
+
+    npz = str(tmp_path / f"{arm}_rr.npz")
+    bake_rr_tensor_npz(kb, npz)
+    g = load_rr_native_geometry(npz)
+
+    def wrap_close(x: np.ndarray, y: np.ndarray) -> bool:
+        return bool(np.max(np.abs((x - y + np.pi) % (2 * np.pi) - np.pi)) < 1e-4)
+
+    rng = np.random.default_rng(11)
+    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in kb.joints]
+    worst_fk = 0.0
+    for _ in range(60):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        T = np.asarray(poe_forward_kinematics(kb, q), dtype=np.float64)
+        nsols = try_native_solve("ikgeo.general_6r", kb, T, respect_limits=True, rr_geometry=g)
+        assert nsols is not None, f"{arm}: native general_6r path returned None"
+        for s in nsols:
+            worst_fk = max(worst_fk, float(np.linalg.norm(poe_forward_kinematics(kb, s.q) - T)))
+        oracle = mod.solve(T, respect_limits=True)
+        for o in oracle:
+            assert any(wrap_close(o.q, s.q) for s in nsols), (
+                f"{arm}: production native path missed an in-limits sol"
+            )
+    assert worst_fk <= 1e-6, f"{arm}: production native path worst FK {worst_fk:.2e}"

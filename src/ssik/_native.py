@@ -24,7 +24,9 @@ from ssik.core.solution import Solution
 # families run the full artifact via try_native_solve; seven_r.srs runs the full
 # artifact via try_native_srs_solve (seeded-track + canonical/general core +
 # finalize + in-limits fallback, all native).
-_NATIVE_SOLVERS = frozenset({"ikgeo.three_parallel", "ikgeo.spherical_two_parallel", "seven_r.srs"})
+_NATIVE_SOLVERS = frozenset(
+    {"ikgeo.three_parallel", "ikgeo.spherical_two_parallel", "seven_r.srs", "ikgeo.general_6r"}
+)
 
 _ext: Any = None
 _ext_tried = False
@@ -97,12 +99,17 @@ def try_native_solve(
     max_solutions: int | None = None,
     allow_rescue: bool = True,
     refinement_max_iters: int = 15,
+    rr_geometry: dict[str, Any] | None = None,
 ) -> list[Solution] | None:
     """Native artifact solve for a supported family, or ``None`` to fall back.
 
     Mirrors the ``<arm>_ik.solve()`` contract (limits -> seed -> truncate, force
     refinement); parity with the Python artifact is validated in
     ``tests/test_native_dispatch.py`` + ``tests/test_three_parallel_artifact.py``.
+
+    ``rr_geometry`` is the baked RR tensor (:func:`load_rr_native_geometry`) that
+    the ``ikgeo.general_6r`` runtime path needs; the artifact loads it once from
+    its sidecar ``.npz`` and passes it here (the ~30s derivation is build-time).
     """
     if solver_name not in _NATIVE_SOLVERS:
         return None
@@ -111,6 +118,23 @@ def try_native_solve(
         return None
     if len(kb.joints) != 6:
         return None
+
+    if solver_name == "ikgeo.general_6r":
+        if rr_geometry is None:
+            return None
+        return _rr_native_solve(
+            ext,
+            kb,
+            rr_geometry,
+            t_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+        )
 
     axes, t_left, t_right, types, lo, hi, has_limits = _consts(solver_name, kb)
     has_seed = q_seed is not None
@@ -126,6 +150,78 @@ def try_native_solve(
         lo,
         hi,
         has_limits,
+        np.asarray(t_target, dtype=np.float64),
+        respect_limits,
+        has_seed,
+        seed_arr,
+        seed_metric,
+        seed_tolerance is not None,
+        seed_tolerance if seed_tolerance is not None else 0.0,
+        max_solutions if max_solutions is not None else -1,
+        allow_rescue,
+        refinement_max_iters,
+    )
+    return [
+        Solution(
+            q=np.asarray(qs[i], dtype=np.float64),
+            fk_residual=float(resids[i]),
+            refinement_used="lm" if int(refine[i]) == 1 else "none",
+        )
+        for i in range(len(qs))
+    ]
+
+
+def _rr_native_solve(
+    ext: Any,
+    kb: Any,
+    g: dict[str, Any],
+    t_target: NDArray[np.float64],
+    *,
+    respect_limits: bool,
+    q_seed: NDArray[np.float64] | None,
+    seed_metric: str,
+    seed_tolerance: float | None,
+    max_solutions: int | None,
+    allow_rescue: bool,
+    refinement_max_iters: int,
+) -> list[Solution]:
+    """Full native general_6r artifact solve via the baked RR tensor ``g`` (#555)."""
+    axes, t_left, t_right, types, lo, hi, has_limits = _consts("ikgeo.general_6r", kb)
+    po_r, po_c, po_m, po_co = g["po_coo"]
+    q_r, q_c, q_m, q_co = g["q_coo"]
+    po_rc = np.stack([po_r, po_c], axis=1).astype(np.int32)
+    q_rc = np.stack([q_r, q_c], axis=1).astype(np.int32)
+    has_seed = q_seed is not None
+    seed_arr = (
+        np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(len(kb.joints), np.float64)
+    )
+    qs, resids, refine = ext.general_6r_tensor_artifact_solve(
+        axes,
+        t_left,
+        t_right,
+        types,
+        lo,
+        hi,
+        has_limits,
+        np.asarray(g["alpha"], dtype=np.float64),
+        np.asarray(g["a"], dtype=np.float64),
+        np.asarray(g["d"], dtype=np.float64),
+        np.asarray(g["theta_offset"], dtype=np.float64),
+        np.asarray(g["t_pre_inv"], dtype=np.float64),
+        np.asarray(g["t_post_inv"], dtype=np.float64),
+        int(g["linearity_joint"]),
+        np.asarray(g["left_bilinear"], dtype=np.int32),
+        np.asarray(g["right_bilinear"], dtype=np.int32),
+        int(g["drop_joint"]),
+        np.asarray(g["p_sin"], dtype=np.float64),
+        np.asarray(g["p_cos"], dtype=np.float64),
+        np.asarray(g["mono_factors"], dtype=np.int32),
+        po_rc,
+        np.asarray(po_m, dtype=np.int32),
+        np.asarray(po_co, dtype=np.float64),
+        q_rc,
+        np.asarray(q_m, dtype=np.int32),
+        np.asarray(q_co, dtype=np.float64),
         np.asarray(t_target, dtype=np.float64),
         respect_limits,
         has_seed,
@@ -315,6 +411,65 @@ def rr_native_geometry(kb: Any) -> dict[str, Any]:
             np.array(q_coeff, np.float64),
         ),
     }
+
+
+def bake_rr_tensor_npz(kb: Any, path: str) -> None:
+    """Serialize :func:`rr_native_geometry` to a sidecar ``.npz`` (#555).
+
+    The tensor derivation is ~30s of sympy, so it runs ONCE at build time
+    (``ssik build`` / codegen), never per-solve. The runtime loads the flat arrays
+    via :func:`load_rr_native_geometry`. Nested COO tuples are flattened into
+    individual keys (np.savez pickles tuples otherwise)."""
+    g = rr_native_geometry(kb)
+    po_r, po_c, po_m, po_co = g["po_coo"]
+    q_r, q_c, q_m, q_co = g["q_coo"]
+    np.savez_compressed(
+        path,
+        alpha=g["alpha"],
+        a=g["a"],
+        d=g["d"],
+        theta_offset=g["theta_offset"],
+        t_pre_inv=g["t_pre_inv"],
+        t_post_inv=g["t_post_inv"],
+        linearity_joint=np.int32(g["linearity_joint"]),
+        left_bilinear=g["left_bilinear"],
+        right_bilinear=g["right_bilinear"],
+        drop_joint=np.int32(g["drop_joint"]),
+        p_sin=g["p_sin"],
+        p_cos=g["p_cos"],
+        mono_factors=g["mono_factors"],
+        po_row=po_r,
+        po_col=po_c,
+        po_mono=po_m,
+        po_coeff=po_co,
+        q_row=q_r,
+        q_col=q_c,
+        q_mono=q_m,
+        q_coeff=q_co,
+    )
+
+
+def load_rr_native_geometry(path: str) -> dict[str, Any]:
+    """Load a baked RR tensor sidecar (:func:`bake_rr_tensor_npz`), reassembling
+    the COO tuples that the runtime native path consumes."""
+    with np.load(path) as z:
+        return {
+            "alpha": z["alpha"],
+            "a": z["a"],
+            "d": z["d"],
+            "theta_offset": z["theta_offset"],
+            "t_pre_inv": z["t_pre_inv"],
+            "t_post_inv": z["t_post_inv"],
+            "linearity_joint": int(z["linearity_joint"]),
+            "left_bilinear": z["left_bilinear"],
+            "right_bilinear": z["right_bilinear"],
+            "drop_joint": int(z["drop_joint"]),
+            "p_sin": z["p_sin"],
+            "p_cos": z["p_cos"],
+            "mono_factors": z["mono_factors"],
+            "po_coo": (z["po_row"], z["po_col"], z["po_mono"], z["po_coeff"]),
+            "q_coo": (z["q_row"], z["q_col"], z["q_mono"], z["q_coeff"]),
+        }
 
 
 def spherical_shoulder_native_geometry(kb: Any, *, polished: bool) -> dict[str, Any] | None:
