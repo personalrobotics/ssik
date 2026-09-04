@@ -257,6 +257,8 @@ def _render_specialised(
     # silently falls back to the Python path below when it is unavailable.
     if plan.solver_name in _NATIVE_SOLVER_FAMILIES:
         buf.write("from ssik._native import try_native_solve as _try_native_solve\n")
+    if plan.solver_name == "ikgeo.general_6r":
+        buf.write("from pathlib import Path as _Path\n")
     buf.write("from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix\n\n")
     buf.write(f'SOLVER_NAME = "{plan.solver_name}"\n')
     buf.write(f"SOLVER_TIER = {plan.tier}\n")
@@ -269,6 +271,9 @@ def _render_specialised(
     buf.write("\n")
     buf.write(_render_kinbody_builder())
     buf.write("\n\n")
+    if plan.solver_name == "ikgeo.general_6r":
+        buf.write(_render_rr_native_loader())
+        buf.write("\n")
     buf.write(algebraic_body)
     buf.write("\n")
     # 7R artifacts get a different orchestrator: their public ``solve()``
@@ -286,6 +291,7 @@ def _render_specialised(
                 _spec.fk_atol_expr,
                 force_refine=_spec.force_refine,
                 emit_native=plan.solver_name in _NATIVE_SOLVER_FAMILIES,
+                native_rr=plan.solver_name == "ikgeo.general_6r",
             )
         )
     buf.write(_render_fk_alias())
@@ -314,6 +320,49 @@ _NATIVE_HOOK = """\
             return _native_sols
 """
 
+# RR (ikgeo.general_6r) variant: passes the baked elimination tensor loaded lazily
+# from the sidecar .npz. A single shipped ext covers every RR arm via the numeric
+# tensor (#555); no per-arm C code.
+_NATIVE_HOOK_RR = _NATIVE_HOOK.replace(
+    "            refinement_max_iters=refinement_max_iters,\n        )",
+    "            refinement_max_iters=refinement_max_iters,\n"
+    "            rr_geometry=_rr_native_geometry(),\n        )",
+)
+
+
+def _render_rr_native_loader() -> str:
+    """Module-scope lazy loader for the baked RR tensor sidecar ``<arm>_rr.npz``
+    (#555), emitted only for ikgeo.general_6r artifacts. Cached; returns ``None``
+    when the sidecar is absent (source installs) so ``native=True`` falls back to
+    the Python path."""
+    return textwrap.dedent(
+        """\
+
+        # Baked Raghavan-Roth elimination tensor for the native (C++) backend,
+        # loaded lazily from the sidecar ``.npz`` beside this module (the ~30s
+        # sympy derivation ran at build time). Cached; ``None`` when the sidecar
+        # is absent so ``native=True`` silently falls back to Python.
+        _RR_NATIVE_NPZ = _Path(__file__).with_name(
+            _Path(__file__).stem.removesuffix("_ik") + "_rr.npz"
+        )
+        _rr_native_geometry_cache = None
+        _rr_native_geometry_loaded = False
+
+
+        def _rr_native_geometry():
+            global _rr_native_geometry_cache, _rr_native_geometry_loaded
+            if not _rr_native_geometry_loaded:
+                _rr_native_geometry_loaded = True
+                if _RR_NATIVE_NPZ.exists():
+                    from ssik._native import load_rr_native_geometry
+
+                    _rr_native_geometry_cache = load_rr_native_geometry(str(_RR_NATIVE_NPZ))
+            return _rr_native_geometry_cache
+
+    """
+    )
+
+
 # Docstring entry for the injected `native` kwarg (dedented base indent).
 _NATIVE_DOC = """\
     :param native: opt into the shipped native (C++) backend for this
@@ -329,6 +378,7 @@ def _render_specialised_solve_orchestrator(
     fk_atol_expr: str = "policy.subproblem_numerical",
     force_refine: bool = False,
     emit_native: bool = False,
+    native_rr: bool = False,
 ) -> str:
     """Render the public ``solve()`` for specialised artifacts.
 
@@ -760,7 +810,7 @@ def _render_specialised_solve_orchestrator(
             '        raise ValueError("seed_tolerance requires q_seed")\n'
             "    T = np.asarray(T_target, dtype=np.float64)",
             '        raise ValueError("seed_tolerance requires q_seed")\n'
-            + _NATIVE_HOOK
+            + (_NATIVE_HOOK_RR if native_rr else _NATIVE_HOOK)
             + "    T = np.asarray(T_target, dtype=np.float64)",
         )
         template = template.replace(

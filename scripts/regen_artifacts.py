@@ -144,6 +144,14 @@ def _emit_arm(arm: Arm) -> None:
         output_path=str(out),
         arm_label=arm.display_name,
     )
+    # RR arms ship a sidecar baked-tensor .npz next to the artifact so the shipped
+    # native ext covers them (the ~30s sympy derivation runs here, at build time,
+    # never per-solve). The emitted _rr_native_geometry() loads it lazily (#555).
+    if plan.solver_name == "ikgeo.general_6r":
+        from ssik._native import bake_rr_tensor_npz
+
+        npz = vendor_dir / f"{arm.module_basename.removesuffix('_ik')}_rr.npz"
+        bake_rr_tensor_npz(kb, str(npz))
     elapsed = time.perf_counter() - t
     size_kb = out.stat().st_size / 1024
     print(

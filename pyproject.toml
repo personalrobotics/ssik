@@ -124,6 +124,11 @@ version-file = "src/ssik/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ssik"]
+# Ship the baked RR elimination-tensor sidecars (#555) next to the general_6r
+# prebuilt artifacts so the native (C++) backend covers those arms; the emitted
+# _rr_native_geometry() loads them lazily. Committed data, but declare explicitly
+# so a future .gitignore rule can't silently drop them from the wheel.
+artifacts = ["src/ssik/prebuilt/**/*_rr.npz"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
@@ -183,6 +188,10 @@ test-command = [
     'python -c "import sys; sys.platform == \"win32\" or __import__(\"ssik._ssik_native\")"',
     'python -c "from ssik.prebuilt import iiwa14_ik; import numpy as np; q = np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]); T = iiwa14_ik.fk(q); sols = iiwa14_ik.solve(T); assert sols and max(s.fk_residual for s in sols) < 1e-9, \"iiwa14_ik smoke failed\""',
     'python -c "from ssik.prebuilt import franka_panda_ik; import numpy as np; T = franka_panda_ik.fk(np.array([0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5])); sols = franka_panda_ik.solve(T); assert sols, \"franka_panda_ik returned no IK\""',
+    # RR (general_6r) native backend (#555): the baked-tensor sidecar .npz must
+    # ship in the wheel so the shipped ext covers RR arms. On non-Windows assert
+    # the tensor loaded (npz present) and native=True solves; Windows has no ext.
+    'python -c "import sys, numpy as np; from ssik.prebuilt.kinova import jaco2_ik; T = jaco2_ik.fk(np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3])); assert jaco2_ik.solve(T, native=(sys.platform != \"win32\")), \"jaco2 native solve failed\"; assert sys.platform == \"win32\" or jaco2_ik._rr_native_geometry() is not None, \"jaco2 RR tensor .npz missing from wheel\""',
     # Vendor subpackages are in the wheel + the catalog works + the hierarchical
     # import path resolves (#421); the flat aliases above cover backward-compat.
     'python -c "import ssik; assert len(ssik.list_arms()) >= 36, \"catalog empty\"; from ssik.prebuilt.universal_robots import ur5_ik; import numpy as np; assert ur5_ik.solve(ur5_ik.fk(np.zeros(6))), \"hierarchical ur5 import/solve failed\""',

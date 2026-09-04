@@ -58,6 +58,8 @@ from ssik.refinement import lm_refine as _lm_refine
 import functools as _functools
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.postprocess import finalize_solutions as _ps_finalize
+from ssik._native import try_native_solve as _try_native_solve
+from pathlib import Path as _Path
 from ssik.subproblems._rotation import rotation_matrix as _rotation_matrix
 
 SOLVER_NAME = "ikgeo.general_6r"
@@ -152,6 +154,29 @@ def _build_kb() -> KinBody:
 
 
 _KB = _build_kb()
+
+
+
+# Baked Raghavan-Roth elimination tensor for the native (C++) backend,
+# loaded lazily from the sidecar ``.npz`` beside this module (the ~30s
+# sympy derivation ran at build time). Cached; ``None`` when the sidecar
+# is absent so ``native=True`` silently falls back to Python.
+_RR_NATIVE_NPZ = _Path(__file__).with_name(
+    _Path(__file__).stem.removesuffix("_ik") + "_rr.npz"
+)
+_rr_native_geometry_cache = None
+_rr_native_geometry_loaded = False
+
+
+def _rr_native_geometry():
+    global _rr_native_geometry_cache, _rr_native_geometry_loaded
+    if not _rr_native_geometry_loaded:
+        _rr_native_geometry_loaded = True
+        if _RR_NATIVE_NPZ.exists():
+            from ssik._native import load_rr_native_geometry
+
+            _rr_native_geometry_cache = load_rr_native_geometry(str(_RR_NATIVE_NPZ))
+    return _rr_native_geometry_cache
 
 
 # --- baked DH parameters (from poe_to_dh at build time) ---
@@ -937,6 +962,7 @@ def solve(
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
+    native: bool = False,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -986,12 +1012,34 @@ def solve(
         Rarely customised.
     :param refinement_max_iters: cap on Newton iterations per
         candidate when ``allow_refinement=True``.
+    :param native: opt into the shipped native (C++) backend for this
+        arm's solver family (~50x faster). Returns the same solution
+        *set*; the *order* without a seed and the near-singular
+        *representative* may differ (numpy vs Eigen). Silently falls back
+        to the Python path when the native extension isn't available
+        (Windows / source installs). Default ``False``.
     :returns: list of :class:`Solution`; empty list iff no IK
         closed within ``policy.subproblem_numerical`` (or all
         IKs were filtered by ``respect_limits=True``).
     """
     if seed_tolerance is not None and q_seed is None:
         raise ValueError("seed_tolerance requires q_seed")
+    if native:
+        _native_sols = _try_native_solve(
+            SOLVER_NAME,
+            _KB,
+            T_target,
+            respect_limits=respect_limits,
+            q_seed=q_seed,
+            seed_metric=seed_metric,
+            seed_tolerance=seed_tolerance,
+            max_solutions=max_solutions,
+            allow_rescue=allow_rescue,
+            refinement_max_iters=refinement_max_iters,
+            rr_geometry=_rr_native_geometry(),
+        )
+        if _native_sols is not None:
+            return _native_sols
     T = np.asarray(T_target, dtype=np.float64)
     candidates = _solve_algebraic(T)
 
