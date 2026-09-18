@@ -60,6 +60,7 @@ __all__ = [
     "finalize_solutions",
     "nearest_to_seed",
     "respect_limits",
+    "rewrap_to_seed",
     "take_first",
     "within_seed_tolerance",
     "wrap_to_limits",
@@ -154,6 +155,54 @@ def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
 def _wrap_to_pi(angle: float) -> float:
     """Wrap a single angle to the canonical ``[-pi, pi]`` representative."""
     return float(((angle + np.pi) % (2.0 * np.pi)) - np.pi)
+
+
+_TWO_PI = 2.0 * np.pi
+
+
+def rewrap_to_seed(
+    sols: list[Solution], kb: KinBody, q_seed: NDArray[np.float64]
+) -> list[Solution]:
+    """Rewrap each revolute joint to the ``q_i + 2*pi*k`` representative nearest
+    the seed, staying within the joint's finite limits (#562, step 1).
+
+    A wide-limit joint (limits spanning > 2*pi, e.g. UR ``[-2*pi, 2*pi]``) admits
+    several in-limit windings of one geometric branch; a seeded solve should
+    return the one nearest ``q_seed`` rather than the principal value, so
+    ``solve(T, q_seed=q_current, max_solutions=1)`` never commands a gratuitous
+    2*pi turn. Per joint:
+
+    - **finite limits** ``[lo, hi]``: among all ``q_i + 2*pi*k`` in ``[lo, hi]``,
+      choose the one nearest ``seed_i`` (ties -> smaller value, deterministic).
+      Representatives are derived from the limits, so a boundary principal like
+      ``0`` with ``[-2*pi, 2*pi]`` correctly considers ``{-2*pi, 0, 2*pi}``.
+    - **continuous** (``limits is None``): the nearest turn to ``seed_i``
+      (``k = round((seed_i - q_i) / 2*pi)``), no clamp.
+    - **prismatic**: unchanged (no rotational periodicity).
+
+    Only the returned coordinate changes; FK is identical. Runs only when a seed
+    is supplied (the unseeded path pays nothing).
+    """
+    seed = np.asarray(q_seed, dtype=np.float64)
+    out: list[Solution] = []
+    for sol in sols:
+        q_new = np.asarray(sol.q, dtype=np.float64).copy()
+        for i, joint in enumerate(kb.joints):
+            if joint.joint_type != "revolute":
+                continue
+            q_i, s_i = float(q_new[i]), float(seed[i])
+            if joint.limits is None:
+                q_new[i] = q_i + _TWO_PI * round((s_i - q_i) / _TWO_PI)
+                continue
+            lo, hi = joint.limits
+            k_lo = int(np.ceil((lo - q_i) / _TWO_PI))
+            k_hi = int(np.floor((hi - q_i) / _TWO_PI))
+            if k_lo > k_hi:  # no in-limit winding (shouldn't happen post-limits)
+                continue
+            cands = [q_i + _TWO_PI * k for k in range(k_lo, k_hi + 1)]
+            q_new[i] = min(cands, key=lambda c: (abs(c - s_i), c))
+        out.append(replace(sol, q=q_new))
+    return out
 
 
 def nearest_to_seed(
@@ -291,6 +340,10 @@ def finalize_solutions(
         if not sols and in_limits_fallback is not None:
             sols = in_limits_fallback()
     if q_seed is not None:
+        # #562 step 1: return the in-limit winding nearest the seed (the tolerance
+        # bound and the ranking then both see the seed-nearest representative, so a
+        # seeded solve never commands a gratuitous 2*pi turn on a wide-limit joint).
+        sols = rewrap_to_seed(sols, kb, q_seed)
         if seed_tolerance is not None:
             sols = within_seed_tolerance(sols, q_seed, seed_tolerance)
         sols = nearest_to_seed(sols, q_seed, metric=seed_metric)

@@ -149,6 +149,43 @@ std::vector<Solution<N>> nearest_to_seed(std::vector<Solution<N>> sols,
   return sols;
 }
 
+// rewrap_to_seed (#562 step 1): rewrap each revolute joint to the q_i + 2pi*k
+// representative nearest the seed, staying within finite limits. Finite limits:
+// among all q_i + 2pi*k in [lo,hi], pick the one nearest seed_i (ties -> smaller
+// value). Continuous (no limits): nearest turn (round). Prismatic: untouched.
+// Only the coordinate changes; FK is identical. (postprocess.py rewrap_to_seed)
+template <int N>
+std::vector<Solution<N>> rewrap_to_seed(std::vector<Solution<N>> sols,
+                                        const JointConsts<N>& consts, const JointLimits<N>& lim,
+                                        const std::array<double, N>& seed) {
+  constexpr double kTwoPi = 2.0 * M_PI;
+  for (auto& sol : sols) {
+    for (int i = 0; i < N; ++i) {
+      if (consts.type[i] != JointType::Revolute) continue;
+      const double qi = sol.q[i], si = seed[i];
+      if (!lim.present[i]) {  // continuous: nearest turn, no clamp
+        sol.q[i] = qi + kTwoPi * std::round((si - qi) / kTwoPi);
+        continue;
+      }
+      const int k_lo = static_cast<int>(std::ceil((lim.lo[i] - qi) / kTwoPi));
+      const int k_hi = static_cast<int>(std::floor((lim.hi[i] - qi) / kTwoPi));
+      if (k_lo > k_hi) continue;  // no in-limit winding (shouldn't happen post-limits)
+      double best = qi + kTwoPi * k_lo;
+      double best_d = std::abs(best - si);
+      for (int k = k_lo + 1; k <= k_hi; ++k) {
+        const double cand = qi + kTwoPi * k;
+        const double d = std::abs(cand - si);
+        if (d < best_d || (d == best_d && cand < best)) {  // nearest, tie -> smaller value
+          best = cand;
+          best_d = d;
+        }
+      }
+      sol.q[i] = best;
+    }
+  }
+  return sols;
+}
+
 // The finalize_solutions pipeline: limits -> seed(tolerance then rank) ->
 // truncate, in that fixed order. (postprocess.py:255-301)
 //
@@ -167,6 +204,9 @@ std::vector<Solution<N>> finalize_solutions(
     if (sols.empty() && in_limits_fallback) sols = in_limits_fallback();
   }
   if (p.has_seed) {
+    // #562 step 1: return the in-limit winding nearest the seed, so tolerance +
+    // ranking both see the seed-nearest representative (no gratuitous 2pi turn).
+    sols = rewrap_to_seed<N>(std::move(sols), consts, lim, p.q_seed);
     if (p.has_seed_tolerance) sols = within_seed_tolerance<N>(sols, p.q_seed, p.seed_tolerance);
     sols = nearest_to_seed<N>(std::move(sols), p.q_seed, p.seed_metric);
   }
