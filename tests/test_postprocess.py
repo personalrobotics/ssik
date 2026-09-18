@@ -220,14 +220,21 @@ def test_nearest_to_seed_linf_metric() -> None:
     assert out[1].q[0] == 0.5
 
 
-def test_nearest_to_seed_stable_sort() -> None:
-    # Two solutions at same distance -- stable sort preserves input order.
-    sols = [_sol([1.0, 0.0]), _sol([-1.0, 0.0])]
-    seed = np.array([0.0, 0.0])
-    out = nearest_to_seed(sols, seed)
-    # Both at distance 1.0; first one stays first.
-    assert out[0].q[0] == 1.0
-    assert out[1].q[0] == -1.0
+def test_nearest_to_seed_ties_are_order_independent() -> None:
+    """Equal-distance solutions get a deterministic order that depends only on
+    the solutions, never on the order they arrived in (#562).
+
+    Ranking on distance alone left ties, and once windings are enumerated those
+    ties are common (under wrap_linf one distant joint fixes the max for every
+    winding of a branch), so "nearest" was being decided by enumeration order --
+    which the Python and native backends do not share. The tie-break is now
+    part of the ordering contract.
+    """
+    a, b = _sol([1.0, 0.0]), _sol([-1.0, 0.0])
+    seed = np.array([0.0, 0.0])  # both at distance 1.0
+    forward = [s.q.tolist() for s in nearest_to_seed([a, b], seed)]
+    reverse = [s.q.tolist() for s in nearest_to_seed([b, a], seed)]
+    assert forward == reverse, "tie order must not depend on input order"
 
 
 def test_nearest_to_seed_unknown_metric_raises() -> None:

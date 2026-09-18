@@ -343,13 +343,40 @@ def test_ik_overhead_under_300us() -> None:
     # (see tests._perf) is the noise floor, so their difference isolates the
     # Manipulator wrapper's true per-call cost instead of the differenced
     # scheduler noise of two means (which can even go negative under load).
-    manip_ms = best_call_ms(lambda: arm.solve(T), warmup=20, runs=200)
+    # Measured with enumerate_windings=False: the UR5's five [-2pi, 2pi] joints
+    # lift 8 geometric branches to 256 in-limit configurations (#562), and
+    # building 32x the Solution objects is a real, intended cost that would
+    # swamp the wrapper overhead this gate exists to watch.
+    manip_ms = best_call_ms(lambda: arm.solve(T, enumerate_windings=False), warmup=20, runs=200)
     raw_ms = best_call_ms(lambda: three_parallel.solve(arm.kinbody, T), warmup=20, runs=200)
 
     overhead = (manip_ms - raw_ms) * 1e3  # ms -> us
     assert overhead < 300.0, (
         f"Manipulator.solve overhead {overhead:.1f} us > 300 us regression gate "
         f"(manip={manip_ms * 1e3:.1f} us, raw={raw_ms * 1e3:.1f} us)"
+    )
+
+
+def test_winding_enumeration_cost_is_proportional() -> None:
+    """Enumeration may cost per configuration returned, but must not make the
+    capped paths pay for configurations they discard (#562).
+
+    The tracking idiom asks for one solution; it must not build the other 255.
+    """
+    arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
+    q = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    T = arm.fk(q)
+
+    plain = best_call_ms(lambda: arm.solve(T, enumerate_windings=False), warmup=20, runs=100)
+    full = best_call_ms(lambda: arm.solve(T), warmup=20, runs=100)
+    tracked = best_call_ms(lambda: arm.solve(T, q_seed=q, max_solutions=1), warmup=20, runs=100)
+
+    assert len(arm.solve(T)) == 256  # 8 branches x 2^5 wide joints
+    # A capped, seeded solve stays close to the un-enumerated cost rather than
+    # scaling with the 256 it could have returned.
+    assert tracked < plain + 0.5 * (full - plain), (
+        f"seeded max_solutions=1 pays for discarded windings: tracked={tracked * 1e3:.0f}us "
+        f"plain={plain * 1e3:.0f}us full={full * 1e3:.0f}us"
     )
 
 

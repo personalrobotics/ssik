@@ -79,6 +79,19 @@ class Diagnostic:
     """The FK-closure threshold the solver used. Useful when the user
     customised the tolerance policy and wants the live value back."""
 
+    geometric_branches: int = 0
+    """Distinct geometric IK branches that survived the limit filter, before
+    winding enumeration (#562). This is the count that pre-6.0 releases
+    returned."""
+
+    winding_representatives: int = 0
+    """Size of the complete in-limit set after winding enumeration -- the
+    finite-limit lifts (``q + 2*pi*k``) of those branches on joints whose limits
+    span more than one turn. Equal to ``geometric_branches`` when the arm has no
+    such joint or ``enumerate_windings=False``. Reported separately so lifts are
+    never mistaken for additional geometric branches, and truthful even when the
+    cap meant the full set was never built."""
+
     warnings: tuple[str, ...] = field(default_factory=tuple)
     """Optional conditioning / robustness flags raised during the solve.
     Empty tuple in the common-path. Today: forward-compatible reservation;
@@ -106,6 +119,11 @@ class Diagnostic:
             )
             if self.dropped_by_limits:
                 lines.append(f"  filtered by joint limits: {self.dropped_by_limits}")
+            if self.winding_representatives > self.geometric_branches:
+                lines.append(
+                    f"  winding lifts: {self.geometric_branches} geometric branches "
+                    f"-> {self.winding_representatives} in-limit configurations"
+                )
             if self.dropped_by_max_solutions:
                 lines.append(f"  capped by max_solutions: {self.dropped_by_max_solutions}")
         elif self.raw_candidates == 0:

@@ -79,7 +79,13 @@ def test_explain_diagnostic_fields_on_reachable_pose(ur5: Manipulator) -> None:
     assert sols
     assert diag.solver_name == "ikgeo.three_parallel"
     assert diag.solver_tier == 0
-    assert diag.raw_candidates >= len(sols)
+    # Winding enumeration (#562) lifts each geometric branch to its in-limit
+    # 2*pi representatives, so the returned count can exceed the solver's raw
+    # candidate count. The invariant holds against the geometric branches, and
+    # the lifts are reported as their own count -- never conflated.
+    assert diag.raw_candidates >= diag.geometric_branches
+    assert diag.winding_representatives >= diag.geometric_branches
+    assert len(sols) == diag.winding_representatives  # uncapped solve
     assert diag.final_count == len(sols)
     assert diag.max_fk_residual < 1e-6
     assert math.isfinite(diag.max_fk_residual)

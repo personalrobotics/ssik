@@ -47,6 +47,8 @@ in Phase 4 (no per-arm specialisation, no symbolic precompute).
 
 from __future__ import annotations
 
+import heapq
+import itertools
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -57,11 +59,14 @@ from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 
 __all__ = [
+    "count_windings",
+    "expand_windings",
     "finalize_solutions",
     "nearest_to_seed",
     "respect_limits",
     "rewrap_to_seed",
     "take_first",
+    "winding_joints",
     "within_seed_tolerance",
     "wrap_to_limits",
 ]
@@ -159,9 +164,120 @@ def _wrap_to_pi(angle: float) -> float:
 
 _TWO_PI = 2.0 * np.pi
 
+# (aggregate, per-joint deviations sorted descending): the part of the seeded
+# ordering that rises monotonically with every per-joint deviation, so it can
+# drive a best-first walk over a branch's winding lattice.
+_LatticeKey = tuple[float, tuple[float, ...]]
+
+
+# A joint is enumerable only when its limits span *strictly more* than one full
+# turn. The tolerance keeps a joint whose span is 2*pi to within round-off (the
+# Kassow arms) out of enumeration: its span admits a second representative only
+# at the exact boundary, which is the same physical configuration, not a lift.
+_SPAN_TOL = 1e-9
+
+
+def winding_joints(kb: KinBody) -> list[tuple[int, float, float]]:
+    """The joints that admit more than one in-limit winding (#562).
+
+    A revolute joint with finite limits spanning more than ``2*pi`` (UR-family
+    ``[-2*pi, 2*pi]``, Doosan ``[-3*pi, 3*pi]``) has several distinct
+    joint-coordinate representatives of the *same* geometric branch. Those are
+    finite-limit lifts, not new IK branches, but they are distinct admissible
+    configurations with different distances and feasible motions.
+
+    Excluded, by construction: prismatic joints (no rotational periodicity),
+    continuous joints (``limits is None`` -- the lift family is infinite and no
+    representative is privileged), and finite joints spanning at most ``2*pi``
+    (at most one representative, except at an exact boundary).
+
+    :returns: ``[(joint_index, lo, hi)]``, in joint order.
+    """
+    out: list[tuple[int, float, float]] = []
+    for i, joint in enumerate(kb.joints):
+        if joint.joint_type != "revolute" or joint.limits is None:
+            continue
+        lo, hi = joint.limits
+        if hi - lo > _TWO_PI + _SPAN_TOL:
+            out.append((i, float(lo), float(hi)))
+    return out
+
+
+def _reps(q_i: float, lo: float, hi: float) -> list[float]:
+    """Every ``q_i + 2*pi*k`` inside ``[lo, hi]``, ascending.
+
+    The ``k`` range comes from the limits (so a boundary value like ``0`` under
+    ``[-2*pi, 2*pi]`` yields ``{-2*pi, 0, 2*pi}``), then each candidate is
+    re-checked against the limits so floating-point error in the ceil/floor can
+    never emit an out-of-limit value.
+    """
+    k_lo = int(np.ceil((lo - q_i) / _TWO_PI)) - 1
+    k_hi = int(np.floor((hi - q_i) / _TWO_PI)) + 1
+    return [v for k in range(k_lo, k_hi + 1) if lo <= (v := q_i + _TWO_PI * k) <= hi]
+
+
+def count_windings(sols: list[Solution], kb: KinBody) -> int:
+    """How many configurations :func:`expand_windings` would produce, without
+    building them. Used for diagnostics so a truncated or pruned solve can still
+    report the true size of the complete in-limit set.
+    """
+    wind = winding_joints(kb)
+    if not wind:
+        return len(sols)
+    total = 0
+    for sol in sols:
+        n = 1
+        for i, lo, hi in wind:
+            n *= len(_reps(float(sol.q[i]), lo, hi))
+        total += n
+    return total
+
+
+def expand_windings(
+    sols: list[Solution], kb: KinBody, *, limit: int | None = None
+) -> list[Solution]:
+    """Expand each solution into every in-limit winding representative (#562).
+
+    Takes the Cartesian product across :func:`winding_joints`, since each
+    combination is a distinct point of the bounded joint-coordinate domain. FK
+    is identical for every representative; only the coordinates differ. Arms
+    with no wide-limit joint are returned unchanged (26 of the 72 shipped arms),
+    so they pay nothing.
+
+    Output order is branch-major, and within a branch the ascending-value
+    Cartesian product -- the stable order the ranking and truncation rules are
+    defined against.
+
+    :param limit: stop once this many configurations exist. Only sound when the
+        caller keeps a *prefix* of the expansion (i.e. unseeded truncation);
+        a ranked truncation must not pass it.
+    """
+    wind = winding_joints(kb)
+    if not wind:
+        return list(sols)
+    idxs = [i for i, _, _ in wind]
+    out: list[Solution] = []
+    for sol in sols:
+        q = np.asarray(sol.q, dtype=np.float64)
+        opts = [_reps(float(q[i]), lo, hi) for i, lo, hi in wind]
+        res, ref = sol.fk_residual, sol.refinement_used
+        for combo in itertools.product(*opts):
+            q_new = q.copy()
+            for t, v in enumerate(combo):
+                q_new[idxs[t]] = v
+            out.append(Solution(q_new, res, ref))
+            if limit is not None and len(out) >= limit:
+                return out
+    return out
+
 
 def rewrap_to_seed(
-    sols: list[Solution], kb: KinBody, q_seed: NDArray[np.float64]
+    sols: list[Solution],
+    kb: KinBody,
+    q_seed: NDArray[np.float64],
+    *,
+    continuous_only: bool = False,
+    honor_limits: bool = True,
 ) -> list[Solution]:
     """Rewrap each revolute joint to the ``q_i + 2*pi*k`` representative nearest
     the seed, staying within the joint's finite limits (#562, step 1).
@@ -182,6 +298,19 @@ def rewrap_to_seed(
 
     Only the returned coordinate changes; FK is identical. Runs only when a seed
     is supplied (the unseeded path pays nothing).
+
+    :param continuous_only: restrict rewrapping to continuous joints. Set when
+        winding enumeration is active: enumeration already emits every in-limit
+        representative of a finite joint, so collapsing them onto the
+        seed-nearest one would destroy the very set being returned. Continuous
+        joints are never enumerated (infinite family), so they still need the
+        nearest-turn choice.
+    :param honor_limits: when ``False`` (the caller passed
+        ``respect_limits=False`` and wants the raw geometric set), limits play
+        no part here either: every revolute joint takes the nearest turn to the
+        seed, unclamped. Clamping a solution into limits the caller asked to
+        ignore was returning a representative a full turn from the seed --
+        exactly the motion this function exists to prevent.
     """
     seed = np.asarray(q_seed, dtype=np.float64)
     out: list[Solution] = []
@@ -190,8 +319,10 @@ def rewrap_to_seed(
         for i, joint in enumerate(kb.joints):
             if joint.joint_type != "revolute":
                 continue
+            if continuous_only and joint.limits is not None and honor_limits:
+                continue
             q_i, s_i = float(q_new[i]), float(seed[i])
-            if joint.limits is None:
+            if joint.limits is None or not honor_limits:
                 q_new[i] = q_i + _TWO_PI * round((s_i - q_i) / _TWO_PI)
                 continue
             lo, hi = joint.limits
@@ -205,11 +336,73 @@ def rewrap_to_seed(
     return out
 
 
+def _circular_mask(kb: KinBody | None, n: int) -> list[bool]:
+    """Per joint: should the seed difference be measured modulo ``2*pi``?
+
+    Only a *continuous* revolute joint may be: it can always take the short way
+    round, so ``q`` and ``q + 2*pi`` are the same point of its configuration
+    space. A finite revolute joint's configuration space is an interval, not a
+    circle: it cannot rotate through a limit, so a joint at ``+3`` really is
+    ``6`` radians from a seed at ``-3`` even though the two wrap to within
+    ``0.28``. Measuring it modulo ``2*pi`` both understates real motion and
+    makes distinct windings tie, which would make the #562 ordering meaningless.
+    Prismatic joints have no periodicity at all.
+
+    ``kb is None`` keeps the pre-#562 behaviour (wrap everything) for callers
+    using these filters standalone without a :class:`KinBody`.
+    """
+    if kb is None:
+        return [True] * n
+    return [j.joint_type == "revolute" and j.limits is None for j in kb.joints]
+
+
+def _seed_deltas(
+    q: NDArray[np.float64], seed: NDArray[np.float64], circular: list[bool]
+) -> list[float]:
+    """Per-joint signed seed difference, wrapped only where ``circular``."""
+    return [
+        _wrap_to_pi(float(q[i] - seed[i])) if circular[i] else float(q[i] - seed[i])
+        for i in range(len(seed))
+    ]
+
+
+def _aggregate(deltas: list[float], metric: str) -> float:
+    if metric == "wrap_l2":
+        return float(np.sqrt(sum(d * d for d in deltas)))
+    return float(max(abs(d) for d in deltas))  # wrap_linf
+
+
+def _rank_key(
+    deltas: list[float], metric: str, q: NDArray[np.float64]
+) -> tuple[float, tuple[float, ...], tuple[float, ...]]:
+    """The total, deterministic seeded ordering (#562).
+
+    Ranking on the aggregate alone leaves ties that are neither rare nor
+    harmless once windings are enumerated: under ``wrap_linf`` one distant joint
+    fixes the max, so every winding of a branch scores identically and the
+    "nearest" one is decided by accident of enumeration order. So the aggregate
+    is refined by the per-joint deviations sorted descending, compared
+    lexicographically -- the leximax refinement. Among configurations whose
+    worst joint moves the same, it prefers the one whose next-worst joint moves
+    less, which is what a caller asking for the nearest configuration means.
+    The joint vector itself is the final tie-break, so the order is total and
+    depends only on the solutions, never on the order they arrived in. That
+    makes it reproducible across the Python and native backends, which do not
+    generate candidates in the same order.
+    """
+    return (
+        _aggregate(deltas, metric),
+        tuple(sorted((abs(d) for d in deltas), reverse=True)),
+        tuple(float(v) for v in q),
+    )
+
+
 def nearest_to_seed(
     sols: list[Solution],
     q_seed: NDArray[np.float64],
     *,
     metric: str = "wrap_l2",
+    kb: KinBody | None = None,
 ) -> list[Solution]:
     """Sort solutions by joint-space distance to a reference configuration.
 
@@ -226,28 +419,28 @@ def nearest_to_seed(
         difference). ``wrap_l2`` is smooth and prefers configurations that
         are uniformly close; ``wrap_linf`` is hard-cap and prefers
         configurations whose worst-joint deviation is small.
-    :returns: solutions sorted by ascending distance to ``q_seed``. Stable
-        sort: ties preserve input order.
+    :param kb: when given, differences are wrapped modulo ``2*pi`` only for
+        continuous joints; finite revolute and prismatic joints use ordinary
+        coordinate distance (see :func:`_circular_mask`). Required for correct
+        ranking of winding representatives (#562) -- without it, a branch and
+        its ``2*pi`` lift tie. ``None`` wraps every joint (pre-#562 behaviour).
+    :returns: solutions sorted by ascending distance to ``q_seed``. Equal
+        distances are broken deterministically by :func:`_rank_key`, so the
+        order depends only on the solutions themselves.
     """
     if metric not in ("wrap_l2", "wrap_linf"):
         raise ValueError(f"unknown metric {metric!r}; expected 'wrap_l2' or 'wrap_linf'")
     seed = np.asarray(q_seed, dtype=np.float64)
-
-    def distance(sol: Solution) -> float:
-        diffs = [_wrap_to_pi(float(sol.q[i] - seed[i])) for i in range(len(seed))]
-        if metric == "wrap_l2":
-            return float(np.sqrt(sum(d * d for d in diffs)))
-        # wrap_linf
-        return float(max(abs(d) for d in diffs))
-
-    # Python's sort is stable, so ties preserve input order.
-    return sorted(sols, key=distance)
+    circular = _circular_mask(kb, len(seed))
+    return sorted(sols, key=lambda s: _rank_key(_seed_deltas(s.q, seed, circular), metric, s.q))
 
 
 def within_seed_tolerance(
     sols: list[Solution],
     q_seed: NDArray[np.float64],
     tolerance: float,
+    *,
+    kb: KinBody | None = None,
 ) -> list[Solution]:
     """Keep only solutions within a per-joint deviation of a reference config.
 
@@ -263,18 +456,118 @@ def within_seed_tolerance(
     :param sols: candidate solutions.
     :param q_seed: reference joint configuration (length matches the chain's
         DOF).
-    :param tolerance: maximum allowed per-joint wrap-to-pi deviation, radians.
+    :param tolerance: maximum allowed per-joint deviation, radians.
+    :param kb: when given, the bound is measured the way the joint actually
+        moves -- modulo ``2*pi`` for continuous joints only, ordinary distance
+        for finite revolute and prismatic joints (#562). This makes the
+        guarantee honest: a finite joint that must travel 6 radians to reach the
+        solution is no longer admitted by a 0.5-radian bound just because the
+        endpoints happen to wrap close. ``None`` wraps every joint (pre-#562).
     :returns: the subset of ``sols`` within ``tolerance`` of ``q_seed``, in
         input order.
     """
     seed = np.asarray(q_seed, dtype=np.float64)
+    circular = _circular_mask(kb, len(seed))
 
     def within(sol: Solution) -> bool:
-        return all(
-            abs(_wrap_to_pi(float(sol.q[i] - seed[i]))) <= tolerance for i in range(len(seed))
-        )
+        return all(abs(d) <= tolerance for d in _seed_deltas(sol.q, seed, circular))
 
     return [s for s in sols if within(s)]
+
+
+def _windings_topk(
+    sols: list[Solution],
+    kb: KinBody,
+    q_seed: NDArray[np.float64],
+    metric: str,
+    k: int,
+) -> list[Solution]:
+    """The globally nearest ``k`` winding representatives, without materializing
+    the complete expansion (#562).
+
+    Exactly equivalent to ``expand_windings`` -> ``nearest_to_seed`` ->
+    ``take_first(k)``, including tie order, but it never builds the discarded
+    configurations. That matters: a UR lifts 8 geometric branches to 256
+    configurations and a Doosan to 1944, while the tracking idiom asks for one.
+
+    Two facts make the pruning exact. First, a configuration in the global
+    top-``k`` is in its own branch's top-``k`` (at most ``k-1`` things precede
+    it anywhere, so at most ``k-1`` do within its branch), so per-branch
+    top-``k`` then a global merge loses nothing. Second, within a branch the
+    per-joint choices are independent and both metrics are non-decreasing in
+    every per-joint deviation, so the branch's representatives can be walked in
+    ascending distance by best-first search over the product lattice -- pop the
+    cheapest rank tuple, push its single-step successors. For ``k = 1`` this
+    degenerates to "pick each joint's seed-nearest representative", which is
+    exactly :func:`rewrap_to_seed`.
+    """
+    seed = np.asarray(q_seed, dtype=np.float64)
+    if k <= 1:
+        # The tracking idiom. Choosing each joint's seed-nearest representative
+        # minimises every per-joint deviation at once, so it minimises both the
+        # aggregate and the leximax refinement: the branch's best winding is
+        # exactly its seed-rewrap, and no lattice search is needed.
+        best = rewrap_to_seed(sols, kb, seed)
+        return nearest_to_seed(best, seed, metric=metric, kb=kb)[:k]
+
+    wind = winding_joints(kb)
+    circular = _circular_mask(kb, len(seed))
+    idxs = [i for i, _, _ in wind]
+    m = len(wind)
+    picked: list[Solution] = []
+
+    for sol in sols:
+        q = np.asarray(sol.q, dtype=np.float64)
+        base = _seed_deltas(q, seed, circular)
+        # Per winding joint: the in-limit representatives ordered by distance to
+        # the seed, so rank 0 is the nearest and each step out costs more.
+        ladders = [
+            sorted((abs(v - float(seed[i])), v) for v in _reps(float(q[i]), lo, hi))
+            for i, lo, hi in wind
+        ]
+
+        def key(
+            ranks: tuple[int, ...],
+            base: list[float] = base,
+            ladders: list[list[tuple[float, float]]] = ladders,
+        ) -> _LatticeKey:
+            """The monotone prefix of :func:`_rank_key`: the aggregate, then the
+            per-joint deviations sorted descending. Both rise whenever any rank
+            rises, which is what makes best-first search able to stop early."""
+            deltas = list(base)
+            for t, r in enumerate(ranks):
+                deltas[idxs[t]] = ladders[t][r][1] - float(seed[idxs[t]])
+            return (
+                _aggregate(deltas, metric),
+                tuple(sorted((abs(d) for d in deltas), reverse=True)),
+            )
+
+        start = (0,) * m
+        heap: list[tuple[_LatticeKey, tuple[int, ...]]] = [(key(start), start)]
+        seen = {start}
+        taken = 0
+        boundary: _LatticeKey | None = None
+        while heap:
+            # Stop once k are taken and the frontier has moved strictly past the
+            # k-th key. Popping through an exact tie keeps the result identical
+            # to ranking the complete expansion, whose tie order this cannot see.
+            if taken >= k and boundary is not None and heap[0][0] > boundary:
+                break
+            popped, ranks = heapq.heappop(heap)
+            taken += 1
+            if taken == k:
+                boundary = popped
+            q_new = q.copy()
+            for t, r in enumerate(ranks):
+                q_new[idxs[t]] = ladders[t][r][1]
+            picked.append(Solution(q_new, sol.fk_residual, sol.refinement_used))
+            for t in range(m):
+                nxt = (*ranks[:t], ranks[t] + 1, *ranks[t + 1 :])
+                if nxt[t] < len(ladders[t]) and nxt not in seen:
+                    seen.add(nxt)
+                    heapq.heappush(heap, (key(nxt), nxt))
+
+    return nearest_to_seed(picked, seed, metric=metric, kb=kb)[:k]
 
 
 def take_first(sols: list[Solution], k: int) -> list[Solution]:
@@ -312,6 +605,7 @@ def finalize_solutions(
     max_solutions: int | None = None,
     in_limits_fallback: Callable[[], list[Solution]] | None = None,
     counts: dict[str, int] | None = None,
+    enumerate_windings: bool = True,
 ) -> list[Solution]:
     """The shared IK post-processing pipeline: limits -> seed -> truncate.
 
@@ -327,8 +621,20 @@ def finalize_solutions(
         pass empties the set -- the redundant-7R exact in-limits resolver (#359),
         which recovers a narrow in-limits arc the coarse sweep missed. ``None``
         for callers without one (e.g. ``Manipulator``).
+    :param enumerate_windings: when ``True`` (default, #562), a joint whose
+        limits span more than ``2*pi`` contributes every in-limit
+        ``q_i + 2*pi*k`` representative, taken as a Cartesian product across
+        such joints. These are finite-limit lifts of the same geometric branch,
+        not new branches, but they are distinct admissible configurations. Set
+        ``False`` for one representative per geometric branch (the pre-6.0
+        result set, and the faster path). Requires ``respect_limits``: the set
+        being enumerated is defined by the limits.
     :param counts: optional dict; when given, populated with ``dropped_by_limits``
-        and ``dropped_by_max_solutions`` for the caller's diagnostics.
+        and ``dropped_by_max_solutions``, plus ``geometric_branches`` and
+        ``winding_representatives`` -- reported separately so a caller can tell
+        real IK branches from their lifts. ``winding_representatives`` is the
+        size of the complete in-limit set even when truncation or top-k pruning
+        means it was never built.
     :returns: the post-processed solution list.
     """
     if respect_limits:
@@ -339,16 +645,48 @@ def finalize_solutions(
             counts["dropped_by_limits"] = pre_limit - len(sols)
         if not sols and in_limits_fallback is not None:
             sols = in_limits_fallback()
-    if q_seed is not None:
-        # #562 step 1: return the in-limit winding nearest the seed (the tolerance
-        # bound and the ranking then both see the seed-nearest representative, so a
-        # seeded solve never commands a gratuitous 2*pi turn on a wide-limit joint).
-        sols = rewrap_to_seed(sols, kb, q_seed)
+
+    # Enumeration is defined relative to the joint limits, so it only runs when
+    # the limit pass did. Arms with no wide-limit joint take the identity path.
+    expanding = enumerate_windings and respect_limits and bool(winding_joints(kb))
+    # The size of the complete set, computed arithmetically so it stays truthful
+    # when a prefix cap or top-k pruning means the set is never materialized.
+    available = count_windings(sols, kb) if expanding else len(sols)
+    if counts is not None:
+        counts["geometric_branches"] = len(sols)
+        counts["winding_representatives"] = available
+
+    if q_seed is None:
+        if expanding:
+            # Unseeded output keeps expansion order, so a cap is a prefix and the
+            # discarded representatives need never be built.
+            sols = expand_windings(sols, kb, limit=max_solutions)
+    else:
+        # #562 step 1: a seeded solve returns the representative nearest the seed
+        # rather than the principal value, so it never commands a gratuitous 2*pi
+        # turn. Under enumeration the finite joints are covered by the expansion
+        # itself (collapsing them here would destroy the set), leaving only the
+        # continuous joints, whose lift family is infinite.
+        sols = rewrap_to_seed(
+            sols, kb, q_seed, continuous_only=expanding, honor_limits=respect_limits
+        )
+        if expanding:
+            if seed_tolerance is None and max_solutions is not None:
+                # Ranked truncation: take the globally nearest max_solutions
+                # directly. Equivalent to expanding, ranking and truncating.
+                sols = _windings_topk(sols, kb, q_seed, seed_metric, max_solutions)
+            else:
+                sols = expand_windings(sols, kb)
         if seed_tolerance is not None:
-            sols = within_seed_tolerance(sols, q_seed, seed_tolerance)
-        sols = nearest_to_seed(sols, q_seed, metric=seed_metric)
-    if max_solutions is not None and len(sols) > max_solutions:
-        if counts is not None:
-            counts["dropped_by_max_solutions"] = len(sols) - max_solutions
-        sols = sols[:max_solutions]
+            sols = within_seed_tolerance(sols, q_seed, seed_tolerance, kb=kb)
+            available = len(sols)
+        sols = nearest_to_seed(sols, q_seed, metric=seed_metric, kb=kb)
+    if max_solutions is not None:
+        # `available` is the size of the complete post-filter set; `sols` may
+        # already be shorter than it, because the prefix cap and the top-k prune
+        # skip building what the cap would discard.
+        if counts is not None and available > max_solutions:
+            counts["dropped_by_max_solutions"] = available - max_solutions
+        if len(sols) > max_solutions:
+            sols = sols[:max_solutions]
     return sols

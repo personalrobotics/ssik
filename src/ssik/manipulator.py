@@ -462,6 +462,7 @@ class Manipulator:
         seed_metric: str = "wrap_linf",
         seed_tolerance: float | None = None,
         allow_rescue: bool = True,
+        enumerate_windings: bool = True,
         **solver_kwargs: Any,
     ) -> list[Solution]: ...
 
@@ -480,6 +481,7 @@ class Manipulator:
         seed_metric: str = "wrap_linf",
         seed_tolerance: float | None = None,
         allow_rescue: bool = True,
+        enumerate_windings: bool = True,
         **solver_kwargs: Any,
     ) -> tuple[list[Solution], Diagnostic]: ...
 
@@ -497,6 +499,7 @@ class Manipulator:
         seed_metric: str = "wrap_linf",
         seed_tolerance: float | None = None,
         allow_rescue: bool = True,
+        enumerate_windings: bool = True,
         **solver_kwargs: Any,
     ) -> list[Solution] | tuple[list[Solution], Diagnostic]:
         """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
@@ -528,6 +531,19 @@ class Manipulator:
         :param respect_limits: when ``True`` (default), solutions outside
             URDF joint limits are dropped. Pass ``False`` for the raw
             geometric set (analysis / debugging).
+        :param enumerate_windings: when ``True`` (default since v6.0, #562),
+            a joint whose limits span more than one turn (UR-family
+            ``[-2*pi, 2*pi]``, Doosan ``[-3*pi, 3*pi]``) contributes every
+            in-limit ``q_i + 2*pi*k`` representative, as a Cartesian product
+            across such joints. These are finite-limit lifts of the same
+            geometric branch, not new branches, but they are distinct
+            admissible configurations that differ in distance and in the
+            motions available from the robot's current state. Counts rise
+            accordingly: a UR pose goes from 8 solutions to 256. Pass
+            ``False`` for one representative per geometric branch, which is
+            the pre-6.0 result set and the cheaper path. Requires
+            ``respect_limits``; ``max_solutions`` and ``q_seed`` still return
+            the same top-k they would from the complete set.
         :param allow_refinement: opt into Newton polish for near-miss
             algebraic candidates. Default ``False`` -- the algebraic
             path is already at machine precision on tier-0 / SRS arms.
@@ -649,7 +665,12 @@ class Manipulator:
         # ssik.postprocess.finalize_solutions): solvers that didn't honour kwargs
         # natively get limits + seed + truncate applied here so the public API is
         # uniform. ``counts`` feeds the Diagnostic below.
-        counts = {"dropped_by_limits": 0, "dropped_by_max_solutions": 0}
+        counts = {
+            "dropped_by_limits": 0,
+            "dropped_by_max_solutions": 0,
+            "geometric_branches": 0,
+            "winding_representatives": 0,
+        }
         result: list[Solution] = _ps_finalize(
             sols,
             self._kb,
@@ -658,6 +679,7 @@ class Manipulator:
             seed_metric=seed_metric,
             seed_tolerance=seed_tolerance,
             max_solutions=max_solutions,
+            enumerate_windings=enumerate_windings,
             counts=counts,
         )
         dropped_by_limits = counts["dropped_by_limits"]
@@ -674,6 +696,8 @@ class Manipulator:
             raw_candidates=raw_candidate_count,
             dropped_by_limits=dropped_by_limits,
             dropped_by_max_solutions=dropped_by_max_solutions,
+            geometric_branches=counts["geometric_branches"],
+            winding_representatives=counts["winding_representatives"],
             final_count=len(result),
             max_fk_residual=max_fk,
             refinement_engaged=refinement_engaged,
