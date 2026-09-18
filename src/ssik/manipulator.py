@@ -679,7 +679,9 @@ class Manipulator:
             seed_metric=seed_metric,
             seed_tolerance=seed_tolerance,
             max_solutions=max_solutions,
-            enumerate_windings=enumerate_windings,
+            # Manipulator runs the pipeline once, so this is the lifting call --
+            # but only when the caller wanted limits honoured at all.
+            enumerate_windings=enumerate_windings and respect_limits,
             counts=counts,
         )
         dropped_by_limits = counts["dropped_by_limits"]

@@ -64,6 +64,40 @@ The `solve()` pipeline already applies these by default (when `respect_limits=Tr
       show_root_heading: false
       show_root_full_path: false
 
+::: ssik.postprocess.rewrap_to_seed
+    options:
+      show_root_heading: false
+      show_root_full_path: false
+
+### Winding representatives
+
+A revolute joint whose limits span more than one turn (the UR family's
+`[-2*pi, 2*pi]`, Doosan's `[-3*pi, 3*pi]`) has several in-limit
+`q + 2*pi*k` representatives of the *same* geometric branch. They reach the
+same pose but are different admissible configurations, at different distances
+and with different motions available from where the robot is now. `solve()`
+returns all of them by default; pass `enumerate_windings=False` for one
+representative per geometric branch.
+
+These are finite-limit **lifts**, not additional geometric branches, and
+`Diagnostic.geometric_branches` / `Diagnostic.winding_representatives` report
+the two counts separately.
+
+::: ssik.postprocess.winding_joints
+    options:
+      show_root_heading: false
+      show_root_full_path: false
+
+::: ssik.postprocess.expand_windings
+    options:
+      show_root_heading: false
+      show_root_full_path: false
+
+::: ssik.postprocess.count_windings
+    options:
+      show_root_heading: false
+      show_root_full_path: false
+
 ## CLI: `ssik build`
 
 ```bash

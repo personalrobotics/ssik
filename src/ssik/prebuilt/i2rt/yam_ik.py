@@ -1044,6 +1044,7 @@ def solve(
     refinement_max_iters: int = 15,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
+    enumerate_windings: bool = True,
     native: bool = True,
 ):
     """Inverse kinematics. Returns ``list[Solution]``.
@@ -1120,6 +1121,7 @@ def solve(
             seed_tolerance=seed_tolerance,
             max_solutions=max_solutions,
             allow_rescue=allow_rescue,
+            enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
             rr_geometry=_rr_native_geometry(),
         )
@@ -1244,6 +1246,9 @@ def solve(
         seed_metric=seed_metric,
         seed_tolerance=seed_tolerance,
         max_solutions=max_solutions,
+        # The single lifting stage (#562): the call that yields the
+        # returned set. Skipped when the caller asked for raw geometry.
+        enumerate_windings=enumerate_windings and respect_limits,
     )
 
 fk = _fk

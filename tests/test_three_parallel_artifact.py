@@ -58,8 +58,25 @@ def _subset(A: list[Any], B: list[Any], tol: float = 1e-3) -> bool:
     return all(any(_close(a.q, b.q, tol) for b in B) for a in A)
 
 
-def _seed_linf(q: Any, seed: Any) -> float:
-    return max(abs(_wrap(float(x - s))) for x, s in zip(q, seed, strict=True))
+def _seed_linf(q: Any, seed: Any, kb: Any = None) -> float:
+    """L-infinity seed distance under the ranking contract (#562).
+
+    Only a continuous joint's difference is measured modulo 2*pi. A finite
+    revolute joint cannot rotate through its limit, so its real displacement is
+    the ordinary coordinate difference -- and wrapping it would make a branch
+    and its 2*pi lift tie, which is exactly what the winding ordering must not
+    do. ``kb=None`` keeps the old all-wrapped behaviour for callers that have no
+    kinbody handy.
+    """
+    circular = (
+        [True] * len(seed)
+        if kb is None
+        else [j.joint_type == "revolute" and j.limits is None for j in kb.joints]
+    )
+    return max(
+        abs(_wrap(float(x - s))) if c else abs(float(x - s))
+        for x, s, c in zip(q, seed, circular, strict=True)
+    )
 
 
 @pytest.mark.parametrize("arm_name", _ARMS)
@@ -103,7 +120,7 @@ def test_artifact_contract_parity(arm_name: str) -> None:
         assert len(py_s) == len(cpp_s), f"{arm_name}: seed-ranked count mismatch"
         if cpp_s:
             assert _close(py_s[0].q, cpp_s[0].q), f"{arm_name}: nearest-to-seed mismatch"
-            dists = [_seed_linf(s.q, seed) for s in cpp_s]
+            dists = [_seed_linf(s.q, seed, kb) for s in cpp_s]
             assert all(dists[i] <= dists[i + 1] + 1e-9 for i in range(len(dists) - 1)), (
                 f"{arm_name}: seed ranking not monotonic"
             )

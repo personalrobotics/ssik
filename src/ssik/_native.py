@@ -117,6 +117,7 @@ def try_native_solve(
     max_solutions: int | None = None,
     allow_rescue: bool = True,
     refinement_max_iters: int = 15,
+    enumerate_windings: bool = True,
     rr_geometry: dict[str, Any] | None = None,
 ) -> list[Solution] | None:
     """Native artifact solve for a supported family, or ``None`` to fall back.
@@ -153,6 +154,7 @@ def try_native_solve(
             max_solutions=max_solutions,
             allow_rescue=allow_rescue,
             refinement_max_iters=refinement_max_iters,
+            enumerate_windings=enumerate_windings,
         )
 
     axes, t_left, t_right, types, lo, hi, has_limits = _consts(solver_name, kb)
@@ -179,6 +181,7 @@ def try_native_solve(
         max_solutions if max_solutions is not None else -1,
         allow_rescue,
         refinement_max_iters,
+        enumerate_windings,
     )
     return [
         Solution(
@@ -203,6 +206,7 @@ def _rr_native_solve(
     max_solutions: int | None,
     allow_rescue: bool,
     refinement_max_iters: int,
+    enumerate_windings: bool = True,
 ) -> list[Solution]:
     """Full native general_6r artifact solve via the baked RR tensor ``g`` (#555)."""
     axes, t_left, t_right, types, lo, hi, has_limits = _consts("ikgeo.general_6r", kb)
@@ -251,6 +255,7 @@ def _rr_native_solve(
         max_solutions if max_solutions is not None else -1,
         allow_rescue,
         refinement_max_iters,
+        enumerate_windings,
     )
     return [
         Solution(
@@ -810,6 +815,7 @@ def try_native_jointlock_solve(
     max_solutions: int | None = None,
     allow_rescue: bool = True,
     refinement_max_iters: int = 15,
+    enumerate_windings: bool = True,
     jointlock_geometry: dict[str, Any] | None = None,
 ) -> list[Solution] | None:
     """FULL native jointlock.seven_r artifact solve (#554), or ``None`` to fall
@@ -835,6 +841,7 @@ def try_native_jointlock_solve(
         max_solutions if max_solutions is not None else -1,
         allow_rescue,
         refinement_max_iters,
+        enumerate_windings,
     )
     common = (g["axes"], g["t_left"], g["t_right"], g["types"], int(g["lock_idx"]), g["q_lock"])
     if g["kind"] == "hp":
@@ -943,6 +950,7 @@ def try_native_srs_solve(
     max_solutions: int | None = None,
     allow_rescue: bool = True,
     refinement_max_iters: int = 15,
+    enumerate_windings: bool = True,
 ) -> list[Solution] | None:
     """FULL native SRS artifact solve (the whole ``<arm>.solve()`` contract in
     C++), or ``None`` to fall back. Runs the entire pipeline natively via
@@ -992,6 +1000,7 @@ def try_native_srs_solve(
         allow_rescue,
         refinement_max_iters,
         polished=(solver_name == "seven_r.srs_polished"),
+        enumerate_windings=enumerate_windings,
     )
     return [
         Solution(
@@ -1045,6 +1054,7 @@ def try_native_spherical_shoulder_solve(
     max_solutions: int | None = None,
     allow_rescue: bool = True,
     refinement_max_iters: int = 15,
+    enumerate_windings: bool = True,
 ) -> list[Solution] | None:
     """FULL native spherical_shoulder{,_polished} artifact solve (#553), or ``None``
     to fall back. ``_polished`` (xarm7/gen72) LM-refines the approximate candidates;
@@ -1081,6 +1091,7 @@ def try_native_spherical_shoulder_solve(
         allow_rescue,
         refinement_max_iters,
         polished,
+        enumerate_windings,
     )
     return [
         Solution(

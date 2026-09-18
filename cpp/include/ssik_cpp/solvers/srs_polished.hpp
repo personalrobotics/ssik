@@ -125,6 +125,9 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
 
   ArtifactParams<7> p_seed = p;
   p_seed.respect_limits = false;
+  // The single lifting stage (#562): this is the call that yields the returned
+  // set. Skipped when the caller wanted the raw geometric set.
+  p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
   return finalize_solutions<7>(std::move(in_limits), c, lim, p_seed);
 }
 

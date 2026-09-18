@@ -137,13 +137,24 @@ def test_emit_then_import_then_roundtrip(
     for trial in range(5):
         q_star = rng.uniform(-1.0, 1.0, size=6)
         T_star = _fk_poe(kb, q_star)
-        sols_artifact = mod.solve(T_star)
+        # Compared without winding enumeration (#562): the artifact lifts each
+        # geometric branch to its in-limit 2*pi representatives, while the
+        # direct solver returns the branches themselves, so the counts are only
+        # comparable with the lifts switched off.
+        sols_artifact = mod.solve(T_star, enumerate_windings=False)
         sols_direct, _is_ls_direct = direct_solver.solve(kb, T_star)  # type: ignore[attr-defined]
         assert len(sols_artifact) == len(sols_direct), f"trial {trial}: solution count disagrees"
         for sol in sols_artifact:
             T_check = _fk_poe(kb, sol.q)
             assert np.allclose(T_check, T_star, atol=1e-9), (
                 f"trial {trial}: artifact q={sol.q.tolist()} fails FK"
+            )
+        # The lifts themselves must still close FK, and only ever add.
+        lifted = mod.solve(T_star)
+        assert len(lifted) >= len(sols_artifact)
+        for sol in lifted:
+            assert np.allclose(_fk_poe(kb, sol.q), T_star, atol=1e-9), (
+                f"trial {trial}: lifted q={sol.q.tolist()} fails FK"
             )
 
 

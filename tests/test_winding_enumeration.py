@@ -13,12 +13,14 @@ are reported separately so they are never conflated.
 from __future__ import annotations
 
 import itertools
+import time
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 import ssik
+from ssik._native import native_available
 from ssik.core.solution import Solution
 from ssik.postprocess import _windings_topk as topk
 from ssik.postprocess import (
@@ -314,3 +316,242 @@ def test_expansion_order_is_the_ascending_cartesian_product(ur5: ssik.Manipulato
     assert len(got) == len(want)
     for a, b in zip(got, want, strict=True):
         assert np.array_equal(a.q, b)
+
+
+# ---------------------------------------------------------------------------
+# Native parity. The C++ finalize mirrors the Python pipeline, so both backends
+# must return the same configurations in the same order (#562's parity clause).
+# ---------------------------------------------------------------------------
+
+# One arm per native solver family whose candidate set is exact on both
+# backends. Redundant / approximate 7R arms (srs_polished, spherical_shoulder,
+# jointlock, and RR general_6r on some poses) sample a continuum and already
+# differ between backends before #562 -- that is the relative-completeness
+# contract from #487/#554, not a winding question -- so they are covered by
+# soundness below instead of set equality.
+_EXACT_NATIVE_ARMS = [
+    "universal_robots.ur5e_ik",  # three_parallel, 5 wide joints -> x32
+    "fanuc.m710ic_ik",  # spherical_two_parallel
+    "ufactory.xarm6_ik",  # general_6r (RR)
+    "abb.irb1600_ik",  # wide joint with a 3-representative span
+    "standard_bots.thor_ik",  # 4 wide joints
+    "rokae.xmatepro7_ik",  # srs
+    "franka.panda_ik",  # spherical_shoulder, no wide joint
+    "kinova.jaco2_ik",  # continuous joints, never enumerated
+]
+
+
+def _module(arm: str):
+    import importlib
+
+    return importlib.import_module(f"ssik.prebuilt.{arm}")
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize("arm", _EXACT_NATIVE_ARMS)
+def test_native_enumeration_matches_python(arm: str) -> None:
+    m = _module(arm)
+    rng = np.random.default_rng(0)
+    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in m._KB.joints]
+    for _ in range(6):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        T = m.fk(q)
+        nat, pyth = m.solve(T, native=True), m.solve(T, native=False)
+        assert len(nat) == len(pyth), f"{arm}: {len(nat)} native vs {len(pyth)} python"
+        key = lambda s: tuple(np.round(s.q, 6))  # noqa: E731
+        assert {key(s) for s in nat} == {key(s) for s in pyth}, f"{arm}: different lifts"
+
+        # Ranked order must agree too, not just the set.
+        a = m.solve(T, q_seed=q, max_solutions=12, native=True)
+        b = m.solve(T, q_seed=q, max_solutions=12, native=False)
+        assert len(a) == len(b)
+        for i, (u, v) in enumerate(zip(a, b, strict=True)):
+            assert np.max(np.abs(u.q - v.q)) < 1e-6, f"{arm}: rank {i} differs"
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize("arm", ["universal_robots.ur5e_ik", "standard_bots.thor_ik"])
+def test_native_lifts_are_sound(arm: str) -> None:
+    """Every configuration the native path returns is in limits and reproduces
+    the target pose: a lift may never move the end effector."""
+    m = _module(arm)
+    kb = m._KB
+    rng = np.random.default_rng(5)
+    ranges = [j.limits for j in kb.joints]
+    for _ in range(4):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        T = m.fk(q)
+        for s in m.solve(T, native=True):
+            for i, joint in enumerate(kb.joints):
+                assert joint.limits[0] <= s.q[i] <= joint.limits[1]
+            assert np.linalg.norm(m.fk(s.q) - T) < 1e-6
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+def test_native_enumerate_windings_false_restores_pre_60_counts() -> None:
+    m = _module("universal_robots.ur5e_ik")
+    q = np.array([0.3, -0.7, 0.9, -0.4, 0.8, 0.2])
+    T = m.fk(q)
+    for native in (True, False):
+        assert len(m.solve(T, native=native, enumerate_windings=False)) == 8
+        assert len(m.solve(T, native=native)) == 256
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+def test_native_does_not_double_expand() -> None:
+    """A solve runs the finalize pipeline several times (limit pass, rescue
+    pass, ranking pass). Lifting in more than one of them silently multiplies
+    the result set, which is why only the final pass enumerates."""
+    m = _module("universal_robots.ur5e_ik")
+    q = np.array([0.3, -0.7, 0.9, -0.4, 0.8, 0.2])
+    T = m.fk(q)
+    for native in (True, False):
+        sols = m.solve(T, native=native)
+        assert len(sols) == 256, f"native={native}: {len(sols)} (256 expected, 8192 = double)"
+        assert len({tuple(np.round(s.q, 9)) for s in sols}) == 256, "duplicates present"
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize("arm", ["universal_robots.ur5e_ik", "standard_bots.thor_ik"])
+def test_flag_matrix_agrees_across_backends(arm: str) -> None:
+    """Both flags, both backends, all four combinations.
+
+    The native path reaches finalize two different ways -- some entry points run
+    it once themselves, others go through an artifact solver whose final pass
+    runs with respect_limits=false by then -- and an early version honoured
+    enumerate_windings but not respect_limits on the first of those, so
+    `solve(T, respect_limits=False)` lifted when it should not have. The
+    benchmark harness calls exactly that, which is how it surfaced.
+    """
+    m = _module(arm)
+    q = np.array([0.3, -0.7, 0.9, -0.4, 0.8, 0.2])[: len(m._KB.joints)]
+    T = m.fk(q)
+    for respect_limits in (True, False):
+        for enumerate_windings in (True, False):
+            counts = {
+                native: len(
+                    m.solve(
+                        T,
+                        native=native,
+                        respect_limits=respect_limits,
+                        enumerate_windings=enumerate_windings,
+                    )
+                )
+                for native in (True, False)
+            }
+            assert counts[True] == counts[False], (
+                f"{arm}: respect_limits={respect_limits} "
+                f"enumerate_windings={enumerate_windings} -> {counts}"
+            )
+            if not (respect_limits and enumerate_windings):
+                # Only the both-on corner lifts.
+                assert counts[True] == len(
+                    m.solve(T, native=True, respect_limits=respect_limits, enumerate_windings=False)
+                )
+
+
+@pytest.mark.perf
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+def test_capped_solve_does_not_pay_for_discarded_lifts() -> None:
+    """Enumeration costs per configuration *returned* -- that is inherent, and a
+    UR returning 256 instead of 8 is the point of #562. What must not happen is
+    a capped solve paying for the configurations it throws away: the tracking
+    idiom asks for one solution and must not build the other 255.
+    """
+    m = _module("universal_robots.ur5e_ik")
+    q = np.array([0.3, -0.7, 0.9, -0.4, 0.8, 0.2])
+    T = m.fk(q)
+
+    def best(call, warmup: int = 20, runs: int = 120) -> float:
+        for _ in range(warmup):
+            call()
+        times = []
+        for _ in range(runs):
+            t0 = time.perf_counter()
+            call()
+            times.append(time.perf_counter() - t0)
+        return min(times)
+
+    plain = best(lambda: m.solve(T, enumerate_windings=False))
+    full = best(lambda: m.solve(T))
+    tracked = best(lambda: m.solve(T, q_seed=q, max_solutions=1))
+
+    assert len(m.solve(T)) == 256
+    assert full > 2.0 * plain, "expected lifting 8 branches to 256 to cost something"
+    # The cap keeps it at the un-enumerated cost, not the 256-configuration one.
+    assert tracked < plain + 0.35 * (full - plain), (
+        f"seeded max_solutions=1 pays for discarded lifts: tracked={tracked * 1e6:.0f}us "
+        f"plain={plain * 1e6:.0f}us full={full * 1e6:.0f}us"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Plumbing guards. The flag has to reach three places in every emitted artifact,
+# and a miss is silent: the arm keeps returning *valid* IK, just the wrong set.
+# One family's native hook was in fact missed, and only a 15x count difference
+# against a clean pre-6.0 build revealed it.
+# ---------------------------------------------------------------------------
+
+
+def _artifact_sources() -> list[tuple[str, str]]:
+    root = Path("src/ssik/prebuilt")
+    return [
+        (str(p.relative_to(root)), p.read_text())
+        for p in sorted(root.rglob("*_ik.py"))
+        if not p.name.startswith("_")
+    ]
+
+
+def test_every_artifact_plumbs_the_flag() -> None:
+    """Signature, native hook, and the single lifting stage -- in every arm."""
+    sources = _artifact_sources()
+    assert len(sources) >= 70, f"expected the full prebuilt set, found {len(sources)}"
+    for name, src in sources:
+        assert "enumerate_windings: bool = True," in src, f"{name}: solve() lacks the kwarg"
+        assert "enumerate_windings=enumerate_windings and respect_limits," in src, (
+            f"{name}: no lifting stage, or it does not honour respect_limits"
+        )
+        if "_try_native" in src:
+            assert "enumerate_windings=enumerate_windings,\n" in src, (
+                f"{name}: native hook does not forward the flag -- the native path "
+                f"would ignore enumerate_windings and silently return a different set"
+            )
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize(
+    "arm",
+    [
+        "universal_robots.ur5e_ik",  # three_parallel
+        "fanuc.m710ic_ik",  # spherical_two_parallel
+        "ufactory.xarm6_ik",  # general_6r (RR)
+        "abb.yumi_left_ik",  # srs_polished
+        "ufactory.xarm7_ik",  # spherical_shoulder_polished
+        "kassow.kr810_ik",  # jointlock
+    ],
+)
+def test_native_actually_responds_to_the_flag(arm: str) -> None:
+    """On an arm that has lifts, the native path must return fewer solutions with
+    enumeration off. A hook that drops the flag returns the lifted set either
+    way, which is easy to miss because every solution is still a valid IK."""
+    m = _module(arm)
+    kb = m._KB
+    assert winding_joints(kb), f"{arm} has no wide-limit joint; pick another arm"
+    rng = np.random.default_rng(2)
+    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in kb.joints]
+    q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+    T = m.fk(q)
+    lifted = len(m.solve(T, native=True))
+    plain = len(m.solve(T, native=True, enumerate_windings=False))
+    assert lifted > plain, f"{arm}: native ignored enumerate_windings ({lifted} either way)"
+    # The Python path must respond the same way. Only the ratio is compared:
+    # redundant 7R arms sample the self-motion manifold differently on the two
+    # backends (the #487/#554 relative-completeness contract), so their absolute
+    # counts legitimately differ while the lift multiplier must not.
+    py_lifted = len(m.solve(T, native=False))
+    py_plain = len(m.solve(T, native=False, enumerate_windings=False))
+    assert py_lifted > py_plain, f"{arm}: python ignored enumerate_windings"
+    assert lifted / plain == pytest.approx(py_lifted / py_plain, rel=0.5), (
+        f"{arm}: backends disagree on the lift multiplier "
+        f"(native {lifted}/{plain}, python {py_lifted}/{py_plain})"
+    )

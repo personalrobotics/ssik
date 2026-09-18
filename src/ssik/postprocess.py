@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import heapq
 import itertools
+import math
 from collections.abc import Callable
 from dataclasses import replace
 
@@ -159,7 +160,7 @@ def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
 
 def _wrap_to_pi(angle: float) -> float:
     """Wrap a single angle to the canonical ``[-pi, pi]`` representative."""
-    return float(((angle + np.pi) % (2.0 * np.pi)) - np.pi)
+    return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
 _TWO_PI = 2.0 * np.pi
@@ -211,9 +212,17 @@ def _reps(q_i: float, lo: float, hi: float) -> list[float]:
     re-checked against the limits so floating-point error in the ceil/floor can
     never emit an out-of-limit value.
     """
-    k_lo = int(np.ceil((lo - q_i) / _TWO_PI)) - 1
-    k_hi = int(np.floor((hi - q_i) / _TWO_PI)) + 1
-    return [v for k in range(k_lo, k_hi + 1) if lo <= (v := q_i + _TWO_PI * k) <= hi]
+    # math.ceil/floor on plain floats, not np.ceil/np.floor: this runs once per
+    # joint per solution on the seeded path, and the numpy scalar round trip
+    # dominated it.
+    k_lo = math.ceil((lo - q_i) / _TWO_PI) - 1
+    k_hi = math.floor((hi - q_i) / _TWO_PI) + 1
+    reps = [v for k in range(k_lo, k_hi + 1) if lo <= (v := q_i + _TWO_PI * k) <= hi]
+    # A value with no in-limit representative keeps its own, so expansion can
+    # only ever add configurations. Expansion runs after the limit filter, so
+    # this is unreachable in the wired paths; it is here so that a mistake in
+    # that wiring could never silently delete solutions.
+    return reps or [q_i]
 
 
 def count_windings(sols: list[Solution], kb: KinBody) -> int:
@@ -277,7 +286,6 @@ def rewrap_to_seed(
     q_seed: NDArray[np.float64],
     *,
     continuous_only: bool = False,
-    honor_limits: bool = True,
 ) -> list[Solution]:
     """Rewrap each revolute joint to the ``q_i + 2*pi*k`` representative nearest
     the seed, staying within the joint's finite limits (#562, step 1).
@@ -288,13 +296,23 @@ def rewrap_to_seed(
     ``solve(T, q_seed=q_current, max_solutions=1)`` never commands a gratuitous
     2*pi turn. Per joint:
 
-    - **finite limits** ``[lo, hi]``: among all ``q_i + 2*pi*k`` in ``[lo, hi]``,
-      choose the one nearest ``seed_i`` (ties -> smaller value, deterministic).
-      Representatives are derived from the limits, so a boundary principal like
-      ``0`` with ``[-2*pi, 2*pi]`` correctly considers ``{-2*pi, 0, 2*pi}``.
+    - **finite limits, value in range**: among all ``q_i + 2*pi*k`` in
+      ``[lo, hi]``, choose the one nearest ``seed_i`` (ties -> smaller value,
+      deterministic). Representatives are derived from the limits, so a
+      boundary principal like ``0`` with ``[-2*pi, 2*pi]`` correctly considers
+      ``{-2*pi, 0, 2*pi}``. An admissible value never leaves its limits.
+    - **finite limits, value out of range**: only reachable via
+      ``respect_limits=False``, where the caller wants the raw geometric set.
+      The nearest turn to ``seed_i``, unclamped. Forcing such a value *into*
+      limits used to return a representative a full turn from the seed --
+      exactly the motion this function exists to prevent (shipped in v5.2.0).
     - **continuous** (``limits is None``): the nearest turn to ``seed_i``
       (``k = round((seed_i - q_i) / 2*pi)``), no clamp.
     - **prismatic**: unchanged (no rotational periodicity).
+
+    The choice is made per value rather than from a caller flag, because the
+    flag would have to mean "the user wanted limits", which is not what the
+    pipeline's own ``respect_limits`` says by the time the ranking pass runs.
 
     Only the returned coordinate changes; FK is identical. Runs only when a seed
     is supplied (the unseeded path pays nothing).
@@ -305,12 +323,6 @@ def rewrap_to_seed(
         seed-nearest one would destroy the very set being returned. Continuous
         joints are never enumerated (infinite family), so they still need the
         nearest-turn choice.
-    :param honor_limits: when ``False`` (the caller passed
-        ``respect_limits=False`` and wants the raw geometric set), limits play
-        no part here either: every revolute joint takes the nearest turn to the
-        seed, unclamped. Clamping a solution into limits the caller asked to
-        ignore was returning a representative a full turn from the seed --
-        exactly the motion this function exists to prevent.
     """
     seed = np.asarray(q_seed, dtype=np.float64)
     out: list[Solution] = []
@@ -319,18 +331,19 @@ def rewrap_to_seed(
         for i, joint in enumerate(kb.joints):
             if joint.joint_type != "revolute":
                 continue
-            if continuous_only and joint.limits is not None and honor_limits:
-                continue
             q_i, s_i = float(q_new[i]), float(seed[i])
-            if joint.limits is None or not honor_limits:
+            if joint.limits is None:
                 q_new[i] = q_i + _TWO_PI * round((s_i - q_i) / _TWO_PI)
                 continue
             lo, hi = joint.limits
-            k_lo = int(np.ceil((lo - q_i) / _TWO_PI))
-            k_hi = int(np.floor((hi - q_i) / _TWO_PI))
-            if k_lo > k_hi:  # no in-limit winding (shouldn't happen post-limits)
+            if not (lo <= q_i <= hi):
+                # Out of limits already (respect_limits=False): take the nearest
+                # turn without dragging it into limits the caller waived.
+                q_new[i] = q_i + _TWO_PI * round((s_i - q_i) / _TWO_PI)
                 continue
-            cands = [q_i + _TWO_PI * k for k in range(k_lo, k_hi + 1)]
+            if continuous_only:  # enumeration emits this joint's representatives
+                continue
+            cands = _reps(q_i, lo, hi)
             q_new[i] = min(cands, key=lambda c: (abs(c - s_i), c))
         out.append(replace(sol, q=q_new))
     return out
@@ -372,6 +385,20 @@ def _aggregate(deltas: list[float], metric: str) -> float:
     return float(max(abs(d) for d in deltas))  # wrap_linf
 
 
+# Seeded ordering compares on this grid rather than on raw doubles. Exact ties
+# are the norm once windings are enumerated -- under wrap_linf one dominant joint
+# fixes the max for every winding of a branch -- and the tie-break then turns on
+# the leading element, which the two backends compute to within about 1e-15 of
+# each other. Comparing raw doubles let that noise decide the order. A grid far
+# below any meaningful joint difference (1e-9 rad is a nanoradian) makes equal
+# things compare equal on both backends. Distinct solutions are never this close.
+_RANK_QUANTUM = 1e-9
+
+
+def _snap(x: float) -> float:
+    return float(round(x / _RANK_QUANTUM))
+
+
 def _rank_key(
     deltas: list[float], metric: str, q: NDArray[np.float64]
 ) -> tuple[float, tuple[float, ...], tuple[float, ...]]:
@@ -391,9 +418,9 @@ def _rank_key(
     generate candidates in the same order.
     """
     return (
-        _aggregate(deltas, metric),
-        tuple(sorted((abs(d) for d in deltas), reverse=True)),
-        tuple(float(v) for v in q),
+        _snap(_aggregate(deltas, metric)),
+        tuple(_snap(d) for d in sorted((abs(d) for d in deltas), reverse=True)),
+        tuple(_snap(float(v)) for v in q),
     )
 
 
@@ -538,8 +565,8 @@ def _windings_topk(
             for t, r in enumerate(ranks):
                 deltas[idxs[t]] = ladders[t][r][1] - float(seed[idxs[t]])
             return (
-                _aggregate(deltas, metric),
-                tuple(sorted((abs(d) for d in deltas), reverse=True)),
+                _snap(_aggregate(deltas, metric)),
+                tuple(_snap(d) for d in sorted((abs(d) for d in deltas), reverse=True)),
             )
 
         start = (0,) * m
@@ -605,7 +632,7 @@ def finalize_solutions(
     max_solutions: int | None = None,
     in_limits_fallback: Callable[[], list[Solution]] | None = None,
     counts: dict[str, int] | None = None,
-    enumerate_windings: bool = True,
+    enumerate_windings: bool = False,
 ) -> list[Solution]:
     """The shared IK post-processing pipeline: limits -> seed -> truncate.
 
@@ -621,14 +648,23 @@ def finalize_solutions(
         pass empties the set -- the redundant-7R exact in-limits resolver (#359),
         which recovers a narrow in-limits arc the coarse sweep missed. ``None``
         for callers without one (e.g. ``Manipulator``).
-    :param enumerate_windings: when ``True`` (default, #562), a joint whose
+    :param enumerate_windings: when ``True`` (#562), a joint whose
         limits span more than ``2*pi`` contributes every in-limit
         ``q_i + 2*pi*k`` representative, taken as a Cartesian product across
         such joints. These are finite-limit lifts of the same geometric branch,
         not new branches, but they are distinct admissible configurations. Set
         ``False`` for one representative per geometric branch (the pre-6.0
-        result set, and the faster path). Requires ``respect_limits``: the set
-        being enumerated is defined by the limits.
+        result set, and the faster path).
+
+        This says "lift in *this* call", which is why it defaults to ``False``
+        here while the user-facing default on ``Manipulator.solve`` and the
+        artifact ``solve()`` is ``True``: a solve runs this pipeline several
+        times (limit pass, rescue pass, then the ranking pass) and the lifts
+        must be produced exactly once, by the call that yields the returned
+        set. Defaulting off means a pass that forgets to say so cannot
+        double-expand. It is likewise the caller's job to pass ``False`` when
+        the user asked for the raw geometric set, since the final pass runs
+        with ``respect_limits=False`` once the limit filter is behind it.
     :param counts: optional dict; when given, populated with ``dropped_by_limits``
         and ``dropped_by_max_solutions``, plus ``geometric_branches`` and
         ``winding_representatives`` -- reported separately so a caller can tell
@@ -646,9 +682,11 @@ def finalize_solutions(
         if not sols and in_limits_fallback is not None:
             sols = in_limits_fallback()
 
-    # Enumeration is defined relative to the joint limits, so it only runs when
-    # the limit pass did. Arms with no wide-limit joint take the identity path.
-    expanding = enumerate_windings and respect_limits and bool(winding_joints(kb))
+    # Whether this call is the one that lifts is the caller's decision (see the
+    # parameter docs), not something inferred from respect_limits: an artifact
+    # runs this pipeline several times and its final ranking pass passes
+    # respect_limits=False because the limit filter already happened.
+    expanding = enumerate_windings and bool(winding_joints(kb))
     # The size of the complete set, computed arithmetically so it stays truthful
     # when a prefix cap or top-k pruning means the set is never materialized.
     available = count_windings(sols, kb) if expanding else len(sols)
@@ -667,9 +705,7 @@ def finalize_solutions(
         # turn. Under enumeration the finite joints are covered by the expansion
         # itself (collapsing them here would destroy the set), leaving only the
         # continuous joints, whose lift family is infinite.
-        sols = rewrap_to_seed(
-            sols, kb, q_seed, continuous_only=expanding, honor_limits=respect_limits
-        )
+        sols = rewrap_to_seed(sols, kb, q_seed, continuous_only=expanding)
         if expanding:
             if seed_tolerance is None and max_solutions is not None:
                 # Ranked truncation: take the globally nearest max_solutions

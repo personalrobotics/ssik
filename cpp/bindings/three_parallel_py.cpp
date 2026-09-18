@@ -206,7 +206,8 @@ py::tuple native_artifact_solve_py(
     py::array_t<double> hi, py::array_t<int> has_limits, py::array_t<double> target,
     bool respect_limits, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
     bool has_seed_tolerance, double seed_tolerance, int max_solutions, bool allow_rescue,
-    int refinement_max_iters) {
+    int refinement_max_iters,
+    bool enumerate_windings) {
   const ssik::JointConsts<6> c = make_consts(axes, t_left, t_right, types);
 
   ssik::JointLimits<6> lim;
@@ -232,6 +233,12 @@ py::tuple native_artifact_solve_py(
   p.max_solutions = max_solutions;
   p.allow_rescue = allow_rescue;
   p.refinement_max_iters = refinement_max_iters;
+  // Lifting is defined against the joint limits, so a caller who waived them
+  // gets the raw geometric set. Applied here, at the boundary where the
+  // caller's own respect_limits is unambiguous: some of these entry points
+  // run finalize once themselves, others go through an artifact solver whose
+  // final pass runs with respect_limits=false by then.
+  p.enumerate_windings = enumerate_windings && respect_limits;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -367,7 +374,8 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
                                 bool has_seed, py::array_t<double> q_seed,
                                 const std::string& seed_metric, bool has_seed_tolerance,
                                 double seed_tolerance, int max_solutions, bool allow_rescue,
-                                int refinement_max_iters, bool polished) {
+                                int refinement_max_iters, bool polished,
+    bool enumerate_windings) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
   ssik::SrsConsts s;
   s.l_se = l_se;
@@ -410,6 +418,12 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   p.max_solutions = max_solutions;
   p.allow_rescue = allow_rescue;
   p.refinement_max_iters = refinement_max_iters;
+  // Lifting is defined against the joint limits, so a caller who waived them
+  // gets the raw geometric set. Applied here, at the boundary where the
+  // caller's own respect_limits is unambiguous: some of these entry points
+  // run finalize once themselves, others go through an artifact solver whose
+  // final pass runs with respect_limits=false by then.
+  p.enumerate_windings = enumerate_windings && respect_limits;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -446,7 +460,8 @@ py::tuple spherical_shoulder_artifact_solve_py(
     py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
     double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
-    bool polished) {
+    bool polished,
+    bool enumerate_windings) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
   ssik::SphericalShoulderConsts sh;
   auto cf = coef.unchecked<2>();  // (3, 48)
@@ -475,6 +490,12 @@ py::tuple spherical_shoulder_artifact_solve_py(
   p.max_solutions = max_solutions;
   p.allow_rescue = allow_rescue;
   p.refinement_max_iters = refinement_max_iters;
+  // Lifting is defined against the joint limits, so a caller who waived them
+  // gets the raw geometric set. Applied here, at the boundary where the
+  // caller's own respect_limits is unambiguous: some of these entry points
+  // run finalize once themselves, others go through an artifact solver whose
+  // final pass runs with respect_limits=false by then.
+  p.enumerate_windings = enumerate_windings && respect_limits;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -688,7 +709,8 @@ py::tuple general_6r_tensor_artifact_solve_py(
     py::array_t<int> q_mono, py::array_t<double> q_coeff, py::array_t<double> target,
     bool respect_limits, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
     bool has_seed_tolerance, double seed_tolerance, int max_solutions, bool allow_rescue,
-    int refinement_max_iters) {
+    int refinement_max_iters,
+    bool enumerate_windings) {
   const ssik::JointConsts<6> c = make_consts_n<6>(axes, t_left, t_right, types);
   const ssik::RrConsts rr =
       make_rr_consts(alpha, a, d, theta_offset, t_pre_inv, t_post_inv, linearity_joint,
@@ -728,6 +750,12 @@ py::tuple general_6r_tensor_artifact_solve_py(
   p.max_solutions = max_solutions;
   p.allow_rescue = allow_rescue;
   p.refinement_max_iters = refinement_max_iters;
+  // Lifting is defined against the joint limits, so a caller who waived them
+  // gets the raw geometric set. Applied here, at the boundary where the
+  // caller's own respect_limits is unambiguous: some of these entry points
+  // run finalize once themselves, others go through an artifact solver whose
+  // final pass runs with respect_limits=false by then.
+  p.enumerate_windings = enumerate_windings && respect_limits;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -1025,7 +1053,8 @@ py::tuple jointlock_hp_artifact_solve_py(
     py::array_t<int> sub_types, py::array_t<double> lo, py::array_t<double> hi,
     py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
-    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters) {
+    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
+    bool enumerate_windings) {
   constexpr int N = 16;
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
   ssik::JointlockConsts<N> jl;
@@ -1082,6 +1111,12 @@ py::tuple jointlock_hp_artifact_solve_py(
   p.max_solutions = max_solutions;
   p.allow_rescue = allow_rescue;
   p.refinement_max_iters = refinement_max_iters;
+  // Lifting is defined against the joint limits, so a caller who waived them
+  // gets the raw geometric set. Applied here, at the boundary where the
+  // caller's own respect_limits is unambiguous: some of these entry points
+  // run finalize once themselves, others go through an artifact solver whose
+  // final pass runs with respect_limits=false by then.
+  p.enumerate_windings = enumerate_windings && respect_limits;
   auto tm = target.unchecked<2>();
   ssik::Pose T;
   for (int r = 0; r < 4; ++r)
@@ -1126,7 +1161,8 @@ py::tuple jointlock_rr_artifact_solve_py(
     const py::list& q_mono, const py::list& q_coeff, py::array_t<double> lo, py::array_t<double> hi,
     py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
-    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters) {
+    double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
+    bool enumerate_windings) {
   constexpr int N = 16;
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
   ssik::JointlockConsts<N> jl;
@@ -1203,6 +1239,12 @@ py::tuple jointlock_rr_artifact_solve_py(
   p.max_solutions = max_solutions;
   p.allow_rescue = allow_rescue;
   p.refinement_max_iters = refinement_max_iters;
+  // Lifting is defined against the joint limits, so a caller who waived them
+  // gets the raw geometric set. Applied here, at the boundary where the
+  // caller's own respect_limits is unambiguous: some of these entry points
+  // run finalize once themselves, others go through an artifact solver whose
+  // final pass runs with respect_limits=false by then.
+  p.enumerate_windings = enumerate_windings && respect_limits;
   auto tm = target.unchecked<2>();
   ssik::Pose T;
   for (int r = 0; r < 4; ++r)
@@ -1250,7 +1292,8 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("po_coeff"), py::arg("q_rc"), py::arg("q_mono"), py::arg("q_coeff"),
         py::arg("target"), py::arg("respect_limits"), py::arg("has_seed"), py::arg("q_seed"),
         py::arg("seed_metric"), py::arg("has_seed_tolerance"), py::arg("seed_tolerance"),
-        py::arg("max_solutions"), py::arg("allow_rescue"), py::arg("refinement_max_iters"));
+        py::arg("max_solutions"), py::arg("allow_rescue"), py::arg("refinement_max_iters"),
+        py::arg("enumerate_windings") = true);
   m.def("hp_pencil_roots_test", &hp_pencil_roots_test_py, py::arg("f"), py::arg("g"),
         py::arg("real_tol") = 1e-3, py::arg("max_magnitude") = 1e10);
   m.def("hp_eliminate_uw_pairs_test", &hp_eliminate_uw_pairs_test_py, py::arg("t_u"),
@@ -1296,14 +1339,16 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("seed_metric") = "wrap_linf", py::arg("has_seed_tolerance") = false,
         py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
         py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15,
-        py::arg("polished") = false);
+        py::arg("polished") = false,
+        py::arg("enumerate_windings") = true);
   m.def("spherical_shoulder_artifact_solve", &spherical_shoulder_artifact_solve_py, py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("coef"), py::arg("lo"),
         py::arg("hi"), py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
         py::arg("has_seed") = false, py::arg("q_seed"), py::arg("seed_metric") = "wrap_linf",
         py::arg("has_seed_tolerance") = false, py::arg("seed_tolerance") = 0.0,
         py::arg("max_solutions") = -1, py::arg("allow_rescue") = true,
-        py::arg("refinement_max_iters") = 15, py::arg("polished") = false);
+        py::arg("refinement_max_iters") = 15, py::arg("polished") = false,
+        py::arg("enumerate_windings") = true);
   m.def("jointlock_hp_artifact_solve", &jointlock_hp_artifact_solve_py, py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lock_idx"),
         py::arg("q_lock"), py::arg("t_u"), py::arg("t_w_pre"), py::arg("dh_a"), py::arg("dh_l"),
@@ -1314,7 +1359,8 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("respect_limits") = true, py::arg("has_seed") = false, py::arg("q_seed"),
         py::arg("seed_metric") = "wrap_linf", py::arg("has_seed_tolerance") = false,
         py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
-        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15);
+        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15,
+        py::arg("enumerate_windings") = true);
   m.def("jointlock_rr_artifact_solve", &jointlock_rr_artifact_solve_py, py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lock_idx"),
         py::arg("q_lock"), py::arg("alpha"), py::arg("a"), py::arg("d"), py::arg("theta_offset"),
@@ -1326,12 +1372,14 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("respect_limits") = true, py::arg("has_seed") = false, py::arg("q_seed"),
         py::arg("seed_metric") = "wrap_linf", py::arg("has_seed_tolerance") = false,
         py::arg("seed_tolerance") = 0.0, py::arg("max_solutions") = -1,
-        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15);
+        py::arg("allow_rescue") = true, py::arg("refinement_max_iters") = 15,
+        py::arg("enumerate_windings") = true);
   m.def("native_artifact_solve", &native_artifact_solve_py, py::arg("family"), py::arg("axes"),
         py::arg("t_left"), py::arg("t_right"), py::arg("types"), py::arg("lo"), py::arg("hi"),
         py::arg("has_limits"), py::arg("target"), py::arg("respect_limits") = true,
         py::arg("has_seed") = false, py::arg("q_seed"), py::arg("seed_metric") = "wrap_linf",
         py::arg("has_seed_tolerance") = false, py::arg("seed_tolerance") = 0.0,
         py::arg("max_solutions") = -1, py::arg("allow_rescue") = true,
-        py::arg("refinement_max_iters") = 15);
+        py::arg("refinement_max_iters") = 15,
+        py::arg("enumerate_windings") = true);
 }

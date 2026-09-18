@@ -323,6 +323,7 @@ _NATIVE_HOOK = """\
             seed_tolerance=seed_tolerance,
             max_solutions=max_solutions,
             allow_rescue=allow_rescue,
+            enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
         )
         if _native_sols is not None:
@@ -660,6 +661,7 @@ def _render_specialised_solve_orchestrator(
             refinement_max_iters: int = 15,
             seed_metric: str = "wrap_linf",
             seed_tolerance: float | None = None,
+            enumerate_windings: bool = True,
         ):
             """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -834,6 +836,9 @@ def _render_specialised_solve_orchestrator(
                 seed_metric=seed_metric,
                 seed_tolerance=seed_tolerance,
                 max_solutions=max_solutions,
+                # The single lifting stage (#562): the call that yields the
+                # returned set. Skipped when the caller asked for raw geometry.
+                enumerate_windings=enumerate_windings and respect_limits,
             )
         '''
     ).replace("fk_atol = policy.subproblem_numerical", f"fk_atol = {fk_atol_expr}")
@@ -847,8 +852,8 @@ def _render_specialised_solve_orchestrator(
         # Add the `native` kwarg + early native dispatch. Only native-capable
         # families opt in, so every other artifact stays byte-identical.
         template = template.replace(
-            "    seed_tolerance: float | None = None,\n):",
-            "    seed_tolerance: float | None = None,\n    native: bool = True,\n):",
+            "    enumerate_windings: bool = True,\n):",
+            "    enumerate_windings: bool = True,\n    native: bool = True,\n):",
         )
         template = template.replace(
             '        raise ValueError("seed_tolerance requires q_seed")\n'
@@ -876,6 +881,7 @@ _JOINTLOCK_NATIVE_HOOK = """\
             seed_tolerance=seed_tolerance,
             max_solutions=max_solutions,
             allow_rescue=allow_rescue,
+            enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
             jointlock_geometry=_jointlock_native_geometry(),
         )
@@ -1114,6 +1120,7 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
             refinement_max_iters: int = 15,
             seed_metric: str = "wrap_linf",
             seed_tolerance: float | None = None,
+            enumerate_windings: bool = True,
         ):
             """Inverse kinematics. Returns ``list[Solution]``.
 
@@ -1302,6 +1309,9 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
                 seed_metric=seed_metric,
                 seed_tolerance=seed_tolerance,
                 max_solutions=max_solutions,
+                # The single lifting stage (#562): the call that yields the
+                # returned set. Skipped when the caller asked for raw geometry.
+                enumerate_windings=enumerate_windings and respect_limits,
             )
         '''
     )
@@ -1309,8 +1319,8 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
         # Add the `native` kwarg + early native dispatch (jointlock: RR tensors or
         # HP kernel, from the sidecar .npz). Only fires when native=True.
         template = template.replace(
-            "    seed_tolerance: float | None = None,\n):",
-            "    seed_tolerance: float | None = None,\n    native: bool = True,\n):",
+            "    enumerate_windings: bool = True,\n):",
+            "    enumerate_windings: bool = True,\n    native: bool = True,\n):",
         )
         template = template.replace(
             '        raise ValueError("seed_tolerance requires q_seed")\n'
@@ -1554,6 +1564,7 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
             refinement_max_iters: int = 15,
             seed_metric: str = "wrap_linf",
             seed_tolerance: float | None = None,
+            enumerate_windings: bool = True,
         ):
             \"\"\"Inverse kinematics. Returns ``list[Solution]``.
 
@@ -1692,6 +1703,9 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
                 seed_metric=seed_metric,
                 seed_tolerance=seed_tolerance,
                 max_solutions=max_solutions,
+                # The single lifting stage (#562): the call that yields the
+                # returned set. Skipped when the caller asked for raw geometry.
+                enumerate_windings=enumerate_windings and respect_limits,
             )
         """
     )
@@ -1701,8 +1715,8 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
         # families with a native thin-wrapper core opt in; others stay
         # byte-identical.
         template = template.replace(
-            "    seed_tolerance: float | None = None,\n):",
-            "    seed_tolerance: float | None = None,\n    native: bool = True,\n):",
+            "    enumerate_windings: bool = True,\n):",
+            "    enumerate_windings: bool = True,\n    native: bool = True,\n):",
         )
         template = template.replace(
             "    if seed_tolerance is not None and q_seed is None:\n"
@@ -1720,6 +1734,7 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
             "            seed_tolerance=seed_tolerance,\n"
             "            max_solutions=max_solutions,\n"
             "            allow_rescue=allow_rescue,\n"
+            "            enumerate_windings=enumerate_windings,\n"
             "            refinement_max_iters=refinement_max_iters,\n"
             "        )\n"
             "        if _native_sols is not None:\n"

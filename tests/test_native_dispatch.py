@@ -158,11 +158,24 @@ def test_native_relative_completeness(arm_name: str) -> None:
         # Drop near-continuum / near-singular poses (mirror the standalone golden:
         # count <= 130 and stable under a 1e-6 perturbation), where native and
         # Python legitimately return different sound subsets of the manifold.
-        if len(py) > 130:
+        #
+        # Measured on the geometric branches, with winding enumeration off: the
+        # threshold is about how densely the solver sampled the self-motion
+        # manifold, and lifting each branch to its in-limit 2*pi coordinates
+        # (#562, x16 on xarm7) multiplies the count without making the pose any
+        # closer to a continuum. Against the lifted count nearly every pose
+        # tripped the filter and the test ran out of samples.
+        geometric = mod.solve(t, enumerate_windings=False)
+        if len(geometric) > 130:
             continue
         stable = all(
-            len(mod.solve(np.asarray(poe_forward_kinematics(kb, q + dq), dtype=np.float64)))
-            == len(py)
+            len(
+                mod.solve(
+                    np.asarray(poe_forward_kinematics(kb, q + dq), dtype=np.float64),
+                    enumerate_windings=False,
+                )
+            )
+            == len(geometric)
             for dq in (rng.uniform(-1e-6, 1e-6, len(q)), rng.uniform(-1e-6, 1e-6, len(q)))
         )
         if not stable:

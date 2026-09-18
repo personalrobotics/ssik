@@ -177,6 +177,9 @@ inline std::vector<Solution<6>> three_parallel_artifact_solve(const JointConsts<
   }
   ArtifactParams<6> p_seed = p;
   p_seed.respect_limits = false;
+  // The single lifting stage (#562): this is the call that yields the returned
+  // set. Skipped when the caller wanted the raw geometric set.
+  p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
   return finalize_solutions<6>(std::move(in_limits), c, lim, p_seed);
 }
 

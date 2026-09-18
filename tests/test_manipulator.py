@@ -357,27 +357,15 @@ def test_ik_overhead_under_300us() -> None:
     )
 
 
-def test_winding_enumeration_cost_is_proportional() -> None:
-    """Enumeration may cost per configuration returned, but must not make the
-    capped paths pay for configurations they discard (#562).
-
-    The tracking idiom asks for one solution; it must not build the other 255.
-    """
+def test_winding_enumeration_counts_but_does_not_break_the_wrapper() -> None:
+    """The wrapper lifts each geometric branch to its in-limit representatives
+    (#562). The cost of that is gated in tests/test_winding_enumeration.py; here
+    we only pin the count so the overhead gate above keeps measuring the
+    un-enumerated path deliberately rather than by accident."""
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
-    q = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
-    T = arm.fk(q)
-
-    plain = best_call_ms(lambda: arm.solve(T, enumerate_windings=False), warmup=20, runs=100)
-    full = best_call_ms(lambda: arm.solve(T), warmup=20, runs=100)
-    tracked = best_call_ms(lambda: arm.solve(T, q_seed=q, max_solutions=1), warmup=20, runs=100)
-
+    T = arm.fk(np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]))
+    assert len(arm.solve(T, enumerate_windings=False)) == 8
     assert len(arm.solve(T)) == 256  # 8 branches x 2^5 wide joints
-    # A capped, seeded solve stays close to the un-enumerated cost rather than
-    # scaling with the 256 it could have returned.
-    assert tracked < plain + 0.5 * (full - plain), (
-        f"seeded max_solutions=1 pays for discarded windings: tracked={tracked * 1e3:.0f}us "
-        f"plain={plain * 1e3:.0f}us full={full * 1e3:.0f}us"
-    )
 
 
 # ---------------------------------------------------------------------------

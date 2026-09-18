@@ -126,9 +126,16 @@ def test_native_seeded_tracking_recovers_seed(arm: str, tol: float) -> None:
 
 
 def test_unseeded_count_unchanged_ur5e() -> None:
-    # Step 1 must not change unseeded counts (MINOR-safe): principal reps only.
+    """Step 1 did not change unseeded counts, which is what made it MINOR-safe.
+
+    Step 2 (#562, 6.0.0) deliberately does: each geometric branch is lifted to
+    its in-limit ``2*pi`` representatives. ``enumerate_windings=False`` is the
+    documented way back to the step-1 result set, and this asserts step 1's
+    invariant against it -- the seed-relative rewrapping being tested in this
+    file still must not add or drop branches.
+    """
     m = importlib.import_module("ssik.prebuilt.universal_robots.ur5e_ik")
     rng = np.random.default_rng(1)
     for _ in range(10):
         q = rng.uniform(-2.0, 2.0, 6)
-        assert 1 <= len(m.solve(m.fk(q))) <= 8
+        assert 1 <= len(m.solve(m.fk(q), enumerate_windings=False)) <= 8

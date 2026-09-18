@@ -41,7 +41,14 @@ def _solve_ms(name: str) -> float:
     arm = load_manifest()[name]
     mod = importlib.import_module(arm.hier_module or f"ssik.prebuilt.{name}")
     t_target = mod.fk(np.array(arm.sample_q))
-    return float(best_call_ms(lambda: mod.solve(t_target), runs=_RUNS))
+    # Measured with enumerate_windings=False (#562): 46 of the shipped arms
+    # have a joint whose limits span more than one turn, and lifting each
+    # geometric branch to its in-limit representatives multiplies the returned
+    # set (x32 on a UR, x243 on a Doosan). That cost is proportional to the
+    # output the caller asked for, not a solver regression, and it would swamp
+    # the signal this gate exists to catch. The cost of the default path is
+    # gated separately by test_winding_enumeration_cost_is_proportional.
+    return float(best_call_ms(lambda: mod.solve(t_target, enumerate_windings=False), runs=_RUNS))
 
 
 def main() -> int:

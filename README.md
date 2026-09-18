@@ -578,6 +578,29 @@ By default `solve()` runs **`respect_limits=True`**: out-of-URDF-limit branches 
 
 The `allow_refinement=True` opt-in runs LM polish per algebraic candidate at a few hundred microseconds per branch, useful when an algebraic candidate lands just above `fk_atol` near a kinematic singularity.
 
+### Joints that can turn more than once
+
+A joint whose limits span more than a full turn — the UR family's `[−2π, 2π]`, Doosan's `[−3π, 3π]`; 46 of the 72 prebuilt arms have at least one — reaches the same pose at several different joint coordinates. With limits `[−2π, 2π]`, −10° and +350° are the same place and different configurations: different distance from where the robot is now, different room to keep turning, different chance of hitting the limit mid-trajectory.
+
+Since v6.0, `solve()` returns all of them:
+
+```python
+sols = ur5e_ik.solve(T)            # 256 = 8 geometric branches x 2^5 wide joints
+sols = ur5e_ik.solve(T, enumerate_windings=False)   # 8, one per geometric branch
+```
+
+These are **finite-limit lifts** of the same geometric branch, not additional IK branches, and the distinction is kept in the diagnostics rather than blurred:
+
+```python
+sols, diag = arm.solve(T, explain=True)
+diag.geometric_branches        # 8   -- real IK branches
+diag.winding_representatives   # 256 -- their in-limit coordinates
+```
+
+Ranking accounts for it. A finite joint's configuration space is an interval, not a circle: it cannot rotate through its limit, so its distance to a seed is the ordinary coordinate difference, and +3 really is 6 radians from −3. Only continuous joints (`limits=None`), which can always take the short way, are measured modulo 2π. So a seed at +350° gets the +350° representative back rather than an equivalent one a full turn away.
+
+Returning 32× more configurations costs proportionally more, but a capped solve never pays for what it discards: `solve(T, q_seed=q, max_solutions=1)` — the tracking idiom — returns the globally nearest configuration for the same cost as the un-enumerated solve, and is identical to enumerating, ranking and truncating.
+
 ### Diagnosing an empty result: `explain=True`
 
 If `solve()` returns `[]`, you can attribute the failure with `explain=True` instead of guessing:
@@ -746,7 +769,7 @@ There are three different questions an IK system can answer: (1) **can the kinem
 
 **Numerical IK** (MINK, TRAC-IK, KDL-LMA) solves a local optimization from a seed and returns one converged configuration — often exactly the right interface for servoing. ssik instead exposes multiple kinematically valid branches, separating *kinematic feasibility* from *which feasible configuration is best for the task* (a planner can enumerate branches and choose by clearance, limits, manipulability, or distance from the current pose).
 
-**EAIK** (Ostermeier 2024) automatically recognizes several geometric manipulator families and derives efficient subproblem-decomposition solvers for them; on those families it is extremely fast and accurate. The table below compares the current EAIK implementation on the supplied fixtures **as-is** against ssik. A `refuses` row means EAIK did not produce a valid solution for that fixture through this benchmark path — not a claim that the robot could never be handled via joint-locking or remodeling. On geometries EAIK recognizes, its specialized C++ is generally faster; ssik's emphasis is retaining enumerative IK as the geometry becomes less structurally convenient, always checking returned solutions against the original FK. The `ssik` column is `solve()` at its **default** (native), so it reflects what you actually get.
+**EAIK** (Ostermeier 2024) automatically recognizes several geometric manipulator families and derives efficient subproblem-decomposition solvers for them; on those families it is extremely fast and accurate. The table below compares the current EAIK implementation on the supplied fixtures **as-is** against ssik. A `refuses` row means EAIK did not produce a valid solution for that fixture through this benchmark path — not a claim that the robot could never be handled via joint-locking or remodeling. On geometries EAIK recognizes, its specialized C++ is generally faster; ssik's emphasis is retaining enumerative IK as the geometry becomes less structurally convenient, always checking returned solutions against the original FK. The `ssik` column is `solve()` on the native backend (the default) over the geometric solution set, which is the like-for-like comparison against what EAIK returns. On an arm with a joint that can turn more than once, ssik's *default* additionally lifts each branch to its in-limit coordinates ([above](#joints-that-can-turn-more-than-once)) and costs proportionally more for the larger set it returns; `enumerate_windings=False` is the benchmarked behaviour.
 
 The table is **measured automatically** by [`scripts/regen_bench.py`](scripts/regen_bench.py) (both libraries over the same 200 random reachable poses per arm, mean ± 95% CI via 1000-resample bootstrap) and stored in the manifest, so it refreshes when an arm is added — no hand-maintained numbers. FK residual is the Frobenius norm `‖FK(q) − T‖`. Each library is fed the same manufacturer fixture as-is (no manual joint-locking).
 
