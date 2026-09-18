@@ -580,7 +580,7 @@ The `allow_refinement=True` opt-in runs LM polish per algebraic candidate at a f
 
 ### Joints that can turn more than once
 
-A joint whose limits span more than a full turn — the UR family's `[−2π, 2π]`, Doosan's `[−3π, 3π]`; 46 of the 72 prebuilt arms have at least one — reaches the same pose at several different joint coordinates. With limits `[−2π, 2π]`, −10° and +350° are the same place and different configurations: different distance from where the robot is now, different room to keep turning, different chance of hitting the limit mid-trajectory.
+A joint whose limits span more than a full turn — the UR family's `[−2π, 2π]`, and 46 of the 72 prebuilt arms have at least one — reaches the same pose at several different joint coordinates. With limits `[−2π, 2π]`, −10° and +350° are the same place and different configurations: different distance from where the robot is now, different room to keep turning, different chance of hitting the limit mid-trajectory.
 
 Since v6.0, `solve()` returns all of them:
 

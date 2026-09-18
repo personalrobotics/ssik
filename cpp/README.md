@@ -20,6 +20,32 @@ std::vector<Solution<arm::DOF>> sols = arm::solve(T);  // all in-limits IK
 `Pose`, `Solution`, and `fk<DOF>` live in namespace `ssik`; the per-arm
 `consts()`, `solve()`, and `DOF` live in `ssik::<arm>_ik`. `solve` takes an
 optional `ArtifactParams<DOF>` for limits / seed ranking / `max_solutions`.
+Its defaults match the Python API exactly, so the same call returns the same
+set on either side.
+
+### Joints that can turn more than once
+
+A joint whose limits span more than a full turn (the UR family's `[-2π, 2π]`)
+reaches the same pose at several different joint coordinates, and since v6.0
+`solve()` returns all of them — 256 for a UR pose rather than 8. They are
+in-limit **lifts** of the same geometric branch, not extra IK branches: same
+end-effector pose, different admissible configuration, different distance from
+wherever the robot is now.
+
+```cpp
+ssik::ArtifactParams<arm::DOF> p;
+p.enumerate_windings = false;         // one representative per geometric branch
+auto sols = arm::solve(T, p);
+
+p.enumerate_windings = true;          // the default
+p.has_seed = true; p.q_seed = q_now;
+p.max_solutions = 1;                  // nearest configuration; skips building the rest
+auto tracked = arm::solve(T, p);
+```
+
+A seeded, capped solve costs the same as the un-enumerated one — it takes the
+globally nearest solution directly instead of materialising what it would
+discard.
 
 ## Use it (CMake)
 

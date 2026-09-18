@@ -754,6 +754,9 @@ inline std::vector<Solution<6>> hp_artifact_solve(const JointConsts<6>& c, const
   };
 
   ArtifactParams<6> p_limits;
+  // Intermediate pass: never lift here, or the lifts would be produced
+  // twice (see ArtifactParams::enumerate_windings).
+  p_limits.enumerate_windings = false;
   p_limits.respect_limits = p.respect_limits;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<6>> in_limits = finalize_solutions<6>(core(T), c, lim, p_limits);

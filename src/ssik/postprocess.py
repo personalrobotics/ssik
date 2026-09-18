@@ -182,7 +182,7 @@ def winding_joints(kb: KinBody) -> list[tuple[int, float, float]]:
     """The joints that admit more than one in-limit winding (#562).
 
     A revolute joint with finite limits spanning more than ``2*pi`` (UR-family
-    ``[-2*pi, 2*pi]``, Doosan ``[-3*pi, 3*pi]``) has several distinct
+    ``[-2*pi, 2*pi]``) has several distinct
     joint-coordinate representatives of the *same* geometric branch. Those are
     finite-limit lifts, not new IK branches, but they are distinct admissible
     configurations with different distances and feasible motions.
@@ -515,7 +515,7 @@ def _windings_topk(
     Exactly equivalent to ``expand_windings`` -> ``nearest_to_seed`` ->
     ``take_first(k)``, including tie order, but it never builds the discarded
     configurations. That matters: a UR lifts 8 geometric branches to 256
-    configurations and a Doosan to 1944, while the tracking idiom asks for one.
+    configurations, while the tracking idiom asks for one.
 
     Two facts make the pruning exact. First, a configuration in the global
     top-``k`` is in its own branch's top-``k`` (at most ``k-1`` things precede

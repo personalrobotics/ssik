@@ -115,6 +115,9 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
   // loudly at the gate instead of being hidden. HP-needing arms (kassow) are
   // deferred to the Study-quaternion kernel, not rescued into looking complete.
   ArtifactParams<7> p_limits;
+  // Intermediate pass: never lift here, or the lifts would be produced
+  // twice (see ArtifactParams::enumerate_windings).
+  p_limits.enumerate_windings = false;
   p_limits.respect_limits = p.respect_limits;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);
@@ -174,6 +177,9 @@ std::vector<Solution<7>> jointlock_hp_artifact_solve(
   };
 
   ArtifactParams<7> p_limits;
+  // Intermediate pass: never lift here, or the lifts would be produced
+  // twice (see ArtifactParams::enumerate_windings).
+  p_limits.enumerate_windings = false;
   p_limits.respect_limits = p.respect_limits;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);

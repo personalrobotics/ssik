@@ -45,11 +45,13 @@ struct ArtifactParams {
   int max_solutions = -1;  // -1 => None (no cap)
   bool allow_rescue = true;
   int refinement_max_iters = 15;
-  // #562 step 2. Defaults FALSE so that params a solver constructs itself --
-  // the limit pass, the rescue pass -- never expand: a solve runs finalize
-  // several times and the lifts must be produced exactly once, by the call that
-  // yields the returned set. The binding sets it from the caller's argument.
-  bool enumerate_windings = false;
+  // #562 step 2. TRUE, because this struct is also the public default for a C++
+  // consumer calling solve(T) with no params, and that must match what Python
+  // returns. A solve runs finalize several times (limit pass, rescue pass, then
+  // the ranking pass) and the lifts must be produced exactly once, so every
+  // internally-constructed params sets this to false explicitly -- see the
+  // p_limits declarations in the solvers.
+  bool enumerate_windings = true;
 };
 
 namespace finalize_detail {
@@ -388,7 +390,7 @@ std::vector<Solution<N>> rewrap_to_seed(std::vector<Solution<N>> sols,
 //
 // Exactly equivalent to expand -> rank -> truncate, ties included, but it never
 // builds the discarded configurations: a UR lifts 8 branches to 256 and a
-// Doosan to 1944, while the tracking idiom asks for one. Two facts make the
+// configurations, while the tracking idiom asks for one. Two facts make the
 // pruning exact. A configuration in the global top-k is in its own branch's
 // top-k, so per-branch top-k then a global merge loses nothing. And within a
 // branch the per-joint choices are independent while both metrics are

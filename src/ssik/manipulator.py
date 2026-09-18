@@ -533,7 +533,7 @@ class Manipulator:
             geometric set (analysis / debugging).
         :param enumerate_windings: when ``True`` (default since v6.0, #562),
             a joint whose limits span more than one turn (UR-family
-            ``[-2*pi, 2*pi]``, Doosan ``[-3*pi, 3*pi]``) contributes every
+            ``[-2*pi, 2*pi]``) contributes every
             in-limit ``q_i + 2*pi*k`` representative, as a Cartesian product
             across such joints. These are finite-limit lifts of the same
             geometric branch, not new branches, but they are distinct

@@ -72,7 +72,7 @@ The `solve()` pipeline already applies these by default (when `respect_limits=Tr
 ### Winding representatives
 
 A revolute joint whose limits span more than one turn (the UR family's
-`[-2*pi, 2*pi]`, Doosan's `[-3*pi, 3*pi]`) has several in-limit
+`[-2*pi, 2*pi]`) has several in-limit
 `q + 2*pi*k` representatives of the *same* geometric branch. They reach the
 same pose but are different admissible configurations, at different distances
 and with different motions available from where the robot is now. `solve()`

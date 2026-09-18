@@ -240,6 +240,9 @@ inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
     return spherical_shoulder_core(c, sh, Tp, polished, p.refinement_max_iters);
   };
   ArtifactParams<7> p_limits;
+  // Intermediate pass: never lift here, or the lifts would be produced
+  // twice (see ArtifactParams::enumerate_windings).
+  p_limits.enumerate_windings = false;
   p_limits.respect_limits = p.respect_limits;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);

@@ -67,6 +67,9 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
   //    emptying a non-empty in-limits set is a user preference, not a missing
   //    solution, and must not trigger a rescue (#524).
   ArtifactParams<7> p_limits;
+  // Intermediate pass: never lift here, or the lifts would be produced
+  // twice (see ArtifactParams::enumerate_windings).
+  p_limits.enumerate_windings = false;
   p_limits.respect_limits = p.respect_limits;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits, [&]() {
