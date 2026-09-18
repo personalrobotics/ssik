@@ -83,6 +83,48 @@ def test_seeded_native_matches_python_ur5e() -> None:
             assert np.allclose(nat[0].q, pyth[0].q, atol=1e-6), "native/python seed rep differ"
 
 
+# One representative per native family + the per-arm seed-recovery tolerance.
+# Most recover the seed exactly (exact solver, or the #380 seeded_track Newton
+# fast path). jointlock is a 16-sample lock sweep, so it lands on the nearest
+# sample rather than the seed -- identically on both backends.
+_SEEDED_ARMS = [
+    ("universal_robots.ur5e_ik", 1e-6),  # three_parallel
+    ("fanuc.m710ic_ik", 1e-6),  # spherical_two_parallel
+    ("ufactory.xarm6_ik", 1e-6),  # general_6r (RR)
+    ("rokae.xmatepro7_ik", 1e-6),  # srs
+    ("abb.yumi_left_ik", 1e-6),  # srs_polished (seeded_track, #562)
+    ("ufactory.xarm7_ik", 1e-6),  # spherical_shoulder_polished (seeded_track)
+    ("franka.panda_ik", 1e-6),  # spherical_shoulder (seeded_track)
+    ("kassow.kr810_ik", 1.0),  # jointlock: nearest lock sample
+]
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize(("arm", "tol"), _SEEDED_ARMS, ids=[a for a, _ in _SEEDED_ARMS])
+def test_native_seeded_tracking_recovers_seed(arm: str, tol: float) -> None:
+    """Seeded tracking on the NATIVE path returns a config near the seed -- never a
+    2*pi winding jump -- and agrees with the Python path (#562)."""
+    m = importlib.import_module(f"ssik.prebuilt.{arm}")
+    kb = m._KB
+    rng = np.random.default_rng(3)
+    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in kb.joints]
+    for _ in range(5):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+        T = m.fk(q)
+        nat = m.solve(T, q_seed=q, max_solutions=1, native=True)
+        pyth = m.solve(T, q_seed=q, max_solutions=1, native=False)
+        assert nat, f"{arm}: native seeded solve returned nothing"
+        assert pyth, f"{arm}: python seeded solve returned nothing"
+        d_nat = float(np.max(np.abs(nat[0].q - q)))
+        d_py = float(np.max(np.abs(pyth[0].q - q)))
+        # The #562 invariant: never a winding jump on either backend.
+        assert d_nat < np.pi, f"{arm}: native seeded jumped {d_nat:.2f} rad from seed"
+        assert d_py < np.pi, f"{arm}: python seeded jumped {d_py:.2f} rad from seed"
+        assert d_nat <= tol, f"{arm}: native seeded Δ={d_nat:.2e} > {tol:.0e}"
+        assert d_py <= tol, f"{arm}: python seeded Δ={d_py:.2e} > {tol:.0e}"
+        assert np.linalg.norm(m.fk(nat[0].q) - T) < 1e-6, f"{arm}: native seeded FK miss"
+
+
 def test_unseeded_count_unchanged_ur5e() -> None:
     # Step 1 must not change unseeded counts (MINOR-safe): principal reps only.
     m = importlib.import_module("ssik.prebuilt.universal_robots.ur5e_ik")

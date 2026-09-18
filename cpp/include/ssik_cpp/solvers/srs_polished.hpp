@@ -85,6 +85,20 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
     limits[i] = lim.present[i] ? std::array<double, 2>{lim.lo[i], lim.hi[i]}
                                : std::array<double, 2>{-M_PI, M_PI};
 
+  // Seeded numerical-tracking fast path (#380), as in srs.hpp: Newton-continue
+  // from q_seed and keep it only if it converges AND stays near the seed
+  // (seeded_track's max_dist guard rejects a branch jump). Without this the
+  // approximate-SRS arms fall back to the sampled swivel manifold, whose nearest
+  // sample can sit radians from the seed -- bad for trajectory tracking (#562).
+  // No in-limits fallback: a tracked seed failing limits/tolerance falls through.
+  if (p.has_seed && p.max_solutions == 1) {
+    const auto tracked = seeded_track<7>(c, p.q_seed, T);
+    if (tracked) {
+      const auto fast = finalize_solutions<7>({*tracked}, c, lim, p);
+      if (!fast.empty()) return fast;
+    }
+  }
+
   // core: exact SRS candidates (reach-slackened, keep-all) -> LM-polish -> dedup.
   const auto core = [&](const Pose& Tp) {
     const auto raw =

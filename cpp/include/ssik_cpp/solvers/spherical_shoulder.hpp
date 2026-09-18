@@ -223,6 +223,19 @@ inline std::vector<Solution<7>> spherical_shoulder_core(const JointConsts<7>& c,
 inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
     const JointConsts<7>& c, const SphericalShoulderConsts& sh, const JointLimits<7>& lim,
     const Pose& T, const ArtifactParams<7>& p, bool polished) {
+  // Seeded numerical-tracking fast path (#380), as in srs.hpp: Newton-continue
+  // from q_seed, kept only if it converges AND stays near the seed (seeded_track's
+  // max_dist guard rejects a branch jump). Without it, seeded tracking falls back
+  // to the sampled arm-angle manifold, whose nearest sample can sit radians from
+  // the seed (#562). No in-limits fallback: a failing track falls through below.
+  if (p.has_seed && p.max_solutions == 1) {
+    const auto tracked = seeded_track<7>(c, p.q_seed, T);
+    if (tracked) {
+      const auto fast = finalize_solutions<7>({*tracked}, c, lim, p);
+      if (!fast.empty()) return fast;
+    }
+  }
+
   const auto core = [&](const Pose& Tp) {
     return spherical_shoulder_core(c, sh, Tp, polished, p.refinement_max_iters);
   };
