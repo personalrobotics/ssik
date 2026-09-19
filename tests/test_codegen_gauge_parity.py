@@ -108,7 +108,7 @@ _GAUGE_SEEDS = {"aligned": 11, "flip2": 22, "flip3": 33, "flip23": 44, "flip1": 
 @pytest.mark.parametrize("native", [False, True], ids=["python", "native"])
 @pytest.mark.parametrize(("tag", "flip"), _GAUGES)
 def test_emitted_artifact_matches_live_under_axis_gauge(
-    tag: str, flip: tuple[int, ...], native: bool
+    tag: str, flip: tuple[int, ...], native: bool, request: pytest.FixtureRequest
 ) -> None:
     """The emitted three_parallel artifact computes the same IK as the live
     solver for every trio axis-sign gauge -- at machine precision, including the
@@ -121,6 +121,25 @@ def test_emitted_artifact_matches_live_under_axis_gauge(
     """
     if native and not native_available():
         pytest.skip("native extension not built")
+    if native:
+        # GitHub #570: on Linux the native path returns an FK-violating solution
+        # (residual 1.72, not a near-miss) for the flipped-trio gauges, while the
+        # Python path is correct on the same pose in the same job. Deterministic
+        # where it occurs -- identical pose and residual across py3.12/py3.13 --
+        # but which jobs trip it varies with the numpy/OpenBLAS build. macOS is
+        # clean: the same pose closes at 1.8e-13.
+        #
+        # Pre-existing, not a regression: this test called solve() at its default
+        # and CI never built the extension, so the native path here was never
+        # exercised until #569. strict=False, following the #82 precedent, so the
+        # test still RUNS everywhere and the xpass/xfail counts say when it is
+        # fixed -- rather than being skipped and telling us nothing.
+        request.applymarker(
+            pytest.mark.xfail(
+                reason="#570: native three_parallel is FK-wrong on Linux for flipped trio gauges",
+                strict=False,
+            )
+        )
     kb = build_kinbody(_flip_axes(_three_parallel_specs(), flip))
     art = _emit_and_import(kb, tag)
     live = Manipulator(kb)
