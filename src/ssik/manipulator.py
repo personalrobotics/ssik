@@ -44,6 +44,8 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from ssik.chart import ChartFamily
+
 __all__ = ["Manipulator"]
 
 
@@ -99,7 +101,14 @@ class Manipulator:
         loader). Most users should use :meth:`from_urdf` instead.
     """
 
-    __slots__ = ("_kb", "_plan", "_solver_module", "_solver_params", "_warned_cold_coverage")
+    __slots__ = (
+        "_kb",
+        "_plan",
+        "_policy",
+        "_solver_module",
+        "_solver_params",
+        "_warned_cold_coverage",
+    )
 
     def __init__(
         self,
@@ -115,6 +124,7 @@ class Manipulator:
             Defaults to :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
         """
         self._kb: KinBody = kinbody
+        self._policy: TolerancePolicy = policy
         self._plan: DispatchPlan = dispatch(kinbody, policy=policy)
         self._solver_module: ModuleType = importlib.import_module(
             SOLVERS[self._plan.solver_name].module_path
@@ -442,6 +452,33 @@ class Manipulator:
             raise ValueError(f"fk expected q of shape ({self.dof},), got {q_arr.shape}")
         result: NDArray[np.float64] = poe_forward_kinematics(self._kb, q_arr)
         return result
+
+    # ------------------------------------------------------------------
+    # Self-motion charts (redundant 7R)
+    # ------------------------------------------------------------------
+
+    def charts(self, T_target: ArrayLike, *, native: bool = True) -> ChartFamily:
+        """Charts of the self-motion manifold at ``T_target`` (redundant 7R only).
+
+        Returns a :class:`~ssik.chart.ChartFamily`: every closed-form branch
+        ``q(t)`` of ``FK^-1(T_target)`` with a stable label and its domain, plus
+        the inverse map ``locate(q)``. See :mod:`ssik.chart` for the per-family
+        meaning of the label and the redundancy coordinate.
+
+        :param native: use the C++ extension when available (default); ``False``
+            forces the pure-Python reference.
+        :raises NotImplementedError: when the dispatched solver has no
+            closed-form chart (6R arms, approximate-class 7R, joint-lock 7R).
+        """
+        from ssik.chart import charts as _charts
+
+        return _charts(
+            self._kb,
+            T_target,
+            solver_name=self._plan.solver_name,
+            policy=self._policy,
+            native=native,
+        )
 
     # ------------------------------------------------------------------
     # Inverse kinematics

@@ -76,6 +76,33 @@ c++ -std=c++20 -I<install>/include -I<eigen-include> my_app.cpp
 `examples/consumer/` is a standalone downstream project that consumes the
 **installed** package via `find_package` (the "C++ consumer" CI smoke builds it).
 
+## Self-motion charts (redundant 7R)
+
+`ssik_cpp/chart.hpp` exposes the self-motion manifold of a 7R pose as charts, the
+C++ counterpart of `ssik.chart`: one continuous branch `q(t)` per chart with a
+stable label and its domain, plus the inverse map `locate(q)`. Build a family once
+per target pose (microseconds: the elbow-reachability arcs are closed form) and
+evaluate per tick; `q(t)` and `locate(q)` cost about a microsecond. A chart's
+`domain(i)` is computed on first request per reachable arc and cached.
+
+```cpp
+#include "ssik_cpp/chart.hpp"
+// Franka Panda / FR3: t = q6. `coef` is the arm's baked (3,48) geometry
+// (SphericalShoulderConsts::coef in the generated <arm>_ik.hpp).
+auto family = ssik::chart::SphericalShoulderCharts::build(coef, T_target);
+double t, mismatch;
+int chart = family.locate(q_now, 1e-6, t, mismatch);   // -1 if q_now is not on FK^-1(T)
+std::array<double, 7> q;
+family.q(chart, t + 0.01, q);                           // a step along the arm's own branch
+const auto& dom = family.domain(chart);                 // its q6 intervals, computed on first request
+std::array<double, 7> dq;
+family.tangent(chart, t, dq);                           // dq/dt along the branch (srs.tangent(i, psi) is closed form)
+
+// KUKA iiwa and other exact SRS arms: t = elbow swivel, charts are full circles.
+ssik::chart::SrsCharts srs;
+srs.init(joint_consts, srs_consts, T_target);
+```
+
 ## Which arms
 
 The committed `gen/<arm>_ik.hpp` are the shippable artifacts. Generate any native

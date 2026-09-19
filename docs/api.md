@@ -11,6 +11,7 @@ Auto-generated from docstrings. The public surface is small by design — most u
         - from_urdf
         - solve
         - fk
+        - charts
         - dof
         - solver_name
         - kinbody
@@ -34,6 +35,18 @@ Returned alongside the solution list when `solve(T, explain=True)`.
 ::: ssik.TolerancePolicy
     options:
       show_root_heading: false
+
+## Self-motion charts: `ssik.chart`
+
+For redundant 7R arms with a closed-form solver (`seven_r.spherical_shoulder`: Franka Panda, FR3; `seven_r.srs`: KUKA iiwa and other exactly-concurrent SRS arms), `Manipulator.charts(T)` returns the self-motion manifold at `T` as charts: one continuous branch `q(t)` each, with a stable branch `label`, its `domain` in the redundancy coordinate, its `tangent(t)` as a unit direction and a rate (closed form on SRS arms, a fourth-order difference of the closed form on the Panda), and the inverse map `locate(q)`. With the native extension (Linux and macOS wheels) a family builds in about 20 µs on a target move and `q(t)` and `locate(q)` run in a few µs, so all of it fits a 1 kHz control loop; a chart's `domain` is computed on first access (about 0.4 ms for a Panda arc) and cached. The Panda's elbow-reachability arcs are closed form (`spherical_shoulder.elbow_arcs`), so nothing is scanned at build time. `native=False` selects the pure-Python reference.
+
+::: ssik.chart
+    options:
+      show_root_heading: false
+      members:
+        - charts
+        - ChartFamily
+        - Chart
 
 ## Postprocess helpers
 
