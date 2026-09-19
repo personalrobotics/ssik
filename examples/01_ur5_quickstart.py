@@ -55,13 +55,31 @@ def main() -> None:
     # 3. Inverse kinematics — full redundancy enumeration.
     # ---------------------------------------------------------------------
     t = time.perf_counter()
-    sols = arm.solve(T)
+    sols = arm.solve(T, enumerate_windings=False)
     elapsed_ms = (time.perf_counter() - t) * 1000
-    print(f"IK (full enumeration): {len(sols)} solutions in {elapsed_ms:.2f} ms")
+    print(f"IK (geometric branches): {len(sols)} solutions in {elapsed_ms:.2f} ms")
     print(f"  max FK residual: {max(s.fk_residual for s in sols):.2e}")
     print("  branches:")
     for i, s in enumerate(sols):
         print(f"    [{i}] q = {[round(x, 3) for x in s.q]}")
+    print()
+
+    # ---------------------------------------------------------------------
+    # 3b. Winding representatives (#562). Five of the UR5's joints have limits
+    #     spanning more than a full turn, so each branch above is reachable at
+    #     several different joint coordinates -- same pose, different
+    #     configuration. solve() returns all of them by default.
+    # ---------------------------------------------------------------------
+    t = time.perf_counter()
+    lifted = arm.solve(T)
+    elapsed_ms = (time.perf_counter() - t) * 1000
+    print(f"IK (default, with winding lifts): {len(lifted)} solutions in {elapsed_ms:.2f} ms")
+    print(f"  {len(sols)} geometric branches x 2^5 wide joints = {len(lifted)}")
+    print("  the same branch at three of its in-limit coordinates:")
+    branch0 = [s for s in lifted if np.allclose(np.mod(s.q - sols[0].q, 2 * np.pi), 0, atol=1e-6)]
+    for s in branch0[:3]:
+        print(f"    q = {[round(x, 3) for x in s.q]}")
+    print("  (identical FK; they differ in how far each joint has turned)")
     print()
 
     # ---------------------------------------------------------------------
