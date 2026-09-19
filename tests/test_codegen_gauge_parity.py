@@ -100,6 +100,10 @@ _GAUGES = [
 ]
 
 
+# Deterministic per-gauge seeds (see the note in the test body).
+_GAUGE_SEEDS = {"aligned": 11, "flip2": 22, "flip3": 33, "flip23": 44, "flip1": 55}
+
+
 @pytest.mark.parametrize(("tag", "flip"), _GAUGES)
 def test_emitted_artifact_matches_live_under_axis_gauge(tag: str, flip: tuple[int, ...]) -> None:
     """The emitted three_parallel artifact computes the same IK as the live
@@ -110,9 +114,14 @@ def test_emitted_artifact_matches_live_under_axis_gauge(tag: str, flip: tuple[in
     live = Manipulator(kb)
     sys.modules.pop(art.__name__, None)
 
-    rng = np.random.default_rng(hash(tag) % (2**31))
+    # Fixed per-gauge seed, NOT hash(tag): str.__hash__ is salted per process
+    # (PYTHONHASHSEED), so this drew a different pose set on every run for the
+    # life of the test. Failures surfaced at random -- one Python version in a
+    # CI matrix, never reproducible locally -- and a green run proved little.
+    # Deterministic and wider: the sweep now covers 200 poses per gauge.
+    rng = np.random.default_rng(_GAUGE_SEEDS[tag])
     checked = 0
-    for i in range(60):
+    for i in range(200):
         # Half near-home (the bug's hiding spot), half across the workspace.
         span = 0.5 if i % 2 == 0 else 2.0
         q = rng.uniform(-span, span, size=6)
