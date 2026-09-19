@@ -492,7 +492,7 @@ class Manipulator:
         explain: Literal[False] = False,
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
-        respect_limits: bool = True,
+        respect_limits: bool | Literal["wrap"] = True,
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
@@ -511,7 +511,7 @@ class Manipulator:
         explain: Literal[True],
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
-        respect_limits: bool = True,
+        respect_limits: bool | Literal["wrap"] = True,
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
@@ -529,7 +529,7 @@ class Manipulator:
         explain: bool = False,
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
-        respect_limits: bool = True,
+        respect_limits: bool | Literal["wrap"] = True,
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
@@ -567,7 +567,9 @@ class Manipulator:
             best-effort behaviour. Requires ``q_seed``.
         :param respect_limits: when ``True`` (default), solutions outside
             URDF joint limits are dropped. Pass ``False`` for the raw
-            geometric set (analysis / debugging).
+            geometric set (analysis / debugging), or ``"wrap"`` for the full
+            geometric set with each joint wrapped into its range where a
+            ``+- 2*pi`` representative exists and nothing dropped.
         :param enumerate_windings: when ``True`` (default since v6.0, #562),
             a joint whose limits span more than one turn (UR-family
             ``[-2*pi, 2*pi]``) contributes every

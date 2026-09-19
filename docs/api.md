@@ -38,13 +38,18 @@ Returned alongside the solution list when `solve(T, explain=True)`.
 
 ## Self-motion charts: `ssik.chart`
 
-For redundant 7R arms with a closed-form solver (`seven_r.spherical_shoulder`: Franka Panda, FR3; `seven_r.srs`: KUKA iiwa and other exactly-concurrent SRS arms), `Manipulator.charts(T)` returns the self-motion manifold at `T` as charts: one continuous branch `q(t)` each, with a stable branch `label`, its `domain` in the redundancy coordinate, its `tangent(t)` as a unit direction and a rate (closed form on SRS arms, a fourth-order difference of the closed form on the Panda), and the inverse map `locate(q)`. With the native extension (Linux and macOS wheels) a family builds in about 20 µs on a target move and `q(t)` and `locate(q)` run in a few µs, so all of it fits a 1 kHz control loop; a chart's `domain` is computed on first access (about 0.4 ms for a Panda arc) and cached. The Panda's elbow-reachability arcs are closed form (`spherical_shoulder.elbow_arcs`), so nothing is scanned at build time. `native=False` selects the pure-Python reference.
+`Manipulator.charts(T)` returns the manifold of solutions at `T` as charts. For redundant 7R arms with a closed-form solver (`seven_r.spherical_shoulder`: Franka Panda, FR3; `seven_r.srs`: KUKA iiwa and other exactly-concurrent SRS arms) each chart is one continuous branch `q(t)` with a stable branch `label`, its `domain` in the redundancy coordinate, its `in_limits()` arcs under joint limits, its `tangent(t)` as a unit direction and a rate, and its `frame(t, metric)` (tangent plus a metric-orthogonal complement); the family has the inverse map `locate(q)` and `continue_from(...)` for continuation along a pose path, and `track()` follows a branch through a list of poses by label. For UR-class 6R arms (`ikgeo.three_parallel`) the charts are the isolated solutions with the geometric (shoulder, elbow, wrist) labels of `three_parallel_label`. `cuspidality_report()` classifies a spherical-shoulder arm's chart slicing (build-time diagnostic). `respect_limits="wrap"` on `Manipulator.solve` returns the full geometric set wrapped into joint ranges without dropping anything.
+
+With the native extension (Linux and macOS wheels) a family builds in about 20 µs on a target move and `q(t)`, `locate(q)` and `tangent(t)` run in a few µs, so all of it fits a 1 kHz control loop; a chart's `domain` and `in_limits()` are computed on first access (well under a millisecond) and cached. `native=False` selects the pure-Python reference.
 
 ::: ssik.chart
     options:
       show_root_heading: false
       members:
         - charts
+        - track
+        - cuspidality_report
+        - three_parallel_label
         - ChartFamily
         - Chart
 

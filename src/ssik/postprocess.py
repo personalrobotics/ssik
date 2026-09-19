@@ -52,6 +52,7 @@ import itertools
 import math
 from collections.abc import Callable
 from dataclasses import replace
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -471,13 +472,12 @@ def within_seed_tolerance(
 ) -> list[Solution]:
     """Keep only solutions within a per-joint deviation of a reference config.
 
-    A solution passes when *every* joint is within ``tolerance`` of the seed in
-    wrap-to-pi distance -- ``max_i |wrap(q_i - seed_i)| <= tolerance``, the
-    L-infinity (max-joint-move) bound. This is the hard guarantee for
-    trajectory tracking ("no joint jumps more than ``tolerance``"), as opposed
-    to :func:`nearest_to_seed`, which only ranks. The result may be empty when
-    no in-tolerance branch exists -- itself the useful signal that smooth
-    continuation is not possible at this pose. Compose with
+    A solution passes when *every* joint is within ``tolerance`` of the seed --
+    ``max_i |d_i| <= tolerance``, the L-infinity (max-joint-move) bound. This is
+    the hard guarantee for trajectory tracking ("no joint jumps more than
+    ``tolerance``"), as opposed to :func:`nearest_to_seed`, which only ranks. The
+    result may be empty when no in-tolerance branch exists -- itself the useful
+    signal that smooth continuation is not possible at this pose. Compose with
     :func:`nearest_to_seed` + :func:`take_first` to rank and cap the survivors.
 
     :param sols: candidate solutions.
@@ -625,7 +625,7 @@ def finalize_solutions(
     sols: list[Solution],
     kb: KinBody,
     *,
-    respect_limits: bool = True,
+    respect_limits: bool | Literal["wrap"] = True,
     q_seed: NDArray[np.float64] | None = None,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
@@ -643,7 +643,13 @@ def finalize_solutions(
     is given, ``within_seed_tolerance`` (hard bound) then ``nearest_to_seed``
     (rank); then truncate to ``max_solutions``.
 
-    :param respect_limits: when ``True`` apply the wrap+drop limit pass.
+    :param respect_limits: when ``True`` apply the wrap+drop limit pass;
+        ``"wrap"`` applies only the wrap (each joint's ``q +- 2*pi*k``
+        representative inside its range where one exists) and drops nothing,
+        so the full geometric set comes back in canonical representatives --
+        the raw ``False`` set is unwrapped, and a limit-margin score on it
+        reads an in-range branch as a violation; ``False`` leaves the set as
+        the solver produced it.
     :param in_limits_fallback: optional zero-arg callable invoked when the limit
         pass empties the set -- the redundant-7R exact in-limits resolver (#359),
         which recovers a narrow in-limits arc the coarse sweep missed. ``None``
@@ -673,7 +679,11 @@ def finalize_solutions(
         means it was never built.
     :returns: the post-processed solution list.
     """
-    if respect_limits:
+    if respect_limits == "wrap":
+        sols = wrap_to_limits(sols, kb)
+        if counts is not None:
+            counts["dropped_by_limits"] = 0
+    elif respect_limits:
         sols = wrap_to_limits(sols, kb)
         pre_limit = len(sols)
         sols = _apply_limits(sols, kb)

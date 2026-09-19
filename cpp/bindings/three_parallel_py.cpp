@@ -1295,8 +1295,11 @@ std::array<double, 7> make_q7(const py::array_t<double>& q) {
 void bind_charts(py::module_& m) {
   using ShCharts = ssik::chart::SphericalShoulderCharts;
   py::class_<ShCharts>(m, "SphericalShoulderCharts")
-      .def(py::init([](py::array_t<double> coef, py::array_t<double> target, double feasibility,
+      .def(py::init([](py::array_t<double> axes, py::array_t<double> t_left,
+                       py::array_t<double> t_right, py::array_t<int> types,
+                       py::array_t<double> coef, py::array_t<double> target, double feasibility,
                        double degeneracy) {
+             const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
              Eigen::Matrix<double, 3, 48> cm;
              auto cf = coef.unchecked<2>();
              for (int i = 0; i < 3; ++i)
@@ -1304,8 +1307,9 @@ void bind_charts(py::module_& m) {
              ssik::Tolerances tol;
              tol.feasibility = feasibility;
              tol.degeneracy = degeneracy;
-             return ShCharts::build(cm, make_pose(target), tol);
+             return ShCharts::build(c, cm, make_pose(target), tol);
            }),
+           py::arg("axes"), py::arg("t_left"), py::arg("t_right"), py::arg("types"),
            py::arg("coef"), py::arg("target"), py::arg("feasibility") = 1e-9,
            py::arg("degeneracy") = 1e-12)
       .def("__len__", [](const ShCharts& f) { return f.n_charts(); })
@@ -1355,6 +1359,21 @@ void bind_charts(py::module_& m) {
                const bool ok = f.q(chart, tu(i), q);
                for (int j = 0; j < 7; ++j)
                  o(i, j) = ok ? q[j] : std::numeric_limits<double>::quiet_NaN();
+             }
+             return out;
+           })
+      .def("in_limits",
+           [](const ShCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
+             auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+             std::array<std::array<double, 2>, 7> lim;
+             for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
+             const auto arcs = f.in_limits(chart, lim);
+             const int n = static_cast<int>(arcs.size());
+             py::array_t<double> out({n, 2});
+             auto o = out.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               o(i, 0) = arcs[i].lo;
+               o(i, 1) = arcs[i].hi;
              }
              return out;
            })
@@ -1454,6 +1473,21 @@ void bind_charts(py::module_& m) {
              for (int i = 0; i < n; ++i) {
                const auto q = f.q(chart, tu(i));
                for (int j = 0; j < 7; ++j) o(i, j) = q[j];
+             }
+             return out;
+           })
+      .def("in_limits",
+           [](const SrsCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
+             auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+             std::array<std::array<double, 2>, 7> lim;
+             for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
+             const auto arcs = f.in_limits(chart, lim);
+             const int n = static_cast<int>(arcs.size());
+             py::array_t<double> out({n, 2});
+             auto o = out.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               o(i, 0) = arcs[i].lo;
+               o(i, 1) = arcs[i].hi;
              }
              return out;
            })

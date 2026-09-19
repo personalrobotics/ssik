@@ -197,12 +197,30 @@ def test_curve_is_continuous_within_each_segment() -> None:
 
 
 def test_unsupported_families_are_refused() -> None:
-    kb = load_urdf_kinbody_normalized(FIXTURES / "ur5.urdf", "base_link", "ee_link")
+    """Approximate-class (polished) and joint-lock 7R arms have no closed-form
+    chart and are refused with a message; a bad pose shape is a ValueError."""
+    import glob
+    import xml.etree.ElementTree as ET
+
+    fixture = sorted(
+        glob.glob(str(FIXTURES / "*xarm7*.urdf")) + glob.glob(str(FIXTURES / "*rizon4*.urdf"))
+    )[0]
+    root = ET.parse(fixture).getroot()
+    links = [str(ln.get("name")) for ln in root.findall("link")]
+    base = "link_base" if "link_base" in links else links[0]
+    ee = "link7" if "link7" in links else links[-1]
+    kb = load_urdf_kinbody_normalized(fixture, base, ee)
     arm = ssik.Manipulator(kb)
+    assert arm.solver_name not in (
+        "seven_r.spherical_shoulder",
+        "seven_r.srs",
+        "ikgeo.three_parallel",
+    )
     with pytest.raises(NotImplementedError, match="no closed-form chart"):
-        arm.charts(arm.fk(np.zeros(6)))
+        arm.charts(arm.fk(np.zeros(7)))
+    ur = load_urdf_kinbody_normalized(FIXTURES / "ur5e.urdf", "world", "tool0")
     with pytest.raises(ValueError, match=r"shape \(4, 4\)"):
-        charts(kb, np.eye(3), solver_name="seven_r.srs")
+        charts(ur, np.eye(3), solver_name="ikgeo.three_parallel")
 
 
 def test_panda_sliver_branch_next_to_a_fold_is_charted() -> None:
@@ -313,3 +331,176 @@ def test_gimbal_lock_configurations_are_charted_exactly() -> None:
             qq = c.q(q[6])
             if np.all(np.isfinite(qq)):
                 assert np.linalg.norm(poe_forward_kinematics(kb, qq) - T) < 1e-9
+
+
+@pytest.mark.parametrize("name", list(_ARMS))
+def test_in_limits_arcs(name: str) -> None:
+    """``in_limits()`` (request A3): the arm's own configuration lies on an arc,
+    every interior point of every arc is within limits, and an arc end that is
+    not a domain end is a limit crossing (some joint leaves its range just past
+    it). Custom limits are honoured."""
+    kb = _kb(name)
+    solver = _ARMS[name][2]
+    lims = np.array([j.limits for j in kb.joints])
+    rng = np.random.default_rng(59)
+    checked_ends = 0
+    for _ in range(20):
+        q = _random_q(kb, rng)
+        fam = charts(kb, poe_forward_kinematics(kb, q), solver_name=solver)
+        located = fam.locate(q)
+        assert located is not None
+        chart, t = located
+        arcs = chart.in_limits()
+        assert any(lo - 1e-9 <= t <= hi + 1e-9 for lo, hi in arcs)
+        dom_ends = {x for d in chart.domain for x in d}
+        for lo, hi in arcs:
+            for s in np.linspace(lo, hi, 9)[1:-1]:
+                assert _in_range_mod_2pi(chart.q(s), lims)
+            for end, side in ((lo, -1.0), (hi, 1.0)):
+                if any(abs(end - x) < 1e-9 for x in dom_ends) or abs(abs(end) - np.pi) < 1e-9:
+                    continue
+                qq = chart.q(end + side * 1e-6)
+                if np.all(np.isfinite(qq)):
+                    assert not _in_range_mod_2pi(qq, lims)
+                    checked_ends += 1
+    assert checked_ends > 0
+    # tighter custom limits shrink (or empty) the arcs, never grow them
+    tight = np.column_stack([lims[:, 0] + 0.3, lims[:, 1] - 0.3])
+    assert _total(chart.in_limits(tight)) <= _total(chart.in_limits()) + 1e-12
+
+
+def _total(arcs) -> float:
+    return float(sum(hi - lo for lo, hi in arcs))
+
+
+def _in_range_mod_2pi(q, lims) -> bool:
+    """A joint is in range when some ``q_i + 2*pi*k`` is (the arcs' convention)."""
+    c = 0.5 * (lims[:, 0] + lims[:, 1])
+    rep = q + 2 * np.pi * np.round((c - q) / (2 * np.pi))
+    return bool(np.all(rep >= lims[:, 0] - 1e-9) and np.all(rep <= lims[:, 1] + 1e-9))
+
+
+def test_frame_is_a_metric_orthogonal_split() -> None:
+    """``frame(t, metric)`` (request D1): unit tangent in ``ker(J)``, complement
+    orthonormal and ``M``-orthogonal to it, continuous along the arc."""
+    from ssik.refinement import kinbody_jacobian
+
+    kb = _kb("franka_panda")
+    rng = np.random.default_rng(67)
+    q = _random_q(kb, rng)
+    fam = charts(kb, poe_forward_kinematics(kb, q), solver_name="seven_r.spherical_shoulder")
+    located = fam.locate(q)
+    assert located is not None
+    chart, t = located
+    d, V = chart.frame(t)
+    assert np.linalg.norm(kinbody_jacobian(kb, chart.q(t)) @ d) < 1e-9
+    assert np.allclose(V.T @ V, np.eye(6), atol=1e-12)
+    assert np.abs(d @ V).max() < 1e-12
+    M = np.diag([5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.5])
+    d2, V2 = chart.frame(t, metric=M)
+    assert np.allclose(d2, d)
+    assert np.abs(d2 @ M @ V2).max() < 1e-12
+    assert np.allclose(V2.T @ V2, np.eye(6), atol=1e-12)
+    lo, hi = next(dm for dm in chart.domain if dm[0] - 1e-9 <= t <= dm[1] + 1e-9)
+    ts = np.linspace(lo + 0.01, hi - 0.01, 40)
+    frames = np.array([chart.frame(s, metric=M)[1] for s in ts])
+    assert np.abs(np.diff(frames, axis=0)).max() < 0.5  # no sign flips between neighbours
+
+
+@pytest.mark.parametrize("name", list(_ARMS))
+def test_track_follows_a_branch_around_a_loop(name: str) -> None:
+    """``track`` (request B4): along a small closed loop in position the branch
+    is continued by label lookup and returns to itself. Loops that push the
+    fixed coordinate off the reachable range are reported as collisions, not
+    hidden; the test picks a pose where the loop stays on the branch."""
+    from ssik.chart import track
+
+    kb = _kb(name)
+    rng = np.random.default_rng(71)
+    for _attempt in range(8):
+        q = _random_q(kb, rng)
+        T = poe_forward_kinematics(kb, q)
+        u = rng.normal(size=3)
+        u /= np.linalg.norm(u)
+        v = np.cross(u, rng.normal(size=3))
+        v /= np.linalg.norm(v)
+        poses = []
+        for k in range(41):
+            s = 2 * np.pi * k / 40
+            P = T.copy()
+            P[:3, 3] = T[:3, 3] + 0.01 * ((np.cos(s) - 1) * u + np.sin(s) * v)
+            poses.append(P)
+        steps = track(kb, poses, q, solver_name=_ARMS[name][2])
+        assert len(steps) == 41
+        assert steps[0].event == "start"
+        if all(st.event == "label" for st in steps[1:]):
+            break
+    else:
+        pytest.fail("no loop stayed on its branch in 8 attempts")
+    assert steps[-1].label == steps[0].label
+    assert _wrap_dist(steps[-1].q, steps[0].q) < 1e-9
+    for st, P in zip(steps, poses, strict=True):
+        assert np.linalg.norm(poe_forward_kinematics(kb, st.q) - P) < 1e-9
+
+
+def test_cuspidality_report_panda_is_noncuspidal() -> None:
+    """ssik's lock-7 slicing of the Panda is noncuspidal (Salunkhe et al. lock
+    joint 5 and find the other slicing cuspidal): four principal aspects plus
+    two thin ones, and no pose with two solutions in one aspect."""
+    from ssik.chart import cuspidality_report
+
+    kb = _kb("franka_panda")
+    rep = cuspidality_report(kb, locked_angles=(0.5, -1.2), n_poses=40, grid=360)
+    assert not rep.cuspidal
+    assert all(n >= 4 for n in rep.aspects.values())
+    assert all(v == 0 for v in rep.shared_pairs.values())
+
+
+def test_ur5e_zero_dimensional_charts() -> None:
+    """UR-class 6R arms (``ikgeo.three_parallel``): the manifold is a finite
+    set of labelled points. Labels are the geometric (shoulder, elbow, wrist)
+    signs, distinct across a pose's solutions, and change only across a
+    singularity; ``locate`` identifies the branch; ``track`` follows it by label."""
+    from ssik.chart import three_parallel_label, track
+
+    kb = load_urdf_kinbody_normalized(FIXTURES / "ur5e.urdf", "world", "tool0")
+    arm = ssik.Manipulator(kb)
+    assert arm.solver_name == "ikgeo.three_parallel"
+    rng = np.random.default_rng(5)
+    for _ in range(15):
+        q = _random_q(kb, rng)
+        T = arm.fk(q)
+        fam = arm.charts(T)
+        assert fam.dimension == 0
+        labels = fam.labels()
+        assert len(set(labels)) == len(labels)
+        located = fam.locate(q)
+        assert located is not None
+        chart, t = located
+        assert chart.dimension == 0
+        assert chart.label == three_parallel_label(kb, q)
+        assert _wrap_dist(chart.q(t), q) < 1e-9
+        assert _wrap_dist(chart.q(1.234), q) < 1e-9  # t is ignored
+        assert chart.in_limits() == ((0.0, 0.0),)
+        assert np.isnan(chart.tangent(0.0)[1])
+        assert fam.singularity_margin(q) > 0.0
+    # label changes only across a singularity along random small steps
+    for _ in range(100):
+        q = _random_q(kb, rng)
+        dq = rng.normal(size=6) * 0.02
+        if three_parallel_label(kb, q) != three_parallel_label(kb, q + dq):
+            margins = [fam.singularity_margin(q + a * dq) for a in np.linspace(0, 1, 11)]
+            assert min(margins) < 0.02
+    # track around a small loop: label lookup throughout, closes on itself
+    q = _random_q(kb, rng)
+    T = arm.fk(q)
+    poses = []
+    for k in range(31):
+        s = 2 * np.pi * k / 30
+        P = T.copy()
+        P[:3, 3] = T[:3, 3] + 0.01 * np.array([np.cos(s) - 1, np.sin(s), 0.0])
+        poses.append(P)
+    steps = track(kb, poses, q)
+    assert all(st.event == "label" for st in steps[1:])
+    assert steps[-1].label == steps[0].label
+    assert _wrap_dist(steps[-1].q, steps[0].q) < 1e-9

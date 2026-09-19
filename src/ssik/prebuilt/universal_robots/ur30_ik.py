@@ -5,7 +5,7 @@ running analytical inverse kinematics on this specific arm. The
 per-arm KinBody constants are baked in below; you do not need to
 load a URDF or MJCF at runtime.
 
-Provenance: KinBody hash 57f885f95ce7 (sha256/12 of the input chain).
+Provenance: KinBody hash adc11255010f (sha256/12 of the input chain).
 ``T_target`` is the pose of ``tool0`` (end-effector link) in
 ``base_link`` (base link). If your URDF differs (calibrated
 geometry, custom tool past the flange, different link names),
@@ -122,7 +122,7 @@ _JOINT_TYPES = [
 _JOINT_LIMITS = [
     (-6.283185307179586, 6.283185307179586),
     (-6.283185307179586, 6.283185307179586),
-    (-3.141592653589793, 3.141592653589793),
+    (-6.283185307179586, 6.283185307179586),
     (-6.283185307179586, 6.283185307179586),
     (-6.283185307179586, 6.283185307179586),
     (-6.283185307179586, 6.283185307179586),

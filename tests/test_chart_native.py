@@ -79,6 +79,10 @@ def test_native_matches_python_reference(name: str) -> None:
             if ok.any():
                 dn, dr = direction_n[ok] * rate_n[ok, None], direction_r[ok] * rate_r[ok, None]
                 assert np.max(np.abs(dn - dr) / (1.0 + np.abs(dr))) < 1e-7
+            an, ar = np.array(cn.in_limits()), np.array(cr.in_limits())
+            assert an.shape == ar.shape
+            if an.size:
+                assert np.max(np.abs(an - ar)) < 1e-8
         ln, lr = nat.locate(q), ref.locate(q)
         assert ln is not None
         assert lr is not None

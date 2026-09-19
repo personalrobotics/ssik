@@ -97,6 +97,7 @@ family.q(chart, t + 0.01, q);                           // a step along the arm'
 const auto& dom = family.domain(chart);                 // its q6 intervals, computed on first request
 std::array<double, 7> dq;
 family.tangent(chart, t, dq);                           // dq/dt along the branch (srs.tangent(i, psi) is closed form)
+const auto arcs = family.in_limits(chart, joint_limits);  // the branch under joint limits, exact
 
 // KUKA iiwa and other exact SRS arms: t = elbow swivel, charts are full circles.
 ssik::chart::SrsCharts srs;

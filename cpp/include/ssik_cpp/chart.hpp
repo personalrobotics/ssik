@@ -26,6 +26,7 @@
 #include <Eigen/Dense>
 
 #include "ssik_cpp/fk.hpp"
+#include "ssik_cpp/newton.hpp"  // spatial_jacobian
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/spherical_shoulder.hpp"
 #include "ssik_cpp/subproblems.hpp"
@@ -238,6 +239,7 @@ inline std::vector<Interval> elbow_arcs(const Eigen::Matrix<double, 3, 48>& coef
 // are closed form); q(t) and locate(q) never need a domain; a slot's domain
 // within an arc is computed on first request, per arc, and cached.
 struct SphericalShoulderCharts {
+  JointConsts<7> c;  // the chain itself (for the Jacobian tangent)
   Eigen::Matrix<double, 3, 48> coef;
   Pose t_rev;
   Tolerances tol;
@@ -245,9 +247,11 @@ struct SphericalShoulderCharts {
   using SlotDomains = std::array<std::vector<Interval>, kSlots>;
   mutable std::vector<std::optional<SlotDomains>> cache;  // per arc
 
-  static SphericalShoulderCharts build(const Eigen::Matrix<double, 3, 48>& coef, const Pose& T,
+  static SphericalShoulderCharts build(const JointConsts<7>& c,
+                                       const Eigen::Matrix<double, 3, 48>& coef, const Pose& T,
                                        const Tolerances& tol = {}) {
     SphericalShoulderCharts f;
+    f.c = c;
     f.coef = coef;
     f.t_rev = T.inverse();
     f.tol = tol;
@@ -354,19 +358,44 @@ struct SphericalShoulderCharts {
     return true;
   }
 
-  // dq/dt on one chart by the fourth-order central difference of the closed form
-  // (ssik.chart._stencil); false where a stencil point is off the branch.
+  // dq/dt on one chart by implicit differentiation of FK(q(t)) = T with q6 = t:
+  // J[:, :6] dq' = -J[:, 6] on the spatial Jacobian (ssik.chart._jacobian_tangent).
+  // false off the branch or at an exact fold (singular 6x6).
   bool tangent(int chart, double t, std::array<double, 7>& out) const {
-    std::array<double, 7> q0, qm2, qm1, qp1, qp2;
-    if (!q(chart, t, q0) || !q(chart, t - 2 * kStencilH, qm2) || !q(chart, t - kStencilH, qm1) ||
-        !q(chart, t + kStencilH, qp1) || !q(chart, t + 2 * kStencilH, qp2))
-      return false;
-    for (int j = 0; j < 7; ++j) {
-      const double dm2 = wrap_pi(qm2[j] - q0[j]), dm1 = wrap_pi(qm1[j] - q0[j]);
-      const double dp1 = wrap_pi(qp1[j] - q0[j]), dp2 = wrap_pi(qp2[j] - q0[j]);
-      out[j] = (dm2 - 8.0 * dm1 + 8.0 * dp1 - dp2) / (12.0 * kStencilH);
-    }
+    std::array<double, 7> q0;
+    if (!q(chart, t, q0)) return false;
+    const Eigen::Matrix<double, 6, 7> jac = spatial_jacobian<7>(c, q0);
+    const Eigen::FullPivLU<Eigen::Matrix<double, 6, 6>> lu(jac.template leftCols<6>());
+    if (!lu.isInvertible()) return false;
+    const Eigen::Matrix<double, 6, 1> dq = lu.solve(-jac.col(6));
+    for (int j = 0; j < 6; ++j) out[j] = dq[j];
+    out[6] = 1.0;
     return true;
+  }
+
+  // In-limits arcs of one chart (request A3): per domain interval the exact
+  // feasible sub-intervals of joints 0..5 (feasible_arcs_bounded), intersected
+  // with joint 6's own range (t is q6). Mirrors ssik.chart._q6_limit_arcs.
+  std::vector<Interval> in_limits(int chart, const std::array<std::array<double, 2>, 7>& limits) const {
+    std::vector<feasible::Arc> lim(7);
+    for (int i = 0; i < 7; ++i) lim[i] = {limits[i][0], limits[i][1]};
+    auto q_scalar = [&](double t) {
+      std::array<double, 7> qv;
+      if (!q(chart, t, qv)) qv.fill(std::numeric_limits<double>::quiet_NaN());
+      return std::vector<double>(qv.begin(), qv.end());
+    };
+    std::vector<Interval> out;
+    for (const auto& iv : domain(chart)) {
+      std::vector<double> grid(kDomainGrid);
+      for (int i = 0; i < kDomainGrid; ++i) grid[i] = iv.lo + (iv.hi - iv.lo) * i / (kDomainGrid - 1);
+      // t is q6 on [-pi, pi]; joint 6's range may sit on another turn of it.
+      feasible::Arcs own;
+      for (int k = -1; k <= 1; ++k) own.emplace_back(limits[6][0] + k * 2.0 * M_PI, limits[6][1] + k * 2.0 * M_PI);
+      const feasible::Arcs arcs = feasible::intersect(
+          feasible::feasible_arcs_bounded(q_scalar, {0, 1, 2, 3, 4, 5}, lim, grid), own);
+      for (const auto& a : arcs) out.push_back({a.first, a.second});
+    }
+    return out;
   }
 
   // Inverse chart map: index of the chart q lies on (or -1), with t and the
@@ -450,6 +479,25 @@ struct SrsCharts {
     const Eigen::Matrix3d a = rotation_matrix(br.u_sw, psi) * br.R_sh0 * rotation_matrix(n[3], br.q3);
     const Eigen::Vector3d wr = rates_3axis(n[4], n[5], n[6], qv[4], qv[5], Eigen::Vector3d(-a.transpose() * br.u_sw));
     return {sh[0], sh[1], sh[2], 0.0, wr[0], wr[1], wr[2]};
+  }
+
+  // In-limits arcs of one swivel chart (request A3): the elbow is constant along
+  // the swivel and checked once; the other six joints give exact periodic arcs.
+  std::vector<Interval> in_limits(int chart, const std::array<std::array<double, 2>, 7>& limits) const {
+    const auto& br = branches[chart];
+    const double q3 = feasible::to_limits(br.q3, limits[3][0], limits[3][1]);
+    if (!(limits[3][0] <= q3 && q3 <= limits[3][1])) return {};
+    std::vector<feasible::Arc> lim(7);
+    for (int i = 0; i < 7; ++i) lim[i] = {limits[i][0], limits[i][1]};
+    static const std::vector<double> grid = feasible::param_grid();
+    auto q_scalar = [&](double psi) {
+      const std::array<double, 7> qv = br.q(psi);
+      return std::vector<double>(qv.begin(), qv.end());
+    };
+    std::vector<Interval> out;
+    for (const auto& a : feasible::feasible_arcs(q_scalar, {0, 1, 2, 4, 5, 6}, lim, grid))
+      out.push_back({a.first, a.second});
+    return out;
   }
 
   double param_of(const std::array<double, 7>& qv) const {
