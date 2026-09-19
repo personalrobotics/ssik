@@ -30,6 +30,7 @@ sys.path.insert(0, str(_ROOT / "tests" / "fixtures"))
 
 from _perf import best_call_ms  # noqa: E402
 
+from ssik._native import native_available  # noqa: E402
 from ssik.prebuilt._manifest import load_manifest  # noqa: E402
 
 _REFERENCE = "ur5_ik"
@@ -41,18 +42,27 @@ def _solve_ms(name: str) -> float:
     arm = load_manifest()[name]
     mod = importlib.import_module(arm.hier_module or f"ssik.prebuilt.{name}")
     t_target = mod.fk(np.array(arm.sample_q))
-    # Measured with enumerate_windings=False (#562): 46 of the shipped arms
-    # have a joint whose limits span more than one turn, and lifting each
-    # geometric branch to its in-limit representatives multiplies the returned
-    # set (x32 on a UR: five [-2pi, 2pi] joints, two representatives each).
-    # That cost is proportional to the
-    # output the caller asked for, not a solver regression, and it would swamp
-    # the signal this gate exists to catch. The cost of the default path is
-    # gated separately by test_winding_enumeration_cost_is_proportional.
-    return float(best_call_ms(lambda: mod.solve(t_target, enumerate_windings=False), runs=_RUNS))
+    # Must match tests/test_perf_regression.py._solve_ms exactly, or the gate
+    # compares against a baseline describing different work.
+    #
+    # native=True (#568): the native backend is what ships and what the gate
+    # measures. enumerate_windings=False (#562): lifting each geometric branch
+    # to its in-limit representatives multiplies the returned set (x32 on a UR)
+    # -- proportional to the output requested, not a solver regression.
+    return float(
+        best_call_ms(lambda: mod.solve(t_target, native=True, enumerate_windings=False), runs=_RUNS)
+    )
 
 
 def main() -> int:
+    if not native_available():
+        print(
+            "refusing to regenerate: ssik._ssik_native is not built, so this would "
+            "record the Python fallback's timings as the native baseline (#568). "
+            "Build it with: python scripts/build_cpp_ext.py --out-dir src/ssik",
+            file=sys.stderr,
+        )
+        return 1
     manifest = load_manifest()
     ref_ms = _solve_ms(_REFERENCE)
     ratios: dict[str, float] = {}
