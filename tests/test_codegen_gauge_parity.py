@@ -30,6 +30,7 @@ import numpy as np
 import pytest
 
 from ssik._kinbody import JointSpec, build_kinbody
+from ssik._native import native_available
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
 from ssik.kinematics.poe_fk import poe_forward_kinematics
@@ -104,11 +105,22 @@ _GAUGES = [
 _GAUGE_SEEDS = {"aligned": 11, "flip2": 22, "flip3": 33, "flip23": 44, "flip1": 55}
 
 
+@pytest.mark.parametrize("native", [False, True], ids=["python", "native"])
 @pytest.mark.parametrize(("tag", "flip"), _GAUGES)
-def test_emitted_artifact_matches_live_under_axis_gauge(tag: str, flip: tuple[int, ...]) -> None:
+def test_emitted_artifact_matches_live_under_axis_gauge(
+    tag: str, flip: tuple[int, ...], native: bool
+) -> None:
     """The emitted three_parallel artifact computes the same IK as the live
     solver for every trio axis-sign gauge -- at machine precision, including the
-    near-home poses where the un-flipped codegen produced wrong LS near-misses."""
+    near-home poses where the un-flipped codegen produced wrong LS near-misses.
+
+    Both backends explicitly. The artifact defaults to native=True wherever the
+    extension is built, so an unparametrized call silently stopped testing the
+    Python path the moment CI started building it -- and left it ambiguous which
+    backend a failure belonged to.
+    """
+    if native and not native_available():
+        pytest.skip("native extension not built")
     kb = build_kinbody(_flip_axes(_three_parallel_specs(), flip))
     art = _emit_and_import(kb, tag)
     live = Manipulator(kb)
@@ -126,13 +138,22 @@ def test_emitted_artifact_matches_live_under_axis_gauge(tag: str, flip: tuple[in
         span = 0.5 if i % 2 == 0 else 2.0
         q = rng.uniform(-span, span, size=6)
         t = poe_forward_kinematics(kb, q)
-        art_sols = art.solve(t, respect_limits=False, allow_rescue=False, allow_refinement=True)
+        art_sols = art.solve(
+            t,
+            respect_limits=False,
+            allow_rescue=False,
+            allow_refinement=True,
+            native=native,
+        )
         if not art_sols:
             continue
         checked += 1
         # The emitted artifact must FK-close to machine precision.
         worst_art = max(float(np.max(np.abs(art.fk(s.q) - t))) for s in art_sols)
-        assert worst_art < 1e-9, f"{tag}: artifact FK {worst_art:.2e} at q={q.tolist()}"
+        assert worst_art < 1e-9, (
+            f"{tag}/{'native' if native else 'python'}: artifact FK {worst_art:.2e} "
+            f"at q={q.tolist()}"
+        )
         # ...and it must find the same number of solutions as the live solver
         # (the un-flipped codegen dropped real branches / returned near-misses).
         live_sols = live.solve(t, respect_limits=False, allow_rescue=False, allow_refinement=True)
