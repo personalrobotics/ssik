@@ -31,6 +31,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from ssik._native import native_available
+
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 
 from _perf import best_call_ms
@@ -62,18 +64,40 @@ def _solve_ms(name: str) -> float:
     arm = _MANIFEST[name]
     mod = importlib.import_module(arm.hier_module or f"ssik.prebuilt.{name}")
     t_target = mod.fk(np.array(arm.sample_q))
-    # Measured with enumerate_windings=False (#562): 46 of the shipped arms
-    # have a joint whose limits span more than one turn, and lifting each
-    # geometric branch to its in-limit representatives multiplies the returned
-    # set (x32 on a UR: five [-2pi, 2pi] joints, two representatives each).
-    # That cost is proportional to the
-    # output the caller asked for, not a solver regression, and it would swamp
-    # the signal this gate exists to catch. The cost of the default path is
-    # gated separately by test_winding_enumeration_cost_is_proportional.
-    return float(best_call_ms(lambda: mod.solve(t_target, enumerate_windings=False), runs=_RUNS))
+    # native=True, pinned (#568). The baseline was recorded on the native
+    # backend, which is what ships; measuring the Python fallback against it
+    # compares two different implementations and reads ~3.2x for a UR where the
+    # baseline says 1.18x. That is close enough to the 3.0x tolerance for noise
+    # to decide the outcome, which is how it first showed up: failing on two of
+    # five Python versions in the same run. The module-level guard below refuses
+    # to run the gate at all without the extension.
+    #
+    # enumerate_windings=False (#562): 46 of the shipped arms have a joint whose
+    # limits span more than one turn, and lifting each geometric branch to its
+    # in-limit representatives multiplies the returned set (x32 on a UR: five
+    # [-2pi, 2pi] joints, two representatives each). That cost is proportional to
+    # the output the caller asked for, not a solver regression, and it would
+    # swamp the signal this gate exists to catch. The default path's own cost is
+    # gated by test_capped_solve_does_not_pay_for_discarded_lifts.
+    return float(
+        best_call_ms(lambda: mod.solve(t_target, native=True, enumerate_windings=False), runs=_RUNS)
+    )
 
 
 _ARMS = sorted(_RATIOS)
+
+# The baseline describes the native backend, so without it there is nothing
+# meaningful to compare against: skipping would report success while measuring a
+# different implementation, and that is exactly the failure mode #568 was. Made
+# explicit here rather than per-test so the reason appears once.
+pytestmark = pytest.mark.skipif(
+    not native_available(),
+    reason=(
+        "perf baseline is recorded on the native backend; build it with "
+        "python scripts/build_cpp_ext.py --out-dir src/ssik "
+        "(test_native_coverage.py fails loudly when it is missing)"
+    ),
+)
 
 
 @pytest.mark.perf

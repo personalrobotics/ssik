@@ -102,6 +102,18 @@ jobs:
         # arm metadata changes.
         run: uv run python scripts/regen_docs.py --check
 
+      - name: Install Eigen
+        # Needed to compile the native extension below.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
+
+      - name: Build native extension into the package (pybind11)
+        # native=True is the shipped default for every prebuilt arm (#554), so
+        # the matrix must exercise it: without this the ~30 native tests here
+        # silently SKIP and the perf gate measures the Python fallback against a
+        # native-recorded baseline (#568). The Python fallback keeps its coverage
+        # from the tests that pass native=False explicitly.
+        run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
+
       - name: pytest (parallel)
         # -n 4 (ubuntu-latest = 4 vCPUs). The heavy redundant tests (full
         # snapshot roster, etc.) are marked slow and run on the macOS pre-push
@@ -147,11 +159,19 @@ jobs:
       - name: Install Eigen + CMake
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libeigen3-dev
 
-      - name: cpp_emit --check (constants headers match the Python oracle)
-        run: uv run python scripts/cpp_emit.py --check
-
-      - name: Regenerate parity fixtures from the current oracle
+      - name: Emit every arm from the current oracle (parity fixtures + artifacts)
+        # One pass, parallel across arms. This used to be two serial 72-arm
+        # passes -- --check regenerated everything into a temp dir to compare,
+        # then --all regenerated everything again -- which was 71 of this job's
+        # 77 minutes. The arms are independent, so the pass now fans out across
+        # the runner's cores and the drift check reads what it produced.
         run: uv run python scripts/cpp_emit.py --all
+
+      - name: Drift guard (committed artifacts match the Python oracle)
+        # Compares what --all just emitted against the committed blobs, with the
+        # same structural-exact / numeric-tolerant comparison as before, so
+        # cross-platform ULP variance still does not false-positive.
+        run: uv run python scripts/cpp_emit.py --check-committed
 
       - name: Configure + build
         run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j

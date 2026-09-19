@@ -34,10 +34,17 @@ ssik/
 git clone https://github.com/personalrobotics/ssik.git
 cd ssik
 uv sync                                 # install dev deps
+uv run python scripts/build_cpp_ext.py --out-dir src/ssik   # native backend
 scripts/install-hooks.sh                # one-time: install pre-push check hook
 ```
 
 `uv` is the recommended package manager; `pip install -e .[urdf]` works too if you prefer pip.
+
+**Build the native extension.** `native=True` is the default for every shipped
+arm, so without `ssik._ssik_native` you are testing the Python fallback, not
+what users get: around thirty native tests skip and the perf gate skips too.
+`tests/test_native_coverage.py` fails loudly rather than letting that pass
+quietly. It needs Eigen (`brew install eigen`, `apt install libeigen3-dev`).
 
 ## Pre-push gate (replaces most of CI)
 

@@ -13,6 +13,8 @@ The generated artifacts call this from ``solve(..., native=True)``; passing
 
 from __future__ import annotations
 
+import contextlib
+import weakref
 from typing import Any, cast
 
 import numpy as np
@@ -69,16 +71,60 @@ def _validate_seed_metric(seed_metric: str, q_seed: NDArray[np.float64] | None) 
         raise ValueError(f"unknown metric {seed_metric!r}; expected 'wrap_l2' or 'wrap_linf'")
 
 
-# Marshalled per-KinBody constants, cached: each artifact has one long-lived _KB,
-# so keying on id(kb) is stable and avoids re-marshalling on every solve (which
-# would erode the native speedup).
-_consts_cache: dict[int, tuple[Any, ...]] = {}
+class _KinBodyCache:
+    """Per-KinBody cache keyed on object *identity*, not merely ``id()``.
+
+    An artifact has one long-lived ``_KB``, so caching its marshalled geometry
+    is what keeps the native path from re-marshalling on every solve. But a bare
+    ``id()`` key is unsound: CPython reuses an address once the object is freed.
+    Measured, 300 sequentially created-and-freed KinBody objects occupied 16
+    distinct ids, one of which served 276 different chains. A caller that builds
+    arms dynamically -- ``from_urdf`` in a loop, a test sweeping geometries --
+    therefore got **another chain's** baked constants back, and the native
+    solver answered for the wrong robot: joint values that are self-consistent,
+    pass the solver's own FK filter, and miss the requested pose entirely
+    (#570).
+
+    Holding a weakref alongside the entry makes the lookup verify the entry
+    still belongs to this object, and the finalizer drops it the moment the
+    object dies, so an address can never be inherited with stale data.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[int, tuple[weakref.ReferenceType[Any], Any]] = {}
+
+    def get(self, kb: Any, default: Any = None) -> Any:
+        entry = self._entries.get(id(kb))
+        if entry is not None and entry[0]() is kb:
+            return entry[1]
+        return default
+
+    def put(self, kb: Any, value: Any) -> Any:
+        key = id(kb)
+
+        def _drop(_ref: Any, key: int = key) -> None:
+            self._entries.pop(key, None)
+
+        # Not weakref-able: skip caching rather than key on a reusable address.
+        with contextlib.suppress(TypeError):
+            self._entries[key] = (weakref.ref(kb, _drop), value)
+        return value
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
+# Distinguishes "absent" from a cached None (these caches store None to mean
+# "this arm is not of that solver class").
+_MISS: Any = object()
+
+_consts_cache = _KinBodyCache()
 
 
 def _consts(solver_name: str, kb: Any) -> tuple[Any, ...]:
-    cached = _consts_cache.get(id(kb))
+    cached = _consts_cache.get(kb)
     if cached is not None:
-        return cached
+        return cached  # type: ignore[no-any-return]
     # Per-family geometry preprocessing: spherical_two_parallel needs the wrist
     # gauge canonicalized (the artifact bakes it at build time; the raw _KB lacks
     # it -- 15/18 arms). Canonicalization is FK-identical, so the returned q are
@@ -101,7 +147,7 @@ def _consts(solver_name: str, kb: Any) -> tuple[Any, ...]:
         np.array([j.limits[1] if j.limits else 0.0 for j in lj], dtype=np.float64),
         np.array([1 if j.limits else 0 for j in lj], dtype=np.int32),
     )
-    _consts_cache[id(kb)] = marshalled
+    _consts_cache.put(kb, marshalled)
     return marshalled
 
 
@@ -269,7 +315,7 @@ def _rr_native_solve(
 
 # Per-KinBody native-SRS args (baked geometry + marshalled JointConsts) or None.
 # Geometry-only, so cache per-arm (keyed on the long-lived artifact _KB's id).
-_srs_cache: dict[int, dict[str, Any] | None] = {}
+_srs_cache = _KinBodyCache()
 
 
 def srs_native_geometry(kb: Any, policy: Any = None) -> dict[str, Any] | None:
@@ -911,8 +957,9 @@ def _srs_native_args(kb: Any, solver_name: str = "seven_r.srs") -> dict[str, Any
     """Cached SRS geometry (strict for ``seven_r.srs``, relaxed/approximate for
     ``seven_r.srs_polished``) + the marshalled JointConsts arrays for the binding,
     or None when the arm isn't SRS-class under that classifier."""
-    if id(kb) in _srs_cache:
-        return _srs_cache[id(kb)]
+    cached = _srs_cache.get(kb, _MISS)
+    if cached is not _MISS:
+        return cached  # type: ignore[no-any-return]
     geom = (
         srs_polished_native_geometry(kb)
         if solver_name == "seven_r.srs_polished"
@@ -934,7 +981,7 @@ def _srs_native_args(kb: Any, solver_name: str = "seven_r.srs") -> dict[str, Any
             "has_limits": np.array([1 if jt.limits else 0 for jt in j], dtype=np.int32),
             **geom,
         }
-    _srs_cache[id(kb)] = result
+    _srs_cache.put(kb, result)
     return result
 
 
@@ -1014,14 +1061,15 @@ def try_native_srs_solve(
 
 # Per-KinBody native spherical_shoulder args (baked (3,48) coef + JointConsts) or
 # None. Geometry-only, cached per-arm.
-_sh_cache: dict[int, dict[str, Any] | None] = {}
+_sh_cache = _KinBodyCache()
 
 
 def _sh_native_args(kb: Any, *, polished: bool) -> dict[str, Any] | None:
     """Cached :func:`spherical_shoulder_native_geometry` + marshalled JointConsts /
     limits for the binding, or None when the arm isn't spherical-shoulder class."""
-    if id(kb) in _sh_cache:
-        return _sh_cache[id(kb)]
+    cached = _sh_cache.get(kb, _MISS)
+    if cached is not _MISS:
+        return cached  # type: ignore[no-any-return]
     geom = spherical_shoulder_native_geometry(kb, polished=polished)
     result: dict[str, Any] | None = None
     if geom is not None:
@@ -1038,7 +1086,7 @@ def _sh_native_args(kb: Any, *, polished: bool) -> dict[str, Any] | None:
             "has_limits": np.array([1 if jt.limits else 0 for jt in j], dtype=np.int32),
             "coef": np.asarray(geom["coef"], dtype=np.float64),
         }
-    _sh_cache[id(kb)] = result
+    _sh_cache.put(kb, result)
     return result
 
 

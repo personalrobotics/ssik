@@ -36,6 +36,13 @@ uv run mypy
 echo "[check] regen_docs --check"
 uv run python scripts/regen_docs.py --check
 
+# native=True is the default for every shipped arm, so a check that runs
+# without ssik._ssik_native is testing the fallback: ~30 native tests skip and
+# the perf gate skips with them. Rebuild it here so the gate covers what ships
+# (#568). Cheap -- one translation unit, a few seconds.
+echo "[check] build native extension"
+uv run python scripts/build_cpp_ext.py --out-dir src/ssik
+
 if [[ $run_tests -eq 1 ]]; then
     echo "[check] pytest"
     # Deselects: pre-existing stale xfails / known flakes that gate on

@@ -27,8 +27,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import importlib
+import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, cast
@@ -1101,6 +1104,83 @@ def _constants_match(committed: str, fresh: str) -> tuple[bool, float, str]:
     return worst_ratio <= 1.0, worst_ratio, worst_detail
 
 
+def _emit_one(args: tuple[str, str]) -> str:
+    """Worker for :func:`emit_all`. Top-level so it is picklable."""
+    arm, out_dir = args
+    emit(arm, Path(out_dir))
+    return arm
+
+
+def emit_all(arms: list[str], out_dir: Path) -> None:
+    """Emit every arm, in parallel.
+
+    Each arm writes only its own files, so this is embarrassingly parallel --
+    and it dominated CI: 72 arms serially took ~35 minutes, twice over, for 71
+    of the C++ job's 77 minutes. Falls back to a serial loop when there is one
+    CPU or a pool cannot start (sandboxes without working semaphores).
+    """
+    workers = min(len(arms), os.cpu_count() or 1)
+    if workers > 1:
+        try:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
+                for arm in pool.map(_emit_one, [(a, str(out_dir)) for a in arms]):
+                    print(f"[cpp_emit] {arm}: done", flush=True)
+            return
+        except OSError as exc:  # no usable process pool here
+            print(f"[cpp_emit] parallel emit unavailable ({exc}); falling back to serial")
+    for arm in arms:
+        emit(arm, out_dir)
+
+
+def check_committed(gen_dir: Path) -> int:
+    """Compare the artifacts now in ``gen_dir`` against their committed blobs.
+
+    Same guarantee as :func:`check_no_drift` -- a committed constants header
+    must match what the current Python oracle emits -- but it compares what is
+    already on disk instead of emitting a second copy into a temp dir. CI emits
+    once with ``--all`` and then calls this, which is why the job stopped
+    running the 72-arm emit twice (71 of its 77 minutes).
+
+    Comparison is the same structural-exact, numeric-tolerant one, so it keeps
+    tolerating the cross-platform ULP variance a byte diff would false-positive
+    on.
+    """
+    arms = emitted_arms(gen_dir)
+    if not arms:
+        print("[cpp_emit] --check-committed: no emitted arms found in", gen_dir)
+        return 0
+    stale: list[str] = []
+    worst_overall = (0.0, "", "")
+    for arm in arms:
+        fresh_path = gen_dir / f"{arm}.hpp"
+        rel = fresh_path.relative_to(_REPO)
+        blob = subprocess.run(
+            ["git", "show", f"HEAD:{rel.as_posix()}"],
+            capture_output=True,
+            text=True,
+            cwd=_REPO,
+            check=False,
+        )
+        if blob.returncode != 0:
+            stale.append(f"{arm}.hpp (not committed; `git add {rel}`)")
+            continue
+        ok, ratio, detail = _constants_match(blob.stdout, fresh_path.read_text())
+        if ratio > worst_overall[0]:
+            worst_overall = (ratio, arm, detail)
+        if not ok:
+            stale.append(f"{arm}.hpp (differs from a fresh emit): {detail}")
+    if worst_overall[1]:
+        print(f"[cpp_emit] --check worst float delta: {worst_overall[1]} -> {worst_overall[2]}")
+    if stale:
+        print("[cpp_emit] --check-committed FAILED: native artifacts are stale vs the oracle:")
+        for item in stale:
+            print(f"  - {item}")
+        print("Re-run: python scripts/cpp_emit.py --all, then commit cpp/gen")
+        return 1
+    print(f"[cpp_emit] --check-committed OK: {len(arms)} constants header(s) up to date")
+    return 0
+
+
 def check_no_drift(gen_dir: Path) -> int:
     """Regenerate each arm's *constants header* and diff against ``gen_dir``.
 
@@ -1125,8 +1205,8 @@ def check_no_drift(gen_dir: Path) -> int:
     worst_overall = (0.0, "", "")  # (ratio, arm, detail) across all arms, for CI visibility
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
+        emit_all(arms, tmp_dir)
         for arm in arms:
-            emit(arm, tmp_dir)
             committed = gen_dir / f"{arm}.hpp"
             fresh = tmp_dir / f"{arm}.hpp"
             if not committed.exists():
@@ -1154,6 +1234,12 @@ def main() -> int:
     ap.add_argument("arm", nargs="?", help="prebuilt arm name, e.g. ur5_ik")
     ap.add_argument("--all", action="store_true", help="re-emit every arm already in --out-dir")
     ap.add_argument(
+        "--check-committed",
+        action="store_true",
+        help="compare the artifacts already in --out-dir against their committed blobs "
+        "(no re-emit; pair with a preceding --all)",
+    )
+    ap.add_argument(
         "--check",
         action="store_true",
         help="verify committed artifacts match a fresh emit (CI drift guard); no writes",
@@ -1161,13 +1247,14 @@ def main() -> int:
     ap.add_argument("--out-dir", type=Path, default=_REPO / "cpp" / "gen")
     args = ap.parse_args()
 
+    if args.check_committed:
+        return check_committed(args.out_dir)
     if args.check:
         return check_no_drift(args.out_dir)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     if args.all:
-        for arm in emitted_arms(args.out_dir):
-            emit(arm, args.out_dir)
+        emit_all(emitted_arms(args.out_dir), args.out_dir)
         emit_artifact_gate(args.out_dir)
         return 0
     if not args.arm:
