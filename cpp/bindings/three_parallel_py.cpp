@@ -6,6 +6,7 @@
 // tests/test_three_parallel.py against both backends.
 #include <array>
 #include <limits>
+#include <stdexcept>
 #include <memory>
 #include <vector>
 
@@ -1510,6 +1511,72 @@ void bind_charts(py::module_& m) {
         const int idx = f.locate(make_q7(q), tol, psi, dist);
         return py::make_tuple(idx, psi, dist);
       });
+
+  // The normalizing tail of Chart.tangent, shared by both families: raw
+  // tangents (N, 7) -> unit directions (N, 7) and rates (N,).
+  m.def(
+      "chart_tangent",
+      [](py::array_t<double> tangent) {
+        auto tg = tangent.unchecked<2>();
+        const auto n = static_cast<py::ssize_t>(tg.shape(0));
+        py::array_t<double> d_out({n, static_cast<py::ssize_t>(7)});
+        py::array_t<double> rate_out(n);
+        auto d_o = d_out.mutable_unchecked<2>();
+        auto r_o = rate_out.mutable_unchecked<1>();
+        for (py::ssize_t i = 0; i < n; ++i) {
+          std::array<double, 7> dq;
+          for (int j = 0; j < 7; ++j) dq[j] = tg(i, j);
+          std::array<double, 7> d;
+          r_o(i) = ssik::chart::unit_tangent(dq, d);
+          for (int j = 0; j < 7; ++j) d_o(i, j) = d[j];
+        }
+        return py::make_tuple(d_out, rate_out);
+      },
+      py::arg("tangent"), "Unit directions and rates from raw tangents (N, 7).");
+
+  // The frame tail of Chart.frame, shared by both families: raw tangents
+  // (N, 7) -> unit directions (N, 7) and metric-orthogonal complements
+  // (N, 7, 6). Family-independent, so it serves the Python charts too.
+  m.def(
+      "chart_frame",
+      [](py::array_t<double> tangent, py::object metric) {
+        auto tg = tangent.unchecked<2>();
+        const auto n = static_cast<py::ssize_t>(tg.shape(0));
+        const double* mp = nullptr;
+        py::array_t<double, py::array::c_style | py::array::forcecast> mm;
+        if (!metric.is_none()) {
+          mm = metric.cast<py::array_t<double, py::array::c_style | py::array::forcecast>>();
+          if (mm.ndim() != 2 || mm.shape(0) != 7 || mm.shape(1) != 7)
+            throw std::invalid_argument("metric must be (7, 7)");
+          mp = mm.data();
+        }
+        py::array_t<double> d_out({n, static_cast<py::ssize_t>(7)});
+        py::array_t<double> v_out(
+            {n, static_cast<py::ssize_t>(7), static_cast<py::ssize_t>(6)});
+        auto d_o = d_out.mutable_unchecked<2>();
+        auto v_o = v_out.mutable_unchecked<3>();
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        for (py::ssize_t i = 0; i < n; ++i) {
+          std::array<double, 7> dq;
+          for (int j = 0; j < 7; ++j) dq[j] = tg(i, j);
+          std::array<double, 7> d;
+          Eigen::Matrix<double, 7, 6> v;
+          if (!ssik::chart::frame_from_tangent(dq, mp, d, v)) {
+            for (int j = 0; j < 7; ++j) {
+              d_o(i, j) = nan;
+              for (int k = 0; k < 6; ++k) v_o(i, j, k) = nan;
+            }
+            continue;
+          }
+          for (int j = 0; j < 7; ++j) {
+            d_o(i, j) = d[j];
+            for (int k = 0; k < 6; ++k) v_o(i, j, k) = v(j, k);
+          }
+        }
+        return py::make_tuple(d_out, v_out);
+      },
+      py::arg("tangent"), py::arg("metric") = py::none(),
+      "Unit tangents and metric-orthogonal complements from raw tangents (N, 7).");
 }
 
 }  // namespace

@@ -407,6 +407,44 @@ def test_frame_is_a_metric_orthogonal_split() -> None:
     assert np.abs(np.diff(frames, axis=0)).max() < 0.5  # no sign flips between neighbours
 
 
+def test_frame_batches_like_tangent() -> None:
+    """``frame`` follows :meth:`Chart.tangent`'s shape contract: scalar ``t`` ->
+    ``((7,), (7, 6))``, ``(N,)`` -> ``((N, 7), (N, 7, 6))``, with the batched
+    result identical to the scalar one and ``NaN`` rows off the branch."""
+    kb = _kb("franka_panda")
+    rng = np.random.default_rng(67)
+    q = _random_q(kb, rng)
+    fam = charts(kb, poe_forward_kinematics(kb, q), solver_name="seven_r.spherical_shoulder")
+    located = fam.locate(q)
+    assert located is not None
+    chart, t = located
+    M = np.diag([5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.5])
+
+    d, V = chart.frame(t, metric=M)
+    assert d.shape == (7,)
+    assert V.shape == (7, 6)
+
+    lo, hi = next(dm for dm in chart.domain if dm[0] - 1e-9 <= t <= dm[1] + 1e-9)
+    ts = np.linspace(lo + 0.01, hi - 0.01, 40)
+    db, Vb = chart.frame(ts, metric=M)
+    assert db.shape == (40, 7)
+    assert Vb.shape == (40, 7, 6)
+    assert np.array_equal(db, np.array([chart.frame(s, metric=M)[0] for s in ts]))
+    assert np.array_equal(Vb, np.array([chart.frame(s, metric=M)[1] for s in ts]))
+
+    # Off the branch the whole row is NaN, in batch as for a scalar.
+    off = lo - 0.5
+    if not chart.contains(off):
+        do, Vo = chart.frame(off, metric=M)
+        assert np.isnan(do).all()
+        assert np.isnan(Vo).all()
+        dm_, Vm_ = chart.frame(np.array([off, t]), metric=M)
+        assert np.isnan(dm_[0]).all()
+        assert np.isnan(Vm_[0]).all()
+        assert np.isfinite(dm_[1]).all()
+        assert np.isfinite(Vm_[1]).all()
+
+
 @pytest.mark.parametrize("name", list(_ARMS))
 def test_track_follows_a_branch_around_a_loop(name: str) -> None:
     """``track`` (request B4): along a small closed loop in position the branch
@@ -504,3 +542,77 @@ def test_ur5e_zero_dimensional_charts() -> None:
     assert all(st.event == "label" for st in steps[1:])
     assert steps[-1].label == steps[0].label
     assert _wrap_dist(steps[-1].q, steps[0].q) < 1e-9
+
+
+@pytest.mark.parametrize("fixture", ["franka_panda", "ur5e"])
+def test_escape_direction_closes_the_gap(fixture: str) -> None:
+    """``escape`` (request D2): along the returned twist the joint gap between
+    the two branches' nearest points shrinks to first order, and faster than
+    along random twists; ``drift_to_merge`` finds a merge along it when one
+    happens within the search range."""
+    from ssik.chart import drift_to_merge
+
+    if fixture == "ur5e":
+        kb = load_urdf_kinbody_normalized(FIXTURES / "ur5e.urdf", "world", "tool0")
+    else:
+        kb = _kb("franka_panda")
+    rng = np.random.default_rng(83)
+    for _ in range(6):
+        q = _random_q(kb, rng)
+        T = poe_forward_kinematics(kb, q)
+        fam = charts(kb, T)
+        located = fam.locate(q)
+        assert located is not None
+        a = located[0]
+        sheets = fam.sheets()
+        mine = next(sh for sh in sheets if a in sh)
+        others = [c for sh in sheets if sh is not mine for c in sh]
+        if not others:
+            continue
+        b = others[0]
+        direction, mag, _qa, _qb = fam.escape(a, b)
+        assert abs(np.linalg.norm(direction) - 1.0) < 1e-12
+        assert np.isfinite(mag)
+        gap0 = fam.gap(a, b)[0]
+
+        g_esc = _gap_along(kb, T, a, b, direction)
+        if np.isnan(g_esc):
+            continue
+        assert g_esc < gap0
+        g_rand = [_gap_along(kb, T, a, b, r / np.linalg.norm(r)) for r in rng.normal(size=(6, 6))]
+        g_rand = [g for g in g_rand if not np.isnan(g)]
+        assert g_esc <= np.median(g_rand)
+        merged = drift_to_merge(kb, T, a, b, direction, max_drift=1.0, n_steps=40)
+        if merged is not None:
+            s_merge, T_merge = merged
+            assert 0 < s_merge <= 1.5
+            assert np.linalg.norm(T_merge[:3, 3] - T[:3, 3]) < 1.5
+        break
+    else:
+        pytest.skip("no pose with two charts")
+
+
+def _gap_along(kb, T, a, b, twist, s=1e-3):
+    from ssik.chart import se3_exp
+
+    f2 = charts(kb, se3_exp(s * twist) @ T)
+    ca = f2.by_label(a.label)
+    cb = f2.by_label(b.label)
+    if ca is None or cb is None:
+        return np.nan
+    return f2.gap(ca, cb)[0]
+
+
+def test_sheets_glue_partner_charts_at_folds() -> None:
+    """``sheets()`` (request B3): on the Panda the eight slot charts of a pose
+    glue into fewer sheets where partner slots meet at a fold; every chart is
+    in exactly one sheet, and charts on different sheets have a positive gap."""
+    kb = _kb("franka_panda")
+    rng = np.random.default_rng(89)
+    fam = charts(kb, poe_forward_kinematics(kb, _random_q(kb, rng)))
+    sheets = fam.sheets()
+    assert sum(len(sh) for sh in sheets) == len(fam)
+    assert len(sheets) < len(fam)
+    for i, sa in enumerate(sheets):
+        for sb in sheets[i + 1 :]:
+            assert fam.gap(sa[0], sb[0])[0] > 1e-3

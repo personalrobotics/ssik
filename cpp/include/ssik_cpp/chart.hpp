@@ -56,6 +56,57 @@ inline double wrap_dist(const std::array<double, 7>& a, const std::array<double,
   return d;
 }
 
+inline constexpr double kFrameDegenerate = 1e-12;  // ssik.chart.Chart.frame
+
+// Split a raw tangent into direction and rate: returns rate = |dq| and writes
+// d_out = dq / rate. Plain IEEE throughout, so the degenerate cases carry the
+// same values numpy's `d / norm(d)` gives and ssik.chart.Chart.tangent
+// documents: at a fold rate diverges while the direction stays unit; a
+// vanishing dq gives rate 0 and a NaN direction (0/0); off the branch dq is
+// NaN and both are NaN.
+inline double unit_tangent(const std::array<double, 7>& dq, std::array<double, 7>& d_out) {
+  const Eigen::Map<const Eigen::Matrix<double, 7, 1>> raw(dq.data());
+  const double rate = raw.norm();
+  Eigen::Map<Eigen::Matrix<double, 7, 1>>(d_out.data()) = raw / rate;
+  return rate;
+}
+
+// The chart frame from a raw tangent (request D1): the unit direction
+// d = dq/|dq| and a (7, 6) basis V of its complement, M-orthogonal to it,
+// d^T M V = 0. `metric` is a row-major 7x7 SPD matrix, or nullptr for the
+// Euclidean case (the kinematic split ker(J)^perp). The columns of V are
+// Euclidean-orthonormal, built by the Householder reflection carrying e_0 onto
+// M d / |M d|, so V varies continuously along the arc except where M d passes
+// through -e_0. False off the branch or at a fold (|dq| not finite).
+// Mirrors ssik.chart.Chart.frame.
+inline bool frame_from_tangent(const std::array<double, 7>& dq, const double* metric,
+                               std::array<double, 7>& d_out,
+                               Eigen::Matrix<double, 7, 6>& v_out) {
+  const double rate = unit_tangent(dq, d_out);
+  if (!std::isfinite(rate) || rate == 0.0) return false;
+  const Eigen::Map<const Eigen::Matrix<double, 7, 1>> d(d_out.data());
+
+  Eigen::Matrix<double, 7, 1> w =
+      metric ? Eigen::Matrix<double, 7, 1>(
+                   Eigen::Map<const Eigen::Matrix<double, 7, 7, Eigen::RowMajor>>(metric) * d)
+             : d;
+  const double nw = w.norm();
+  if (!std::isfinite(nw) || nw == 0.0) return false;
+  w /= nw;
+
+  // Householder H = I - 2 u u^T with H e0 = w  (u along e0 - w); V = H[:, 1:].
+  Eigen::Matrix<double, 7, 1> u = -w;
+  u(0) += 1.0;
+  const double nu = u.norm();
+  if (nu < kFrameDegenerate) {  // w == e0: H = I
+    v_out = Eigen::Matrix<double, 7, 7>::Identity().rightCols<6>();
+    return true;
+  }
+  u /= nu;
+  v_out = (Eigen::Matrix<double, 7, 7>::Identity() - 2.0 * u * u.transpose()).rightCols<6>();
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // spherical_shoulder: slot-indexed closed form (mirrors _slot_grid)
 // ---------------------------------------------------------------------------

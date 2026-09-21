@@ -116,12 +116,158 @@ def _wrap_pi(a: NDArray[np.float64]) -> NDArray[np.float64]:
     return out
 
 
+_FRAME_DEGENERATE = 1e-12  # chart.hpp kFrameDegenerate
+
+
+def _frame_tail(
+    raw: NDArray[np.float64], metric: NDArray[np.float64] | None
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The frame tail of :meth:`Chart.frame`, batched: raw tangents ``(N, 7)``
+    -> unit directions ``(N, 7)`` and complements ``(N, 7, 6)``. The Python
+    reference for ``_ssik_native.chart_frame``; parity in
+    ``tests/test_chart_native.py``. ``NaN`` rows where the tangent is not
+    finite or vanishes."""
+    n = raw.shape[0]
+    d: NDArray[np.float64] = np.full((n, 7), np.nan)
+    v: NDArray[np.float64] = np.full((n, 7, 6), np.nan)
+    with np.errstate(invalid="ignore"):
+        rate: NDArray[np.float64] = np.linalg.norm(raw, axis=1)
+        ok: NDArray[np.bool_] = np.isfinite(rate) & (rate > 0.0)
+        if not ok.any():
+            return d, v
+        dk: NDArray[np.float64] = raw[ok] / rate[ok, None]
+        # w = M d per row (M^T so a non-symmetric input still means M @ d).
+        w: NDArray[np.float64] = dk if metric is None else dk @ metric.T
+        nw: NDArray[np.float64] = np.linalg.norm(w, axis=1)
+    good: NDArray[np.bool_] = np.isfinite(nw) & (nw > 0.0)
+    if not good.all():  # a metric that annihilates the tangent: no frame there
+        ok[np.flatnonzero(ok)[~good]] = False
+        dk, w, nw = dk[good], w[good], nw[good]
+    d[ok] = dk
+    w = w / nw[:, None]
+    # Householder H = I - 2 u u^T with H e0 = w  (u along e0 - w).
+    u: NDArray[np.float64] = -w
+    u[:, 0] += 1.0
+    nu: NDArray[np.float64] = np.linalg.norm(u, axis=1)
+    deg: NDArray[np.bool_] = nu < _FRAME_DEGENERATE  # w == e0: H = I, reached with u = 0
+    u = np.where(deg[:, None], 0.0, u / np.where(deg, 1.0, nu)[:, None])
+    h: NDArray[np.float64] = np.eye(7) - 2.0 * u[:, :, None] * u[:, None, :]
+    v[ok] = h[:, :, 1:]
+    return d, v
+
+
+def _tangent_tail(
+    raw: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The normalizing tail of :meth:`Chart.tangent`, batched: raw tangents
+    ``(N, 7)`` -> unit directions ``(N, 7)`` and rates ``(N,)``. The Python
+    reference for ``_ssik_native.chart_tangent``; parity in
+    ``tests/test_chart_native.py``."""
+    rate: NDArray[np.float64] = np.linalg.norm(raw, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        direction: NDArray[np.float64] = raw / rate[:, None]
+    return direction, rate
+
+
+_native_fn_cache: dict[str, Any] = {}
+
+
+def _native_fn(name: str) -> Any:
+    """``_ssik_native.<name>`` if the extension ships it, else ``None``."""
+    if name not in _native_fn_cache:
+        ext = _native_ext()
+        _native_fn_cache[name] = None if ext is None else getattr(ext, name, None)
+    return _native_fn_cache[name]
+
+
 def _wrap_dist(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
     """Wrap-to-pi L-infinity distance between two joint vectors."""
     return float(np.max(np.abs(_wrap_pi(a - b))))
 
 
 Limits = tuple[tuple[float, float], ...]
+
+
+def _restrict_arcs(
+    eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    domain: tuple[tuple[float, float], ...],
+    fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    *,
+    clearance: float,
+    tol: float,
+    samples: int,
+    conservative: bool | None,
+    periodic: bool,
+) -> tuple[tuple[float, float], ...]:
+    """Sub-intervals of ``domain`` where ``margin(q(t)) >= 0``.
+
+    Brackets sign changes on a grid, then bisects each bracket to ``tol``. A
+    boolean ``fn`` becomes a ``+/-1`` margin, which bisects to the same tolerance
+    but only localises a step, hence the conservative shrink. ``NaN`` rows of
+    ``q(t)`` (off-branch) are infeasible and never reach ``fn``.
+    """
+
+    def margin(ts: NDArray[np.float64]) -> NDArray[np.float64]:
+        qs = np.atleast_2d(eval_fn(np.atleast_1d(ts)))
+        live = np.all(np.isfinite(qs), axis=1)
+        out = np.full(qs.shape[0], -np.inf)
+        if not np.any(live):
+            return out
+        vals = np.asarray(fn(qs[live]))
+        if vals.dtype == bool:
+            out[live] = np.where(vals, 1.0, -1.0)
+        else:
+            out[live] = vals.astype(np.float64) - clearance
+        return out
+
+    is_bool = (
+        bool(np.asarray(fn(np.atleast_2d(eval_fn(np.array([domain[0][0]]))))).dtype == bool)
+        if domain
+        else False
+    )
+    shrink = is_bool if conservative is None else conservative
+
+    def bisect(t_in: float, t_out: float) -> float:
+        """The boundary between a feasible ``t_in`` and an infeasible ``t_out``."""
+        for _ in range(200):
+            if abs(t_out - t_in) <= tol:
+                break
+            mid = 0.5 * (t_in + t_out)
+            if margin(np.array([mid]))[0] >= 0.0:
+                t_in = mid
+            else:
+                t_out = mid
+        return t_in
+
+    # One resolution for the whole chart: the conservative shrink has to mean the
+    # same thing on every interval, and a narrow interval needs at least as fine a
+    # grid as a wide one (sampling it at its own width would make the shrink
+    # annihilate it, which is a resolution artefact rather than a finding).
+    step = _TWO_PI / max(samples, 3)
+    out: list[tuple[float, float]] = []
+    for lo, hi in domain:
+        n = max(int(np.ceil((hi - lo) / step)) + 1, 9)
+        ts = np.linspace(lo, hi, n)
+        ok = margin(ts) >= 0.0
+        start: float | None = None
+        for i, good in enumerate(ok):
+            if good and start is None:
+                start = lo if i == 0 else bisect(float(ts[i]), float(ts[i - 1]))
+            elif not good and start is not None:
+                out.append((start, bisect(float(ts[i - 1]), float(ts[i]))))
+                start = None
+        if start is not None:
+            out.append((start, hi))
+    if shrink:
+        # Certify only what the grid resolves: an interval narrower than a step
+        # cannot be vouched for by a step-function predicate, so it is dropped.
+        out = [(a + step, b - step) for a, b in out]
+    merged = [(a, b) for a, b in out if b - a > tol]
+    if periodic and len(merged) >= 2:
+        (a0, b0), (a1, b1) = merged[0], merged[-1]
+        if abs(a0 - domain[0][0]) <= tol and abs(b1 - domain[-1][1]) <= tol:
+            merged = [(a1 - _TWO_PI, b0), *merged[1:-1]]  # rejoin across the seam
+    return tuple(merged)
 
 
 class Chart:
@@ -204,7 +350,12 @@ class Chart:
 
         Angles are compared modulo ``2*pi``: ``q(t)`` returns principal values,
         and a joint is in limits when *some* ``q_i + 2*pi*k`` is (the
-        representative ``ssik.postprocess.wrap_to_limits`` would pick).
+        representative ``ssik.postprocess.wrap_to_limits`` would pick). A chart
+        is a geometric branch; on a joint whose range exceeds one turn (UR
+        arms, ``+-2*pi``) the windings ``q_i + 2*pi*k`` are distinct postures
+        of that branch, and which one the arm can reach from where it is is
+        the caller's question -- ``ssik.postprocess.rewrap_to_seed`` picks the
+        winding nearest a seed.
         """
         if self._limit_arcs is None:
             return ()
@@ -235,22 +386,30 @@ class Chart:
         Spherical-shoulder: implicit differentiation of ``FK(q(t)) = T`` with
         ``q_6 = t`` -- ``J[:, :6] dq' = -J[:, 6]`` on the chain's spatial
         Jacobian, a 6x6 solve, singular exactly at a fold of ``t``.
+
+        The tail past the raw tangent runs natively where the extension is
+        present (``_ssik_native.chart_tangent``); :func:`_tangent_tail` is the
+        reference.
         """
         ts = np.asarray(t, dtype=np.float64)
         scalar = ts.ndim == 0
         assert self._deriv is not None
-        d = self._deriv(np.atleast_1d(ts))
-        rate = np.linalg.norm(d, axis=1)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            direction = d / rate[:, None]
+        raw = np.ascontiguousarray(self._deriv(np.atleast_1d(ts)), dtype=np.float64)
+        native = _native_fn("chart_tangent")
+        if native is None:
+            direction, rate = _tangent_tail(raw)
+        else:
+            out: tuple[NDArray[np.float64], NDArray[np.float64]] = native(raw)
+            direction, rate = out
         return (direction[0], rate[0]) if scalar else (direction, rate)
 
     def frame(
-        self, t: float, metric: ArrayLike | None = None
+        self, t: ArrayLike, metric: ArrayLike | None = None
     ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """The chart frame at ``t`` (request D1): the unit tangent ``d`` and a
         ``(7, 6)`` basis ``V`` of its complement, orthogonal to ``d`` in
-        ``metric``.
+        ``metric``. Scalar ``t`` -> ``((7,), (7, 6))``; ``(N,)`` ->
+        ``((N, 7), (N, 7, 6))``, as :meth:`tangent`.
 
         With ``metric=None`` the complement is ``ker(J)^perp = row(J)``, the
         kinematic split. With ``metric=M`` (SPD ``(7, 7)``, e.g. the mass matrix
@@ -262,21 +421,22 @@ class Chart:
         varies continuously along the arc except where ``M d`` passes through
         ``-e_0`` -- a measure-zero event, unlike the per-evaluation sign flips of
         an SVD. ``NaN`` off the branch.
+
+        The tail past the tangent runs natively where the extension is present
+        (``_ssik_native.chart_frame``); :func:`_frame_tail` is the reference.
         """
-        d, rate = self.tangent(t)
-        if not np.isfinite(rate):
-            return np.full(7, np.nan), np.full((7, 6), np.nan)
-        w = d if metric is None else np.asarray(metric, dtype=np.float64) @ d
-        w = w / np.linalg.norm(w)
-        # Householder H = I - 2 u u^T with H e0 = w  (u along e0 - w).
-        u = -w.copy()
-        u[0] += 1.0
-        nu = np.linalg.norm(u)
-        if nu < 1e-12:  # w == e0: H = I
-            return d, np.eye(7)[:, 1:]
-        u /= nu
-        h = np.eye(7) - 2.0 * np.outer(u, u)
-        return d, h[:, 1:]
+        ts = np.asarray(t, dtype=np.float64)
+        scalar = ts.ndim == 0
+        assert self._deriv is not None
+        raw = np.ascontiguousarray(self._deriv(np.atleast_1d(ts)), dtype=np.float64)
+        m = None if metric is None else np.ascontiguousarray(metric, dtype=np.float64)
+        native = _native_fn("chart_frame")
+        if native is None:
+            d, v = _frame_tail(raw, m)
+        else:
+            out: tuple[NDArray[np.float64], NDArray[np.float64]] = native(raw, m)
+            d, v = out
+        return (d[0], v[0]) if scalar else (d, v)
 
     def restrict(
         self,
@@ -407,6 +567,8 @@ class ChartFamily:
         locate: Callable[[NDArray[np.float64], float], tuple[int, float]] | None = None,
         native: bool = False,
         kb: KinBody | None = None,
+        T: NDArray[np.float64] | None = None,
+        solver_name: str | None = None,
     ) -> None:
         self.parameter = parameter
         self.periodic = periodic
@@ -418,6 +580,8 @@ class ChartFamily:
         self._nonempty = nonempty
         self._locate = locate
         self._kb = kb
+        self._T = T
+        self._solver_name = solver_name
         self._cache: dict[int, Chart] = {}
 
     def _chart(self, i: int) -> Chart:
@@ -436,6 +600,39 @@ class ChartFamily:
 
     def __iter__(self) -> Iterator[Chart]:
         return iter(self.charts)
+
+    def restrict(
+        self,
+        fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+        **kwargs: Any,
+    ) -> ChartFamily:
+        """:meth:`Chart.restrict` applied to every chart, dropping those it empties.
+
+        The family-level entry point for planning: hand it one predicate over
+        configurations and get back the pose's manifold with the forbidden parts
+        removed, ready for :meth:`locate` and :attr:`charts`. Keyword arguments are
+        forwarded to :meth:`Chart.restrict` unchanged.
+
+        :meth:`locate` on the result still answers for the *restricted* charts
+        only, so a configuration in a forbidden region locates as ``None`` -- which
+        is the question a controller is asking.
+        """
+        kept = [c.restrict(fn, **kwargs) for c in self.charts]
+        kept = [c for c in kept if c.domain]
+        return ChartFamily(
+            parameter=self.parameter,
+            periodic=self.periodic,
+            param_of=self._param_of,
+            make_chart=lambda i: kept[i],
+            nonempty=lambda: list(range(len(kept))),
+            locate=None,  # the native locate knows nothing of the restriction
+            native=False,
+            # Carried through so the pose-level methods (gap, escape, drift_to_merge)
+            # keep working on a restricted family; only the charts are narrower.
+            kb=self._kb,
+            T=self._T,
+            solver_name=self._solver_name,
+        )
 
     def labels(self) -> list[tuple[int, ...]]:
         return [c.label for c in self.charts]
@@ -500,6 +697,123 @@ class ChartFamily:
             return c, tc, "collision"
         return best[1], tt, "fold" if best[0] <= max_step else "collision"
 
+    def gap(
+        self, a: Chart, b: Chart, n_samples: int = 91
+    ) -> tuple[float, NDArray[np.float64], NDArray[np.float64]]:
+        """The joint-space gap between two charts of this pose: the Euclidean
+        wrap-to-pi distance between their nearest points, and those points.
+        A grid of ``n_samples`` per domain interval brackets the pair; a
+        bounded minimisation over the two coordinates then refines it."""
+        pa, ta = _sample_points(a, n_samples, with_t=True)
+        pb, tb = _sample_points(b, n_samples, with_t=True)
+        if pa.shape[0] == 0 or pb.shape[0] == 0:
+            return float("inf"), np.full(7, np.nan), np.full(7, np.nan)
+        d2 = np.array([np.sum(_wrap_pi(pb - qa[None, :]) ** 2, axis=1) for qa in pa])
+        i, j = np.unravel_index(int(np.argmin(d2)), d2.shape)
+        qa, qb = pa[i], pb[j]
+        free = [(a, float(ta[i])), (b, float(tb[j]))]
+        free = [(c, t) for c, t in free if c.dimension == 1]
+        if free:
+            from scipy.optimize import minimize  # type: ignore[import-untyped]
+
+            def bounds_of(c: Chart, t: float) -> tuple[float, float]:
+                for lo, hi in c.domain:
+                    if lo - 1e-9 <= t <= hi + 1e-9:
+                        return lo, hi
+                return t, t
+
+            def objective(x: NDArray[np.float64]) -> float:
+                qs = []
+                k = 0
+                for c, q_fixed in ((a, qa), (b, qb)):
+                    if c.dimension == 1:
+                        qs.append(c.q(float(x[k])))
+                        k += 1
+                    else:
+                        qs.append(q_fixed)
+                if not (np.all(np.isfinite(qs[0])) and np.all(np.isfinite(qs[1]))):
+                    return 1e6
+                return float(np.sum(_wrap_pi(qs[1] - qs[0]) ** 2))
+
+            x0 = np.array([t for _c, t in free])
+            res = minimize(
+                objective, x0, method="L-BFGS-B", bounds=[bounds_of(c, t) for c, t in free]
+            )
+            if res.fun < objective(x0):
+                k = 0
+                if a.dimension == 1:
+                    qa = a.q(float(res.x[k]))
+                    k += 1
+                if b.dimension == 1:
+                    qb = b.q(float(res.x[k]))
+        return float(np.sqrt(np.sum(_wrap_pi(qb - qa) ** 2))), qa, qb
+
+    def sheets(self, tol: float = 1e-6) -> list[tuple[Chart, ...]]:
+        """Connected components of the manifold (request B3): charts glued where
+        they meet, i.e. whose :meth:`gap` is below ``tol`` (partner slots share a
+        fold point at a domain end). Each sheet is a tuple of charts; the
+        arm's self-motion can reach every point of the sheet it is on and no
+        point of any other. Isolated solutions (6R arms) are one-chart sheets.
+        """
+        cs = list(self.charts)
+        parent = list(range(len(cs)))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+
+        for i in range(len(cs)):
+            for j in range(i + 1, len(cs)):
+                if cs[i].dimension == 1 and self.gap(cs[i], cs[j])[0] <= tol:
+                    parent[find(i)] = find(j)
+        groups: dict[int, list[Chart]] = {}
+        for i, c in enumerate(cs):
+            groups.setdefault(find(i), []).append(c)
+        return [tuple(g) for g in groups.values()]
+
+    def escape(
+        self, a: Chart, b: Chart, step: float = 1e-4
+    ) -> tuple[NDArray[np.float64], float, NDArray[np.float64], NDArray[np.float64]]:
+        """Escape direction between two charts (request D2): the unit task-space
+        twist along which the two branches approach each other fastest, and a
+        first-order estimate of how far the pose must drift along it for them to
+        merge.
+
+        Meaningful between charts on different :meth:`sheets`: they can only be
+        connected by moving the pose to a fold, where two branches coincide
+        (partner charts on one sheet already touch, gap zero). The direction
+        is the negative gradient of :meth:`gap` with
+        respect to the pose, taken by central differences over the six spatial
+        twist components (``se3_exp(dx) @ T``, the convention of
+        ``ssik.refinement.kinbody_jacobian``), and the magnitude is
+        ``gap / |grad gap|``, the distance to a zero gap if the gap kept closing
+        at this rate; the branches curve towards each other, so the true drift
+        is usually smaller. :func:`drift_to_merge` finds it. Returns
+        ``(direction, magnitude, q_a, q_b)`` with the nearest pair at ``T``.
+        Model-free: twelve chart families of neighbouring poses.
+        """
+        if self._kb is None or self._T is None:
+            raise ValueError("escape needs the family's chain and pose")
+        gap0, qa, qb = self.gap(a, b)
+        grad = np.zeros(6)
+        for k in range(6):
+            g = []
+            for sgn in (1.0, -1.0):
+                dx = np.zeros(6)
+                dx[k] = sgn * step
+                fam = charts(self._kb, se3_exp(dx) @ self._T, solver_name=self._solver_name)
+                ca, cb = fam.by_label(a.label), fam.by_label(b.label)
+                g.append(fam.gap(ca, cb)[0] if ca is not None and cb is not None else np.nan)
+            grad[k] = (g[0] - g[1]) / (2 * step)
+        if not np.all(np.isfinite(grad)):
+            grad = np.where(np.isfinite(grad), grad, 0.0)
+        n = float(np.linalg.norm(grad))
+        if n == 0.0:
+            return np.zeros(6), float("inf"), qa, qb
+        return -grad / n, gap0 / n, qa, qb
+
     def singularity_margin(self, q: ArrayLike) -> float:
         """Smallest singular value of the chain's 6xN spatial Jacobian at ``q``:
         zero exactly at a kinematic singularity, where branches meet. For a 6R
@@ -543,6 +857,13 @@ class ChartFamily:
             if np.all(np.isfinite(qc)) and _wrap_dist(qc, qa) <= tol:
                 return chart, t
         return None
+
+
+_SOLVER_OF = {
+    "q6": "seven_r.spherical_shoulder",
+    "swivel": "seven_r.srs",
+    "point": "ikgeo.three_parallel",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -898,6 +1219,8 @@ def _spherical_shoulder_family(
         nonempty=nonempty,
         locate=locate,
         kb=kb,
+        T=T,
+        solver_name=_SOLVER_OF["q6"],
     )
 
 
@@ -1009,6 +1332,8 @@ def _srs_family(kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy) ->
         nonempty=lambda: list(range(len(branches))),
         locate=locate,
         kb=kb,
+        T=T,
+        solver_name=_SOLVER_OF["swivel"],
     )
 
 
@@ -1117,12 +1442,100 @@ def _three_parallel_family(
         locate=locate,
         native=native,
         kb=kb,
+        T=T,
+        solver_name=_SOLVER_OF["point"],
     )
 
 
 # ---------------------------------------------------------------------------
 # Tracking along a pose path, and the cuspidality report behind it
 # ---------------------------------------------------------------------------
+
+
+def _sample_points(chart: Chart, n: int, with_t: bool = False) -> Any:
+    """Finite points of a chart: its solution (0-D) or ``n`` per domain interval,
+    with their coordinates when ``with_t``."""
+    if chart.dimension == 0:
+        pts, ts_all = chart.q(0.0)[None, :], np.zeros(1)
+    else:
+        rows, tss = [], []
+        for lo, hi in chart.domain:
+            ts = np.linspace(lo, hi, n)
+            qs = chart.q(ts)
+            ok = np.all(np.isfinite(qs), axis=1)
+            rows.append(qs[ok])
+            tss.append(ts[ok])
+        pts = np.concatenate(rows) if rows else np.zeros((0, 7))
+        ts_all = np.concatenate(tss) if tss else np.zeros(0)
+    return (pts, ts_all) if with_t else pts
+
+
+def se3_exp(xi: ArrayLike) -> NDArray[np.float64]:
+    """4x4 exponential of a spatial twist ``xi = (v, w)`` (linear, angular), so
+    that ``se3_exp(dx) @ T`` is the pose ``T`` moved by ``dx``, matching the
+    spatial Jacobian convention ``T(q + dq) ~ exp([J dq]) T(q)``."""
+    x = np.asarray(xi, dtype=np.float64)
+    v, w = x[:3], x[3:]
+    th = float(np.linalg.norm(w))
+    K = np.array([[0.0, -w[2], w[1]], [w[2], 0.0, -w[0]], [-w[1], w[0], 0.0]])
+    if th < 1e-12:
+        R, V = np.eye(3), np.eye(3)
+    else:
+        R = np.eye(3) + np.sin(th) / th * K + (1 - np.cos(th)) / th**2 * K @ K
+        V = np.eye(3) + (1 - np.cos(th)) / th**2 * K + (th - np.sin(th)) / th**3 * K @ K
+    out = np.eye(4)
+    out[:3, :3] = R
+    out[:3, 3] = V @ v
+    return out
+
+
+def drift_to_merge(
+    kb: KinBody,
+    T: ArrayLike,
+    a: Chart,
+    b: Chart,
+    direction: ArrayLike,
+    *,
+    max_drift: float = 1.0,
+    n_steps: int = 50,
+    merge_tol: float = 0.05,
+    solver_name: str | None = None,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    native: bool = True,
+) -> tuple[float, NDArray[np.float64]] | None:
+    """March the pose along a unit twist and report the drift at which the two
+    branches merge (request D2, the verification of :meth:`ChartFamily.escape`).
+
+    Both branches are continued step by step from their nearest points; they
+    have merged when the continued configurations come within ``merge_tol``
+    (wrap-Linf), or when one branch's continuation lands on the other's chart.
+    Returns ``(drift, pose)`` at the merge or ``None`` if none occurred within
+    ``max_drift``. Cost: two continuations per step.
+    """
+    T0 = np.asarray(T, dtype=np.float64)
+    d = np.asarray(direction, dtype=np.float64)
+    fam0 = charts(kb, T0, solver_name=solver_name, policy=policy, native=native)
+    _gap, qa, qb = fam0.gap(a, b)
+    la, lb = fam0.locate(qa), fam0.locate(qb)
+    if la is None or lb is None:
+        raise ValueError("drift_to_merge: the charts' nearest points do not locate")
+    ca, ta = la
+    cb, tb = lb
+    for k in range(1, n_steps + 1):
+        s = max_drift * k / n_steps
+        Tk = se3_exp(s * d) @ T0
+        fam = charts(kb, Tk, solver_name=solver_name, policy=policy, native=native)
+        try:
+            ca, ta, ea = fam.continue_from(ca, ta, qa, max_step=0.7)
+            cb, tb, eb = fam.continue_from(cb, tb, qb, max_step=0.7)
+        except ValueError:
+            return None
+        qa, qb = ca.q(ta), cb.q(tb)
+        if ca.label == cb.label or _wrap_dist(qa, qb) <= merge_tol:
+            return s, Tk
+        if ea == "collision" and eb == "collision":
+            return s, Tk
+    return None
 
 
 class TrackStep:
@@ -1412,6 +1825,8 @@ def _spherical_shoulder_family_native(
         locate=locate,
         native=True,
         kb=kb,
+        T=T,
+        solver_name=_SOLVER_OF["q6"],
     )
 
 
@@ -1483,4 +1898,6 @@ def _srs_family_native(ext: Any, kb: KinBody, T: NDArray[np.float64]) -> ChartFa
         locate=locate,
         native=True,
         kb=kb,
+        T=T,
+        solver_name=_SOLVER_OF["swivel"],
     )
