@@ -15,15 +15,26 @@ A :class:`Chart` is one continuous branch ``q(t)`` of the manifold at one pose:
   branch across poses a lookup instead of a nearest-neighbour search.
 - ``q(t)`` evaluates the branch at any ``t``, scalar or batched; ``tangent(t)`` is
   its derivative as a unit direction and a rate (request B2).
-- ``in_limits()`` is the domain under joint limits, exact (request A3).
+- ``in_limits()`` is the domain under joint limits (request A3): sign-zeros of
+  smooth per-joint margins, bracketed on a grid the shared resolver refines
+  until no joint steps or bends more than 0.02 rad, then bisected.
 - ``domain`` is the set of ``t`` where the branch exists (reachable), exact to
   bisection tolerance. Joint limits are *not* applied here: the chart is the
   geometric object, limits are a filter the caller composes on top.
+- ``frame(t, metric)`` is the tangent plus a metric-orthogonal complement (D1);
+  ``sample(n, metric)`` / ``length(metric)`` place points evenly in arc length
+  in that metric, not in ``t`` (C1); ``restrict(fn)`` narrows the domain by any
+  margin, such as a collision distance.
 
 A :class:`SelfMotionManifold` is the fibre ``FK^-1(T)`` itself, presented as
 its charts: every branch at one pose, plus the inverse map
 :meth:`SelfMotionManifold.locate` -- given a configuration on the manifold, which
-chart is it on and at what ``t``.
+chart is it on and at what ``t``. Across charts it gives ``sheets()`` (the
+components self-motion can reach), ``gap(a, b, limits=...)`` (distance between
+holdable postures, minimised over the windings the joint box admits) and
+``escape``; across poses, ``continue_from`` / :func:`track` / :func:`track_all`
+(``Manipulator.solve_path``, request C2) follow branches by label and
+:func:`drift_to_merge` finds where two sheets join or touch.
 
 Two solver families are supported, each with its own redundancy coordinate:
 
