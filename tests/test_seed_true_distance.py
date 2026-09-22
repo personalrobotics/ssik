@@ -56,7 +56,7 @@ _Q_TRUE = np.array([2.800491, -6.253941, -0.040885, -5.122635, -0.674865, -4.614
 def _seed_case() -> tuple[np.ndarray, np.ndarray]:
     """``(T, seed)`` for the separating pose, with the seed verified in limits."""
     lims = np.array([j.limits for j in m._KB.joints])
-    assert np.all((_SEED >= lims[:, 0]) & (_SEED <= lims[:, 1])), "seed must be in limits"
+    assert np.all((lims[:, 0] <= _SEED) & (lims[:, 1] >= _SEED)), "seed must be in limits"
     return m.fk(_Q_TRUE), _SEED
 
 

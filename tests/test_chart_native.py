@@ -181,7 +181,15 @@ def test_native_chart_frame_matches_the_python_tail(name: str) -> None:
     located = fam.locate(q)
     assert located is not None
     chart = located[0]
-    raw = _raw_tangents(chart)
+    # The arc's own tangents never reach the Householder degeneracy, so append
+    # the directions that do: exactly +/-e_0, and either side of each.
+    e0 = np.eye(7)[0]
+    eps = 1e-7
+    degenerate = [e0, -e0]
+    for centre in (e0, -e0):
+        for offset in (np.eye(7)[1], np.eye(7)[2]):
+            degenerate.append(centre + eps * offset)
+    raw = np.ascontiguousarray(np.vstack([_raw_tangents(chart), np.array(degenerate)]))
     # SPD, and deliberately not diagonal, so M genuinely rotates the complement.
     a = rng.standard_normal((7, 7))
     metric = np.ascontiguousarray(a @ a.T + 7.0 * np.eye(7))

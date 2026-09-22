@@ -208,7 +208,7 @@ py::tuple native_artifact_solve_py(
     const std::string& family, py::array_t<double> axes, py::array_t<double> t_left,
     py::array_t<double> t_right, py::array_t<int> types, py::array_t<double> lo,
     py::array_t<double> hi, py::array_t<int> has_limits, py::array_t<double> target,
-    bool respect_limits, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
+    int limit_mode, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
     bool has_seed_tolerance, double seed_tolerance, int max_solutions, bool allow_rescue,
     int refinement_max_iters,
     bool enumerate_windings) {
@@ -225,7 +225,9 @@ py::tuple native_artifact_solve_py(
   }
 
   ssik::ArtifactParams<6> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -374,7 +376,7 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
                                 int elbow_index, py::array_t<double> upper_home,
                                 py::array_t<double> forearm_home, py::array_t<double> lo,
                                 py::array_t<double> hi, py::array_t<int> has_limits,
-                                py::array_t<double> target, bool general_path, bool respect_limits,
+                                py::array_t<double> target, bool general_path, int limit_mode,
                                 bool has_seed, py::array_t<double> q_seed,
                                 const std::string& seed_metric, bool has_seed_tolerance,
                                 double seed_tolerance, int max_solutions, bool allow_rescue,
@@ -410,7 +412,9 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   }
 
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -461,7 +465,7 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
 py::tuple spherical_shoulder_artifact_solve_py(
     py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
     py::array_t<int> types, py::array_t<double> coef, py::array_t<double> lo, py::array_t<double> hi,
-    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<int> has_limits, py::array_t<double> target, int limit_mode, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
     double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
     bool polished,
@@ -482,7 +486,9 @@ py::tuple spherical_shoulder_artifact_solve_py(
   }
 
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -711,7 +717,7 @@ py::tuple general_6r_tensor_artifact_solve_py(
     py::array_t<double> p_cos, py::array_t<int> mono_factors, py::array_t<int> po_rc,
     py::array_t<int> po_mono, py::array_t<double> po_coeff, py::array_t<int> q_rc,
     py::array_t<int> q_mono, py::array_t<double> q_coeff, py::array_t<double> target,
-    bool respect_limits, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
+    int limit_mode, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
     bool has_seed_tolerance, double seed_tolerance, int max_solutions, bool allow_rescue,
     int refinement_max_iters,
     bool enumerate_windings) {
@@ -742,7 +748,9 @@ py::tuple general_6r_tensor_artifact_solve_py(
   }
 
   ssik::ArtifactParams<6> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -1055,7 +1063,7 @@ py::tuple jointlock_hp_artifact_solve_py(
     py::array_t<double> t_joint6_offset_inv, py::array_t<int> right_pv, py::array_t<int> drop_idx,
     py::array_t<double> sub_axes, py::array_t<double> sub_t_left, py::array_t<double> sub_t_right,
     py::array_t<int> sub_types, py::array_t<double> lo, py::array_t<double> hi,
-    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<int> has_limits, py::array_t<double> target, int limit_mode, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
     double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
     bool enumerate_windings) {
@@ -1103,7 +1111,9 @@ py::tuple jointlock_hp_artifact_solve_py(
     lim.present[i] = hl_u(i) != 0;
   }
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -1163,7 +1173,7 @@ py::tuple jointlock_rr_artifact_solve_py(
     const py::list& p_sin, const py::list& p_cos, const py::list& mono_factors,
     const py::list& po_rc, const py::list& po_mono, const py::list& po_coeff, const py::list& q_rc,
     const py::list& q_mono, const py::list& q_coeff, py::array_t<double> lo, py::array_t<double> hi,
-    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<int> has_limits, py::array_t<double> target, int limit_mode, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
     double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
     bool enumerate_windings) {
@@ -1231,7 +1241,9 @@ py::tuple jointlock_rr_artifact_solve_py(
     lim.present[i] = hl_u(i) != 0;
   }
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();

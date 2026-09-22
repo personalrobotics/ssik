@@ -44,7 +44,7 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from ssik.chart import ChartFamily
+    from ssik.chart import PathTrack, SelfMotionManifold
 
 __all__ = ["Manipulator"]
 
@@ -314,7 +314,11 @@ class Manipulator:
         :param joint_trafos: ``(N + 1, 4, 4)`` relative zero-pose transforms:
             ``joint_trafos[i]`` maps frame ``i-1`` to frame ``i`` (``[0]`` is
             base -> joint 0), and ``joint_trafos[N]`` maps joint ``N-1`` -> EE.
-        :param joint_axis: rotation axis in each joint's local frame (default Z).
+        :param joint_axis: rotation axis in each joint's local frame: one ``(3,)``
+            axis shared by every joint (default Z), or ``(N, 3)``, one per joint
+            -- a UR arm's joints turn about ``z, y, y, y, z, y`` in their own
+            frames, and folding that into the transforms instead would move the
+            flange rotation off the last one.
         :param limits: optional ``(N, 2)`` per-joint ``(lower, upper)`` ranges.
         :param policy: tolerance policy for the dispatcher.
         """
@@ -323,11 +327,17 @@ class Manipulator:
             raise ValueError(f"joint_trafos must be (N + 1, 4, 4); got {t.shape}")
         n = t.shape[0] - 1
         axis = np.asarray(joint_axis, dtype=np.float64)
+        if axis.shape == (3,):
+            axes = np.broadcast_to(axis, (n, 3))
+        elif axis.shape == (n, 3):
+            axes = axis
+        else:
+            raise ValueError(f"joint_axis must be (3,) or ({n}, 3); got {axis.shape}")
         lim = _coerce_limits(limits, n)
         specs = [
             JointSpec(
                 parent_link_T=t[i],
-                axis=axis,
+                axis=axes[i],
                 joint_type="revolute",
                 child_link_T=t[n] if i == n - 1 else None,
                 limits=lim[i],
@@ -457,10 +467,10 @@ class Manipulator:
     # Self-motion charts (redundant 7R)
     # ------------------------------------------------------------------
 
-    def charts(self, T_target: ArrayLike, *, native: bool = True) -> ChartFamily:
+    def charts(self, T_target: ArrayLike, *, native: bool = True) -> SelfMotionManifold:
         """Charts of the self-motion manifold at ``T_target`` (redundant 7R only).
 
-        Returns a :class:`~ssik.chart.ChartFamily`: every closed-form branch
+        Returns a :class:`~ssik.chart.SelfMotionManifold`: every closed-form branch
         ``q(t)`` of ``FK^-1(T_target)`` with a stable label and its domain, plus
         the inverse map ``locate(q)``. See :mod:`ssik.chart` for the per-family
         meaning of the label and the redundancy coordinate.
@@ -478,6 +488,38 @@ class Manipulator:
             solver_name=self._plan.solver_name,
             policy=self._policy,
             native=native,
+        )
+
+    def solve_path(
+        self,
+        poses: ArrayLike,
+        *,
+        q0: ArrayLike | None = None,
+        native: bool = True,
+        max_step: float = 0.5,
+    ) -> PathTrack:
+        """Solve a sequence of poses in one call, carrying chart labels along it.
+
+        Every branch at ``poses[0]`` (or only those through ``q0``, one start or
+        ``(k, dof)`` of them) is
+        continued pose to pose by label lookup; see :func:`ssik.chart.track_all`.
+        Chart-capable arms only, as :meth:`charts`.
+
+        :param poses: ``(N, 4, 4)`` pose path. A closed path (last pose equal
+            to the first) exposes the monodromy as ``result.permutation``.
+        :raises NotImplementedError: when the dispatched solver has no
+            closed-form chart.
+        """
+        from ssik.chart import track_all
+
+        return track_all(
+            self._kb,
+            poses,
+            q0=q0,
+            solver_name=self._plan.solver_name,
+            policy=self._policy,
+            native=native,
+            max_step=max_step,
         )
 
     # ------------------------------------------------------------------
@@ -701,7 +743,19 @@ class Manipulator:
                     inner_sols, _ = self._solver_module.solve(self._kb, T_pert, **inner)
                     return list(inner_sols)
 
-                sols = rescue_via_T_perturbation(self.fk, _analytic, T, jacobian_fn=None)
+                # The Newton polish inside the rescue wants a spatial Jacobian, and this
+                # KinBody has a closed-form one -- the same POE walk the baked prebuilt
+                # solvers hand in as ``_spatial_jacobian``. Left at None it central-
+                # differences the FK instead: 2N extra FK calls per iteration for a
+                # derivative we can write down.
+                from ssik.refinement import kinbody_jacobian
+
+                sols = rescue_via_T_perturbation(
+                    self.fk,
+                    _analytic,
+                    T,
+                    jacobian_fn=lambda q: kinbody_jacobian(self._kb, q),
+                )
 
         raw_candidate_count = len(sols)
 

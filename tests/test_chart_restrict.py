@@ -52,7 +52,8 @@ def _cut(chart) -> float:
         v = v[np.isfinite(v)]
         if v.size and float(v.max() - v.min()) > span:
             best, span = float(0.5 * (v.max() + v.min())), float(v.max() - v.min())
-    assert best is not None and span > 1e-3, "fixture has no interval to split"
+    assert best is not None, "fixture has no interval to split"
+    assert span > 1e-3, "fixture has no interval to split"
     return best
 
 
@@ -63,9 +64,7 @@ def test_margin_boundaries_are_bisected_not_sampled(chart) -> None:
     r = chart.restrict(lambda qs: cut - qs[:, 3], samples=21)  # deliberately coarse
     assert r.domain
     parent_edges = {round(v, 9) for lo, hi in chart.domain for v in (lo, hi)}
-    introduced = [
-        t for lo, hi in r.domain for t in (lo, hi) if round(t, 9) not in parent_edges
-    ]
+    introduced = [t for lo, hi in r.domain for t in (lo, hi) if round(t, 9) not in parent_edges]
     assert introduced, "the restriction must introduce at least one new boundary"
     for t in introduced:
         assert chart.q(t)[3] == pytest.approx(cut, abs=1e-8)
@@ -117,7 +116,8 @@ def test_contains_and_in_limits_respect_the_restriction(chart) -> None:
     r = chart.restrict(lambda qs: cut - qs[:, 3])
     forbidden = [t for lo, hi in chart.domain for t in (0.5 * (lo + hi),) if chart.q(t)[3] > cut]
     for t in forbidden:
-        assert chart.contains(t) and not r.contains(t)
+        assert chart.contains(t)
+        assert not r.contains(t)
     for lo, hi in r.in_limits():
         assert any(lo >= a - 1e-9 and hi <= b + 1e-9 for a, b in r.domain)
 
@@ -131,7 +131,8 @@ def test_a_vacuous_constraint_returns_the_same_domain(chart) -> None:
     r = chart.restrict(lambda qs: np.full(len(qs), 1.0))
     assert len(r.domain) == len(chart.domain)
     for (a, b), (c, d) in zip(r.domain, chart.domain, strict=True):
-        assert a == pytest.approx(c, abs=1e-9) and b == pytest.approx(d, abs=1e-9)
+        assert a == pytest.approx(c, abs=1e-9)
+        assert b == pytest.approx(d, abs=1e-9)
 
 
 def test_family_restrict_drops_emptied_charts(family) -> None:

@@ -543,7 +543,7 @@ def solve(
     max_solutions: int | None = None,
     q_seed: NDArray[np.float64] | None = None,
     dispatch_cache: Sequence[str] | None = None,
-    respect_limits: bool = False,
+    respect_limits: bool | str = False,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for any 7R arm via joint-locking + inner 6R solver.
 
@@ -728,7 +728,8 @@ def solve(
                 # out-of-limits candidates that postprocess would drop anyway.
                 if respect_limits:
                     full_q = _wrap_to_limits_inplace(full_q, kb)
-                    if not _in_limits(full_q, kb):
+                    # "wrap" keeps every branch, wrapped: only True drops.
+                    if respect_limits != "wrap" and not _in_limits(full_q, kb):
                         continue
                 candidates.append(
                     Solution(

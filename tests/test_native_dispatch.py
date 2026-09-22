@@ -109,6 +109,18 @@ def test_native_matches_python(arm_name: str) -> None:
             mod.solve(t, respect_limits=False), mod.solve(t, native=True, respect_limits=False)
         ), f"{arm_name}: respect_limits=False"
 
+        # respect_limits="wrap": the raw set, nothing dropped, each joint in its
+        # range where a +-2pi representative is -- compared WITHOUT wrapping, since
+        # the representative is the point of the mode.
+        py_w = mod.solve(t, respect_limits="wrap")
+        nat_w = mod.solve(t, native=True, respect_limits="wrap")
+        assert len(py_w) == len(nat_w) == len(mod.solve(t, respect_limits=False)), (
+            f"{arm_name}: wrap drops nothing"
+        )
+        assert all(any(np.max(np.abs(a.q - b.q)) < 1e-3 for b in py_w) for a in nat_w), (
+            f"{arm_name}: wrap representatives"
+        )
+
         py_full = mod.solve(t)
         cpp_m = mod.solve(t, native=True, max_solutions=3)
         assert len(cpp_m) == min(3, len(py_full)), f"{arm_name}: max count"

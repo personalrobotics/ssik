@@ -16,7 +16,7 @@ import pytest
 
 import ssik
 from ssik._urdf import load_urdf_kinbody_normalized
-from ssik.chart import Chart, ChartFamily, charts
+from ssik.chart import Chart, SelfMotionManifold, charts
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.solvers.seven_r import spherical_shoulder, srs
 
@@ -57,7 +57,7 @@ def test_dispatch_and_parameter(name: str) -> None:
     arm = ssik.Manipulator(kb)
     assert arm.solver_name == solver
     fam = arm.charts(arm.fk(np.zeros(7)))
-    assert isinstance(fam, ChartFamily)
+    assert isinstance(fam, SelfMotionManifold)
     assert fam.parameter == param
     assert all(c.parameter == param for c in fam)
 
@@ -616,3 +616,47 @@ def test_sheets_glue_partner_charts_at_folds() -> None:
     for i, sa in enumerate(sheets):
         for sb in sheets[i + 1 :]:
             assert fam.gap(sa[0], sb[0])[0] > 1e-3
+
+
+def test_frame_is_discontinuous_only_at_plus_e0() -> None:
+    """The Householder frame's one defect sits at ``w == +e_0`` and nowhere else.
+
+    At both ``w == +e_0`` and ``w == -e_0`` the complement happens to come out as
+    ``I[:, 1:]`` -- at ``-e_0`` the reflection flips only column 0, which is the
+    column that gets dropped -- so the values alone do not tell the two apart.
+    What tells them apart is the limit: approaching ``+e_0`` from two different
+    directions gives two different frames, while approaching ``-e_0`` gives the
+    same one either way. This pins the sign, which the docstring previously had
+    backwards.
+    """
+    from ssik.chart import _frame_tail
+
+    e0 = np.eye(7)[0]
+
+    def frame_of(direction):
+        d, v = _frame_tail(np.ascontiguousarray(np.atleast_2d(direction)), None)
+        return d[0], v[0]
+
+    for centre in (e0, -e0):
+        d, V = frame_of(centre)
+        assert np.isfinite(V).all()
+        assert np.abs(d @ V).max() < 1e-15
+        assert np.allclose(V.T @ V, np.eye(6), atol=1e-15)
+        assert np.allclose(V, np.eye(7)[:, 1:])  # both, for the reason above
+
+    eps = 1e-7
+    # The two probe directions must be transverse to the axis AND not antipodal to each
+    # other. `H` depends on `u` only through `u u^T`, so probing along `+v` and `-v`
+    # gives the *same* reflection and the defect stays completely hidden -- a run along
+    # +/-v shows no jump at either pole. Simplifying these to `v, -v` would leave the
+    # test passing while testing nothing.
+    v1, v2 = np.eye(7)[1], np.eye(7)[2]
+
+    def approach(centre, offset):
+        w = centre + eps * offset
+        return frame_of(w / np.linalg.norm(w))[1]
+
+    # +e_0: the limit depends on the direction of approach -- an O(1) jump.
+    assert np.abs(approach(e0, v1) - approach(e0, v2)).max() > 1.0
+    # -e_0: the limit does not -- the two agree to the size of the step itself.
+    assert np.abs(approach(-e0, v1) - approach(-e0, v2)).max() < 10 * eps

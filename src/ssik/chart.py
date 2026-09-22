@@ -20,9 +20,10 @@ A :class:`Chart` is one continuous branch ``q(t)`` of the manifold at one pose:
   bisection tolerance. Joint limits are *not* applied here: the chart is the
   geometric object, limits are a filter the caller composes on top.
 
-A :class:`ChartFamily` is every chart at one pose plus the inverse map
-:meth:`ChartFamily.locate`: given a configuration on the manifold, which chart
-is it on and at what ``t``.
+A :class:`SelfMotionManifold` is the fibre ``FK^-1(T)`` itself, presented as
+its charts: every branch at one pose, plus the inverse map
+:meth:`SelfMotionManifold.locate` -- given a configuration on the manifold, which
+chart is it on and at what ``t``.
 
 Two solver families are supported, each with its own redundancy coordinate:
 
@@ -63,7 +64,7 @@ When the native C++ extension is available (the Linux and macOS wheels), the
 family is built and evaluated in C++ -- ``q(t)`` and ``locate(q)`` take about
 2 microseconds, a Panda family builds in about 0.5 ms -- and ``native=False``
 forces the pure-Python reference, which the parity tests pin the C++ path to.
-:attr:`ChartFamily.native` says which one you got.
+:attr:`SelfMotionManifold.native` says which one you got.
 
 Angles come back as the solver produces them, i.e. principal values from
 ``atan2``. Along a chart a joint may therefore jump by ``2*pi`` at a wrap; this
@@ -84,7 +85,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from functools import cached_property
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -96,12 +97,14 @@ if TYPE_CHECKING:  # pragma: no cover
 
 __all__ = [
     "Chart",
-    "ChartFamily",
     "CuspidalityReport",
+    "PathTrack",
+    "SelfMotionManifold",
     "TrackStep",
     "charts",
     "cuspidality_report",
     "track",
+    "track_all",
 ]
 
 SUPPORTED_SOLVERS: frozenset[str] = frozenset(
@@ -417,10 +420,17 @@ class Chart:
         dynamically consistent split, so a task correction commanded in
         ``span(V)`` does no work along the self-motion. The columns of ``V`` are
         Euclidean-orthonormal (not ``M``-orthonormal) and are built by the
-        Householder reflection carrying ``e_0`` onto ``M d / |M d|``, so ``V``
-        varies continuously along the arc except where ``M d`` passes through
-        ``-e_0`` -- a measure-zero event, unlike the per-evaluation sign flips of
-        an SVD. ``NaN`` off the branch.
+        Householder reflection carrying ``e_0`` onto ``w = M d / |M d|``, so
+        ``V`` varies continuously along the arc except at the single direction
+        ``w == +e_0``, where ``u = e_0 - w`` vanishes and the limit depends on
+        the direction of approach (``w == -e_0`` is benign: ``u -> e_0`` from
+        every side). That defect cannot be removed, only moved: a continuous
+        ``V(w)`` on the whole sphere is a parallelisation of ``S^6``, which does
+        not exist, and puncturing one point is the best possible -- an arc
+        misses a codimension-6 point, where the ``sign(w_0)`` variant that fixes
+        the conditioning would put a codimension-1 equator in its way. Unlike an
+        SVD's per-evaluation sign flips, this is a measure-zero event. ``NaN``
+        off the branch.
 
         The tail past the tangent runs natively where the extension is present
         (``_ssik_native.chart_frame``); :func:`_frame_tail` is the reference.
@@ -477,7 +487,7 @@ class Chart:
 
         A zero-dimensional chart (a 6R arm's isolated solution) is kept or dropped
         whole; an empty result means this branch is entirely forbidden, and
-        :meth:`ChartFamily.restrict` drops such charts from the family.
+        :meth:`SelfMotionManifold.restrict` drops such charts from the manifold.
 
         :param fn: batched margin or predicate over configurations.
         :param clearance: required margin, in the margin's own units. Ignored for
@@ -547,13 +557,206 @@ class Chart:
             segments.append((ts, np.unwrap(qs, axis=0)))
         return segments
 
+    def length(
+        self,
+        metric: Metric | None = None,
+        *,
+        limits: ArrayLike | bool | None = None,
+        tol: float = 1e-5,
+    ) -> float:
+        """Arc length of the branch, summed over its pieces (request C1).
 
-class ChartFamily:
-    """Every chart of the self-motion manifold at one pose, with the inverse map.
+        ``metric`` is ``None`` (Euclidean joint space), a constant SPD
+        ``(dof, dof)`` matrix, or a batched callable ``(N, dof) -> (N, dof, dof)``
+        -- the mass matrix from gafro gives kinetic-energy distance. ``limits``
+        restricts the branch to :meth:`in_limits` first (``True`` for the chain's
+        own limits, or a ``(dof, 2)`` array). See :meth:`sample` for ``tol``.
+        Zero on a zero-dimensional chart.
+        """
+        return float(sum(s[-1] for _, _, s in self._polylines(metric, limits, tol)))
 
-    Charts are created on demand and cached, so :meth:`locate` never pays for
-    charts it does not return; :attr:`charts` enumerates the non-empty ones,
-    which requires every domain.
+    def sample(
+        self,
+        n: int,
+        metric: Metric | None = None,
+        *,
+        limits: ArrayLike | bool | None = None,
+        tol: float = 1e-5,
+    ) -> list[tuple[NDArray[np.float64], NDArray[np.float64]]]:
+        """About ``n`` points spaced uniformly in arc length (request C1).
+
+        Uniform in ``t`` is not uniform on the manifold: at a fold of the
+        coordinate the rate ``|dq/dt|`` diverges (see :meth:`tangent`), so a
+        ``t``-grid bunches up in joint space in the middle of a branch and
+        leaves gaps at its ends. This places points at equal arc length
+        instead, in ``metric`` (see :meth:`length`), so a sum over the samples
+        converges to the curve's value rather than to a sample-density artefact.
+
+        Returns one ``(ts, qs)`` per piece, like :meth:`curve` (``qs`` unwrapped
+        along the piece). The spacing ``h = L / n`` is shared by all pieces; an
+        open piece gets ``round(L_i / h) + 1`` points (at least two) including
+        both ends, a closed one ``round(L_i / h)`` (at least three) with the
+        seam spaced like the rest. Every point is ``q(t)`` evaluated exactly on
+        the chart; only its ``t`` comes from the arc-length inversion.
+
+        The length is the midpoint-metric sum over a polyline of ``q(t)``,
+        refined by bisection until no chord's midpoint strays more than ``tol``
+        (rad) from the curve; near a fold ``q`` goes like ``sqrt(t - t_0)`` and
+        the refinement concentrates there on its own. Spacing is uniform to
+        about ``tol``. A position-dependent ``metric`` is evaluated once per
+        chord, batched.
+        """
+        if n < 1:
+            raise ValueError("sample: n must be >= 1")
+        lines = self._polylines(metric, limits, tol)
+        total = sum(s[-1] for _, _, s in lines)
+        if not lines:
+            return []
+        if self.dimension == 0 or total <= 0.0:
+            return [(ts[:1], qs[:1]) for ts, qs, _ in lines]
+        h = total / n
+        out: list[tuple[NDArray[np.float64], NDArray[np.float64]]] = []
+        for ts, qs, s in lines:
+            L = s[-1]
+            closed = _closes(qs)
+            if closed:
+                m = max(round(L / h), 3)
+                targets = np.arange(m) * (L / m)
+            else:
+                m = max(round(L / h) + 1, 2)
+                targets = np.linspace(0.0, L, m)
+            k = np.clip(np.searchsorted(s, targets, side="right") - 1, 0, s.shape[0] - 2)
+            ds = s[k + 1] - s[k]
+            f = np.where(ds > 0.0, (targets - s[k]) / np.where(ds > 0.0, ds, 1.0), 0.0)
+            t_new = ts[k] + f * (ts[k + 1] - ts[k])
+            q_new = self._eval_t(t_new)
+            ok = np.all(np.isfinite(q_new), axis=1)
+            out.append((t_new[ok], np.unwrap(q_new[ok], axis=0)))
+        return out
+
+    def _eval_t(self, ts: NDArray[np.float64]) -> NDArray[np.float64]:
+        """``q(t)`` accepting ``t`` past ``pi`` on a periodic chart (a piece
+        joined across the seam)."""
+        return self._eval(_wrap_pi(ts) if self.periodic else ts)
+
+    def _pieces(self, limits: ArrayLike | bool | None) -> list[tuple[float, float]]:
+        """The intervals to measure: the domain, or its in-limits part; on a
+        periodic chart two pieces meeting at the ``+-pi`` seam are one piece."""
+        if limits is None or limits is False:
+            arcs = list(self.domain)
+        else:
+            arcs = list(self.in_limits(None if limits is True else limits))
+        arcs.sort()
+        if (
+            self.periodic
+            and len(arcs) >= 2
+            and abs(arcs[0][0] + np.pi) < 1e-9
+            and abs(arcs[-1][1] - np.pi) < 1e-9
+        ):
+            first = arcs.pop(0)
+            lo, _ = arcs.pop()
+            arcs.append((lo, first[1] + _TWO_PI))
+        return arcs
+
+    def _polylines(
+        self, metric: Metric | None, limits: ArrayLike | bool | None, tol: float
+    ) -> list[tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]]:
+        """Per piece ``(ts, qs, s)``: an adaptive polyline of the branch and the
+        cumulative metric length along it."""
+        if self.dimension == 0:
+            q0 = self.q(0.0)
+            if not np.all(np.isfinite(q0)):
+                return []
+            return [(np.zeros(1), q0[None, :], np.zeros(1))]
+        mfn = _metric_fn(metric)
+        lines = []
+        for lo, hi in self._pieces(limits):
+            ts, qs = _adaptive_polyline(self._eval_t, lo, hi, tol)
+            if ts.shape[0] < 2:
+                continue
+            dq = _wrap_pi(qs[1:] - qs[:-1])
+            if mfn is None:
+                seg = np.linalg.norm(dq, axis=1)
+            else:
+                M = mfn(qs[:-1] + 0.5 * dq)
+                seg = np.sqrt(np.maximum(np.einsum("ni,nij,nj->n", dq, M, dq), 0.0))
+            lines.append((ts, np.unwrap(qs, axis=0), np.concatenate(([0.0], np.cumsum(seg)))))
+        return lines
+
+
+#: A joint-space metric for :meth:`Chart.length` / :meth:`Chart.sample`: a
+#: constant SPD matrix or a batched ``(N, dof) -> (N, dof, dof)`` callable.
+Metric = NDArray[np.float64] | Callable[[NDArray[np.float64]], NDArray[np.float64]]
+
+
+def _metric_fn(
+    metric: Metric | None,
+) -> Callable[[NDArray[np.float64]], NDArray[np.float64]] | None:
+    if metric is None:
+        return None
+    if callable(metric):
+        fn = metric
+
+        def batched(qs: NDArray[np.float64]) -> NDArray[np.float64]:
+            M = np.asarray(fn(qs), dtype=np.float64)
+            if M.shape != (qs.shape[0], qs.shape[1], qs.shape[1]):
+                raise ValueError(
+                    f"metric callable must map (N, dof) -> (N, dof, dof); got {M.shape} "
+                    f"for input {qs.shape}"
+                )
+            return M
+
+        return batched
+    M0 = np.asarray(metric, dtype=np.float64)
+    return lambda qs: np.broadcast_to(M0, (qs.shape[0], *M0.shape))
+
+
+def _closes(qs: NDArray[np.float64]) -> bool:
+    """True when an (unwrapped) polyline ends where it began, modulo ``2*pi``
+    per joint: a piece that is a loop on the manifold."""
+    return qs.shape[0] > 2 and float(np.max(np.abs(_wrap_pi(qs[-1] - qs[0])))) < 1e-7
+
+
+def _adaptive_polyline(
+    eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    lo: float,
+    hi: float,
+    tol: float,
+    n0: int = 65,
+    max_levels: int = 48,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Polyline of ``q(t)`` on ``[lo, hi]``, every chord bisected until its
+    midpoint lies within ``tol`` of the curve. Non-finite rows are dropped."""
+    m = max(round(n0 * (hi - lo) / _TWO_PI), 9)
+    ts = np.linspace(lo, hi, m)
+    qs = eval_fn(ts)
+    for _ in range(max_levels):
+        ok = np.all(np.isfinite(qs), axis=1)
+        ts, qs = ts[ok], qs[ok]
+        if ts.shape[0] < 2:
+            break
+        mids = 0.5 * (ts[:-1] + ts[1:])
+        qm = eval_fn(mids)
+        dq = _wrap_pi(qs[1:] - qs[:-1])
+        dev = np.linalg.norm(_wrap_pi(qm - (qs[:-1] + 0.5 * dq)), axis=1)
+        bad = np.isfinite(dev) & (dev > tol)
+        if not bad.any():
+            break
+        order = np.argsort(np.concatenate((ts, mids[bad])), kind="stable")
+        ts = np.concatenate((ts, mids[bad]))[order]
+        qs = np.concatenate((qs, qm[bad]))[order]
+    return ts, qs
+
+
+class SelfMotionManifold:
+    """The self-motion manifold ``FK^-1(T)`` at one pose, presented as charts.
+
+    The object is the fibre, not merely a container of charts: :meth:`gap`,
+    :meth:`sheets`, :meth:`escape` and :meth:`singularity_margin` are questions
+    about the manifold, and the charts are how it is coordinatised. Charts are
+    created on demand and cached, so :meth:`locate` never pays for charts it does
+    not return; :attr:`charts` enumerates the non-empty ones, which requires
+    every domain.
     """
 
     def __init__(
@@ -574,7 +777,7 @@ class ChartFamily:
         self.periodic = periodic
         self.dimension = 0 if parameter == "point" else 1
         self.native = native
-        """True when the family is backed by the native C++ extension."""
+        """True when this manifold is backed by the native C++ extension."""
         self._param_of = param_of
         self._make_chart = make_chart
         self._nonempty = nonempty
@@ -605,10 +808,10 @@ class ChartFamily:
         self,
         fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
         **kwargs: Any,
-    ) -> ChartFamily:
+    ) -> SelfMotionManifold:
         """:meth:`Chart.restrict` applied to every chart, dropping those it empties.
 
-        The family-level entry point for planning: hand it one predicate over
+        The manifold-level entry point for planning: hand it one predicate over
         configurations and get back the pose's manifold with the forbidden parts
         removed, ready for :meth:`locate` and :attr:`charts`. Keyword arguments are
         forwarded to :meth:`Chart.restrict` unchanged.
@@ -619,7 +822,7 @@ class ChartFamily:
         """
         kept = [c.restrict(fn, **kwargs) for c in self.charts]
         kept = [c for c in kept if c.domain]
-        return ChartFamily(
+        return SelfMotionManifold(
             parameter=self.parameter,
             periodic=self.periodic,
             param_of=self._param_of,
@@ -698,17 +901,47 @@ class ChartFamily:
         return best[1], tt, "fold" if best[0] <= max_step else "collision"
 
     def gap(
-        self, a: Chart, b: Chart, n_samples: int = 91
+        self,
+        a: Chart,
+        b: Chart,
+        n_samples: int = 91,
+        *,
+        limits: ArrayLike | bool | None = None,
     ) -> tuple[float, NDArray[np.float64], NDArray[np.float64]]:
         """The joint-space gap between two charts of this pose: the Euclidean
-        wrap-to-pi distance between their nearest points, and those points.
-        A grid of ``n_samples`` per domain interval brackets the pair; a
-        bounded minimisation over the two coordinates then refines it."""
-        pa, ta = _sample_points(a, n_samples, with_t=True)
-        pb, tb = _sample_points(b, n_samples, with_t=True)
+        distance between their nearest points, and those points.
+        A grid of ``n_samples`` per piece brackets the pair; a bounded
+        minimisation over the two coordinates then refines it.
+
+        ``limits=None`` measures on the torus (every joint wrapped to
+        ``[-pi, pi)``): right for the geometry, blind to the joint box. With
+        ``limits`` (``True`` for the chain's own, or ``(dof, 2)``) only postures
+        the arm can hold count: each chart is cut to :meth:`Chart.in_limits`,
+        and the distance is the plain one between *in-box representatives*,
+        minimised over the windings ``q_i + 2*pi*k`` that lie in the box. That
+        one rule gets both cases right that wrap-to-pi gets half wrong: where a
+        joint's range is under a turn only one winding is holdable and two
+        points a turn apart are one posture; where it exceeds a turn (UR arms,
+        ``+-2*pi``) both windings are holdable, distinct postures, and the
+        nearer pair is what counts. The returned points are those in-box
+        representatives, so ``|qb - qa|`` is the gap. ``inf`` (and ``NaN``
+        points) when either chart has no posture in the box.
+        """
+        box = None if limits is None or limits is False else _box(a, limits)
+        pa, ta = _sample_points(a, n_samples, with_t=True, limits=limits)
+        pb, tb = _sample_points(b, n_samples, with_t=True, limits=limits)
+        nan = np.full(a.q(0.0).shape[-1], np.nan)
         if pa.shape[0] == 0 or pb.shape[0] == 0:
-            return float("inf"), np.full(7, np.nan), np.full(7, np.nan)
-        d2 = np.array([np.sum(_wrap_pi(pb - qa[None, :]) ** 2, axis=1) for qa in pa])
+            return float("inf"), nan, nan
+
+        def dist2(qa: NDArray[np.float64], qb: NDArray[np.float64]) -> NDArray[np.float64]:
+            if box is None:
+                return np.asarray(np.sum(_wrap_pi(qb - qa) ** 2, axis=-1))
+            return _inbox_dist2(qa, qb, box)[0]
+
+        d2 = np.stack([dist2(qa[None, :], pb) for qa in pa])
+        if not np.isfinite(d2).any():
+            return float("inf"), nan, nan
         i, j = np.unravel_index(int(np.argmin(d2)), d2.shape)
         qa, qb = pa[i], pb[j]
         free = [(a, float(ta[i])), (b, float(tb[j]))]
@@ -717,36 +950,55 @@ class ChartFamily:
             from scipy.optimize import minimize  # type: ignore[import-untyped]
 
             def bounds_of(c: Chart, t: float) -> tuple[float, float]:
-                for lo, hi in c.domain:
+                for lo, hi in c._pieces(limits):
                     if lo - 1e-9 <= t <= hi + 1e-9:
                         return lo, hi
                 return t, t
 
-            def objective(x: NDArray[np.float64]) -> float:
+            def points(x: NDArray[np.float64]) -> tuple[NDArray[np.float64], ...]:
                 qs = []
                 k = 0
                 for c, q_fixed in ((a, qa), (b, qb)):
                     if c.dimension == 1:
-                        qs.append(c.q(float(x[k])))
+                        qs.append(c._eval_t(np.array([float(x[k])]))[0])
                         k += 1
                     else:
                         qs.append(q_fixed)
-                if not (np.all(np.isfinite(qs[0])) and np.all(np.isfinite(qs[1]))):
+                return qs[0], qs[1]
+
+            def objective(x: NDArray[np.float64]) -> float:
+                ua, ub = points(x)
+                if not (np.all(np.isfinite(ua)) and np.all(np.isfinite(ub))):
                     return 1e6
-                return float(np.sum(_wrap_pi(qs[1] - qs[0]) ** 2))
+                v = float(dist2(ua[None, :], ub[None, :])[0])
+                return v if np.isfinite(v) else 1e6
 
             x0 = np.array([t for _c, t in free])
+            # Tight tolerances: the gradient of a squared distance vanishes with the
+            # distance, and at scipy's defaults the search stopped ~1e-3 rad short
+            # of a touching pair -- too coarse for drift_to_merge to call a merge.
             res = minimize(
-                objective, x0, method="L-BFGS-B", bounds=[bounds_of(c, t) for c, t in free]
+                objective,
+                x0,
+                method="L-BFGS-B",
+                bounds=[bounds_of(c, t) for c, t in free],
+                options={"ftol": 1e-16, "gtol": 1e-14, "maxiter": 500},
             )
             if res.fun < objective(x0):
-                k = 0
-                if a.dimension == 1:
-                    qa = a.q(float(res.x[k]))
-                    k += 1
-                if b.dimension == 1:
-                    qb = b.q(float(res.x[k]))
-        return float(np.sqrt(np.sum(_wrap_pi(qb - qa) ** 2))), qa, qb
+                qa, qb = points(res.x)
+        if box is None:
+            return float(np.sqrt(np.sum(_wrap_pi(qb - qa) ** 2))), qa, qb
+        d2v, ra, rb = _inbox_dist2(qa[None, :], qb[None, :], box)
+        # The nearest pair can sit at a cusp in t narrow enough that the search
+        # restricted to the in-limits pieces starts in the wrong cell and stops
+        # short (0.085 where a pair 8.4e-4 apart was in the box, on the iiwa14).
+        # The torus search's pair, measured in the box, is a second candidate.
+        _, ta_q, tb_q = self.gap(a, b, n_samples)
+        if np.all(np.isfinite(ta_q)) and np.all(np.isfinite(tb_q)):
+            d2t, sa, sb = _inbox_dist2(ta_q[None, :], tb_q[None, :], box)
+            if d2t[0] < d2v[0]:
+                d2v, ra, rb = d2t, sa, sb
+        return float(np.sqrt(d2v[0])), ra[0], rb[0]
 
     def sheets(self, tol: float = 1e-6) -> list[tuple[Chart, ...]]:
         """Connected components of the manifold (request B3): charts glued where
@@ -789,13 +1041,24 @@ class ChartFamily:
         twist components (``se3_exp(dx) @ T``, the convention of
         ``ssik.refinement.kinbody_jacobian``), and the magnitude is
         ``gap / |grad gap|``, the distance to a zero gap if the gap kept closing
-        at this rate; the branches curve towards each other, so the true drift
-        is usually smaller. :func:`drift_to_merge` finds it. Returns
+        at this rate.
+
+        **The magnitude overshoots by about a factor of two, and systematically
+        so.** Two branches annihilate at a fold, where they are the two roots of
+        a quadratic, so the gap closes like ``C * sqrt(s_c - s)`` rather than
+        linearly; a first-order step from ``s = 0`` then lands at ``2 * s_c``
+        exactly. Measured over 204 sheet pairs the closest approach sits at a
+        median ``0.50`` of this magnitude, with the fraction uncorrelated with
+        the gap (r = -0.01) -- as it must be, the factor coming from the
+        exponent alone. So use the direction as returned and line-search the
+        distance, starting near ``0.5 * magnitude``; the minimum is sharp in
+        ``s`` because ``d(gap)/ds`` diverges at the merge.
+        :func:`drift_to_merge` walks it. Returns
         ``(direction, magnitude, q_a, q_b)`` with the nearest pair at ``T``.
         Model-free: twelve chart families of neighbouring poses.
         """
         if self._kb is None or self._T is None:
-            raise ValueError("escape needs the family's chain and pose")
+            raise ValueError("escape needs the manifold's chain and pose")
         gap0, qa, qb = self.gap(a, b)
         grad = np.zeros(6)
         for k in range(6):
@@ -833,7 +1096,7 @@ class ChartFamily:
 
         Pure geometry, no branch search: ``q6`` itself for the spherical-shoulder
         family, the elbow's swivel angle on the shoulder-wrist circle for SRS.
-        Meaningful only when ``FK(q)`` is the family's pose.
+        Meaningful only when ``FK(q)`` is this manifold's pose.
         """
         return self._param_of(np.asarray(q, dtype=np.float64))
 
@@ -878,7 +1141,7 @@ def charts(
     solver_name: str | None = None,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     native: bool = True,
-) -> ChartFamily:
+) -> SelfMotionManifold:
     """Enumerate the self-motion charts of ``kb`` at pose ``T_target``.
 
     :param kb: POE-normalised 7R :class:`~ssik.internals.KinBody`.
@@ -985,7 +1248,12 @@ def _q6_limit_arcs(
         grid = np.linspace(lo, hi, _Q6_DOMAIN_GRID)
         q_grid = eval_fn(grid)
         arcs = feasible_arcs_bounded(
-            lambda t: eval_fn(np.array([t]))[0], q_grid, range(6), list(limits), grid
+            lambda t: eval_fn(np.array([t]))[0],
+            q_grid,
+            range(6),
+            list(limits),
+            grid,
+            q_batch=eval_fn,
         )
         out += intersect(arcs, own)
     return tuple(out)
@@ -1009,6 +1277,7 @@ def _swivel_limit_arcs(
             (0, 1, 2, 4, 5, 6),
             list(limits),
             PARAM_GRID,
+            q_batch=eval_fn,
         )
     )
 
@@ -1136,7 +1405,7 @@ def _arc_domains(
 
 def _spherical_shoulder_family(
     kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy
-) -> ChartFamily:
+) -> SelfMotionManifold:
     from ssik.kinematics._scalar3 import _se3_inv
     from ssik.solvers.seven_r import spherical_shoulder as sh
 
@@ -1211,7 +1480,7 @@ def _spherical_shoulder_family(
                 return k * _N_SLOTS + slot, t
         return -1, t
 
-    return ChartFamily(
+    return SelfMotionManifold(
         parameter="q6",
         periodic=False,
         param_of=param_of,
@@ -1242,7 +1511,7 @@ def _rates_3axis(
     r0 = rot(n[0], float(q[0]))
     cols = np.stack([n[0], r0 @ n[1], r0 @ rot(n[1], float(q[1])) @ n[2]], axis=1)
     try:
-        out: NDArray[np.float64] = np.linalg.solve(cols, omega)
+        out: NDArray[np.float64] = np.linalg.solve(cols, omega).astype(np.float64, copy=False)
     except np.linalg.LinAlgError:
         out = np.full(3, np.nan)
     return out
@@ -1271,7 +1540,7 @@ def _srs_tangent(branch: Any, psis: NDArray[np.float64]) -> NDArray[np.float64]:
     return out
 
 
-def _srs_family(kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy) -> ChartFamily:
+def _srs_family(kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy) -> SelfMotionManifold:
     from ssik.kinematics.predicates import _classify_srs_7r_geometric
     from ssik.solvers.seven_r import _swivel_limits as sw
     from ssik.solvers.seven_r.srs import _arm_constants, _frame_at_joint_batch, _swivel_basis
@@ -1324,7 +1593,7 @@ def _srs_family(kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy) ->
                 return i, psi
         return -1, psi
 
-    return ChartFamily(
+    return SelfMotionManifold(
         parameter="swivel",
         periodic=True,
         param_of=param_of,
@@ -1375,7 +1644,7 @@ def three_parallel_label(kb: KinBody, q: ArrayLike) -> tuple[int, int, int]:
 
 def _three_parallel_family(
     kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy, native: bool
-) -> ChartFamily:
+) -> SelfMotionManifold:
     """A 6R arm's manifold at a regular pose is a finite set of points: every
     chart is zero-dimensional, ``q(t)`` ignores ``t``, and the label is
     :func:`three_parallel_label`. The solutions come from the native solver
@@ -1433,7 +1702,7 @@ def _three_parallel_family(
                 return i, 0.0
         return -1, 0.0
 
-    return ChartFamily(
+    return SelfMotionManifold(
         parameter="point",
         periodic=False,
         param_of=lambda q: 0.0,
@@ -1452,22 +1721,61 @@ def _three_parallel_family(
 # ---------------------------------------------------------------------------
 
 
-def _sample_points(chart: Chart, n: int, with_t: bool = False) -> Any:
-    """Finite points of a chart: its solution (0-D) or ``n`` per domain interval,
-    with their coordinates when ``with_t``."""
+def _sample_points(
+    chart: Chart, n: int, with_t: bool = False, limits: ArrayLike | bool | None = None
+) -> Any:
+    """Finite points of a chart: its solution (0-D) or ``n`` per piece (the
+    domain, or its in-limits part), with their coordinates when ``with_t``."""
     if chart.dimension == 0:
+        # Out-of-box is decided by the in-box distance itself (``inf``).
         pts, ts_all = chart.q(0.0)[None, :], np.zeros(1)
     else:
         rows, tss = [], []
-        for lo, hi in chart.domain:
+        for lo, hi in chart._pieces(limits):
             ts = np.linspace(lo, hi, n)
-            qs = chart.q(ts)
+            qs = chart._eval_t(ts)
             ok = np.all(np.isfinite(qs), axis=1)
             rows.append(qs[ok])
             tss.append(ts[ok])
         pts = np.concatenate(rows) if rows else np.zeros((0, 7))
         ts_all = np.concatenate(tss) if tss else np.zeros(0)
     return (pts, ts_all) if with_t else pts
+
+
+def _box(chart: Chart, limits: ArrayLike | bool) -> NDArray[np.float64]:
+    """``(dof, 2)`` joint box: the chain's own (``True``; what
+    :meth:`Chart.in_limits` uses by default) or the one given."""
+    if limits is True:
+        if not chart._default_limits:
+            raise ValueError("limits=True: this chart carries no joint limits; pass them")
+        return np.asarray(chart._default_limits, dtype=np.float64)
+    return np.asarray(limits, dtype=np.float64)
+
+
+def _inbox_dist2(
+    qa: NDArray[np.float64], qb: NDArray[np.float64], box: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Squared distance between in-box representatives, broadcast over leading
+    axes: per joint, the nearest pair among the windings ``q + 2*pi*k`` of each
+    side that lie in ``box``. The box is a product of intervals, so the
+    minimum separates by joint. ``inf`` where a side has no in-box winding.
+    Returns the distance and the chosen representatives."""
+    ks = 2.0 * np.pi * np.arange(-2, 3, dtype=np.float64)
+    lo, hi = box[:, 0], box[:, 1]
+    tol = 1e-9
+    wa = qa[..., None] + ks  # (..., dof, 5)
+    wb = qb[..., None] + ks
+    wa = np.where((wa >= lo[:, None] - tol) & (wa <= hi[:, None] + tol), wa, np.nan)
+    wb = np.where((wb >= lo[:, None] - tol) & (wb <= hi[:, None] + tol), wb, np.nan)
+    diff = np.abs(wa[..., :, None] - wb[..., None, :])  # (..., dof, 5, 5)
+    flat = np.where(np.isnan(diff), np.inf, diff).reshape(*diff.shape[:-2], 25)
+    best = np.argmin(flat, axis=-1)
+    per_joint = np.take_along_axis(flat, best[..., None], axis=-1)[..., 0]
+    d2 = np.sum(per_joint**2, axis=-1)
+    ia, ib = np.divmod(best, 5)
+    ra = np.take_along_axis(wa, ia[..., None], axis=-1)[..., 0]
+    rb = np.take_along_axis(wb, ib[..., None], axis=-1)[..., 0]
+    return d2, ra, rb
 
 
 def se3_exp(xi: ArrayLike) -> NDArray[np.float64]:
@@ -1489,6 +1797,87 @@ def se3_exp(xi: ArrayLike) -> NDArray[np.float64]:
     return out
 
 
+#: :func:`drift_to_merge`'s answer, and the same paired with its reason.
+_MergeFound = tuple[float, NDArray[np.float64]] | None
+_MergeExplained = tuple[_MergeFound, str]
+
+
+def _merge_outcome(found: _MergeFound, reason: str, explain: bool) -> _MergeFound | _MergeExplained:
+    """:func:`drift_to_merge`'s return, with or without the reason."""
+    return (found, reason) if explain else found
+
+
+def _glued_sheet(
+    family: SelfMotionManifold, chart: Chart, tol: float = 1e-6
+) -> frozenset[tuple[int, ...]]:
+    """Labels of the sheet ``chart`` lies on: charts glued where one's domain
+    end coincides with another's (partner slots meet at a fold point). The
+    endpoint test is what :meth:`SelfMotionManifold.sheets` decides by ``gap``,
+    at a fraction of the cost; charts on a whole circle have no end and are a
+    sheet of their own."""
+
+    def ends(c: Chart) -> NDArray[np.float64]:
+        if c.dimension == 0:
+            return np.zeros((0, 7))
+        ts = [e for lo, hi in c.domain if hi - lo < _TWO_PI - 1e-9 for e in (lo, hi)]
+        if not ts:
+            return np.zeros((0, 7))
+        qs = c.q(np.asarray(ts))
+        return np.asarray(qs[np.all(np.isfinite(qs), axis=1)])
+
+    cs = list(family.charts)
+    tips = {c.label: ends(c) for c in cs}
+    sheet, frontier = {chart.label}, [chart.label]
+    while frontier:
+        mine = tips[frontier.pop()]
+        for c in cs:
+            if c.label in sheet or mine.shape[0] == 0 or tips[c.label].shape[0] == 0:
+                continue
+            d = np.abs(_wrap_pi(mine[:, None, :] - tips[c.label][None, :, :])).max(axis=2)
+            if float(d.min()) <= tol:
+                sheet.add(c.label)
+                frontier.append(c.label)
+    return frozenset(sheet)
+
+
+@overload
+def drift_to_merge(
+    kb: KinBody,
+    T: ArrayLike,
+    a: Chart,
+    b: Chart,
+    direction: ArrayLike,
+    *,
+    max_drift: float = ...,
+    n_steps: int = ...,
+    merge_tol: float = ...,
+    limits: ArrayLike | bool | None = ...,
+    solver_name: str | None = ...,
+    policy: TolerancePolicy = ...,
+    native: bool = ...,
+    explain: Literal[False] = False,
+) -> _MergeFound: ...
+
+
+@overload
+def drift_to_merge(
+    kb: KinBody,
+    T: ArrayLike,
+    a: Chart,
+    b: Chart,
+    direction: ArrayLike,
+    *,
+    max_drift: float = ...,
+    n_steps: int = ...,
+    merge_tol: float = ...,
+    limits: ArrayLike | bool | None = ...,
+    solver_name: str | None = ...,
+    policy: TolerancePolicy = ...,
+    native: bool = ...,
+    explain: Literal[True],
+) -> _MergeExplained: ...
+
+
 def drift_to_merge(
     kb: KinBody,
     T: ArrayLike,
@@ -1497,45 +1886,177 @@ def drift_to_merge(
     direction: ArrayLike,
     *,
     max_drift: float = 1.0,
-    n_steps: int = 50,
-    merge_tol: float = 0.05,
+    n_steps: int = 200,
+    merge_tol: float = 1e-3,
+    limits: ArrayLike | bool | None = None,
     solver_name: str | None = None,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     native: bool = True,
-) -> tuple[float, NDArray[np.float64]] | None:
-    """March the pose along a unit twist and report the drift at which the two
-    branches merge (request D2, the verification of :meth:`ChartFamily.escape`).
+    explain: bool = False,
+) -> _MergeFound | _MergeExplained:
+    """March the pose along a unit twist and report the drift at which the
+    *sheets* of charts ``a`` and ``b`` merge (request D2, the verification of
+    :meth:`SelfMotionManifold.escape`).
 
-    Both branches are continued step by step from their nearest points; they
-    have merged when the continued configurations come within ``merge_tol``
-    (wrap-Linf), or when one branch's continuation lands on the other's chart.
-    Returns ``(drift, pose)`` at the merge or ``None`` if none occurred within
-    ``max_drift``. Cost: two continuations per step.
+    A sheet is several charts glued at folds (the Panda) or one closed chart
+    (an SRS arm), so what is followed is the sheet, not a chart: one point of
+    each sheet is carried along by label continuation -- the same point at
+    every step, so a nearest point sitting on a fold, where either of two
+    charts can claim it, never changes which sheet is meant -- and the quantity
+    watched is the gap between the two sheets, the least :meth:`~SelfMotionManifold.gap`
+    over their chart pairs.
+
+    Two ways to merge. The sheets can join, becoming one sheet (the Panda):
+    the drift where that happens is bisected on "same sheet" to ~1e-12. Or
+    they can touch without joining (the iiwa14, whose sheets are closed
+    charts): the gap has a square-root cusp there, and each local minimum
+    the grid brackets is refined by golden section. Either is a merge when
+    the gap just before it is at most ``merge_tol``. Returns ``(drift, pose)``
+    at the first merge, or ``None``.
+
+    Resolution: the drift of a touch is found to ~1e-8, the gap at it to
+    ~1e-4 rad (the nearest pair is itself cusp-shaped in ``t`` there), hence
+    the default ``merge_tol``. The grid must see a touch before it can be
+    refined; the gap grows like ``c*sqrt(|s - s*|)`` with ``c`` ~ 8 rad, so
+    it is near 1 rad 0.015 away, and ``n_steps=200`` over unit drift resolves
+    that. ``limits`` is passed to :meth:`~SelfMotionManifold.gap`: only
+    postures inside the joint box count.
+
+    ``explain=True`` returns ``(result, reason)``, the reason naming the
+    outcome -- ``merged``, ``branch lost`` or ``no merge`` -- with the closest
+    approach found; a bare ``None`` cannot tell "never met" from "the pose left
+    the workspace".
     """
     T0 = np.asarray(T, dtype=np.float64)
     d = np.asarray(direction, dtype=np.float64)
-    fam0 = charts(kb, T0, solver_name=solver_name, policy=policy, native=native)
-    _gap, qa, qb = fam0.gap(a, b)
-    la, lb = fam0.locate(qa), fam0.locate(qb)
+
+    def fam_at(s: float) -> SelfMotionManifold:
+        pose = se3_exp(s * d) @ T0
+        return charts(kb, pose, solver_name=solver_name, policy=policy, native=native)
+
+    Head = tuple[Chart, float, NDArray[np.float64]]
+
+    def advance(fam: SelfMotionManifold, h: Head) -> Head:
+        c, t, _ = fam.continue_from(h[0], h[1], h[2], max_step=0.7)
+        return c, t, c.q(t)
+
+    def sheet_gap(fam: SelfMotionManifold, ha: Head, hb: Head) -> tuple[float, bool]:
+        """(gap between the heads' sheets, whether they are one sheet)."""
+        sa, sb = _glued_sheet(fam, ha[0]), _glued_sheet(fam, hb[0])
+        if sa & sb:
+            return 0.0, True
+        best = float("inf")
+        for x in fam.charts:
+            if x.label not in sa:
+                continue
+            for y in fam.charts:
+                if y.label in sb:
+                    best = min(best, fam.gap(x, y, limits=limits)[0])
+        return best, False
+
+    fam0 = fam_at(0.0)
+    _, qa, qb = fam0.gap(a, b, limits=limits)
+    la, lb = fam0.locate(_wrap_pi(qa)), fam0.locate(_wrap_pi(qb))
     if la is None or lb is None:
         raise ValueError("drift_to_merge: the charts' nearest points do not locate")
-    ca, ta = la
-    cb, tb = lb
+    ha: Head = (la[0], la[1], _wrap_pi(qa))
+    hb: Head = (lb[0], lb[1], _wrap_pi(qb))
+    g_start, joined = sheet_gap(fam0, ha, hb)
+    if joined:
+        raise ValueError("drift_to_merge: a and b are on one sheet already")
+    grid: list[tuple[float, Head, Head, float]] = [(0.0, ha, hb, g_start)]
+
+    def state_at(k: int, s: float) -> tuple[float, bool] | None:
+        """Sheet gap at drift ``s``, the heads continued from grid step ``k``."""
+        fam = fam_at(s)
+        if not fam.charts:
+            return None
+        _, ha_k, hb_k, _ = grid[k]
+        return sheet_gap(fam, advance(fam, ha_k), advance(fam, hb_k))
+
+    def gap_at(k: int, s: float) -> float:
+        st = state_at(k, s)
+        return float("inf") if st is None else st[0]
+
+    def golden(k: int, lo: float, hi: float) -> tuple[float, float]:
+        r = 0.5 * (np.sqrt(5.0) - 1.0)
+        x1, x2 = hi - r * (hi - lo), lo + r * (hi - lo)
+        f1, f2 = gap_at(k, x1), gap_at(k, x2)
+        for _ in range(80):
+            if hi - lo < 1e-14:
+                break
+            if f1 <= f2:
+                hi, x2, f2 = x2, x1, f1
+                x1 = hi - r * (hi - lo)
+                f1 = gap_at(k, x1)
+            else:
+                lo, x1, f1 = x1, x2, f2
+                x2 = lo + r * (hi - lo)
+                f2 = gap_at(k, x2)
+        return (x1, f1) if f1 <= f2 else (x2, f2)
+
+    def joined_between(k: int, lo: float, hi: float) -> tuple[float, float]:
+        """Bisect the drift where the sheets become one, from grid step ``k``;
+        the gap just before it."""
+        for _ in range(60):
+            if hi - lo <= 1e-12:
+                break
+            mid = 0.5 * (lo + hi)
+            st = state_at(k, mid)
+            if st is not None and st[1]:
+                hi = mid
+            else:
+                lo = mid
+        return hi, gap_at(k, lo)
+
+    def merged(s_min: float, g_min: float, how: str) -> _MergeFound | _MergeExplained:
+        return _merge_outcome(
+            (s_min, se3_exp(s_min * d) @ T0),
+            f"merged at drift {s_min:.8f} ({how}), gap {g_min:.3e} rad",
+            explain,
+        )
+
+    closest, closest_s = g_start, 0.0
     for k in range(1, n_steps + 1):
         s = max_drift * k / n_steps
-        Tk = se3_exp(s * d) @ T0
-        fam = charts(kb, Tk, solver_name=solver_name, policy=policy, native=native)
-        try:
-            ca, ta, ea = fam.continue_from(ca, ta, qa, max_step=0.7)
-            cb, tb, eb = fam.continue_from(cb, tb, qb, max_step=0.7)
-        except ValueError:
-            return None
-        qa, qb = ca.q(ta), cb.q(tb)
-        if ca.label == cb.label or _wrap_dist(qa, qb) <= merge_tol:
-            return s, Tk
-        if ea == "collision" and eb == "collision":
-            return s, Tk
-    return None
+        fam = fam_at(s)
+        if not fam.charts:
+            s_min, g_min = golden(k - 1, grid[max(k - 2, 0)][0], s)
+            if g_min <= merge_tol:
+                return merged(s_min, g_min, "touched before leaving the workspace")
+            return _merge_outcome(
+                None,
+                f"branch lost at drift {s:.4f} (the pose left the workspace); closest "
+                f"approach {min(closest, g_min):.4g} rad",
+                explain,
+            )
+        ha, hb = advance(fam, grid[-1][1]), advance(fam, grid[-1][2])
+        g, joined = sheet_gap(fam, ha, hb)
+        if joined:
+            s_star, g_before = joined_between(k - 1, grid[-1][0], s)
+            if g_before <= merge_tol:
+                return merged(s_star, g_before, "the sheets joined")
+            return _merge_outcome(
+                None,
+                f"branch lost at drift {s_star:.6f}: the sheets became one while "
+                f"{g_before:.4g} rad apart -- a continuation jumped, not a merge",
+                explain,
+            )
+        grid.append((s, ha, hb, g))
+        if k >= 2 and grid[k - 1][3] <= grid[k - 2][3] and grid[k - 1][3] < g:
+            s_min, g_min = golden(k - 1, grid[k - 2][0], s)
+            if g_min <= merge_tol:
+                return merged(s_min, g_min, "the sheets touched")
+            if g_min < closest:
+                closest, closest_s = g_min, s_min
+        if g < closest:
+            closest, closest_s = g, s
+    return _merge_outcome(
+        None,
+        f"no merge within max_drift={max_drift:g}; closest approach {closest:.4g} rad "
+        f"at drift {closest_s:.6f}",
+        explain,
+    )
 
 
 class TrackStep:
@@ -1573,28 +2094,159 @@ def track(
     """Follow one branch of the self-motion manifold along a pose path.
 
     ``poses[0]`` must be the pose of ``q0``. At each subsequent pose the branch is
-    continued by :meth:`ChartFamily.continue_from`: a label lookup while the
+    continued by :meth:`SelfMotionManifold.continue_from`: a label lookup while the
     label persists, a relabel at a fold, and a ``"collision"`` event where the
-    branch vanished (the step then holds the nearest chart's point). The
+    branch vanished (the step then holds the nearest chart's point). At a pose
+    with no manifold at all (outside the workspace) tracking stops: the list
+    ends with one ``"unreachable"`` step (``q`` all ``NaN``) and is shorter than
+    ``poses``. The
     coordinate ``t`` is held fixed step to step, so this is *pure* continuation
     of the redundancy: a controller would add its own motion along the chart.
     Closing a loop and comparing the first and last labels reads off the
     monodromy of the loop.
     """
+    path = track_all(
+        kb, poses, q0=q0, solver_name=solver_name, policy=policy, native=native, max_step=max_step
+    )
+    return next(iter(path.tracks.values()))
+
+
+class PathTrack:
+    """Result of :func:`track_all`: every tracked branch along a pose path.
+
+    ``tracks`` maps each starting label (at ``poses[0]``) to its list of
+    :class:`TrackStep`, one per pose up to where tracking stopped.
+    ``stopped_at`` is the index of the first pose outside the workspace, where
+    every track ends with an ``"unreachable"`` step, or ``None`` when the whole
+    path was tracked. ``closed`` is ``True`` when the path returns to its
+    starting pose, and then :attr:`permutation` reads off the monodromy.
+    """
+
+    __slots__ = ("closed", "stopped_at", "tracks")
+
+    def __init__(
+        self,
+        tracks: dict[tuple[int, ...], list[TrackStep]],
+        closed: bool,
+        stopped_at: int | None = None,
+    ) -> None:
+        self.tracks = tracks
+        self.closed = closed
+        self.stopped_at = stopped_at
+
+    @property
+    def permutation(self) -> dict[tuple[int, ...], tuple[int, ...]] | None:
+        """Start label -> end label, on a closed path tracked to its end
+        (``None`` otherwise, including a path that left the workspace). The
+        identity when every branch came back to itself. Not necessarily a
+        bijection: after a ``"collision"`` two tracks can end on one chart --
+        :meth:`is_bijection` says whether it is one."""
+        if not self.closed or self.stopped_at is not None:
+            return None
+        return {label: steps[-1].label for label, steps in self.tracks.items()}
+
+    def is_bijection(self) -> bool:
+        perm = self.permutation
+        return perm is not None and sorted(perm.values()) == sorted(perm)
+
+    def events(self) -> list[TrackStep]:
+        """Every step whose event is not a plain ``"label"`` lookup or the
+        start: the folds, collisions and the stop outside the workspace, in
+        pose order."""
+        steps = [
+            s for track in self.tracks.values() for s in track if s.event not in ("label", "start")
+        ]
+        return sorted(steps, key=lambda s: s.index)
+
+    def q(self, label: tuple[int, ...]) -> NDArray[np.float64]:
+        """The configurations of one track, ``(n_steps, dof)``; the last row is
+        ``NaN`` when tracking stopped outside the workspace."""
+        return np.stack([s.q for s in self.tracks[label]])
+
+    def __repr__(self) -> str:
+        return (
+            f"PathTrack({len(self.tracks)} branches, "
+            f"{len(next(iter(self.tracks.values()), []))} poses, closed={self.closed}, "
+            f"{len(self.events())} events)"
+        )
+
+
+def _start_t(chart: Chart) -> float:
+    """A representative coordinate on a chart: the middle of its longest
+    domain interval (``0`` on a zero-dimensional chart)."""
+    if chart.dimension == 0:
+        return 0.0
+    lo, hi = max(chart.domain, key=lambda d: d[1] - d[0])
+    return 0.5 * (lo + hi)
+
+
+def track_all(
+    kb: KinBody,
+    poses: ArrayLike,
+    *,
+    q0: ArrayLike | None = None,
+    solver_name: str | None = None,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    native: bool = True,
+    max_step: float = 0.5,
+    close_tol: float = 1e-9,
+) -> PathTrack:
+    """Solve a pose path in one call, carrying chart labels along it (request C2).
+
+    With ``q0=None`` every chart of ``poses[0]`` is tracked, each from the
+    middle of its longest domain interval; with ``q0`` only the branch through
+    ``q0``, from where ``q0`` sits (``poses[0]`` must be its pose), and with a
+    ``(k, dof)`` ``q0`` the ``k`` branches through those starts, one per chart. The manifold
+    is built once per pose and every branch is continued on it by
+    :meth:`SelfMotionManifold.continue_from` -- a label lookup, no
+    nearest-neighbour search, with the fold and collision events of
+    :func:`track`. ``t`` is held fixed per branch, as in :func:`track`.
+    Tracking stops at the first pose with no manifold at all (outside the
+    workspace): nothing connects a branch across that gap, so picking a label
+    up again on the far side would be a fresh lookup posing as continuation.
+    Every track then ends with one ``"unreachable"`` step (``q`` all ``NaN``)
+    and :attr:`PathTrack.stopped_at` names the pose.
+
+    When ``poses[-1]`` equals ``poses[0]`` (to ``close_tol``, max abs entry)
+    the path is a loop and :attr:`PathTrack.permutation` is its monodromy.
+    """
     P = np.asarray(poses, dtype=np.float64)
+    if P.ndim != 3 or P.shape[1:] != (4, 4) or P.shape[0] < 1:
+        raise ValueError(f"track_all: poses must be (N, 4, 4) with N >= 1, got {P.shape}")
     fam = charts(kb, P[0], solver_name=solver_name, policy=policy, native=native)
-    located = fam.locate(q0)
-    if located is None:
-        raise ValueError("track: q0 is not on the manifold of poses[0]")
-    chart, t = located
-    q = np.asarray(q0, dtype=np.float64)
-    steps = [TrackStep(0, chart.label, t, q, "start")]
+    heads: list[tuple[Chart, float, NDArray[np.float64]]] = []
+    if q0 is None:
+        for c in fam.charts:
+            t = _start_t(c)
+            heads.append((c, t, c.q(t)))
+    else:
+        for q_start in np.atleast_2d(np.asarray(q0, dtype=np.float64)):
+            located = fam.locate(q_start)
+            if located is None:
+                raise ValueError("track: q0 is not on the manifold of poses[0]")
+            heads.append((located[0], located[1], q_start))
+    starts = [c.label for c, _, _ in heads]
+    if len(set(starts)) != len(starts):
+        raise ValueError(
+            f"track_all: two starts lie on one chart ({starts}); tracks are keyed by it"
+        )
+    tracks = {c.label: [TrackStep(0, c.label, t, q, "start")] for c, t, q in heads}
+    stopped_at: int | None = None
     for i in range(1, P.shape[0]):
         fam = charts(kb, P[i], solver_name=solver_name, policy=policy, native=native)
-        chart, t, event = fam.continue_from(chart, t, q, max_step=max_step)
-        q = chart.q(t)
-        steps.append(TrackStep(i, chart.label, t, q, event))
-    return steps
+        if not fam.charts:
+            gone = np.full(len(kb.joints), np.nan)
+            for k, (chart, t, _) in enumerate(heads):
+                tracks[starts[k]].append(TrackStep(i, chart.label, t, gone, "unreachable"))
+            stopped_at = i
+            break
+        for k, (chart, t, q) in enumerate(heads):
+            chart, t, event = fam.continue_from(chart, t, q, max_step=max_step)
+            q = chart.q(t)
+            heads[k] = (chart, t, q)
+            tracks[starts[k]].append(TrackStep(i, chart.label, t, q, event))
+    closed = P.shape[0] > 1 and float(np.max(np.abs(P[-1] - P[0]))) <= close_tol
+    return PathTrack(tracks, closed, stopped_at)
 
 
 class CuspidalityReport:
@@ -1765,7 +2417,7 @@ def _native_ext() -> Any:
 
 def _spherical_shoulder_family_native(
     ext: Any, kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy
-) -> ChartFamily:
+) -> SelfMotionManifold:
     from ssik.solvers.seven_r import spherical_shoulder as sh
 
     j = kb.joints
@@ -1816,7 +2468,7 @@ def _spherical_shoulder_family_native(
         idx, t, _dist = nat.locate(np.ascontiguousarray(q, dtype=np.float64), tol)
         return int(idx), float(t)
 
-    return ChartFamily(
+    return SelfMotionManifold(
         parameter="q6",
         periodic=False,
         param_of=param_of,
@@ -1847,7 +2499,7 @@ _SRS_ARG_KEYS = (
 )
 
 
-def _srs_family_native(ext: Any, kb: KinBody, T: NDArray[np.float64]) -> ChartFamily | None:
+def _srs_family_native(ext: Any, kb: KinBody, T: NDArray[np.float64]) -> SelfMotionManifold | None:
     from ssik._native import _srs_native_args
 
     args = _srs_native_args(kb)
@@ -1889,7 +2541,7 @@ def _srs_family_native(ext: Any, kb: KinBody, T: NDArray[np.float64]) -> ChartFa
         idx, psi, _dist = nat.locate(np.ascontiguousarray(q, dtype=np.float64), tol)
         return int(idx), float(psi)
 
-    return ChartFamily(
+    return SelfMotionManifold(
         parameter="swivel",
         periodic=True,
         param_of=param_of,

@@ -76,9 +76,13 @@ inline double unit_tangent(const std::array<double, 7>& dq, std::array<double, 7
 // d^T M V = 0. `metric` is a row-major 7x7 SPD matrix, or nullptr for the
 // Euclidean case (the kinematic split ker(J)^perp). The columns of V are
 // Euclidean-orthonormal, built by the Householder reflection carrying e_0 onto
-// M d / |M d|, so V varies continuously along the arc except where M d passes
-// through -e_0. False off the branch or at a fold (|dq| not finite).
-// Mirrors ssik.chart.Chart.frame.
+// w = M d / |M d|, so V varies continuously along the arc except at the single
+// direction w == +e_0, where u = e_0 - w vanishes and the limit depends on the
+// direction of approach (w == -e_0 is benign: u -> e_0 from every side). The
+// defect cannot be removed, only moved -- a continuous V(w) on the whole sphere
+// is a parallelisation of S^6, which does not exist -- and a single punctured
+// point is the best possible. False off the branch or at a fold (|dq| not
+// finite). Mirrors ssik.chart.Chart.frame.
 inline bool frame_from_tangent(const std::array<double, 7>& dq, const double* metric,
                                std::array<double, 7>& d_out,
                                Eigen::Matrix<double, 7, 6>& v_out) {

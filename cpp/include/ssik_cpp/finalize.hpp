@@ -37,6 +37,9 @@ enum class SeedMetric { WrapLinf, WrapL2 };
 template <int N>
 struct ArtifactParams {
   bool respect_limits = true;
+  // respect_limits="wrap": wrap each joint into its range where a +-2pi
+  // representative exists, drop nothing (postprocess.finalize_solutions).
+  bool wrap_only = false;
   bool has_seed = false;
   std::array<double, N> q_seed{};
   SeedMetric seed_metric = SeedMetric::WrapLinf;
@@ -495,8 +498,10 @@ std::vector<Solution<N>> finalize_solutions(
     const std::function<std::vector<Solution<N>>()>& in_limits_fallback = nullptr) {
   if (p.respect_limits) {
     sols = wrap_to_limits<N>(sols, consts, lim);
-    sols = apply_respect_limits<N>(sols, lim);
-    if (sols.empty() && in_limits_fallback) sols = in_limits_fallback();
+    if (!p.wrap_only) {
+      sols = apply_respect_limits<N>(sols, lim);
+      if (sols.empty() && in_limits_fallback) sols = in_limits_fallback();
+    }
   }
 
   // Whether this call is the one that lifts is the caller's decision (see the
