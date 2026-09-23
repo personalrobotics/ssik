@@ -467,8 +467,8 @@ class Manipulator:
     # Self-motion charts (redundant 7R)
     # ------------------------------------------------------------------
 
-    def charts(self, T_target: ArrayLike, *, native: bool = True) -> SelfMotionManifold:
-        """Charts of the self-motion manifold at ``T_target`` (redundant 7R only).
+    def self_motion(self, T_target: ArrayLike, *, native: bool = True) -> SelfMotionManifold:
+        """The self-motion manifold at ``T_target``, as charts (redundant 7R only).
 
         Returns a :class:`~ssik.chart.SelfMotionManifold`: every closed-form branch
         ``q(t)`` of ``FK^-1(T_target)`` with a stable label and its domain, plus
@@ -503,7 +503,7 @@ class Manipulator:
         Every branch at ``poses[0]`` (or only those through ``q0``, one start or
         ``(k, dof)`` of them) is
         continued pose to pose by label lookup; see :func:`ssik.chart.track_all`.
-        Chart-capable arms only, as :meth:`charts`.
+        Chart-capable arms only, as :meth:`self_motion`.
 
         :param poses: ``(N, 4, 4)`` pose path. A closed path (last pose equal
             to the first) exposes the monodromy as ``result.permutation``.

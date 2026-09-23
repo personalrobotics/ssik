@@ -56,7 +56,7 @@ def test_dispatch_and_parameter(name: str) -> None:
     _base, _ee, solver, param = _ARMS[name]
     arm = ssik.Manipulator(kb)
     assert arm.solver_name == solver
-    fam = arm.charts(arm.fk(np.zeros(7)))
+    fam = arm.self_motion(arm.fk(np.zeros(7)))
     assert isinstance(fam, SelfMotionManifold)
     assert fam.parameter == param
     assert all(c.parameter == param for c in fam)
@@ -217,7 +217,7 @@ def test_unsupported_families_are_refused() -> None:
         "ikgeo.three_parallel",
     )
     with pytest.raises(NotImplementedError, match="no closed-form chart"):
-        arm.charts(arm.fk(np.zeros(7)))
+        arm.self_motion(arm.fk(np.zeros(7)))
     ur = load_urdf_kinbody_normalized(FIXTURES / "ur5e.urdf", "world", "tool0")
     with pytest.raises(ValueError, match=r"shape \(4, 4\)"):
         charts(ur, np.eye(3), solver_name="ikgeo.three_parallel")
@@ -508,7 +508,7 @@ def test_ur5e_zero_dimensional_charts() -> None:
     for _ in range(15):
         q = _random_q(kb, rng)
         T = arm.fk(q)
-        fam = arm.charts(T)
+        fam = arm.self_motion(T)
         assert fam.dimension == 0
         labels = fam.labels()
         assert len(set(labels)) == len(labels)

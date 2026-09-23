@@ -9,10 +9,10 @@ the chart itself.
 
 A :class:`Chart` is one continuous branch ``q(t)`` of the manifold at one pose:
 
-- ``label`` is a hashable branch identity, the sign bits of the closed-form
-  subproblem roots the branch was built from. Two charts at two different poses
-  with the same label are the same branch, which is what makes tracking a
-  branch across poses a lookup instead of a nearest-neighbour search.
+- ``label`` is a hashable branch identity built from the closed-form
+  subproblem roots of the branch. At one pose it tells the charts apart; across
+  poses it is what makes tracking a branch a lookup instead of a
+  nearest-neighbour search, within the limits of the label contract below.
 - ``q(t)`` evaluates the branch at any ``t``, scalar or batched; ``tangent(t)`` is
   its derivative as a unit direction and a rate (request B2).
 - ``in_limits()`` is the domain under joint limits (request A3): sign-zeros of
@@ -65,6 +65,28 @@ Approximate-class arms (``*_polished`` solvers) and the joint-lock family are
 refused: their branches are not closed-form (LM polish) or carry no stable
 discrete identity across samples (eigen-solver root ordering).
 
+Label contract. What a label promises, per family; nothing beyond this is
+promised. In every supported family the labels of one pose are distinct, and
+the same label at a nearby pose is the same branch, except:
+
+- ``seven_r.spherical_shoulder``: across a fold, where the branch is
+  relabelled (``continue_from`` reports ``"fold"``), and in the ``interval``
+  entry whenever the number of reachable q6 intervals changes.
+- ``seven_r.srs``: across a singularity, where two branches meet
+  (``"collision"``).
+- ``ikgeo.three_parallel``: across a singularity, where a factor of the
+  singularity determinant changes sign.
+
+Labels are compared only within one family and one arm: they are tuples of
+small ints whose entries mean different things per family (the SRS and
+three-parallel labels are both 3-tuples). "Nearby" is what
+:meth:`SelfMotionManifold.continue_from` checks, a point of the same-label
+chart within ``max_step`` of the old one; it reports every exception above as
+an event rather than trusting the label. A family added later -- joint-lock,
+or a polished solver -- states its own entry, and may promise only the first
+half: its label then identifies a chart at one pose and nothing across poses,
+and tracking falls back to nearest-point continuation.
+
 Cost model: ``charts(T)`` builds the family in microseconds (the Panda's
 elbow-reachability arcs are closed form; nothing is scanned). ``locate`` and
 ``q(t)`` never need a domain. A chart's ``domain`` is computed on first access,
@@ -87,7 +109,7 @@ Example::
     import ssik
     arm = ssik.Manipulator.from_urdf("panda.urdf", base="panda_link0", ee="panda_link8")
     T = arm.fk(q_now)
-    family = arm.charts(T)
+    family = arm.self_motion(T)
     chart, t = family.locate(q_now)       # the branch the arm is on, and where
     (ts, qs), *_ = chart.curve(200)       # the branch, continuous in t, per segment
 """
@@ -461,6 +483,42 @@ class Chart:
             out: tuple[NDArray[np.float64], NDArray[np.float64]] = native(raw, m)
             d, v = out
         return (d[0], v[0]) if scalar else (d, v)
+
+    def pullback_metric(self, t: ArrayLike, metric: Metric | None = None) -> NDArray[np.float64]:
+        """The joint-space metric pulled back to the chart coordinate:
+        ``g(t) = Dφ(t)^T G(q(t)) Dφ(t)`` with ``Dφ = dq/dt``, the ``1x1`` metric
+        tensor of the branch in ``t``. Scalar ``t`` -> ``()``; ``(N,)`` ->
+        ``(N,)``.
+
+        ``metric`` is ``G`` as in :meth:`length`: ``None`` (Euclidean, so
+        ``g = |dq/dt|^2``), a constant SPD ``(dof, dof)`` matrix, or a batched
+        callable ``(N, dof) -> (N, dof, dof)`` such as the mass matrix.
+        ``sqrt(g(t)) dt`` is the arc-length element whose integral
+        :meth:`length` approximates by chords.
+
+        Exact: built on :meth:`tangent`, ``g = rate^2 * d^T G d``. At a fold of
+        ``t`` the rate diverges and so does ``g`` (the coordinate is singular
+        there, not the manifold; ``d^T G d`` stays finite). ``NaN`` off the
+        branch. A zero-dimensional chart has no coordinate and raises.
+        """
+        if self.dimension == 0:
+            raise ValueError("pullback_metric: a zero-dimensional chart has no coordinate")
+        ts = np.asarray(t, dtype=np.float64)
+        scalar = ts.ndim == 0
+        tt = np.atleast_1d(ts)
+        d, rate = self.tangent(tt)
+        mfn = _metric_fn(metric)
+        if mfn is None:
+            dgd = np.ones(tt.shape[0])
+        else:
+            q = self.q(tt)
+            ok = np.all(np.isfinite(q), axis=1)
+            dgd = np.full(tt.shape[0], np.nan)
+            if ok.any():
+                G = mfn(q[ok])
+                dgd[ok] = np.einsum("ni,nij,nj->n", d[ok], G, d[ok])
+        g = np.asarray(rate**2 * dgd, dtype=np.float64)
+        return g[0] if scalar else g
 
     def restrict(
         self,

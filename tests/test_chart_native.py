@@ -123,7 +123,7 @@ def test_native_locate_recovers_own_configuration(name: str) -> None:
     worst = 0.0
     for _ in range(100):
         q = _random_q(kb, rng)
-        fam = arm.charts(arm.fk(q))
+        fam = arm.self_motion(arm.fk(q))
         assert fam.native
         located = fam.locate(q)
         assert located is not None

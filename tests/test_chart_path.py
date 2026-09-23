@@ -184,6 +184,55 @@ def test_zero_dimensional_chart() -> None:
     ((_, qs),) = c.sample(10)
     assert qs.shape == (1, 6)
     assert np.allclose(qs[0], c.q(0.0))
+    with pytest.raises(ValueError, match="zero-dimensional"):
+        c.pullback_metric(0.0)
+
+
+def _position_metric(qs):
+    """An SPD metric that varies with the posture, like a mass matrix."""
+    w = 1.0 + np.sin(qs) ** 2  # (N, 7), in [1, 2]
+    B = np.eye(7) + 0.1 * np.ones((7, 7))
+    return w[:, :, None] * B[None] * w[:, None, :]
+
+
+def test_pullback_metric_integrates_to_the_length() -> None:
+    """``integral sqrt(g(t)) dt`` is the length :meth:`Chart.length` sums by
+    chords, on a fold-free chart and in a posture-dependent metric."""
+    kb = _kb("kuka_iiwa14")
+    c = charts(kb, poe_forward_kinematics(kb, _random_q(kb, np.random.default_rng(3)))).charts[0]
+    t = np.linspace(-np.pi, np.pi, 20001)
+
+    def integral(metric):
+        s = np.sqrt(c.pullback_metric(t, metric))
+        return float(np.sum(0.5 * (s[1:] + s[:-1]) * np.diff(t)))
+
+    L = c.length(_position_metric)
+    # The metric is doing something: the weighted length is not the Euclidean one.
+    assert c.length() * 1.5 < L
+    assert integral(_position_metric) == pytest.approx(L, rel=1e-6)
+    assert integral(None) == pytest.approx(c.length(), rel=1e-6)
+
+
+def test_pullback_metric_is_the_metric_of_dq_dt() -> None:
+    """Pointwise: ``g(t) = q'(t)^T G(q(t)) q'(t)`` against a central difference
+    of ``q``, and it diverges at a fold, where the rate does."""
+    chart = _panda_chart_with_folds(np.random.default_rng(1))
+    lo, hi = max(chart.domain, key=lambda d: d[1] - d[0])
+    t = np.linspace(lo, hi, 41)[5:-5]  # clear of the folds
+    h = 1e-6
+    dq = _wrap(chart.q(t + h) - chart.q(t - h)) / (2 * h)
+    G = _position_metric(chart.q(t))
+    fd = np.einsum("ni,nij,nj->n", dq, G, dq)
+    assert chart.pullback_metric(t, _position_metric) == pytest.approx(fd, rel=1e-5)
+    _, rate = chart.tangent(t)
+    assert chart.pullback_metric(t, None) == pytest.approx(rate**2, rel=1e-12)
+    assert np.shape(chart.pullback_metric(float(t[0]))) == ()
+
+    # At a fold q ~ sqrt(t - t_0), so g ~ 1/(t - t_0): a hundredfold per two
+    # decades of approach, at both ends of the piece.
+    far = chart.pullback_metric(np.array([lo + 1e-3, hi - 1e-3]))
+    near = chart.pullback_metric(np.array([lo + 1e-5, hi - 1e-5]))
+    assert near / far == pytest.approx([100.0, 100.0], rel=0.01)
 
 
 # --------------------------------------------------------------------------
