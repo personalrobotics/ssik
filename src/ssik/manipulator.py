@@ -779,7 +779,7 @@ class Manipulator:
             max_solutions=max_solutions,
             # Manipulator runs the pipeline once, so this is the lifting call --
             # but only when the caller wanted limits honoured at all.
-            enumerate_windings=enumerate_windings and respect_limits,
+            enumerate_windings=enumerate_windings and bool(respect_limits),
             counts=counts,
         )
         dropped_by_limits = counts["dropped_by_limits"]

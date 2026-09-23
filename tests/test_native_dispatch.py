@@ -111,15 +111,24 @@ def test_native_matches_python(arm_name: str) -> None:
 
         # respect_limits="wrap": the raw set, nothing dropped, each joint in its
         # range where a +-2pi representative is -- compared WITHOUT wrapping, since
-        # the representative is the point of the mode.
-        py_w = mod.solve(t, respect_limits="wrap")
-        nat_w = mod.solve(t, native=True, respect_limits="wrap")
-        assert len(py_w) == len(nat_w) == len(mod.solve(t, respect_limits=False)), (
-            f"{arm_name}: wrap drops nothing"
-        )
-        assert all(any(np.max(np.abs(a.q - b.q)) < 1e-3 for b in py_w) for a in nat_w), (
-            f"{arm_name}: wrap representatives"
-        )
+        # the representative is the point of the mode. One representative per
+        # branch (enumerate_windings=False) is what matches the raw set 1:1; with
+        # enumeration (the default, #562) wrap also lifts wide-limit joints, and the
+        # two backends must still agree on that set.
+        raw_n = len(mod.solve(t, respect_limits=False))
+        for enumerate_windings in (False, True):
+            py_w = mod.solve(t, respect_limits="wrap", enumerate_windings=enumerate_windings)
+            nat_w = mod.solve(
+                t, native=True, respect_limits="wrap", enumerate_windings=enumerate_windings
+            )
+            assert len(py_w) == len(nat_w), f"{arm_name}: wrap parity ({enumerate_windings})"
+            if not enumerate_windings:
+                assert len(py_w) == raw_n, f"{arm_name}: wrap drops nothing"
+            else:
+                assert len(py_w) >= raw_n, f"{arm_name}: wrap lifts, never drops"
+            assert all(any(np.max(np.abs(a.q - b.q)) < 1e-3 for b in py_w) for a in nat_w), (
+                f"{arm_name}: wrap representatives ({enumerate_windings})"
+            )
 
         py_full = mod.solve(t)
         cpp_m = mod.solve(t, native=True, max_solutions=3)

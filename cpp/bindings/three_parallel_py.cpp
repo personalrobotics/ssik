@@ -244,7 +244,7 @@ py::tuple native_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -431,7 +431,7 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -505,7 +505,7 @@ py::tuple spherical_shoulder_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -767,7 +767,7 @@ py::tuple general_6r_tensor_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -1130,7 +1130,7 @@ py::tuple jointlock_hp_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
   auto tm = target.unchecked<2>();
   ssik::Pose T;
   for (int r = 0; r < 4; ++r)
@@ -1260,7 +1260,7 @@ py::tuple jointlock_rr_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
   auto tm = target.unchecked<2>();
   ssik::Pose T;
   for (int r = 0; r < 4; ++r)
