@@ -113,7 +113,7 @@ inline SrsConsts srs_consts() {
   SrsConsts s;
   s.l_se = 0.4;
   s.l_ew = 0.3999999999999999;
-  s.ee_offset_local = Eigen::Vector3d(-3.17052967785409e-32, 4.487286431829201e-18, 0.1259999999999999);
+  s.ee_offset_local = Eigen::Vector3d(-1.937934513446259e-32, 4.487286431829195e-18, 0.1259999999999999);
   s.shoulder_pivot = Eigen::Vector3d(0.0, 0.0, 0.33999999999999997);
   s.r_post_wrist = (Eigen::Matrix3d() <<
        1.0, 3.6739403974420594e-16, -1.2246467991473537e-16,
@@ -121,7 +121,7 @@ inline SrsConsts srs_consts() {
        1.2246467991473532e-16, 3.697785493223493e-32, 1.0).finished();
   s.elbow_index = 3;
   s.upper_home = Eigen::Vector3d(-2.3268289183799715e-17, -1.2858791391047205e-17, 0.4);
-  s.forearm_home = Eigen::Vector3d(-4.898587196589411e-17, 3.6127080574846914e-17, 0.3999999999999999);
+  s.forearm_home = Eigen::Vector3d(-4.8985871965894125e-17, 3.6127080574846926e-17, 0.3999999999999999);
   s.general_path = true;
   return s;
 }
