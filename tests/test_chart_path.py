@@ -424,34 +424,6 @@ def test_drift_to_merge_finds_the_touch_and_only_a_touch() -> None:
     assert "0.91" in why  # the closest approach, reported
 
 
-def test_feasible_arc_survives_a_flip_at_its_midpoint() -> None:
-    """At a wrist gimbal lock a chart's coordinate flips by pi at one point. When
-    that point is exactly the midpoint of a feasible arc, a midpoint test threw the
-    whole arc away (an iiwa14 joint in range over 92% of the circle came back never
-    in range). The grid samples inside the arc decide it instead."""
-    from ssik.solvers.seven_r._feasible_param import PARAM_GRID, arcs_for_joint
-
-    lo, hi = -2.9, 2.9
-    bad = (-2.6, -2.4)  # a genuine out-of-range stretch: q = 3.0 there
-
-    def smooth(t):
-        return 3.0 if bad[0] < t < bad[1] else 0.1
-
-    # The long feasible arc runs from -2.4 round to -2.6 + 2pi; its midpoint:
-    mid = float(((bad[1] + bad[0] + 2 * np.pi) / 2 + np.pi) % (2 * np.pi) - np.pi)
-
-    def flipped(t):
-        # 1e-9 wide: far below the grid step, wide enough to hold the arc's
-        # midpoint, which the bisected boundaries place within ~1e-12 of `mid`.
-        return 0.1 + np.pi if abs(t - mid) < 1e-9 else smooth(t)  # -3.04: out of range
-
-    q_col = np.array([smooth(t) for t in PARAM_GRID])
-    for q_of in (smooth, flipped):
-        arcs = arcs_for_joint(q_of, lo, hi, PARAM_GRID, q_col)
-        covered = sum(b - a for a, b in arcs)
-        assert covered == pytest.approx(2 * np.pi - 0.2, abs=1e-6), (q_of.__name__, arcs)
-
-
 def test_track_all_from_several_starts() -> None:
     kb = _kb("kuka_iiwa14")
     q = _random_q(kb, np.random.default_rng(21))
@@ -467,23 +439,6 @@ def test_track_all_from_several_starts() -> None:
         track_all(kb, poses, q0=np.stack([starts[0], starts[0]]))
 
 
-def test_seeded_solve_capped_to_one_returns_the_nearest() -> None:
-    """The tracking idiom `solve(T, q_seed=q, max_solutions=1, respect_limits=False)`
-    on a solver that takes no seed (SRS): the cap used to reach the solver before
-    the seed ranking, returning its first branch instead of the nearest."""
-    kb = _kb("kuka_iiwa14")
-    arm = ssik.Manipulator(kb)
-    rng = np.random.default_rng(31)
-    for _ in range(5):
-        q = _random_q(kb, rng)
-        T = poe_forward_kinematics(kb, q)
-        seed = q + rng.uniform(-0.05, 0.05, 7)
-        full = arm.solve(T, respect_limits=False)
-        nearest = min(float(np.max(np.abs(_wrap(s.q - seed)))) for s in full)
-        (top,) = arm.solve(T, q_seed=seed, max_solutions=1, respect_limits=False)
-        assert float(np.max(np.abs(_wrap(top.q - seed)))) == pytest.approx(nearest, abs=1e-9)
-
-
 def _box_margin(qs, lims):
     """Signed distance inside the joint box, modulo 2*pi (``>= 0`` in limits)."""
     box = np.asarray(lims, dtype=np.float64)
@@ -493,27 +448,9 @@ def _box_margin(qs, lims):
 
 
 def test_in_limits_catches_an_excursion_between_grid_points() -> None:
-    """A joint that leaves its range and returns between two points of the
-    bracketing grid. Checked in the shared arc finder (the chart's in_limits and
-    the solver's in-limits resolver both call it) on a synthetic bump 0.24 past
-    the stop and 0.004 wide, then on the Panda branch it was found on (0.243 rad
-    past a stop over 0.01 of t)."""
-    from ssik.solvers.seven_r._feasible_param import PARAM_GRID, feasible_arcs
-
-    def q_scalar(t):
-        bump = 1.24 * np.exp(-(((t - 0.3) / 0.002) ** 2))
-        return np.array([0.5 * np.sin(t) + bump])
-
-    q_grid = np.array([q_scalar(t) for t in PARAM_GRID])
-    arcs = feasible_arcs(q_scalar, q_grid, (0,), [(-1.0, 1.0)], PARAM_GRID)
-    t = np.linspace(-np.pi, np.pi, 400001, endpoint=False)
-    inside = np.array([abs(q_scalar(x)[0]) <= 1.0 for x in t])
-    covered = np.zeros_like(inside)
-    for lo, hi in arcs:
-        covered |= (t >= lo - 1e-9) & (t <= hi + 1e-9)
-    assert not np.any(covered & ~inside), arcs  # nothing out of range is kept
-    assert not np.any(inside & ~covered), arcs  # nothing in range is lost
-
+    """Chart.in_limits on the Panda branch where the shared arc finder once
+    missed a joint leaving its range between grid points (0.243 rad past a stop
+    over 0.01 of t); the finder itself is tested in test_in_limits_arcs.py."""
     kb = _kb("franka_panda")
     lims_panda = tuple((float(lo), float(hi)) for lo, hi in (j.limits for j in kb.joints))
     rng = np.random.default_rng(0)
