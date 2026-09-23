@@ -123,6 +123,9 @@ SUPPORTED_SOLVERS: frozenset[str] = frozenset(
 )
 
 _TWO_PI = 2.0 * np.pi
+#: Most grid pairs :meth:`SelfMotionManifold.gap` refines from (those within
+#: twice the best grid distance); four covers a mirror-tied pair twice over.
+_GAP_STARTS = 4
 
 
 def _wrap_pi(a: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -953,11 +956,23 @@ class SelfMotionManifold:
         d2 = np.stack([dist2(qa[None, :], pb) for qa in pa])
         if not np.isfinite(d2).any():
             return float("inf"), nan, nan
-        i, j = np.unravel_index(int(np.argmin(d2)), d2.shape)
+        # Refine from every grid pair within twice the best distance, not from
+        # the argmin alone. Two charts parameterised by the same joint put
+        # mirror pairs (ta, tb) and (tb, ta) at one grid distance, and which
+        # np.argmin keeps is decided by rounding (BLAS kernel, platform); the
+        # search from one of them found a touching pair 1.4e-3 apart and from
+        # the other stalled at 0.109 on the same Panda pose.
+        order = np.argsort(d2, axis=None, kind="stable")
+        best_d2 = float(d2.flat[order[0]])
+        starts: list[tuple[int, int]] = []
+        for k in order[:_GAP_STARTS]:
+            si, sj = np.unravel_index(int(k), d2.shape)
+            if d2[si, sj] <= 4.0 * best_d2:
+                starts.append((int(si), int(sj)))
+        i, j = starts[0]
         qa, qb = pa[i], pb[j]
-        free = [(a, float(ta[i])), (b, float(tb[j]))]
-        free = [(c, t) for c, t in free if c.dimension == 1]
-        if free:
+        free_any = a.dimension == 1 or b.dimension == 1
+        if free_any:
             from scipy.optimize import minimize  # type: ignore[import-untyped]
 
             def bounds_of(c: Chart, t: float) -> tuple[float, float]:
@@ -966,37 +981,47 @@ class SelfMotionManifold:
                         return lo, hi
                 return t, t
 
-            def points(x: NDArray[np.float64]) -> tuple[NDArray[np.float64], ...]:
-                qs = []
-                k = 0
-                for c, q_fixed in ((a, qa), (b, qb)):
-                    if c.dimension == 1:
-                        qs.append(c._eval_t(np.array([float(x[k])]))[0])
-                        k += 1
-                    else:
-                        qs.append(q_fixed)
-                return qs[0], qs[1]
+            best_v = best_d2
+            for i0, j0 in starts:
+                fixed = (pa[i0], pb[j0])
+                free = [
+                    (c, t) for c, t in ((a, float(ta[i0])), (b, float(tb[j0]))) if c.dimension == 1
+                ]
 
-            def objective(x: NDArray[np.float64]) -> float:
-                ua, ub = points(x)
-                if not (np.all(np.isfinite(ua)) and np.all(np.isfinite(ub))):
-                    return 1e6
-                v = float(dist2(ua[None, :], ub[None, :])[0])
-                return v if np.isfinite(v) else 1e6
+                def points(
+                    x: NDArray[np.float64], fixed: tuple[NDArray[np.float64], ...] = fixed
+                ) -> tuple[NDArray[np.float64], ...]:
+                    qs = []
+                    k = 0
+                    for c, q_fixed in zip((a, b), fixed, strict=True):
+                        if c.dimension == 1:
+                            qs.append(c._eval_t(np.array([float(x[k])]))[0])
+                            k += 1
+                        else:
+                            qs.append(q_fixed)
+                    return qs[0], qs[1]
 
-            x0 = np.array([t for _c, t in free])
-            # Tight tolerances: the gradient of a squared distance vanishes with the
-            # distance, and at scipy's defaults the search stopped ~1e-3 rad short
-            # of a touching pair -- too coarse for drift_to_merge to call a merge.
-            res = minimize(
-                objective,
-                x0,
-                method="L-BFGS-B",
-                bounds=[bounds_of(c, t) for c, t in free],
-                options={"ftol": 1e-16, "gtol": 1e-14, "maxiter": 500},
-            )
-            if res.fun < objective(x0):
-                qa, qb = points(res.x)
+                def objective(x: NDArray[np.float64], points: Any = points) -> float:
+                    ua, ub = points(x)
+                    if not (np.all(np.isfinite(ua)) and np.all(np.isfinite(ub))):
+                        return 1e6
+                    v = float(dist2(ua[None, :], ub[None, :])[0])
+                    return v if np.isfinite(v) else 1e6
+
+                x0 = np.array([t for _c, t in free])
+                # Tight tolerances: the gradient of a squared distance vanishes with the
+                # distance, and at scipy's defaults the search stopped ~1e-3 rad short
+                # of a touching pair -- too coarse for drift_to_merge to call a merge.
+                res = minimize(
+                    objective,
+                    x0,
+                    method="L-BFGS-B",
+                    bounds=[bounds_of(c, t) for c, t in free],
+                    options={"ftol": 1e-16, "gtol": 1e-14, "maxiter": 500},
+                )
+                if res.fun < best_v:
+                    best_v = float(res.fun)
+                    qa, qb = points(res.x)
         if box is None:
             return float(np.sqrt(np.sum(_wrap_pi(qb - qa) ** 2))), qa, qb
         d2v, ra, rb = _inbox_dist2(qa[None, :], qb[None, :], box)

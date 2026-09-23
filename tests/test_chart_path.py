@@ -480,9 +480,13 @@ def test_in_limits_catches_an_excursion_between_grid_points() -> None:
 
 def test_drift_to_merge_follows_sheets_on_the_panda() -> None:
     """A Panda sheet is several charts glued at folds, and the nearest point of
-    a gap sits on a fold, where either chart can claim it. Following charts
-    there once reported a merge at drift 0.1996 where the branches pass 0.109
-    rad apart; following sheets reports the real touch at 0.848."""
+    a gap sits on a fold, where either chart can claim it; the heads follow
+    sheets, not charts. The touch at drift 0.19960583 is real -- a dense scan
+    brings the two branches within 3e-4 rad of each other there, the gap a
+    square-root cusp ~1e-8 wide in drift -- and must be found on every BLAS
+    kernel: ``gap`` once refined from only the argmin of a grid with a mirror
+    tie, so on some kernels it stalled at 0.109 and walked past this touch to
+    one at 0.848 (py3.10-3.13 in CI, OPENBLAS_CORETYPE locally)."""
     from ssik.chart import drift_to_merge, se3_exp
 
     kb = _kb("franka_panda")
@@ -506,15 +510,16 @@ def test_drift_to_merge_follows_sheets_on_the_panda() -> None:
     T, a, b, d = cases[3]
     found, why = drift_to_merge(kb, T, a, b, d, explain=True)
     assert found is not None, why
-    assert found[0] == pytest.approx(0.84813837, abs=1e-5)
+    assert found[0] == pytest.approx(0.19960583, abs=1e-6)
 
-    def chart_gap(s):
+    def chart_gaps(s):
         f = charts(kb, se3_exp(s * d) @ T)
         xa, xb = f.by_label(a.label), f.by_label(b.label)
         assert xa is not None
         assert xb is not None
-        return f.gap(xa, xb)[0]
+        return f.gap(xa, xb)[0], f.gap(xb, xa)[0]
 
-    assert chart_gap(0.1996058) > 0.1  # the near miss that used to be reported
-    assert chart_gap(found[0]) < 5e-3
-    assert chart_gap(found[0] - 0.01) > 0.5
+    # Both argument orders: swapping them transposes gap's grid, which moves
+    # a mirror tie to the other side of argmin.
+    assert max(chart_gaps(found[0])) < 5e-3
+    assert min(chart_gaps(found[0] - 0.01)) > 0.5
