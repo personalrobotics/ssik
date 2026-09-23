@@ -177,7 +177,9 @@ def _branch_arcs(branch: _Branch, limits: list[tuple[float, float]]) -> list[tup
     if not (limits[3][0] <= branch.q3 <= limits[3][1]):
         return []
     q_grid = branch.q_grid(PARAM_GRID)  # (N, 7) -- one batched eval per branch
-    return feasible_arcs(branch.q, q_grid, (0, 1, 2, 4, 5, 6), limits, PARAM_GRID)
+    return feasible_arcs(
+        branch.q, q_grid, (0, 1, 2, 4, 5, 6), limits, PARAM_GRID, q_batch=branch.q_grid
+    )
 
 
 def _enumerate_branches(

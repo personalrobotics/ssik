@@ -604,9 +604,14 @@ class Manipulator:
         # sweep on max_solutions: the closest-to-seed branch the solver
         # picks first may be out-of-limits and the postprocess pass would
         # drop it, leaving zero results. Force the full sweep, then
-        # filter + trim. The user opts out via respect_limits=False.
+        # filter + trim. The user opts out via respect_limits=False. Likewise
+        # when a seed is given to a solver that does not take one (the SRS
+        # 7R path): its first solution is not the one nearest the seed, so
+        # capping it before the seed ranking returned an arbitrary branch --
+        # 1.5 rad from a seed with a solution 0.118 away on the iiwa14.
         if "max_solutions" in params:
-            kwargs["max_solutions"] = None if respect_limits else max_solutions
+            seed_unseen = q_seed_arr is not None and "q_seed" not in params
+            kwargs["max_solutions"] = None if respect_limits or seed_unseen else max_solutions
         if q_seed_arr is not None and "q_seed" in params:
             kwargs["q_seed"] = q_seed_arr
         # Power-user kwargs override our defaults.
