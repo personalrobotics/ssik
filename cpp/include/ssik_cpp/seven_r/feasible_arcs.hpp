@@ -86,6 +86,30 @@ inline double to_limits(double v, double lo, double hi) {
   return v + kTwoPi * k;
 }
 
+// Whether the arc (u, w) between two consecutive boundaries is feasible: decided
+// by the grid samples inside it, which all share one sign (boundaries are only
+// placed where the grid changes sign); the midpoint is the fallback for an arc
+// holding no sample. The midpoint alone is wrong where q(t) is discontinuous --
+// at a wrist gimbal lock the coordinate flips by pi -- and it lands there: an
+// iiwa14 joint in range over 92% of the circle came back never in range.
+// (_feasible_param._arc_feasible)
+template <typename Phi>
+bool arc_feasible(double u, double w, const std::vector<double>& grid,
+                  const std::vector<double>& val, Phi&& phi, bool periodic) {
+  int inside = 0, ok = 0;
+  for (std::size_t k = 0; k < grid.size(); ++k) {
+    double t = grid[k];
+    if (periodic && t < u) t += kTwoPi;
+    if (t > u && t < w) {
+      ++inside;
+      if (val[k] >= 0.0) ++ok;
+    }
+  }
+  if (inside > 0) return 2 * ok > inside;
+  const double mid = 0.5 * (u + w);
+  return phi(periodic ? wrap(mid) : mid) >= 0.0;
+}
+
 // Feasible-t arcs for a single periodic joint q_of(t) in [lo, hi]. q_col is q_of
 // on `grid` (passed in so a batched family evaluates once).
 template <typename QOf>
@@ -115,7 +139,7 @@ Arcs arcs_for_joint(QOf&& q_of, double lo, double hi, const std::vector<double>&
   ext.push_back(roots[0] + kTwoPi);
   for (std::size_t i = 0; i + 1 < ext.size(); ++i) {
     const double u = ext[i], w = ext[i + 1];
-    if (phi(wrap(0.5 * (u + w))) >= 0.0) {
+    if (arc_feasible(u, w, grid, val, phi, true)) {
       if (w <= M_PI) {
         arcs.emplace_back(u, w);
       } else {  // arc straddles +pi: split
@@ -155,19 +179,96 @@ Arcs arcs_for_joint_bounded(QOf&& q_of, double lo, double hi, const std::vector<
   Arcs arcs;
   for (std::size_t i = 0; i + 1 < pts.size(); ++i) {
     const double u = pts[i], w = pts[i + 1];
-    if (phi(0.5 * (u + w)) >= 0.0) arcs.emplace_back(u, w);
+    if (arc_feasible(u, w, grid, val, phi, false)) arcs.emplace_back(u, w);
   }
   return merge(std::move(arcs));
+}
+
+// Largest move of any swept joint between two points of the bracketing grid. A
+// joint that leaves its range and returns between two grid points is invisible to
+// the sign-change search, so the grid is refined until no step moves a joint further
+// (measured 0.243 rad past a Panda stop over 0.01 of t on the fixed grid). The floor
+// in t stops refinement where q(t) jumps (a gimbal-lock flip). (_feasible_param)
+inline constexpr double kMaxJointStep = 0.02;
+inline constexpr double kMinParamStep = 1e-12;
+
+// grid / q_grid refined where the bracketing search could miss an excursion: a step
+// is split while some swept joint moves more than kMaxJointStep across it, or bends
+// more than that away from the straight line between its ends at the step's
+// midpoint (a joint that goes out and comes back between two samples). On the
+// circle the step from the last point round to grid[0] + 2pi counts too. Steps
+// that pass are not revisited. (_feasible_param.refine_grid)
+template <typename QScalar>
+void refine_grid(QScalar&& q_scalar, std::vector<double>& grid,
+                 std::vector<std::vector<double>>& q_grid, const std::vector<int>& swept,
+                 bool periodic) {
+  auto dist = [&](const std::vector<double>& a, const std::vector<double>& b) {
+    double worst = 0.0;
+    for (int i : swept) {
+      const double d = std::abs(wrap(a[i] - b[i]));
+      if (std::isfinite(d)) worst = std::max(worst, d);
+    }
+    return worst;
+  };
+  struct Step {
+    double a;
+    std::vector<double> qa;
+    double b;
+    std::vector<double> qb;
+  };
+  const std::size_t n = grid.size();
+  std::vector<Step> work;
+  for (std::size_t k = 0; k < (periodic ? n : n - 1); ++k) {
+    const double b = (k + 1 < n) ? grid[k + 1] : grid[0] + kTwoPi;
+    work.push_back({grid[k], q_grid[k], b, q_grid[(k + 1) % n]});
+  }
+  std::vector<double> add_t;
+  std::vector<std::vector<double>> add_q;
+  for (int round = 0; round < 64 && !work.empty(); ++round) {
+    std::vector<Step> next;
+    for (const Step& st : work) {
+      if (st.b - st.a <= kMinParamStep) continue;
+      const double m = 0.5 * (st.a + st.b);
+      const double m_eval = periodic ? wrap(m) : m;
+      std::vector<double> qm = q_scalar(m_eval);
+      std::vector<double> chord(st.qa.size());
+      for (std::size_t i = 0; i < chord.size(); ++i)
+        chord[i] = st.qa[i] + 0.5 * wrap(st.qb[i] - st.qa[i]);
+      if (std::max(dist(st.qa, st.qb), dist(qm, chord)) <= kMaxJointStep) continue;
+      add_t.push_back(m_eval);
+      add_q.push_back(qm);
+      next.push_back({st.a, st.qa, m, qm});
+      next.push_back({m, qm, st.b, st.qb});
+    }
+    work = std::move(next);
+  }
+  if (add_t.empty()) return;
+  std::vector<double> ts = grid;
+  std::vector<std::vector<double>> qs = q_grid;
+  ts.insert(ts.end(), add_t.begin(), add_t.end());
+  qs.insert(qs.end(), add_q.begin(), add_q.end());
+  std::vector<std::size_t> idx(ts.size());
+  for (std::size_t k = 0; k < idx.size(); ++k) idx[k] = k;
+  std::stable_sort(idx.begin(), idx.end(),
+                   [&](std::size_t x, std::size_t y) { return ts[x] < ts[y]; });
+  grid.resize(idx.size());
+  q_grid.resize(idx.size());
+  for (std::size_t k = 0; k < idx.size(); ++k) {
+    grid[k] = ts[idx[k]];
+    q_grid[k] = qs[idx[k]];
+  }
 }
 
 // Exact periodic feasible-t set: intersection of every swept joint's arcs.
 // q_scalar(t) -> per-joint values. Empty iff no t keeps all swept joints in range.
 template <typename QScalar>
 Arcs feasible_arcs(QScalar&& q_scalar, const std::vector<int>& swept_joints,
-                   const std::vector<Arc>& limits, const std::vector<double>& grid) {
+                   const std::vector<Arc>& limits, const std::vector<double>& base_grid) {
   // Evaluate the joint family once on the grid (mirrors the Python q_grid).
+  std::vector<double> grid = base_grid;
   std::vector<std::vector<double>> q_grid(grid.size());
   for (std::size_t k = 0; k < grid.size(); ++k) q_grid[k] = q_scalar(grid[k]);
+  refine_grid(q_scalar, grid, q_grid, swept_joints, /*periodic=*/true);
 
   Arcs arcs = {{-M_PI, M_PI}};
   for (int i : swept_joints) {
@@ -183,9 +284,12 @@ Arcs feasible_arcs(QScalar&& q_scalar, const std::vector<int>& swept_joints,
 // Bounded-domain analogue of feasible_arcs (non-periodic).
 template <typename QScalar>
 Arcs feasible_arcs_bounded(QScalar&& q_scalar, const std::vector<int>& swept_joints,
-                           const std::vector<Arc>& limits, const std::vector<double>& grid) {
+                           const std::vector<Arc>& limits,
+                           const std::vector<double>& base_grid) {
+  std::vector<double> grid = base_grid;
   std::vector<std::vector<double>> q_grid(grid.size());
   for (std::size_t k = 0; k < grid.size(); ++k) q_grid[k] = q_scalar(grid[k]);
+  refine_grid(q_scalar, grid, q_grid, swept_joints, /*periodic=*/false);
 
   Arcs arcs = {{grid.front(), grid.back()}};
   for (int i : swept_joints) {
