@@ -98,6 +98,48 @@ FIXTURES: tuple[BranchFixture, ...] = (
         issue="#571",
     ),
     BranchFixture(
+        name="pi_at_right_bilinear_q0",
+        description=(
+            "q0 at pi, every other joint generic. Under the default loop split q0 is "
+            "in the right-bilinear pair, whose reconstruction carries its own affine "
+            "tan-half representation. Lost for a different reason than the linearity "
+            "joint, so a fix aimed only at the eigenvalue at infinity leaves this one "
+            "broken (see the diagnosis on #571)."
+        ),
+        dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
+        dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
+        dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
+        q_star=(PI, 0.62, 0.93, -0.44, 0.75, -0.26),
+        issue="#571",
+    ),
+    BranchFixture(
+        name="pi_at_right_bilinear_q1",
+        description=(
+            "q1 at pi, the second member of the right-bilinear pair. Included "
+            "alongside q0 because the two are reconstructed together and a partial "
+            "fix could plausibly repair one and not the other."
+        ),
+        dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
+        dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
+        dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
+        q_star=(0.31, PI, 0.93, -0.44, 0.75, -0.26),
+        issue="#571",
+    ),
+    BranchFixture(
+        name="pi_at_left_bilinear_q3",
+        description=(
+            "q3 at pi. The control for the split: the left-bilinear pair already "
+            "handles pi correctly today, so this must stay recovered through any "
+            "change to the projective handling. It is also the working pattern the "
+            "right-bilinear path can copy."
+        ),
+        dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
+        dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
+        dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
+        q_star=(0.31, 0.62, 0.93, PI, 0.75, -0.26),
+        issue=None,
+    ),
+    BranchFixture(
         name="tan_half_infinity_regular_pose",
         description=(
             "Same chain as tan_half_infinity at a generic pose, no joint near pi. "

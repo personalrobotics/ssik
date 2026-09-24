@@ -137,60 +137,51 @@ def test_soundness_every_returned_branch_closes_fk(name: str, solved: dict[str, 
 
 
 # ---------------------------------------------------------------------------
-# Contract 2: recovery.
+# Contracts 2 and 3: recovery and completeness.
+#
+# Expectation comes from the fixture's own `issue` field rather than a
+# hand-written marker per case: a fixture tagged with an open defect is expected
+# to fail, everything else must pass. strict=True, so fixing the defect turns
+# these red and forces the tag to be cleared, which is the milestone exit
+# condition #573 asks for.
 # ---------------------------------------------------------------------------
 
 
-def test_recovery_on_a_regular_pose(solved: dict[str, Any]) -> None:
-    fx = BY_NAME["tan_half_infinity_regular_pose"]
-    _, _, sols = solved[fx.name]
-    nearest = min(wrapped_linf(np.asarray(s.q), fx.q_star_array()) for s in sols)
-    assert nearest <= _EQUIV_TOL, f"q* not recovered; nearest branch {nearest:.3f} rad away"
+def _expect(fx: BranchFixture) -> Any:
+    if fx.issue:
+        return pytest.param(
+            fx.name,
+            marks=pytest.mark.xfail(
+                reason=f"{fx.issue}: a configuration at pi is unrepresentable in the "
+                f"affine tan-half coordinate, so this branch is never reconstructed",
+                strict=True,
+            ),
+        )
+    return pytest.param(fx.name)
 
 
-@pytest.mark.xfail(
-    reason="#571: the linearity joint at pi is dropped as a nonfinite generalized "
-    "eigenvalue, so q* is never reconstructed",
-    strict=True,
-)
-def test_recovery_at_tan_half_angle_infinity(solved: dict[str, Any]) -> None:
-    fx = BY_NAME["tan_half_infinity"]
-    _, _, sols = solved[fx.name]
-    nearest = min(wrapped_linf(np.asarray(s.q), fx.q_star_array()) for s in sols)
-    assert nearest <= _EQUIV_TOL, f"q* not recovered; nearest branch {nearest:.3f} rad away"
+_CASES = [_expect(f) for f in FIXTURES]
 
 
-# ---------------------------------------------------------------------------
-# Contract 3: completeness.
-# ---------------------------------------------------------------------------
-
-
-def test_completeness_on_a_regular_pose(solved: dict[str, Any]) -> None:
-    name = "tan_half_infinity_regular_pose"
+@pytest.mark.parametrize("name", _CASES)
+def test_recovery_returns_the_seeded_configuration(name: str, solved: dict[str, Any]) -> None:
+    fx = BY_NAME[name]
     _, _, sols = solved[name]
-    missing = [
-        b
-        for b in _branches(name)
-        if not any(wrapped_linf(np.asarray(s.q), b) <= _EQUIV_TOL for s in sols)
-    ]
-    assert not missing, f"{name}: missing {[np.round(b, 4).tolist() for b in missing]}"
+    nearest = min(wrapped_linf(np.asarray(s.q), fx.q_star_array()) for s in sols)
+    assert nearest <= _EQUIV_TOL, (
+        f"{name}: q* not recovered; nearest returned branch is {nearest:.3f} rad away"
+    )
 
 
-@pytest.mark.xfail(
-    reason="#571: seven of the eight branches are returned; the eighth needs the "
-    "projective root at tan-half-angle infinity",
-    strict=True,
-)
-def test_completeness_at_tan_half_angle_infinity(solved: dict[str, Any]) -> None:
-    name = "tan_half_infinity"
+@pytest.mark.parametrize("name", _CASES)
+def test_completeness_matches_the_golden(name: str, solved: dict[str, Any]) -> None:
     _, _, sols = solved[name]
+    branches = _branches(name)
     missing = [
-        b
-        for b in _branches(name)
-        if not any(wrapped_linf(np.asarray(s.q), b) <= _EQUIV_TOL for s in sols)
+        b for b in branches if not any(wrapped_linf(np.asarray(s.q), b) <= _EQUIV_TOL for s in sols)
     ]
     assert not missing, (
-        f"solver returned {len(sols)} of the golden's {len(_branches(name))} branches; "
+        f"{name}: solver returned {len(sols)} of {len(branches)} branches; "
         f"missing {[np.round(b, 4).tolist() for b in missing]}"
     )
 
