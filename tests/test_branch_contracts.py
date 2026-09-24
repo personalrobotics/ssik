@@ -3,9 +3,9 @@
 The acceptance framework for M7. Today's gates establish soundness well and
 completeness barely: ``check_solve_coverage`` counts a pose as covered when at
 least one IK comes back, and native conformance mostly uses Python as the
-completeness oracle, so an omission shared by both passes. These three
-contracts are deliberately distinct, because an arm can satisfy any one of them
-while failing another:
+completeness oracle, so an omission shared by both passes. These three contracts
+are deliberately distinct, because an arm can satisfy any one while failing
+another:
 
 **Soundness** every returned ``q`` closes under independent FK. A solver that
 returns nothing is vacuously sound.
@@ -15,98 +15,137 @@ configuration equivalent to ``q*``. This is what a user means by "it found my
 pose". A solver returning seven of eight branches usually still passes, because
 the sampled ``q*`` is usually one of the seven.
 
-**Completeness** the returned set matches an independent branch oracle. This is
-the one #571 fails, and the only one that can fail while the other two pass.
+**Completeness** the returned set matches the full branch set. This is the one
+#571 fails, and the only one that can fail while the other two pass.
 
-The oracle (``tests._branch_oracle``) shares no algebra with the solvers, which
-is the point: it works in joint space, so a configuration at tan-half-angle
-infinity is unremarkable to it.
+The expected branch sets come from ``tests/data/branch_goldens.json``, computed
+offline by a chart-free oracle (``scripts/regen_branch_goldens.py``). Nothing
+here runs the oracle: a stabilized run is thousands of LM solves, and the whole
+point of committing the result is that per-PR cost stays near zero. The
+oracle-versus-golden check lives in ``test_branch_oracle_slow.py``.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
-import ssik
 from ssik.kinematics.poe_fk import poe_forward_kinematics
-from tests._branch_oracle import OracleResult, enumerate_branches, wrapped_linf
-
-PI = np.pi
-
-# #571's exact reproducer: a regular pose (rank 6, cond ~123) whose linearity
-# joint sits at pi, i.e. at tan-half-angle infinity.
-_571_ALPHA = [PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0]
-_571_A = [1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8]
-_571_D = [1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5]
-_571_QSTAR = np.array([0.0, PI / 2, PI, PI / 2, PI / 2, 0.0])
+from tests._branch_fixtures import BY_NAME, FIXTURES, BranchFixture, load_goldens
+from tests._branch_oracle import wrapped_linf
 
 _EQUIV_TOL = 1e-6  # two configurations are the same branch below this
+_FK_TOL = 1e-9
+
+_GOLDENS = load_goldens()["fixtures"]
+_NAMES = [f.name for f in FIXTURES]
 
 
-@pytest.fixture(scope="module")
-def arm_571() -> ssik.Manipulator:
-    return ssik.Manipulator.from_dh(dh_alpha=_571_ALPHA, dh_a=_571_A, dh_d=_571_D)
-
-
-@pytest.fixture(scope="module")
-def oracle_571(arm_571: ssik.Manipulator) -> OracleResult:
-    """Stabilized oracle at #571's pose. Module-scoped: this is thousands of LM
-    solves and the result is reused by every contract below."""
-    return enumerate_branches(arm_571.kinbody, arm_571.fk(_571_QSTAR))
-
-
-# ---------------------------------------------------------------------------
-# The oracle itself has to be trustworthy before anything is measured with it.
-# ---------------------------------------------------------------------------
-
-
-def test_oracle_stabilizes_and_is_sound(
-    arm_571: ssik.Manipulator, oracle_571: OracleResult
-) -> None:
-    """A growing branch count means the oracle has not finished looking, so an
-    unstabilized result is a lower bound and must never be read as completeness."""
-    assert oracle_571.stabilized, (
-        f"oracle still finding new branches at budget {oracle_571.budget_used}; "
-        f"raise the budget before trusting the count"
+def _golden(name: str) -> dict[str, Any]:
+    assert name in _GOLDENS, (
+        f"no golden for fixture {name!r}; run python scripts/regen_branch_goldens.py"
     )
-    assert oracle_571.worst_fk <= 1e-12, f"oracle branch fails FK: {oracle_571.worst_fk:.2e}"
-    for i, a in enumerate(oracle_571.branches):
-        for b in oracle_571.branches[i + 1 :]:
-            assert wrapped_linf(a, b) > 1e-4, "oracle returned a duplicate branch"
+    golden: dict[str, Any] = _GOLDENS[name]
+    return golden
 
 
-def test_oracle_finds_the_configuration_the_chart_cannot_represent(
-    oracle_571: OracleResult,
-) -> None:
-    """The reason the oracle may not share the solver's coordinates (#571).
+def _branches(name: str) -> list[np.ndarray]:
+    return [np.asarray(b, dtype=np.float64) for b in _golden(name)["branches"]]
 
-    ``q*`` has its linearity joint at exactly pi, which the tan-half-angle
-    coordinate sends to infinity. A higher-precision run of the same algebra
-    would drop it for the same reason the solver does; a joint-space search
-    does not care.
+
+@pytest.fixture(scope="module")
+def solved() -> dict[str, Any]:
+    """One solve per fixture, shared by the contracts below."""
+    out = {}
+    for fx in FIXTURES:
+        arm = fx.build()
+        t = arm.fk(fx.q_star_array())
+        out[fx.name] = (arm, t, arm.solve(t, respect_limits=False))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# The goldens have to be trustworthy before anything is measured against them.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", _NAMES)
+def test_golden_matches_its_fixture(name: str) -> None:
+    """A golden records the fingerprint of the numbers it was generated from, so
+    editing a fixture without regenerating fails here instead of silently
+    checking against a stale expectation."""
+    fx: BranchFixture = BY_NAME[name]
+    g = _golden(name)
+    assert g["fingerprint"] == fx.fingerprint(), (
+        f"{name}: the fixture changed since its branch set was generated. "
+        f"Re-run: python scripts/regen_branch_goldens.py --fixture {name}"
+    )
+    assert g["stabilized"], (
+        f"{name}: golden was recorded from an oracle run that had not stabilized, "
+        f"so its branch count is a lower bound and cannot gate completeness"
+    )
+
+
+@pytest.mark.parametrize("name", _NAMES)
+def test_golden_branches_are_distinct_and_close_fk(name: str, solved: dict[str, Any]) -> None:
+    arm, t, _ = solved[name]
+    branches = _branches(name)
+    assert branches, f"{name}: golden has no branches"
+    for i, a in enumerate(branches):
+        resid = float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, a) - t))
+        assert resid <= 1e-11, f"{name}: golden branch fails FK at {resid:.2e}"
+        for b in branches[i + 1 :]:
+            assert wrapped_linf(a, b) > 1e-4, f"{name}: golden holds a duplicate branch"
+
+
+@pytest.mark.parametrize("name", _NAMES)
+def test_golden_covers_everything_the_solver_finds(name: str, solved: dict[str, Any]) -> None:
+    """The golden must be a superset of the solver's output.
+
+    A solver branch the golden lacks does not mean the solver is wrong, it means
+    the oracle under-searched and the golden cannot be used to judge
+    completeness. Checking the direction that invalidates the reference is the
+    point: a statistical oracle can stabilize on an incomplete set.
     """
-    d = oracle_571.nearest(_571_QSTAR)
-    assert d <= _EQUIV_TOL, f"oracle missed q* itself (nearest {d:.2e}); it cannot be the reference"
+    _, _, sols = solved[name]
+    branches = _branches(name)
+    missing = [
+        s.q
+        for s in sols
+        if not any(wrapped_linf(np.asarray(s.q), b) <= _EQUIV_TOL for b in branches)
+    ]
+    assert not missing, (
+        f"{name}: solver returned {len(missing)} branch(es) absent from the golden, so the "
+        f"golden is an incomplete reference. Raise the oracle budget and regenerate."
+    )
 
 
 # ---------------------------------------------------------------------------
-# Contract 1: soundness. Passes today.
+# Contract 1: soundness.
 # ---------------------------------------------------------------------------
 
 
-def test_soundness_every_returned_branch_closes_fk(arm_571: ssik.Manipulator) -> None:
-    T = arm_571.fk(_571_QSTAR)
-    sols = arm_571.solve(T, respect_limits=False)
-    assert sols, "no solutions at a rank-6 pose"
+@pytest.mark.parametrize("name", _NAMES)
+def test_soundness_every_returned_branch_closes_fk(name: str, solved: dict[str, Any]) -> None:
+    arm, t, sols = solved[name]
+    assert sols, f"{name}: no solutions at a rank-6 pose"
     for s in sols:
-        resid = float(np.linalg.norm(poe_forward_kinematics(arm_571.kinbody, s.q) - T))
-        assert resid <= 1e-9, f"unsound branch, FK residual {resid:.2e}"
+        resid = float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, s.q) - t))
+        assert resid <= _FK_TOL, f"{name}: unsound branch, FK residual {resid:.2e}"
 
 
 # ---------------------------------------------------------------------------
-# Contract 2: recovery. Fails on this fixture, which is the bug.
+# Contract 2: recovery.
 # ---------------------------------------------------------------------------
+
+
+def test_recovery_on_a_regular_pose(solved: dict[str, Any]) -> None:
+    fx = BY_NAME["tan_half_infinity_regular_pose"]
+    _, _, sols = solved[fx.name]
+    nearest = min(wrapped_linf(np.asarray(s.q), fx.q_star_array()) for s in sols)
+    assert nearest <= _EQUIV_TOL, f"q* not recovered; nearest branch {nearest:.3f} rad away"
 
 
 @pytest.mark.xfail(
@@ -114,19 +153,27 @@ def test_soundness_every_returned_branch_closes_fk(arm_571: ssik.Manipulator) ->
     "eigenvalue, so q* is never reconstructed",
     strict=True,
 )
-def test_recovery_solve_returns_the_seeded_configuration(arm_571: ssik.Manipulator) -> None:
-    T = arm_571.fk(_571_QSTAR)
-    sols = arm_571.solve(T, respect_limits=False)
-    nearest = min(wrapped_linf(np.asarray(s.q), _571_QSTAR) for s in sols)
-    assert nearest <= _EQUIV_TOL, (
-        f"q* not recovered; nearest returned branch is {nearest:.3f} rad away"
-    )
+def test_recovery_at_tan_half_angle_infinity(solved: dict[str, Any]) -> None:
+    fx = BY_NAME["tan_half_infinity"]
+    _, _, sols = solved[fx.name]
+    nearest = min(wrapped_linf(np.asarray(s.q), fx.q_star_array()) for s in sols)
+    assert nearest <= _EQUIV_TOL, f"q* not recovered; nearest branch {nearest:.3f} rad away"
 
 
 # ---------------------------------------------------------------------------
-# Contract 3: completeness. Fails on this fixture, and is the only contract
-# that can fail while soundness and recovery both pass.
+# Contract 3: completeness.
 # ---------------------------------------------------------------------------
+
+
+def test_completeness_on_a_regular_pose(solved: dict[str, Any]) -> None:
+    name = "tan_half_infinity_regular_pose"
+    _, _, sols = solved[name]
+    missing = [
+        b
+        for b in _branches(name)
+        if not any(wrapped_linf(np.asarray(s.q), b) <= _EQUIV_TOL for s in sols)
+    ]
+    assert not missing, f"{name}: missing {[np.round(b, 4).tolist() for b in missing]}"
 
 
 @pytest.mark.xfail(
@@ -134,37 +181,30 @@ def test_recovery_solve_returns_the_seeded_configuration(arm_571: ssik.Manipulat
     "projective root at tan-half-angle infinity",
     strict=True,
 )
-def test_completeness_matches_the_independent_oracle(
-    arm_571: ssik.Manipulator, oracle_571: OracleResult
-) -> None:
-    T = arm_571.fk(_571_QSTAR)
-    sols = arm_571.solve(T, respect_limits=False)
+def test_completeness_at_tan_half_angle_infinity(solved: dict[str, Any]) -> None:
+    name = "tan_half_infinity"
+    _, _, sols = solved[name]
     missing = [
         b
-        for b in oracle_571.branches
+        for b in _branches(name)
         if not any(wrapped_linf(np.asarray(s.q), b) <= _EQUIV_TOL for s in sols)
     ]
     assert not missing, (
-        f"solver returned {len(sols)} of the oracle's {len(oracle_571)} branches; "
+        f"solver returned {len(sols)} of the golden's {len(_branches(name))} branches; "
         f"missing {[np.round(b, 4).tolist() for b in missing]}"
     )
 
 
-def test_the_three_contracts_are_not_redundant(
-    arm_571: ssik.Manipulator, oracle_571: OracleResult
-) -> None:
-    """Pins the distinction this module exists to make.
-
-    On this fixture the solver is sound and incomplete at the same time, so a
-    gate that only checks FK closure reports success while a branch is missing.
-    """
-    T = arm_571.fk(_571_QSTAR)
-    sols = arm_571.solve(T, respect_limits=False)
+def test_the_three_contracts_are_not_redundant(solved: dict[str, Any]) -> None:
+    """Pins the distinction this module exists to make: on #571's fixture the
+    solver is sound and incomplete at once, so a gate that only checks FK
+    closure reports success while a branch is missing."""
+    name = "tan_half_infinity"
+    arm, t, sols = solved[name]
     assert all(
-        float(np.linalg.norm(poe_forward_kinematics(arm_571.kinbody, s.q) - T)) <= 1e-9
-        for s in sols
+        float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, s.q) - t)) <= _FK_TOL for s in sols
     ), "expected soundness to hold here"
-    assert len(sols) < len(oracle_571), (
+    assert len(sols) < len(_branches(name)), (
         "expected this fixture to be incomplete; if the solver now returns every "
         "branch, #571 is fixed and the xfails above should be removed"
     )
