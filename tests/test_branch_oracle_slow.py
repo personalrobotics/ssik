@@ -3,9 +3,16 @@
 Marked slow: this is the only place the chart-free oracle actually runs, and a
 stabilized run is thousands of LM solves per fixture. The fast contract tests
 read ``tests/data/branch_goldens.json`` instead, so a committed golden that
-drifted from what the oracle now produces would otherwise go unnoticed. This is
-what keeps the reference honest, on the nightly/slow schedule rather than per
-pull request.
+drifted from what the oracle now produces would otherwise go unnoticed.
+
+Run it by hand when regenerating or when changing the oracle:
+
+    uv run pytest tests/test_branch_oracle_slow.py -m slow
+
+There is deliberately no scheduled job behind it. The oracle draws from a fixed
+restart sequence, so repeating it on a timer re-derives the same evidence at
+recurring cost. The useful moments to re-derive are when the fixtures or the
+oracle change, and both are already visible in a diff.
 """
 
 from __future__ import annotations
