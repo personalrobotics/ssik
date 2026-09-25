@@ -33,6 +33,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MP4_OUT = REPO_ROOT / "docs" / "assets" / "demo_tour.mp4"
 GIF_DIR = REPO_ROOT / "docs" / "assets" / "per_arm"
 MONTAGE_OUT = REPO_ROOT / "docs" / "assets" / "demo_tour_montage.gif"
+# The self-motion sweep is a single hero asset rather than one of the
+# per-arm roster GIFs, so it lands beside the montage instead of in per_arm/.
+SELF_MOTION_KEY = "self_motion"
+SELF_MOTION_OUT = REPO_ROOT / "docs" / "assets" / "self_motion.gif"
 
 GIF_WIDTH = 480
 # GIF stays at the source capture rate (30 fps). Earlier versions reduced
@@ -78,16 +82,25 @@ def encode_full_mp4(capture_dir: Path) -> None:
     print(f"  mp4: {MP4_OUT.relative_to(REPO_ROOT)}  ({MP4_OUT.stat().st_size / 1e6:.2f} MB)")
 
 
-def encode_per_arm_gif(capture_dir: Path, module: str, start: int, end_exclusive: int) -> None:
+def encode_per_arm_gif(
+    capture_dir: Path,
+    module: str,
+    start: int,
+    end_exclusive: int,
+    out: Path | None = None,
+) -> None:
     """Build one looping GIF from frames [start, end_exclusive).
 
     Uses ffmpeg's two-pass palette workflow (``palettegen`` then
     ``paletteuse``) so the GIF retains color fidelity at the cost of an
     extra ffmpeg invocation. Single-pass GIF encoding produces visibly
     banded reds against the white background.
+
+    ``out`` overrides the default ``per_arm/<module>.gif`` destination, for
+    captures that are not one of the roster arms.
     """
-    GIF_DIR.mkdir(parents=True, exist_ok=True)
-    out = GIF_DIR / f"{module}.gif"
+    out = out if out is not None else GIF_DIR / f"{module}.gif"
+    out.parent.mkdir(parents=True, exist_ok=True)
     n_frames = end_exclusive - start
     palette = capture_dir / f"_palette_{module}.png"
     # Pass 1: generate optimized palette from this arm's frame range.
@@ -260,6 +273,7 @@ def main() -> None:
                 module,
                 int(rng["start"]),
                 int(rng["end_exclusive"]),
+                out=SELF_MOTION_OUT if module == SELF_MOTION_KEY else None,
             )
 
     if args.montage:

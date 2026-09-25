@@ -605,6 +605,10 @@ Returning 32× more configurations costs proportionally more, but a capped solve
 
 A 7R arm holding a 6-DOF pose is not at a point in configuration space, it is on a curve: the **self-motion manifold**, the one-parameter family of postures with the same end-effector pose. `solve()` samples that curve and hands back points. Since v6.1 you can ask for the curve itself.
 
+<img src="docs/assets/self_motion.gif" alt="A Franka Panda sweeping one branch of its self-motion manifold: the elbow travels from folded to fully extended while the gripper and its frame stay exactly in place." width="480">
+
+One Panda, one target, one branch. The shoulder and elbow travel several radians while the hand does not move: every frame is an exact IK solution for the same pose, not an interpolation between two of them. Reproduce it with `python examples/06_self_motion.py` (no display needed) or `python examples/05_viser_interactive_ik.py --self-motion`.
+
 ```python
 manifold = arm.self_motion(T_target)   # every branch at this pose
 chart = manifold.charts[0]             # one continuous branch q(t)
@@ -617,7 +621,7 @@ chart.sample(20)    # ~20 postures along the branch, spaced evenly in arc length
                     # (returned per continuous segment, as (t, q) arrays)
 ```
 
-The closed-form solvers already compute this internally, as a branch label plus a redundancy coordinate, and used to discard both at the `Solution` boundary. The tangent comes from implicit differentiation of `FK(q(t)) = T`, so `J·q' = 0` holds by construction rather than by choosing a step size, and a fold returns `NaN` instead of a fabricated direction.
+The closed-form solvers already compute this internally, as a branch label plus a redundancy coordinate, and used to discard both at the `Solution` boundary. The tangent comes from implicit differentiation of `FK(q(t)) = T`, so `J·q' = 0` holds by construction rather than by choosing a step size. Where a branch folds back, the rate of travel diverges while the direction stays well defined; exactly at the fold both currently come back `NaN` ([#588](https://github.com/personalrobotics/ssik/issues/588)), and `sample()` includes those endpoints, so measure the tangent on the interior.
 
 Beyond one branch, the manifold knows its own structure: `sheets()` glues charts that meet at folds, so you get the components a controller can actually reach by self-motion; `gap(a, b)` and `escape(a, b)` measure how close two sheets come and the task-space twist that closes the distance fastest; `locate(q)` inverts back to a chart and parameter. Along a path, `solve_path(poses)` tracks every branch by label, reporting folds, unreachable poses, and on a closed loop the monodromy permutation.
 
