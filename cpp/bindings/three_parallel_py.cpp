@@ -5,11 +5,15 @@
 // needs no Python; Python stays the reference oracle). It exists purely to run
 // tests/test_three_parallel.py against both backends.
 #include <array>
+#include <limits>
+#include <stdexcept>
+#include <memory>
 #include <vector>
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
+#include "ssik_cpp/chart.hpp"
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
 #include "ssik_cpp/generalized_euler.hpp"
@@ -204,7 +208,7 @@ py::tuple native_artifact_solve_py(
     const std::string& family, py::array_t<double> axes, py::array_t<double> t_left,
     py::array_t<double> t_right, py::array_t<int> types, py::array_t<double> lo,
     py::array_t<double> hi, py::array_t<int> has_limits, py::array_t<double> target,
-    bool respect_limits, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
+    int limit_mode, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
     bool has_seed_tolerance, double seed_tolerance, int max_solutions, bool allow_rescue,
     int refinement_max_iters,
     bool enumerate_windings) {
@@ -221,7 +225,9 @@ py::tuple native_artifact_solve_py(
   }
 
   ssik::ArtifactParams<6> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -238,7 +244,7 @@ py::tuple native_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -370,7 +376,7 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
                                 int elbow_index, py::array_t<double> upper_home,
                                 py::array_t<double> forearm_home, py::array_t<double> lo,
                                 py::array_t<double> hi, py::array_t<int> has_limits,
-                                py::array_t<double> target, bool general_path, bool respect_limits,
+                                py::array_t<double> target, bool general_path, int limit_mode,
                                 bool has_seed, py::array_t<double> q_seed,
                                 const std::string& seed_metric, bool has_seed_tolerance,
                                 double seed_tolerance, int max_solutions, bool allow_rescue,
@@ -406,7 +412,9 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   }
 
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -423,7 +431,7 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -457,7 +465,7 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
 py::tuple spherical_shoulder_artifact_solve_py(
     py::array_t<double> axes, py::array_t<double> t_left, py::array_t<double> t_right,
     py::array_t<int> types, py::array_t<double> coef, py::array_t<double> lo, py::array_t<double> hi,
-    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<int> has_limits, py::array_t<double> target, int limit_mode, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
     double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
     bool polished,
@@ -478,7 +486,9 @@ py::tuple spherical_shoulder_artifact_solve_py(
   }
 
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -495,7 +505,7 @@ py::tuple spherical_shoulder_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -707,7 +717,7 @@ py::tuple general_6r_tensor_artifact_solve_py(
     py::array_t<double> p_cos, py::array_t<int> mono_factors, py::array_t<int> po_rc,
     py::array_t<int> po_mono, py::array_t<double> po_coeff, py::array_t<int> q_rc,
     py::array_t<int> q_mono, py::array_t<double> q_coeff, py::array_t<double> target,
-    bool respect_limits, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
+    int limit_mode, bool has_seed, py::array_t<double> q_seed, const std::string& seed_metric,
     bool has_seed_tolerance, double seed_tolerance, int max_solutions, bool allow_rescue,
     int refinement_max_iters,
     bool enumerate_windings) {
@@ -738,7 +748,9 @@ py::tuple general_6r_tensor_artifact_solve_py(
   }
 
   ssik::ArtifactParams<6> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -755,7 +767,7 @@ py::tuple general_6r_tensor_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
 
   auto tm = target.unchecked<2>();
   ssik::Pose T;
@@ -1051,7 +1063,7 @@ py::tuple jointlock_hp_artifact_solve_py(
     py::array_t<double> t_joint6_offset_inv, py::array_t<int> right_pv, py::array_t<int> drop_idx,
     py::array_t<double> sub_axes, py::array_t<double> sub_t_left, py::array_t<double> sub_t_right,
     py::array_t<int> sub_types, py::array_t<double> lo, py::array_t<double> hi,
-    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<int> has_limits, py::array_t<double> target, int limit_mode, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
     double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
     bool enumerate_windings) {
@@ -1099,7 +1111,9 @@ py::tuple jointlock_hp_artifact_solve_py(
     lim.present[i] = hl_u(i) != 0;
   }
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -1116,7 +1130,7 @@ py::tuple jointlock_hp_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
   auto tm = target.unchecked<2>();
   ssik::Pose T;
   for (int r = 0; r < 4; ++r)
@@ -1159,7 +1173,7 @@ py::tuple jointlock_rr_artifact_solve_py(
     const py::list& p_sin, const py::list& p_cos, const py::list& mono_factors,
     const py::list& po_rc, const py::list& po_mono, const py::list& po_coeff, const py::list& q_rc,
     const py::list& q_mono, const py::list& q_coeff, py::array_t<double> lo, py::array_t<double> hi,
-    py::array_t<int> has_limits, py::array_t<double> target, bool respect_limits, bool has_seed,
+    py::array_t<int> has_limits, py::array_t<double> target, int limit_mode, bool has_seed,
     py::array_t<double> q_seed, const std::string& seed_metric, bool has_seed_tolerance,
     double seed_tolerance, int max_solutions, bool allow_rescue, int refinement_max_iters,
     bool enumerate_windings) {
@@ -1227,7 +1241,9 @@ py::tuple jointlock_rr_artifact_solve_py(
     lim.present[i] = hl_u(i) != 0;
   }
   ssik::ArtifactParams<7> p;
-  p.respect_limits = respect_limits;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
   p.has_seed = has_seed;
   if (has_seed) {
     auto qs_u = q_seed.unchecked<1>();
@@ -1244,7 +1260,7 @@ py::tuple jointlock_rr_artifact_solve_py(
   // caller's own respect_limits is unambiguous: some of these entry points
   // run finalize once themselves, others go through an artifact solver whose
   // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && respect_limits;
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
   auto tm = target.unchecked<2>();
   ssik::Pose T;
   for (int r = 0; r < 4; ++r)
@@ -1267,7 +1283,318 @@ py::tuple jointlock_rr_artifact_solve_py(
   return py::make_tuple(qs, resids, refine);
 }
 
+// ---------------------------------------------------------------------------
+// Self-motion charts (ssik.chart native backend). Bound as classes so a family
+// is built once per target pose and q(t) / locate(q) are per-tick calls.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+ssik::Pose make_pose(const py::array_t<double>& target) {
+  auto tm = target.unchecked<2>();
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  return T;
+}
+
+std::array<double, 7> make_q7(const py::array_t<double>& q) {
+  auto qu = q.unchecked<1>();
+  std::array<double, 7> out;
+  for (int i = 0; i < 7; ++i) out[i] = qu(i);
+  return out;
+}
+
+void bind_charts(py::module_& m) {
+  using ShCharts = ssik::chart::SphericalShoulderCharts;
+  py::class_<ShCharts>(m, "SphericalShoulderCharts")
+      .def(py::init([](py::array_t<double> axes, py::array_t<double> t_left,
+                       py::array_t<double> t_right, py::array_t<int> types,
+                       py::array_t<double> coef, py::array_t<double> target, double feasibility,
+                       double degeneracy) {
+             const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+             Eigen::Matrix<double, 3, 48> cm;
+             auto cf = coef.unchecked<2>();
+             for (int i = 0; i < 3; ++i)
+               for (int j = 0; j < 48; ++j) cm(i, j) = cf(i, j);
+             ssik::Tolerances tol;
+             tol.feasibility = feasibility;
+             tol.degeneracy = degeneracy;
+             return ShCharts::build(c, cm, make_pose(target), tol);
+           }),
+           py::arg("axes"), py::arg("t_left"), py::arg("t_right"), py::arg("types"),
+           py::arg("coef"), py::arg("target"), py::arg("feasibility") = 1e-9,
+           py::arg("degeneracy") = 1e-12)
+      .def("__len__", [](const ShCharts& f) { return f.n_charts(); })
+      .def_property_readonly("labels",
+                             [](const ShCharts& f) {
+                               const int n = f.n_charts();
+                               py::array_t<int> out({n, 4});
+                               auto o = out.mutable_unchecked<2>();
+                               for (int i = 0; i < n; ++i) {
+                                 const auto l = f.label(i);
+                                 for (int j = 0; j < 4; ++j) o(i, j) = l[j];
+                               }
+                               return out;
+                             })
+      .def_property_readonly("arcs",
+                             [](const ShCharts& f) {
+                               const int n = static_cast<int>(f.arcs.size());
+                               py::array_t<double> out({n, 2});
+                               auto o = out.mutable_unchecked<2>();
+                               for (int i = 0; i < n; ++i) {
+                                 o(i, 0) = f.arcs[i].lo;
+                                 o(i, 1) = f.arcs[i].hi;
+                               }
+                               return out;
+                             })
+      .def("nonempty", [](const ShCharts& f, int chart) { return f.nonempty(chart); })
+      .def("domain",
+           [](const ShCharts& f, int chart) {
+             const auto& d = f.domain(chart);
+             const int n = static_cast<int>(d.size());
+             py::array_t<double> out({n, 2});
+             auto o = out.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               o(i, 0) = d[i].lo;
+               o(i, 1) = d[i].hi;
+             }
+             return out;
+           })
+      .def("q",
+           [](const ShCharts& f, int chart, py::array_t<double> ts) {
+             auto tu = ts.unchecked<1>();
+             const int n = static_cast<int>(tu.shape(0));
+             py::array_t<double> out({n, 7});
+             auto o = out.mutable_unchecked<2>();
+             std::array<double, 7> q;
+             for (int i = 0; i < n; ++i) {
+               const bool ok = f.q(chart, tu(i), q);
+               for (int j = 0; j < 7; ++j)
+                 o(i, j) = ok ? q[j] : std::numeric_limits<double>::quiet_NaN();
+             }
+             return out;
+           })
+      .def("in_limits",
+           [](const ShCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
+             auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+             std::array<std::array<double, 2>, 7> lim;
+             for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
+             const auto arcs = f.in_limits(chart, lim);
+             const int n = static_cast<int>(arcs.size());
+             py::array_t<double> out({n, 2});
+             auto o = out.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               o(i, 0) = arcs[i].lo;
+               o(i, 1) = arcs[i].hi;
+             }
+             return out;
+           })
+      .def("tangent",
+           [](const ShCharts& f, int chart, py::array_t<double> ts) {
+             auto tu = ts.unchecked<1>();
+             const int n = static_cast<int>(tu.shape(0));
+             py::array_t<double> out({n, 7});
+             auto o = out.mutable_unchecked<2>();
+             std::array<double, 7> d;
+             for (int i = 0; i < n; ++i) {
+               const bool ok = f.tangent(chart, tu(i), d);
+               for (int j = 0; j < 7; ++j)
+                 o(i, j) = ok ? d[j] : std::numeric_limits<double>::quiet_NaN();
+             }
+             return out;
+           })
+      .def("slot_eval",
+           [](const ShCharts& f, py::array_t<double> ts) {
+             auto tu = ts.unchecked<1>();
+             const int n = static_cast<int>(tu.shape(0));
+             py::array_t<double> q({ssik::chart::kSlots, n, 7});
+             py::array_t<bool> valid({ssik::chart::kSlots, n});
+             auto qo = q.mutable_unchecked<3>();
+             auto vo = valid.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               const auto ev = ssik::chart::sh::slot_eval(f.coef, f.t_rev, tu(i), f.tol);
+               for (int s = 0; s < ssik::chart::kSlots; ++s) {
+                 vo(s, i) = ev.valid[s];
+                 for (int j = 0; j < 7; ++j) qo(s, i, j) = ev.q[s][j];
+               }
+             }
+             return py::make_tuple(q, valid);
+           })
+      .def("param_of",
+           [](const ShCharts&, py::array_t<double> q) { return ShCharts::param_of(make_q7(q)); })
+      .def("locate", [](const ShCharts& f, py::array_t<double> q, double tol) {
+        double t, dist;
+        const int idx = f.locate(make_q7(q), tol, t, dist);
+        return py::make_tuple(idx, t, dist);
+      });
+
+  using SrsCharts = ssik::chart::SrsCharts;
+  py::class_<SrsCharts>(m, "SrsCharts")
+      .def(py::init([](py::array_t<double> axes, py::array_t<double> t_left,
+                       py::array_t<double> t_right, py::array_t<int> types, double l_se,
+                       double l_ew, py::array_t<double> ee_offset,
+                       py::array_t<double> shoulder_pivot, py::array_t<double> r_post,
+                       int elbow_index, py::array_t<double> upper_home,
+                       py::array_t<double> forearm_home, bool general_path,
+                       py::array_t<double> target) {
+             const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+             ssik::SrsConsts s;
+             s.l_se = l_se;
+             s.l_ew = l_ew;
+             s.elbow_index = elbow_index;
+             s.general_path = general_path;
+             auto eo = ee_offset.unchecked<1>();
+             auto sp = shoulder_pivot.unchecked<1>();
+             auto uh = upper_home.unchecked<1>();
+             auto fh = forearm_home.unchecked<1>();
+             auto rp = r_post.unchecked<2>();
+             for (int i = 0; i < 3; ++i) {
+               s.ee_offset_local[i] = eo(i);
+               s.shoulder_pivot[i] = sp(i);
+               s.upper_home[i] = uh(i);
+               s.forearm_home[i] = fh(i);
+               for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
+             }
+             auto obj = std::make_unique<SrsCharts>();
+             obj->init(c, s, make_pose(target));
+             return obj;
+           }),
+           py::arg("axes"), py::arg("t_left"), py::arg("t_right"), py::arg("types"),
+           py::arg("l_se"), py::arg("l_ew"), py::arg("ee_offset_local"),
+           py::arg("shoulder_pivot"), py::arg("r_post_wrist"), py::arg("elbow_index"),
+           py::arg("upper_home"), py::arg("forearm_home"), py::arg("general_path"),
+           py::arg("target"))
+      .def("__len__", [](const SrsCharts& f) { return f.size(); })
+      .def_property_readonly("labels",
+                             [](const SrsCharts& f) {
+                               const int n = f.size();
+                               py::array_t<int> out({n, 3});
+                               auto o = out.mutable_unchecked<2>();
+                               for (int i = 0; i < n; ++i) {
+                                 const auto l = f.label(i);
+                                 for (int j = 0; j < 3; ++j) o(i, j) = l[j];
+                               }
+                               return out;
+                             })
+      .def("q",
+           [](const SrsCharts& f, int chart, py::array_t<double> ts) {
+             auto tu = ts.unchecked<1>();
+             const int n = static_cast<int>(tu.shape(0));
+             py::array_t<double> out({n, 7});
+             auto o = out.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               const auto q = f.q(chart, tu(i));
+               for (int j = 0; j < 7; ++j) o(i, j) = q[j];
+             }
+             return out;
+           })
+      .def("in_limits",
+           [](const SrsCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
+             auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+             std::array<std::array<double, 2>, 7> lim;
+             for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
+             const auto arcs = f.in_limits(chart, lim);
+             const int n = static_cast<int>(arcs.size());
+             py::array_t<double> out({n, 2});
+             auto o = out.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               o(i, 0) = arcs[i].lo;
+               o(i, 1) = arcs[i].hi;
+             }
+             return out;
+           })
+      .def("tangent",
+           [](const SrsCharts& f, int chart, py::array_t<double> ts) {
+             auto tu = ts.unchecked<1>();
+             const int n = static_cast<int>(tu.shape(0));
+             py::array_t<double> out({n, 7});
+             auto o = out.mutable_unchecked<2>();
+             for (int i = 0; i < n; ++i) {
+               const auto d = f.tangent(chart, tu(i));
+               for (int j = 0; j < 7; ++j) o(i, j) = d[j];
+             }
+             return out;
+           })
+      .def("param_of",
+           [](const SrsCharts& f, py::array_t<double> q) { return f.param_of(make_q7(q)); })
+      .def("locate", [](const SrsCharts& f, py::array_t<double> q, double tol) {
+        double psi, dist;
+        const int idx = f.locate(make_q7(q), tol, psi, dist);
+        return py::make_tuple(idx, psi, dist);
+      });
+
+  // The normalizing tail of Chart.tangent, shared by both families: raw
+  // tangents (N, 7) -> unit directions (N, 7) and rates (N,).
+  m.def(
+      "chart_tangent",
+      [](py::array_t<double> tangent) {
+        auto tg = tangent.unchecked<2>();
+        const auto n = static_cast<py::ssize_t>(tg.shape(0));
+        py::array_t<double> d_out({n, static_cast<py::ssize_t>(7)});
+        py::array_t<double> rate_out(n);
+        auto d_o = d_out.mutable_unchecked<2>();
+        auto r_o = rate_out.mutable_unchecked<1>();
+        for (py::ssize_t i = 0; i < n; ++i) {
+          std::array<double, 7> dq;
+          for (int j = 0; j < 7; ++j) dq[j] = tg(i, j);
+          std::array<double, 7> d;
+          r_o(i) = ssik::chart::unit_tangent(dq, d);
+          for (int j = 0; j < 7; ++j) d_o(i, j) = d[j];
+        }
+        return py::make_tuple(d_out, rate_out);
+      },
+      py::arg("tangent"), "Unit directions and rates from raw tangents (N, 7).");
+
+  // The frame tail of Chart.frame, shared by both families: raw tangents
+  // (N, 7) -> unit directions (N, 7) and metric-orthogonal complements
+  // (N, 7, 6). Family-independent, so it serves the Python charts too.
+  m.def(
+      "chart_frame",
+      [](py::array_t<double> tangent, py::object metric) {
+        auto tg = tangent.unchecked<2>();
+        const auto n = static_cast<py::ssize_t>(tg.shape(0));
+        const double* mp = nullptr;
+        py::array_t<double, py::array::c_style | py::array::forcecast> mm;
+        if (!metric.is_none()) {
+          mm = metric.cast<py::array_t<double, py::array::c_style | py::array::forcecast>>();
+          if (mm.ndim() != 2 || mm.shape(0) != 7 || mm.shape(1) != 7)
+            throw std::invalid_argument("metric must be (7, 7)");
+          mp = mm.data();
+        }
+        py::array_t<double> d_out({n, static_cast<py::ssize_t>(7)});
+        py::array_t<double> v_out(
+            {n, static_cast<py::ssize_t>(7), static_cast<py::ssize_t>(6)});
+        auto d_o = d_out.mutable_unchecked<2>();
+        auto v_o = v_out.mutable_unchecked<3>();
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        for (py::ssize_t i = 0; i < n; ++i) {
+          std::array<double, 7> dq;
+          for (int j = 0; j < 7; ++j) dq[j] = tg(i, j);
+          std::array<double, 7> d;
+          Eigen::Matrix<double, 7, 6> v;
+          if (!ssik::chart::frame_from_tangent(dq, mp, d, v)) {
+            for (int j = 0; j < 7; ++j) {
+              d_o(i, j) = nan;
+              for (int k = 0; k < 6; ++k) v_o(i, j, k) = nan;
+            }
+            continue;
+          }
+          for (int j = 0; j < 7; ++j) {
+            d_o(i, j) = d[j];
+            for (int k = 0; k < 6; ++k) v_o(i, j, k) = v(j, k);
+          }
+        }
+        return py::make_tuple(d_out, v_out);
+      },
+      py::arg("tangent"), py::arg("metric") = py::none(),
+      "Unit tangents and metric-orthogonal complements from raw tangents (N, 7).");
+}
+
+}  // namespace
+
 PYBIND11_MODULE(_ssik_native, m) {
+  bind_charts(m);
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
         py::arg("n2"), py::arg("n3"));

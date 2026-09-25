@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import weakref
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -151,12 +151,20 @@ def _consts(solver_name: str, kb: Any) -> tuple[Any, ...]:
     return marshalled
 
 
+def _limit_mode(respect_limits: bool | Literal["wrap"]) -> int:
+    """The extension's limit mode: 0 the raw set (``False``), 1 wrap and drop
+    (``True``), 2 wrap only (``"wrap"``) -- ``finalize_solutions``' three cases."""
+    if respect_limits == "wrap":
+        return 2
+    return 1 if respect_limits else 0
+
+
 def try_native_solve(
     solver_name: str,
     kb: Any,
     t_target: NDArray[np.float64],
     *,
-    respect_limits: bool = True,
+    respect_limits: bool | Literal["wrap"] = True,
     q_seed: NDArray[np.float64] | None = None,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
@@ -218,7 +226,7 @@ def try_native_solve(
         hi,
         has_limits,
         np.asarray(t_target, dtype=np.float64),
-        respect_limits,
+        _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,
@@ -245,7 +253,7 @@ def _rr_native_solve(
     g: dict[str, Any],
     t_target: NDArray[np.float64],
     *,
-    respect_limits: bool,
+    respect_limits: bool | Literal["wrap"],
     q_seed: NDArray[np.float64] | None,
     seed_metric: str,
     seed_tolerance: float | None,
@@ -292,7 +300,7 @@ def _rr_native_solve(
         np.asarray(q_m, dtype=np.int32),
         np.asarray(q_co, dtype=np.float64),
         np.asarray(t_target, dtype=np.float64),
-        respect_limits,
+        _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,
@@ -854,7 +862,7 @@ def try_native_jointlock_solve(
     kb: Any,
     t_target: NDArray[np.float64],
     *,
-    respect_limits: bool = True,
+    respect_limits: bool | Literal["wrap"] = True,
     q_seed: NDArray[np.float64] | None = None,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
@@ -878,7 +886,7 @@ def try_native_jointlock_solve(
     has_seed = q_seed is not None
     seed_arr = np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(7, np.float64)
     tail = (
-        respect_limits,
+        _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,
@@ -990,7 +998,7 @@ def try_native_srs_solve(
     kb: Any,
     t_target: NDArray[np.float64],
     *,
-    respect_limits: bool = True,
+    respect_limits: bool | Literal["wrap"] = True,
     q_seed: NDArray[np.float64] | None = None,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
@@ -1037,7 +1045,7 @@ def try_native_srs_solve(
         a["has_limits"],
         np.asarray(t_target, dtype=np.float64),
         a["general_path"],
-        respect_limits,
+        _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,
@@ -1095,7 +1103,7 @@ def try_native_spherical_shoulder_solve(
     kb: Any,
     t_target: NDArray[np.float64],
     *,
-    respect_limits: bool = True,
+    respect_limits: bool | Literal["wrap"] = True,
     q_seed: NDArray[np.float64] | None = None,
     seed_metric: str = "wrap_linf",
     seed_tolerance: float | None = None,
@@ -1129,7 +1137,7 @@ def try_native_spherical_shoulder_solve(
         a["hi"],
         a["has_limits"],
         np.asarray(t_target, dtype=np.float64),
-        respect_limits,
+        _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,

@@ -62,6 +62,8 @@ _TRACK_GRID = 180  # per-interval branch-tracking / feasible-arc resolution
 _MERGE_KEY = 6  # dedup rounding (decimals) on the full q vector
 _BAKE_Q6 = np.array([0.0, 2.0 * np.pi / 3.0, 4.0 * np.pi / 3.0])  # {cos,sin,1} basis samples
 _FK_ATOL = 1e-10  # bulletproof exact-class gate: only machine-precision solutions
+_LOCK_TOL = 1e-9  # |k x p| / |p| below which an SP1 is a 0/0 (gimbal lock / point on axis)
+_TANGENT_SNAP = 1e-15  # SP4 |ratio| / SP2 gss within this of the tangent case: exact double root
 # (feedback_bulletproof_solvers). Arms that are only *approximately* spherical
 # (no exact wrist triple, e.g. xArm7) fail this and return [] -- they need the
 # LM-polish path (follow-up), not silent 1e-6 solutions.
@@ -175,7 +177,14 @@ def _bdot(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]
 def _sp1_batch(
     k: NDArray[np.float64], p: NDArray[np.float64], q: NDArray[np.float64]
 ) -> NDArray[np.float64]:
-    return np.arctan2(_bdot(np.cross(k, p), q), _bdot(p, q) - _bdot(k, p) * _bdot(k, q))
+    """Batched SP1, with the angle defined as 0 where ``p`` lies on the axis
+    (``k x p`` vanishes): there the rotation angle is free and ``atan2`` of two
+    rounding-noise terms would return an arbitrary value -- a slot label must
+    map to one canonical representative, identically in Python and C++."""
+    kxp = np.cross(k, p)
+    ang: NDArray[np.float64] = np.arctan2(_bdot(kxp, q), _bdot(p, q) - _bdot(k, p) * _bdot(k, q))
+    free = np.linalg.norm(kxp, axis=1) <= _LOCK_TOL * np.linalg.norm(p, axis=1)
+    return np.where(free, 0.0, ang)
 
 
 def _sp4_batch(
@@ -195,6 +204,12 @@ def _sp4_batch(
     r = np.hypot(a, b)
     rhs = d - cc
     ratio = np.clip(np.divide(rhs, r, out=np.zeros_like(r), where=r > 1e-12), -1.0, 1.0)
+    # Snap the tangent case: within a few ulps of |ratio| = 1 the two roots are
+    # one double root, and arccos would return sqrt(eps) ~ 1e-8 instead of 0 --
+    # enough to push the downstream SP1s at a gimbal lock into 0/0 territory.
+    ratio = np.where(
+        ratio >= 1.0 - _TANGENT_SNAP, 1.0, np.where(ratio <= -1.0 + _TANGENT_SNAP, -1.0, ratio)
+    )
     delta = np.arccos(ratio)
     phi = np.arctan2(b, a)
     feas = (np.abs(rhs) - r <= feas_tol) & (r * r >= deg * deg)
@@ -220,6 +235,9 @@ def _sp2_batch(
     pp, qq = _bdot(p, p), _bdot(q, q)
     gss = 0.5 * (pp + qq) - alpha * alpha - beta * beta - 2.0 * alpha * beta * c
     feas = (np.abs(pp - qq) <= feas_tol) & (gss >= -feas_tol) & (s_sq >= deg)
+    # Tangent case (the two shoulder roots coincide): snap gss to an exact zero
+    # when it is within rounding of 0 relative to |p|^2, as for SP4.
+    gss = np.where(np.abs(gss) <= _TANGENT_SNAP * np.maximum(pp, qq), 0.0, gss)
     gamma = np.sqrt(np.maximum(gss, 0.0) / safe)
     base = alpha[:, None] * k1 + beta[:, None] * k2
     za = base + gamma[:, None] * kxk
@@ -229,16 +247,41 @@ def _sp2_batch(
     return t1, t2, feas
 
 
-def _closed_branches_grid(
+N_SLOTS = 8  # discrete branch slots per q6: (elbow, shoulder, wrist) in {0,1}^3
+
+
+def slot_label(slot: int) -> tuple[int, int, int]:
+    """``(elbow, shoulder, wrist)`` sign bits of a branch slot index in ``[0, 8)``.
+
+    Slot ``s = 4*elbow + 2*shoulder + wrist``: bit 0 of each SP pair is the
+    ``phi + delta`` root, bit 1 the ``phi - delta`` root. Within one reachable q6
+    interval each slot is a *continuous* closed-form branch ``q(q6)``, which is
+    what makes the slot a chart label (see :mod:`ssik.chart`).
+    """
+    return (slot >> 2) & 1, (slot >> 1) & 1, slot & 1
+
+
+def _slot_grid(
     coef: NDArray[np.float64],
     t_rev: NDArray[np.float64],
     q6_grid: NDArray[np.float64],
     policy: TolerancePolicy,
-) -> list[list[NDArray[np.float64]]]:
-    """Vectorised :func:`_closed_branches` over a q6 grid: loop the <=8 branch
-    slots (fixed), vectorise each SP stage over the grid. Returns, per grid point,
-    the list of feasible q0..q6 branches. Validated to match the scalar oracle's
-    FK-closing branch set exactly (0 missed) at ~7x the speed of the scalar loop."""
+    *,
+    valid_only: bool = False,
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Every branch slot evaluated over a q6 grid, slot-indexed.
+
+    Returns ``(q, valid)`` with ``q`` of shape ``(8, N, 7)`` and ``valid`` of
+    shape ``(8, N)``: ``q[s, k]`` is slot ``s`` (:func:`slot_label`) at
+    ``q6_grid[k]``, meaningful only where ``valid[s, k]``. This is the one
+    place the closed form is evaluated on a batch; :func:`_closed_branches_grid`
+    flattens it into the solver's per-grid-point branch lists and
+    :mod:`ssik.chart` reads the slots directly.
+
+    ``valid_only=True`` stops after the feasibility gates (SP3, SP2, SP4) and
+    leaves ``q`` uninitialised -- the two SP1 stages never affect validity, so a
+    domain search pays only for the gates.
+    """
     n = q6_grid.shape[0]
     ft, dg = policy.subproblem_feasibility, policy.subproblem_degeneracy
     basis = np.stack([np.cos(q6_grid), np.sin(q6_grid), np.ones(n)], axis=1)
@@ -257,7 +300,8 @@ def _closed_branches_grid(
     d3 = 0.5 * (_bdot(p3, p3) + _bdot(p2, p2) - _bdot(p_16, p_16))
     q3_both, feas3 = _sp4_batch(-p2, a2, p3, d3, ft, dg)  # SP3 via SP4
 
-    slots: list[list[NDArray[np.float64]]] = [[] for _ in range(n)]
+    q_out = np.empty((N_SLOTS, n, 7), dtype=np.float64)
+    valid = np.zeros((N_SLOTS, n), dtype=bool)
     for e in range(2):
         q3 = q3_both[:, e]
         sp2_arg = p2 + np.einsum("nij,nj->ni", _rot_batch(a2, q3), p3)
@@ -267,25 +311,57 @@ def _closed_branches_grid(
             r36 = _rot_batch(-a2, q3) @ _rot_batch(-a1, q2) @ _rot_batch(-a0, q1) @ r_06
             d_sp4 = np.einsum("ni,nij,nj->n", a3, r36, a5)
             q5_both, feas4 = _sp4_batch(a3, a4, a5, d_sp4, ft, dg)
-            valid = feas3 & feas2 & feas4
+            ok = feas3 & feas2 & feas4
+            if valid_only:
+                valid[4 * e + 2 * sh] = ok
+                valid[4 * e + 2 * sh + 1] = ok
+                continue
             for w in range(2):
                 q5 = q5_both[:, w]
-                q4 = _sp1_batch(
-                    a3,
-                    np.einsum("nij,nj->ni", _rot_batch(a4, q5), a5),
-                    np.einsum("nij,nj->ni", r36, a5),
-                )
+                r45 = _rot_batch(a4, q5)
+                a5_mid = np.einsum("nij,nj->ni", r45, a5)
+                q4 = _sp1_batch(a3, a5_mid, np.einsum("nij,nj->ni", r36, a5))
                 q6i = _sp1_batch(
                     -a5,
                     np.einsum("nij,nj->ni", _rot_batch(-a4, q5), a3),
                     np.einsum("nji,nj->ni", r36, a3),
                 )
+                # Gimbal lock of the wrist triple: the outer axes align (a3 || R45 a5),
+                # only q4 + q6i is determined. Canonical split: q6i = 0 and q4 the
+                # angle of the whole residual r36 R45^T about a3, read off a4 (which
+                # is perpendicular to a3, so this SP1 is well conditioned).
+                lock = np.linalg.norm(np.cross(a3, a5_mid), axis=1) <= _LOCK_TOL
+                if lock.any():
+                    m = np.einsum("nij,nkj->nik", r36, r45)  # r36 @ r45^T
+                    q4_lock = _sp1_batch(a3, a4, np.einsum("nij,nj->ni", m, a4))
+                    q4 = np.where(lock, q4_lock, q4)
+                    q6i = np.where(lock, 0.0, q6i)
                 # map_reversed_q(flip [q1..q6i]) = [q6i,q5,q4,q3,q2,q1] + q6
-                full = np.concatenate(
+                s = 4 * e + 2 * sh + w
+                q_out[s] = np.concatenate(
                     [np.stack([q6i, q5, q4, q3, q2, q1], axis=1), q6_grid[:, None]], axis=1
                 )
-                for i in np.nonzero(valid)[0]:
-                    slots[i].append(full[i])
+                valid[s] = ok
+    return q_out, valid
+
+
+def _closed_branches_grid(
+    coef: NDArray[np.float64],
+    t_rev: NDArray[np.float64],
+    q6_grid: NDArray[np.float64],
+    policy: TolerancePolicy,
+) -> list[list[NDArray[np.float64]]]:
+    """Vectorised :func:`_closed_branches` over a q6 grid: loop the <=8 branch
+    slots (fixed), vectorise each SP stage over the grid. Returns, per grid point,
+    the list of feasible q0..q6 branches, in slot order. Validated to match the
+    scalar oracle's FK-closing branch set exactly (0 missed) at ~7x the speed of
+    the scalar loop."""
+    q_out, valid = _slot_grid(coef, t_rev, q6_grid, policy)
+    n = q6_grid.shape[0]
+    slots: list[list[NDArray[np.float64]]] = [[] for _ in range(n)]
+    for s in range(N_SLOTS):
+        for i in np.nonzero(valid[s])[0]:
+            slots[i].append(q_out[s, i])
     return slots
 
 
@@ -315,6 +391,67 @@ def _sp3_reach_margins(
     pperp = np.linalg.norm(pp - k * (pp * k).sum(1, keepdims=True), axis=1)
     out: NDArray[np.float64] = qperp * pperp - np.abs(target - center)
     return out
+
+
+def elbow_arcs(coef: NDArray[np.float64], t_rev: NDArray[np.float64]) -> list[tuple[float, float]]:
+    """Exact reachable q6 arcs of the elbow (SP3) gate, in closed form.
+
+    The reversed lock-6 chain is the same rigid chain rotated about the joint-6
+    axis, so every scalar product between two chain-fixed vectors is constant
+    in q6 and the only q6-dependent quantity in SP3 is the squared distance to
+    the fixed target, ``|p_16|^2 = A + B cos q6 + C sin q6`` (exactly: three
+    samples determine it). SP3 closes iff ``|rhs| <= r`` with
+    ``rhs = (|p3|^2 + |p2|^2 - |p_16|^2)/2 - center`` and ``r``, ``center``
+    constant, i.e. iff ``lo <= rho cos(q6 - phi) <= hi``: at most two arcs whose
+    ends are ``phi +- arccos(.)``. These are the exact elbow-fold points; the
+    90-point scan in :func:`_reachable_intervals` brackets the same set one
+    grid step wide. Returns sorted arcs on ``[-pi, pi]``, split at the seam;
+    ``[(-pi, pi)]`` when every q6 is reachable, ``[]`` when none is.
+    """
+    d2 = np.empty(3)
+    for i, q6 in enumerate(_BAKE_Q6):
+        axes, our_p, tool, r_home = _eval_geom(coef, float(q6))
+        p2 = our_p[2]
+        p3 = our_p[3] + our_p[4] + our_p[5]
+        r_06 = t_rev[:3, :3] @ r_home.T
+        p_16 = t_rev[:3, 3] - r_06 @ tool - our_p[0]
+        d2[i] = float(p_16 @ p_16)
+        if i == 0:  # the q6-invariant SP3 scalars, as _sp4_batch(-p2, a2, p3, .) forms them
+            k, h, pp = axes[2], -p2, p3
+            a = float(h @ pp - (k @ pp) * (h @ k))
+            b = float(h @ np.cross(k, pp))
+            r = float(np.hypot(a, b))
+            center = float((k @ pp) * (h @ k))
+            s_const = float(pp @ pp + p2 @ p2)
+    basis = np.stack([np.ones(3), np.cos(_BAKE_Q6), np.sin(_BAKE_Q6)], axis=1)
+    a0, b0, c0 = np.linalg.solve(basis, d2)
+    rho, phi = float(np.hypot(b0, c0)), float(np.arctan2(c0, b0))
+    lo = s_const - a0 - 2.0 * (center + r)  # lo <= rho cos(q6 - phi) <= hi
+    hi = s_const - a0 - 2.0 * (center - r)
+    if rho < 1e-15:
+        return [(-np.pi, np.pi)] if lo <= 0.0 <= hi else []
+    c_lo, c_hi = max(lo / rho, -1.0), min(hi / rho, 1.0)
+    if c_lo > c_hi:
+        return []
+    if c_lo <= -1.0 and c_hi >= 1.0:
+        return [(-np.pi, np.pi)]
+    a_hi = float(np.arccos(c_lo))  # largest |q6 - phi| allowed
+    a_lo = float(np.arccos(c_hi))  # smallest |q6 - phi| allowed
+    if a_lo <= 0.0:
+        raw = [(phi - a_hi, phi + a_hi)]
+    elif a_hi >= np.pi - 1e-15:
+        raw = [(phi + a_lo, phi + 2.0 * np.pi - a_lo)]
+    else:
+        raw = [(phi + a_lo, phi + a_hi), (phi - a_hi, phi - a_lo)]
+    out: list[tuple[float, float]] = []
+    for a, b in raw:
+        wa = float((a + np.pi) % (2.0 * np.pi) - np.pi)
+        wb = float((b + np.pi) % (2.0 * np.pi) - np.pi)
+        if wa <= wb:
+            out.append((wa, wb))
+        else:
+            out += [(wa, np.pi), (-np.pi, wb)]
+    return sorted(out)
 
 
 # --- redundancy resolution ----------------------------------------------------

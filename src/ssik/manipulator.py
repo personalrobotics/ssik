@@ -44,6 +44,8 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics
 if TYPE_CHECKING:
     from types import ModuleType
 
+    from ssik.chart import PathTrack, SelfMotionManifold
+
 __all__ = ["Manipulator"]
 
 
@@ -99,7 +101,14 @@ class Manipulator:
         loader). Most users should use :meth:`from_urdf` instead.
     """
 
-    __slots__ = ("_kb", "_plan", "_solver_module", "_solver_params", "_warned_cold_coverage")
+    __slots__ = (
+        "_kb",
+        "_plan",
+        "_policy",
+        "_solver_module",
+        "_solver_params",
+        "_warned_cold_coverage",
+    )
 
     def __init__(
         self,
@@ -115,6 +124,7 @@ class Manipulator:
             Defaults to :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
         """
         self._kb: KinBody = kinbody
+        self._policy: TolerancePolicy = policy
         self._plan: DispatchPlan = dispatch(kinbody, policy=policy)
         self._solver_module: ModuleType = importlib.import_module(
             SOLVERS[self._plan.solver_name].module_path
@@ -304,7 +314,11 @@ class Manipulator:
         :param joint_trafos: ``(N + 1, 4, 4)`` relative zero-pose transforms:
             ``joint_trafos[i]`` maps frame ``i-1`` to frame ``i`` (``[0]`` is
             base -> joint 0), and ``joint_trafos[N]`` maps joint ``N-1`` -> EE.
-        :param joint_axis: rotation axis in each joint's local frame (default Z).
+        :param joint_axis: rotation axis in each joint's local frame: one ``(3,)``
+            axis shared by every joint (default Z), or ``(N, 3)``, one per joint
+            -- a UR arm's joints turn about ``z, y, y, y, z, y`` in their own
+            frames, and folding that into the transforms instead would move the
+            flange rotation off the last one.
         :param limits: optional ``(N, 2)`` per-joint ``(lower, upper)`` ranges.
         :param policy: tolerance policy for the dispatcher.
         """
@@ -313,11 +327,17 @@ class Manipulator:
             raise ValueError(f"joint_trafos must be (N + 1, 4, 4); got {t.shape}")
         n = t.shape[0] - 1
         axis = np.asarray(joint_axis, dtype=np.float64)
+        if axis.shape == (3,):
+            axes = np.broadcast_to(axis, (n, 3))
+        elif axis.shape == (n, 3):
+            axes = axis
+        else:
+            raise ValueError(f"joint_axis must be (3,) or ({n}, 3); got {axis.shape}")
         lim = _coerce_limits(limits, n)
         specs = [
             JointSpec(
                 parent_link_T=t[i],
-                axis=axis,
+                axis=axes[i],
                 joint_type="revolute",
                 child_link_T=t[n] if i == n - 1 else None,
                 limits=lim[i],
@@ -444,6 +464,65 @@ class Manipulator:
         return result
 
     # ------------------------------------------------------------------
+    # Self-motion charts (redundant 7R)
+    # ------------------------------------------------------------------
+
+    def self_motion(self, T_target: ArrayLike, *, native: bool = True) -> SelfMotionManifold:
+        """The self-motion manifold at ``T_target``, as charts (redundant 7R only).
+
+        Returns a :class:`~ssik.chart.SelfMotionManifold`: every closed-form branch
+        ``q(t)`` of ``FK^-1(T_target)`` with a stable label and its domain, plus
+        the inverse map ``locate(q)``. See :mod:`ssik.chart` for the per-family
+        meaning of the label and the redundancy coordinate.
+
+        :param native: use the C++ extension when available (default); ``False``
+            forces the pure-Python reference.
+        :raises NotImplementedError: when the dispatched solver has no
+            closed-form chart (6R arms, approximate-class 7R, joint-lock 7R).
+        """
+        from ssik.chart import charts as _charts
+
+        return _charts(
+            self._kb,
+            T_target,
+            solver_name=self._plan.solver_name,
+            policy=self._policy,
+            native=native,
+        )
+
+    def solve_path(
+        self,
+        poses: ArrayLike,
+        *,
+        q0: ArrayLike | None = None,
+        native: bool = True,
+        max_step: float = 0.5,
+    ) -> PathTrack:
+        """Solve a sequence of poses in one call, carrying chart labels along it.
+
+        Every branch at ``poses[0]`` (or only those through ``q0``, one start or
+        ``(k, dof)`` of them) is
+        continued pose to pose by label lookup; see :func:`ssik.chart.track_all`.
+        Chart-capable arms only, as :meth:`self_motion`.
+
+        :param poses: ``(N, 4, 4)`` pose path. A closed path (last pose equal
+            to the first) exposes the monodromy as ``result.permutation``.
+        :raises NotImplementedError: when the dispatched solver has no
+            closed-form chart.
+        """
+        from ssik.chart import track_all
+
+        return track_all(
+            self._kb,
+            poses,
+            q0=q0,
+            solver_name=self._plan.solver_name,
+            policy=self._policy,
+            native=native,
+            max_step=max_step,
+        )
+
+    # ------------------------------------------------------------------
     # Inverse kinematics
     # ------------------------------------------------------------------
 
@@ -455,7 +534,7 @@ class Manipulator:
         explain: Literal[False] = False,
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
-        respect_limits: bool = True,
+        respect_limits: bool | Literal["wrap"] = True,
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
@@ -474,7 +553,7 @@ class Manipulator:
         explain: Literal[True],
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
-        respect_limits: bool = True,
+        respect_limits: bool | Literal["wrap"] = True,
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
@@ -492,7 +571,7 @@ class Manipulator:
         explain: bool = False,
         max_solutions: int | None = None,
         q_seed: ArrayLike | None = None,
-        respect_limits: bool = True,
+        respect_limits: bool | Literal["wrap"] = True,
         allow_refinement: bool = False,
         policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
         refinement_max_iters: int = 15,
@@ -530,7 +609,9 @@ class Manipulator:
             best-effort behaviour. Requires ``q_seed``.
         :param respect_limits: when ``True`` (default), solutions outside
             URDF joint limits are dropped. Pass ``False`` for the raw
-            geometric set (analysis / debugging).
+            geometric set (analysis / debugging), or ``"wrap"`` for the full
+            geometric set with each joint wrapped into its range where a
+            ``+- 2*pi`` representative exists and nothing dropped.
         :param enumerate_windings: when ``True`` (default since v6.0, #562),
             a joint whose limits span more than one turn (UR-family
             ``[-2*pi, 2*pi]``) contributes every
@@ -662,7 +743,19 @@ class Manipulator:
                     inner_sols, _ = self._solver_module.solve(self._kb, T_pert, **inner)
                     return list(inner_sols)
 
-                sols = rescue_via_T_perturbation(self.fk, _analytic, T, jacobian_fn=None)
+                # The Newton polish inside the rescue wants a spatial Jacobian, and this
+                # KinBody has a closed-form one -- the same POE walk the baked prebuilt
+                # solvers hand in as ``_spatial_jacobian``. Left at None it central-
+                # differences the FK instead: 2N extra FK calls per iteration for a
+                # derivative we can write down.
+                from ssik.refinement import kinbody_jacobian
+
+                sols = rescue_via_T_perturbation(
+                    self.fk,
+                    _analytic,
+                    T,
+                    jacobian_fn=lambda q: kinbody_jacobian(self._kb, q),
+                )
 
         raw_candidate_count = len(sols)
 
@@ -686,7 +779,7 @@ class Manipulator:
             max_solutions=max_solutions,
             # Manipulator runs the pipeline once, so this is the lifting call --
             # but only when the caller wanted limits honoured at all.
-            enumerate_windings=enumerate_windings and respect_limits,
+            enumerate_windings=enumerate_windings and bool(respect_limits),
             counts=counts,
         )
         dropped_by_limits = counts["dropped_by_limits"]

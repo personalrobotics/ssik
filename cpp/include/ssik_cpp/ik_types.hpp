@@ -34,6 +34,7 @@ struct Solution {
 template <int N>
 struct SolveOptions {
   bool respect_limits = true;
+  bool wrap_only = false;             // respect_limits="wrap": wrap, drop nothing
   bool has_seed = false;              // when true, rank solutions nearest q_seed
   std::array<double, N> q_seed{};
   int max_solutions = -1;             // -1 = no cap

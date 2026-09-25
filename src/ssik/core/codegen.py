@@ -654,7 +654,7 @@ def _render_specialised_solve_orchestrator(
             *,
             max_solutions: int | None = None,
             q_seed=None,
-            respect_limits: bool = True,
+            respect_limits: bool | str = True,
             allow_refinement: bool = False,
             allow_rescue: bool = True,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
@@ -689,7 +689,9 @@ def _render_specialised_solve_orchestrator(
                 Requires ``q_seed``.
             :param respect_limits: when ``True`` (default), solutions
                 outside URDF joint limits are dropped. Pass ``False`` for
-                the raw geometric set (e.g. analysis / debugging).
+                the raw geometric set (e.g. analysis / debugging), or
+                ``"wrap"`` for the full set wrapped into the joint ranges
+                with nothing dropped.
             :param allow_refinement: opt into Newton polish for near-miss
                 algebraic candidates that don't quite meet ``fk_atol``.
                 Default ``False`` -- the algebraic path is already at
@@ -1113,7 +1115,7 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
             *,
             max_solutions: int | None = None,
             q_seed=None,
-            respect_limits: bool = True,
+            respect_limits: bool | str = True,
             allow_refinement: bool = False,
             allow_rescue: bool = True,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
@@ -1150,7 +1152,8 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
                 Requires ``q_seed``.
             :param respect_limits: when ``True`` (default), solutions
                 outside URDF joint limits are dropped. Pass ``False``
-                for the raw geometric set.
+                for the raw geometric set, or ``"wrap"`` for the full set
+                wrapped into the joint ranges with nothing dropped.
             :param allow_refinement: when ``True`` (default), Newton
                 polish fires on near-miss algebraic candidates.
             :param allow_rescue: when ``True`` (default), if the analytical
@@ -1557,7 +1560,7 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
             *,
             max_solutions=None,
             q_seed=None,
-            respect_limits: bool = True,
+            respect_limits: bool | str = True,
             allow_refinement: bool = False,
             allow_rescue: bool = True,
             policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
@@ -1587,7 +1590,8 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
                 Requires ``q_seed``.
             :param respect_limits: when ``True`` (default), solutions
                 outside URDF joint limits are dropped. ``False`` returns
-                the raw geometric set.
+                the raw geometric set; ``"wrap"`` the full set wrapped into
+                the joint ranges with nothing dropped.
             :param allow_refinement: when ``True`` (default), Newton polish
                 fires on near-miss algebraic candidates. Tightens FK
                 closure to machine precision.

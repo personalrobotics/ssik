@@ -828,7 +828,7 @@ def solve(
     *,
     max_solutions: int | None = None,
     q_seed=None,
-    respect_limits: bool = True,
+    respect_limits: bool | str = True,
     allow_refinement: bool = False,
     allow_rescue: bool = True,
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
@@ -866,7 +866,8 @@ def solve(
         Requires ``q_seed``.
     :param respect_limits: when ``True`` (default), solutions
         outside URDF joint limits are dropped. Pass ``False``
-        for the raw geometric set.
+        for the raw geometric set, or ``"wrap"`` for the full set
+        wrapped into the joint ranges with nothing dropped.
     :param allow_refinement: when ``True`` (default), Newton
         polish fires on near-miss algebraic candidates.
     :param allow_rescue: when ``True`` (default), if the analytical

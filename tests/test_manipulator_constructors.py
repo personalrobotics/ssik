@@ -63,9 +63,10 @@ def _dh_fk(alpha, a, d, q):
 
 
 def _tf_fk(trafos: np.ndarray, axis, q: np.ndarray) -> np.ndarray:
+    axes = np.broadcast_to(np.asarray(axis, dtype=np.float64), (len(q), 3))
     t = trafos[0]
     for i in range(len(q)):
-        t = t @ _rot(np.asarray(axis, dtype=np.float64), q[i]) @ trafos[i + 1]
+        t = t @ _rot(axes[i], q[i]) @ trafos[i + 1]
     return np.asarray(t, dtype=np.float64)
 
 
@@ -175,6 +176,25 @@ def test_from_transforms_fk_matches_reference() -> None:
         for q in rng.uniform(-3, 3, (200, 6))
     )
     assert worst < 1e-12, f"from_transforms FK vs reference {worst:.2e}"
+
+
+def test_from_transforms_per_joint_axes() -> None:
+    """One axis per joint (a UR arm turns about z, y, y, y, z, y in its own
+    frames), with a flange rotation on the last transform that a shared-axis
+    workaround would have to move."""
+    trafos = _sample_trafos()
+    trafos[6, :3, :3] = np.diag([1.0, -1.0, -1.0])
+    axes = np.array([[0, 0, 1], [0, 1, 0], [0, 1, 0], [0, 1, 0], [0, 0, 1], [0, 1, 0]], float)
+    m = Manipulator.from_transforms(trafos, joint_axis=axes)
+    rng = np.random.default_rng(6)
+    qs = rng.uniform(-3, 3, (200, 6))
+    worst = max(float(np.max(np.abs(m.fk(q) - _tf_fk(trafos, axes, q)))) for q in qs)
+    assert worst < 1e-12, f"per-joint axes FK vs reference {worst:.2e}"
+    # The failing case: a shared z axis is a different arm.
+    shared = Manipulator.from_transforms(trafos, joint_axis=[0.0, 0.0, 1.0])
+    assert max(float(np.max(np.abs(shared.fk(q) - m.fk(q)))) for q in qs[:20]) > 1e-2
+    with pytest.raises(ValueError, match="joint_axis"):
+        Manipulator.from_transforms(trafos, joint_axis=np.zeros((5, 3)))
 
 
 def test_from_transforms_rejects_bad_shape() -> None:
