@@ -62,35 +62,35 @@ Each loop below is one arm's interactive demo running for ~3 seconds: the live r
 
 **UR5**: three-parallel 6R (Pieper). EAIK supports this class.
 
-<img src="docs/assets/per_arm/ur5_ik.gif" alt="UR5 IK demo" width="480">
+<img src="docs/assets/per_arm/ur5_ik.gif" alt="UR5 IK demo" height="256">
 
 **Unitree Z1**: three-parallel 6R (UR-class). EAIK supports this class.
 
-<img src="docs/assets/per_arm/z1_ik.gif" alt="Unitree Z1 IK demo" width="480">
+<img src="docs/assets/per_arm/z1_ik.gif" alt="Unitree Z1 IK demo" height="256">
 
 **Franka Panda**: anthropomorphic 7R. EAIK refuses ("only 1–6R").
 
-<img src="docs/assets/per_arm/franka_panda_ik.gif" alt="Franka Panda IK demo" width="480">
+<img src="docs/assets/per_arm/franka_panda_ik.gif" alt="Franka Panda IK demo" height="256">
 
 **UFactory xArm6**: non-Pieper 6R. EAIK refuses ("6R-Unknown Kinematic Class").
 
-<img src="docs/assets/per_arm/xarm6_ik.gif" alt="UFactory xArm6 IK demo" width="480">
+<img src="docs/assets/per_arm/xarm6_ik.gif" alt="UFactory xArm6 IK demo" height="256">
 
 **Kinova JACO 2**: non-Pieper 6R. EAIK refuses ("6R-Unknown Kinematic Class").
 
-<img src="docs/assets/per_arm/jaco2_ik.gif" alt="Kinova JACO 2 IK demo" width="480">
+<img src="docs/assets/per_arm/jaco2_ik.gif" alt="Kinova JACO 2 IK demo" height="256">
 
 **AgileX PiPER**: non-Pieper 6R. EAIK refuses ("6R-Unknown Kinematic Class").
 
-<img src="docs/assets/per_arm/piper_ik.gif" alt="AgileX PiPER IK demo" width="480">
+<img src="docs/assets/per_arm/piper_ik.gif" alt="AgileX PiPER IK demo" height="256">
 
 **KUKA iiwa14**: SRS 7R. EAIK refuses ("no 7R DH path").
 
-<img src="docs/assets/per_arm/iiwa14_ik.gif" alt="KUKA iiwa14 IK demo" width="480">
+<img src="docs/assets/per_arm/iiwa14_ik.gif" alt="KUKA iiwa14 IK demo" height="256">
 
 **Flexiv Rizon 4**: non-SRS 7R. EAIK refuses ("only 1–6R").
 
-<img src="docs/assets/per_arm/rizon4_ik.gif" alt="Flexiv Rizon 4 IK demo" width="480">
+<img src="docs/assets/per_arm/rizon4_ik.gif" alt="Flexiv Rizon 4 IK demo" height="256">
 
 ## Why ssik exists
 
@@ -605,7 +605,7 @@ Returning 32× more configurations costs proportionally more, but a capped solve
 
 A 7R arm holding a 6-DOF pose is not at a point in configuration space, it is on a curve: the **self-motion manifold**, the one-parameter family of postures with the same end-effector pose. `solve()` samples that curve and hands back points. Since v6.1 you can ask for the curve itself.
 
-<img src="docs/assets/self_motion.gif" alt="A Franka Panda sweeping one branch of its self-motion manifold: the elbow travels from folded to fully extended while the gripper and its frame stay exactly in place." width="480">
+<img src="docs/assets/self_motion.gif" alt="A Franka Panda sweeping one branch of its self-motion manifold: the elbow travels from folded to fully extended while the gripper and its frame stay exactly in place." height="256">
 
 One Panda, one target, one branch. The shoulder and elbow travel several radians while the hand does not move: every frame is an exact IK solution for the same pose, not an interpolation between two of them. Reproduce it with `python examples/06_self_motion.py` (no display needed) or `python examples/05_viser_interactive_ik.py --self-motion`.
 
