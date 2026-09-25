@@ -1294,6 +1294,18 @@ PYBIND11_MODULE(_ssik_native, m) {
         py::arg("seed_metric"), py::arg("has_seed_tolerance"), py::arg("seed_tolerance"),
         py::arg("max_solutions"), py::arg("allow_rescue"), py::arg("refinement_max_iters"),
         py::arg("enumerate_windings") = true);
+  // Worker-thread cap for the native parallel_for (0 = auto, 1 = serial).
+  // Exposed so a measurement can make itself machine-independent: kassow is the
+  // only arm whose solve fans out (16 lock samples), so its time relative to a
+  // single-threaded reference tracks core count rather than clock, which is
+  // precisely the assumption the perf-regression baseline rests on. Also lets a
+  // caller pin to 1 to reproduce results exactly, since work-splitting across
+  // heterogeneous cores perturbs the last bits of an LM-refined solution.
+  m.def("set_max_threads", &ssik::set_max_threads, py::arg("n"),
+        "Cap native worker threads process-wide. 0 = auto, 1 = serial.");
+  m.def("get_max_threads", []() { return ssik::parallel_thread_cap().load(); },
+        "Current worker-thread cap (0 = auto).");
+
   m.def("hp_pencil_roots_test", &hp_pencil_roots_test_py, py::arg("f"), py::arg("g"),
         py::arg("real_tol") = 1e-3, py::arg("max_magnitude") = 1e10);
   m.def("hp_eliminate_uw_pairs_test", &hp_eliminate_uw_pairs_test_py, py::arg("t_u"),

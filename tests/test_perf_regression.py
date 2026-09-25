@@ -27,6 +27,7 @@ import importlib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -82,6 +83,33 @@ def _solve_ms(name: str) -> float:
     return float(
         best_call_ms(lambda: mod.solve(t_target, native=True, enumerate_windings=False), runs=_RUNS)
     )
+
+
+# Pinned to one worker thread for the whole measurement (#568 follow-up).
+#
+# The ratio in this file is only machine-independent while both the arm and the
+# reference scale the same way with hardware, and that breaks for a solve that
+# fans out: kassow is the one arm whose native path runs its 16 lock samples in
+# parallel, so its time relative to the single-threaded ur5 reference tracks
+# CORE COUNT, not clock. Measured on the same machine, kassow/ur5 is 527x with
+# threads auto and 3076x pinned; a 4-vCPU CI runner read 1435x against a
+# baseline of 464x recorded on a 10-core laptop, and tripped a 3.0x gate on an
+# arm nobody had touched.
+#
+# Serial measurement costs a little wall-clock and buys a number that means the
+# same thing everywhere. The parallel speedup itself is worth gating, but as its
+# own assertion rather than as noise smeared through every arm's ratio.
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _serial_native() -> Any:
+    """Force serial native execution for every measurement in this module."""
+    from ssik import _ssik_native as ext  # type: ignore[attr-defined]
+
+    previous = ext.get_max_threads()
+    ext.set_max_threads(1)
+    yield
+    ext.set_max_threads(previous)
 
 
 _ARMS = sorted(_RATIOS)

@@ -55,6 +55,12 @@ def _solve_ms(name: str) -> float:
 
 
 def main() -> int:
+    # Must match tests/test_perf_regression.py: serial native execution, so the
+    # recorded ratio means the same thing on any core count. See the note there.
+    from ssik import _ssik_native as ext  # type: ignore[attr-defined]
+
+    ext.set_max_threads(1)
+
     if not native_available():
         print(
             "refusing to regenerate: ssik._ssik_native is not built, so this would "
