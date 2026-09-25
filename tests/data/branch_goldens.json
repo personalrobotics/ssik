@@ -1,6 +1,6 @@
 {
   "fixtures": {
-    "pi_at_left_bilinear_q3": {
+    "pi_at_dropped_joint_q3": {
       "branches": [
         [
           0.2860902689872284,
@@ -52,41 +52,14 @@
         ]
       ],
       "budget_used": 2000,
-      "description": "q3 at pi. The control for the split: the left-bilinear pair already handles pi correctly today, so this must stay recovered through any change to the projective handling. It is also the working pattern the right-bilinear path can copy.",
+      "description": "q3 at pi, the dropped joint, recovered via atan2 on a genuine (sin, cos) pair. The control: pi already works here and must keep working through the projective change. The right-bilinear pair (q4, q5) works the same way and is the pattern to copy.",
       "fingerprint": "2ee9a4880bd3e144",
       "issue": null,
       "n_branches": 6,
       "stabilized": true,
       "worst_fk": 5.064917260848195e-16
     },
-    "pi_at_right_bilinear_q0": {
-      "branches": [
-        [
-          2.4532344251118188,
-          1.3108057699676208,
-          -0.21457239049255314,
-          1.6227757435331185,
-          0.2900514887093714,
-          1.0391303860034247
-        ],
-        [
-          3.141592653589793,
-          0.6199999999999999,
-          0.93,
-          -0.44000000000000017,
-          0.7499999999999999,
-          -0.25999999999999995
-        ]
-      ],
-      "budget_used": 2000,
-      "description": "q0 at pi, every other joint generic. Under the default loop split q0 is in the right-bilinear pair, whose reconstruction carries its own affine tan-half representation. Lost for a different reason than the linearity joint, so a fix aimed only at the eigenvalue at infinity leaves this one broken (see the diagnosis on #571).",
-      "fingerprint": "020b64a2ca0cd996",
-      "issue": "#571",
-      "n_branches": 2,
-      "stabilized": true,
-      "worst_fk": 4.783309287441108e-16
-    },
-    "pi_at_right_bilinear_q1": {
+    "pi_at_left_bilinear_q1": {
       "branches": [
         [
           -2.916494102637312,
@@ -154,14 +127,14 @@
         ]
       ],
       "budget_used": 2000,
-      "description": "q1 at pi, the second member of the right-bilinear pair. Included alongside q0 because the two are reconstructed together and a partial fix could plausibly repair one and not the other.",
+      "description": "q1 at pi, the other LEFT-bilinear joint: defect B, and its cleanest demonstration. The linearity joint stays at 0.31 so its root is found correctly, and q* is still missed by 1.218 rad, which isolates the loss to back-substitution rather than root finding.",
       "fingerprint": "45ce936b4471d133",
       "issue": "#571",
       "n_branches": 8,
       "stabilized": true,
       "worst_fk": 3.898151775035868e-16
     },
-    "tan_half_infinity": {
+    "pi_at_left_bilinear_q2": {
       "branches": [
         [
           -1.08983630111622,
@@ -229,14 +202,41 @@
         ]
       ],
       "budget_used": 4000,
-      "description": "Regular pose (rank 6, cond ~123) whose linearity joint sits at pi, i.e. at tan-half-angle infinity. The tan-half-angle coordinate cannot represent it, so the Raghavan-Roth path drops it as a nonfinite generalized eigenvalue and returns seven of the eight branches.",
+      "description": "The reproducer from #571, q2 at pi. This chain's auto-selected leftvar is 0, so q2 is a LEFT-bilinear joint rather than the polynomial variable: defect B. The root IS found; back-substitution cannot read it, because v_12 is a normalised monomial vector whose lower-degree entries underflow to ~1e-16 once the variable goes to infinity, so every candidate ratio divides two noise values.",
       "fingerprint": "fa590ef0844e1d1a",
       "issue": "#571",
       "n_branches": 8,
       "stabilized": true,
       "worst_fk": 4.531316008922399e-16
     },
-    "tan_half_infinity_regular_pose": {
+    "pi_at_linearity_variable_q0": {
+      "branches": [
+        [
+          2.4532344251118188,
+          1.3108057699676208,
+          -0.21457239049255314,
+          1.6227757435331185,
+          0.2900514887093714,
+          1.0391303860034247
+        ],
+        [
+          3.141592653589793,
+          0.6199999999999999,
+          0.93,
+          -0.44000000000000017,
+          0.7499999999999999,
+          -0.25999999999999995
+        ]
+      ],
+      "budget_used": 2000,
+      "description": "q0 at pi, which IS the polynomial variable under leftvar 0: defect A. The root is absent from the raw 24 eigenvalues before any filtering, so nothing is being rejected, there is simply no finite eigenvalue to find. This is the case homogeneous (alpha, beta) pairs address.",
+      "fingerprint": "020b64a2ca0cd996",
+      "issue": "#571",
+      "n_branches": 2,
+      "stabilized": true,
+      "worst_fk": 4.783309287441108e-16
+    },
+    "regular_pose_control": {
       "branches": [
         [
           0.2999999999999972,
@@ -256,7 +256,7 @@
         ]
       ],
       "budget_used": 2000,
-      "description": "Same chain as tan_half_infinity at a generic pose, no joint near pi. The control: whatever the projective fix does, this pose must keep the branch set it already has.",
+      "description": "Same chain, no joint at pi. The other control: whatever the fix does, this pose must keep the branch set it already has.",
       "fingerprint": "ff9abf4de836eaf8",
       "issue": null,
       "n_branches": 2,

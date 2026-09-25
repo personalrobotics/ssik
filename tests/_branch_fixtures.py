@@ -84,12 +84,14 @@ class BranchFixture:
 
 FIXTURES: tuple[BranchFixture, ...] = (
     BranchFixture(
-        name="tan_half_infinity",
+        name="pi_at_left_bilinear_q2",
         description=(
-            "Regular pose (rank 6, cond ~123) whose linearity joint sits at pi, "
-            "i.e. at tan-half-angle infinity. The tan-half-angle coordinate cannot "
-            "represent it, so the Raghavan-Roth path drops it as a nonfinite "
-            "generalized eigenvalue and returns seven of the eight branches."
+            "The reproducer from #571, q2 at pi. This chain's auto-selected "
+            "leftvar is 0, so q2 is a LEFT-bilinear joint rather than the "
+            "polynomial variable: defect B. The root IS found; back-substitution "
+            "cannot read it, because v_12 is a normalised monomial vector whose "
+            "lower-degree entries underflow to ~1e-16 once the variable goes to "
+            "infinity, so every candidate ratio divides two noise values."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
@@ -98,13 +100,12 @@ FIXTURES: tuple[BranchFixture, ...] = (
         issue="#571",
     ),
     BranchFixture(
-        name="pi_at_right_bilinear_q0",
+        name="pi_at_linearity_variable_q0",
         description=(
-            "q0 at pi, every other joint generic. Under the default loop split q0 is "
-            "in the right-bilinear pair, whose reconstruction carries its own affine "
-            "tan-half representation. Lost for a different reason than the linearity "
-            "joint, so a fix aimed only at the eigenvalue at infinity leaves this one "
-            "broken (see the diagnosis on #571)."
+            "q0 at pi, which IS the polynomial variable under leftvar 0: defect A. "
+            "The root is absent from the raw 24 eigenvalues before any filtering, so "
+            "nothing is being rejected, there is simply no finite eigenvalue to find. "
+            "This is the case homogeneous (alpha, beta) pairs address."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
@@ -113,11 +114,12 @@ FIXTURES: tuple[BranchFixture, ...] = (
         issue="#571",
     ),
     BranchFixture(
-        name="pi_at_right_bilinear_q1",
+        name="pi_at_left_bilinear_q1",
         description=(
-            "q1 at pi, the second member of the right-bilinear pair. Included "
-            "alongside q0 because the two are reconstructed together and a partial "
-            "fix could plausibly repair one and not the other."
+            "q1 at pi, the other LEFT-bilinear joint: defect B, and its cleanest "
+            "demonstration. The linearity joint stays at 0.31 so its root is found "
+            "correctly, and q* is still missed by 1.218 rad, which isolates the loss "
+            "to back-substitution rather than root finding."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
@@ -126,12 +128,12 @@ FIXTURES: tuple[BranchFixture, ...] = (
         issue="#571",
     ),
     BranchFixture(
-        name="pi_at_left_bilinear_q3",
+        name="pi_at_dropped_joint_q3",
         description=(
-            "q3 at pi. The control for the split: the left-bilinear pair already "
-            "handles pi correctly today, so this must stay recovered through any "
-            "change to the projective handling. It is also the working pattern the "
-            "right-bilinear path can copy."
+            "q3 at pi, the dropped joint, recovered via atan2 on a genuine "
+            "(sin, cos) pair. The control: pi already works here and must keep "
+            "working through the projective change. The right-bilinear pair "
+            "(q4, q5) works the same way and is the pattern to copy."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
@@ -140,11 +142,10 @@ FIXTURES: tuple[BranchFixture, ...] = (
         issue=None,
     ),
     BranchFixture(
-        name="tan_half_infinity_regular_pose",
+        name="regular_pose_control",
         description=(
-            "Same chain as tan_half_infinity at a generic pose, no joint near pi. "
-            "The control: whatever the projective fix does, this pose must keep "
-            "the branch set it already has."
+            "Same chain, no joint at pi. The other control: whatever the fix does, "
+            "this pose must keep the branch set it already has."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),

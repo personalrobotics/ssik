@@ -152,8 +152,11 @@ def _expect(fx: BranchFixture) -> Any:
         return pytest.param(
             fx.name,
             marks=pytest.mark.xfail(
-                reason=f"{fx.issue}: a configuration at pi is unrepresentable in the "
-                f"affine tan-half coordinate, so this branch is never reconstructed",
+                reason=f"{fx.issue}: a joint at pi is unreachable through the affine "
+                f"tan-half coordinate. As the polynomial variable the root is absent "
+                f"from the spectrum; as a left-bilinear variable the root is found but "
+                f"the eigenvector's lower-degree monomials have underflowed, so the "
+                f"ratio that would recover it divides two noise values.",
                 strict=True,
             ),
         )
@@ -190,7 +193,7 @@ def test_the_three_contracts_are_not_redundant(solved: dict[str, Any]) -> None:
     """Pins the distinction this module exists to make: on #571's fixture the
     solver is sound and incomplete at once, so a gate that only checks FK
     closure reports success while a branch is missing."""
-    name = "tan_half_infinity"
+    name = "pi_at_left_bilinear_q2"
     arm, t, sols = solved[name]
     assert all(
         float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, s.q) - t)) <= _FK_TOL for s in sols
