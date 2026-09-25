@@ -195,6 +195,44 @@ def _frame_tail(
     return d, v
 
 
+# Relative to the largest singular value: below this the 6xN Jacobian has lost
+# rank, the null space is no longer one-dimensional, and no single self-motion
+# direction is determined (a kinematic singularity, not a fold).
+_FOLD_RANK_TOL = 1e-9
+# Offsets tried, smallest first, when orienting a recovered fold direction.
+# Only the sign of a dot product is read off the probe, so its accuracy does
+# not matter -- but a probe must land inside the branch, which is why the
+# smallest offset is tried first: on a very short arc a larger one steps out.
+_FOLD_PROBE_OFFSETS = (1e-6, 1e-5, 1e-4, 1e-3)
+
+
+def _null_tangent(kb: KinBody, qs: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Unit self-motion directions at ``qs`` from the null space of the chain's
+    ``6xN`` spatial Jacobian: the rows of ``J`` span the task-space image, so
+    its one-dimensional kernel is the direction the arm can move without moving
+    the end effector.
+
+    Unoriented -- the sign is the caller's, since a kernel has two unit vectors.
+    ``NaN`` rows where ``J`` has lost rank, where the kernel is more than
+    one-dimensional and no single direction is determined.
+
+    This is what makes a fold recoverable. A fold is a critical point of the
+    chart *coordinate*, not of the manifold: ``J`` itself is healthy there
+    (``sigma_min ~ 0.2`` at the Panda folds), and only the normalization that
+    pins ``dq/dt`` to the coordinate blows up. Taking the kernel directly skips
+    that normalization and is exact -- ``|J @ d| ~ 2e-16`` at a fold, against
+    ``~5e-6`` for a square-root-extrapolated one-sided limit.
+    """
+    from ssik.refinement import kinbody_jacobian
+
+    out: NDArray[np.float64] = np.full(qs.shape, np.nan)
+    for i, q in enumerate(qs):
+        _u, sv, vt = np.linalg.svd(kinbody_jacobian(kb, q))
+        if sv[-1] > _FOLD_RANK_TOL * sv[0]:
+            out[i] = vt[-1]
+    return out
+
+
 def _tangent_tail(
     raw: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -328,6 +366,7 @@ class Chart:
         eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
         domain_fn: Callable[[], tuple[tuple[float, float], ...]],
         deriv_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]] | None = None,
+        fold_dir_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]] | None = None,
         limit_arcs_fn: Callable[[Limits], tuple[tuple[float, float], ...]] | None = None,
         default_limits: Limits = (),
     ) -> None:
@@ -339,6 +378,7 @@ class Chart:
         self._eval = eval_fn
         self._domain_fn = domain_fn
         self._deriv = deriv_fn
+        self._fold_dir = fold_dir_fn
         self._limit_arcs = limit_arcs_fn
         self._default_limits = default_limits
         self._limit_cache: dict[Limits, tuple[tuple[float, float], ...]] = {}
@@ -387,9 +427,15 @@ class Chart:
         One connected self-motion sheet can come back as several arcs: the
         pieces the limits leave of it, which is what a controller can hold.
 
-        Angles are compared modulo ``2*pi``: ``q(t)`` returns principal values,
-        and a joint is in limits when *some* ``q_i + 2*pi*k`` is (the
-        representative ``ssik.postprocess.wrap_to_limits`` would pick). A chart
+        Angles are compared modulo ``2*pi``, and a joint is in limits when
+        *some* ``q_i + 2*pi*k`` is. ``q(t)`` itself returns one representative
+        of each joint angle, which may lie on any turn and outside the joint
+        box: on the Panda a joint limited to ``[-3.07, -0.07]`` comes back as
+        ``+4.37``, which is admissible, being ``-1.91`` a turn away. So an arc
+        this method reports is *not* an arc whose ``q(t)`` can be compared
+        against limits directly; move it into the box first, with
+        ``ssik.postprocess.wrap_to_limits`` (which takes solutions) or by
+        wrapping each joint to the representative nearest its box centre. A chart
         is a geometric branch; on a joint whose range exceeds one turn (UR
         arms, ``+-2*pi``) the windings ``q_i + 2*pi*k`` are distinct postures
         of that branch, and which one the arm can reach from where it is is
@@ -408,6 +454,52 @@ class Chart:
             arcs = self._limit_cache[lims] = self._limit_arcs(lims)
         return arcs
 
+    def _raw_tangent(
+        self, ts: NDArray[np.float64]
+    ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+        """``dq/dt`` rows for :meth:`tangent` and :meth:`frame`, with folds
+        repaired: rows where the coordinate derivative is not finite but the
+        branch exists are replaced by the unit limiting direction, and flagged.
+
+        A flagged row carries a direction of unit length rather than a rate, so
+        the normalizing tails see a well-formed tangent and :meth:`tangent`
+        substitutes the infinite rate afterwards.
+        """
+        assert self._deriv is not None
+        raw = np.ascontiguousarray(self._deriv(ts), dtype=np.float64)
+        fold: NDArray[np.bool_] = np.zeros(raw.shape[0], dtype=bool)
+        if self._fold_dir is None:
+            return raw, fold
+        bad = np.flatnonzero(~np.all(np.isfinite(raw), axis=1))
+        if not bad.size:
+            return raw, fold
+        # A fold is where the coordinate fails but the branch does not, so an
+        # off-branch t (q is NaN there) is left alone: it has no tangent.
+        qs = np.atleast_2d(self._eval(ts[bad]))
+        on_branch = np.all(np.isfinite(qs), axis=1)
+        if not on_branch.any():
+            return raw, fold
+        rows = bad[on_branch]
+        dirs = self._fold_dir(qs[on_branch])
+        for row, direction in zip(rows, dirs, strict=True):
+            if not np.all(np.isfinite(direction)):
+                continue
+            # The kernel has two unit vectors; the branch picks one by
+            # continuity, so orient against the tangent just inside the domain.
+            # Both sides are tried because a fold is an endpoint of the branch
+            # and only the inward one evaluates.
+            for offset in _FOLD_PROBE_OFFSETS:
+                probe = self._deriv(ts[row] + np.array([-offset, offset]))
+                live = np.flatnonzero(np.all(np.isfinite(probe), axis=1))
+                if not live.size:
+                    continue
+                sign = np.sign(float(direction @ probe[live[0]]))
+                if sign != 0.0:
+                    raw[row] = sign * direction
+                    fold[row] = True
+                break
+        return raw, fold
+
     def tangent(self, t: ArrayLike) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """The branch's tangent at ``t``: ``(direction, rate)`` with
         ``dq/dt = rate * direction``, ``direction`` a unit 7-vector oriented by
@@ -416,15 +508,25 @@ class Chart:
 
         The split matters at a fold of the joint coordinates (a gimbal lock of
         the shoulder or wrist decomposition): the manifold is smooth there but
-        the coordinate ``t`` has a critical point, so ``rate`` diverges while
+        the coordinate ``t`` has a critical point, so ``rate`` is ``inf`` while
         ``direction`` stays well defined. Both are ``NaN`` where the branch does
-        not exist.
+        not exist, and that is the only case that gives ``NaN``.
+
+        Folds are not rare and they are exactly where a caller lands: an
+        endpoint of a bounded domain is usually one (an endpoint cut by a
+        shoulder or wrist gate instead keeps a finite rate), so :meth:`sample`
+        with ``limits=True`` returns them. ``direction`` there is the kernel of the
+        chain's ``6xN`` Jacobian (see :func:`_null_tangent`), oriented by the
+        branch just inside the domain -- exact, not extrapolated, because the
+        Jacobian is healthy at a fold and only the coordinate normalization is
+        not.
 
         Exact on both families. SRS: the closed form (rotor derivative of the
         swivel orbit pushed through the two 3-axis decompositions).
         Spherical-shoulder: implicit differentiation of ``FK(q(t)) = T`` with
         ``q_6 = t`` -- ``J[:, :6] dq' = -J[:, 6]`` on the chain's spatial
-        Jacobian, a 6x6 solve, singular exactly at a fold of ``t``.
+        Jacobian, a 6x6 solve, singular exactly at a fold of ``t``, where the
+        kernel above takes over.
 
         The tail past the raw tangent runs natively where the extension is
         present (``_ssik_native.chart_tangent``); :func:`_tangent_tail` is the
@@ -432,14 +534,14 @@ class Chart:
         """
         ts = np.asarray(t, dtype=np.float64)
         scalar = ts.ndim == 0
-        assert self._deriv is not None
-        raw = np.ascontiguousarray(self._deriv(np.atleast_1d(ts)), dtype=np.float64)
+        raw, fold = self._raw_tangent(np.atleast_1d(ts))
         native = _native_fn("chart_tangent")
         if native is None:
             direction, rate = _tangent_tail(raw)
         else:
             out: tuple[NDArray[np.float64], NDArray[np.float64]] = native(raw)
             direction, rate = out
+        rate = np.where(fold, np.inf, rate)
         return (direction[0], rate[0]) if scalar else (direction, rate)
 
     def frame(
@@ -466,15 +568,15 @@ class Chart:
         misses a codimension-6 point, where the ``sign(w_0)`` variant that fixes
         the conditioning would put a codimension-1 equator in its way. Unlike an
         SVD's per-evaluation sign flips, this is a measure-zero event. ``NaN``
-        off the branch.
+        off the branch. Defined at a fold, on the same recovered tangent
+        :meth:`tangent` reports.
 
         The tail past the tangent runs natively where the extension is present
         (``_ssik_native.chart_frame``); :func:`_frame_tail` is the reference.
         """
         ts = np.asarray(t, dtype=np.float64)
         scalar = ts.ndim == 0
-        assert self._deriv is not None
-        raw = np.ascontiguousarray(self._deriv(np.atleast_1d(ts)), dtype=np.float64)
+        raw, _fold = self._raw_tangent(np.atleast_1d(ts))
         m = None if metric is None else np.ascontiguousarray(metric, dtype=np.float64)
         native = _native_fn("chart_frame")
         if native is None:
@@ -598,6 +700,7 @@ class Chart:
             eval_fn=self._eval,
             domain_fn=lambda: arcs,
             deriv_fn=self._deriv,
+            fold_dir_fn=self._fold_dir,
             limit_arcs_fn=None if parent_limit_arcs is None else limit_arcs,
             default_limits=self._default_limits,
         )
@@ -677,6 +780,11 @@ class Chart:
         the refinement concentrates there on its own. Spacing is uniform to
         about ``tol``. A position-dependent ``metric`` is evaluated once per
         chord, batched.
+
+        The returned ``qs`` carry whatever turn the branch is on, as
+        :meth:`in_limits` describes: with ``limits`` set they are on an
+        admissible arc, which is not the same as being inside the joint box
+        numerically.
         """
         if n < 1:
             raise ValueError("sample: n must be >= 1")
@@ -1550,6 +1658,7 @@ def _spherical_shoulder_family(
             eval_fn=ev,
             domain_fn=lambda: arc_domains(k)[slot],
             deriv_fn=lambda ts: _jacobian_tangent(kb, ev, ts),
+            fold_dir_fn=lambda qs: _null_tangent(kb, qs),
             limit_arcs_fn=lambda lims: _q6_limit_arcs(ev, chart.domain, lims),
             default_limits=limits,
         )
@@ -1676,6 +1785,7 @@ def _srs_family(kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy) ->
             eval_fn=_eval,
             domain_fn=lambda: _FULL_CIRCLE,
             deriv_fn=lambda ts: _srs_tangent(br, ts),
+            fold_dir_fn=lambda qs: _null_tangent(kb, qs),
             limit_arcs_fn=lambda lims: _swivel_limit_arcs(_eval, lims),
             default_limits=limits,
         )
@@ -2551,6 +2661,7 @@ def _spherical_shoulder_family_native(
             eval_fn=_eval,
             domain_fn=lambda: tuple((float(lo), float(hi)) for lo, hi in nat.domain(i)),
             deriv_fn=_deriv,
+            fold_dir_fn=lambda qs: _null_tangent(kb, qs),
             limit_arcs_fn=lambda lims: limit_arcs(i, lims),
             default_limits=limits,
         )
@@ -2624,6 +2735,7 @@ def _srs_family_native(ext: Any, kb: KinBody, T: NDArray[np.float64]) -> SelfMot
             eval_fn=_eval,
             domain_fn=lambda: _FULL_CIRCLE,
             deriv_fn=_deriv,
+            fold_dir_fn=lambda qs: _null_tangent(kb, qs),
             limit_arcs_fn=lambda lims: limit_arcs(i, lims),
             default_limits=limits,
         )
