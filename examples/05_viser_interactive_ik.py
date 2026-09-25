@@ -811,6 +811,11 @@ def main(
     tour_max_ghosts: int = 7,
     tour_record_dir: str = "",
     tour_record_size: tuple[int, int] = (1280, 720),
+    self_motion: bool = False,
+    self_motion_arm: str = "Franka Panda — anthropomorphic 7R",
+    self_motion_seconds: float = 8.0,
+    self_motion_seed: int = 23,
+    self_motion_ghosts: int = 0,
 ) -> None:
     server = viser.ViserServer(host=host, port=port)
 
@@ -1129,6 +1134,43 @@ def main(
         print("  tour: complete", flush=True)
         if tour_exit:
             return
+
+    if self_motion:
+        # Self-motion mode: one redundant arm, one fixed target, sweeping a
+        # single branch of the self-motion manifold. Shares the tour's capture
+        # path, so the same record dir feeds the same ffmpeg encoder.
+        record_dir = Path(tour_record_dir).expanduser().resolve() if tour_record_dir else None
+        if record_dir is not None:
+            record_dir.mkdir(parents=True, exist_ok=True)
+            print(
+                f"  self-motion record: open http://localhost:{port} in a browser "
+                "to act as the render client; waiting for connection",
+                flush=True,
+            )
+            while not server.get_clients():
+                time.sleep(0.5)
+            print(
+                f"  self-motion record: client connected; capturing to {record_dir} "
+                f"at {tour_record_size[0]}x{tour_record_size[1]}",
+                flush=True,
+            )
+        time.sleep(tour_delay_s)
+        _run_self_motion(
+            select_arm=select_arm,
+            move_marker=_move_marker,
+            state=state,
+            arm_label=self_motion_arm,
+            seconds=self_motion_seconds,
+            n_ghosts=self_motion_ghosts,
+            server=server,
+            record_dir=record_dir,
+            record_size=tour_record_size,
+            seed=self_motion_seed,
+        )
+        print("  self-motion: complete", flush=True)
+        if tour_exit:
+            return
+
     while True:
         time.sleep(1.0)
 
@@ -1208,6 +1250,36 @@ def _lissajous_marker_T(
     return T
 
 
+def _make_capture(server, record_dir: Path | None, record_size: tuple[int, int]):
+    """Build the per-frame PNG capture used by the recorded modes.
+
+    Pulls a server-rendered frame from the first connected client and writes
+    it zero-padded, returning the next frame index. A no-op (returns the index
+    unchanged) when not recording or when no client has connected, so the same
+    call site works whether or not a browser is attached.
+    """
+
+    def _capture(frame_idx: int) -> int:
+        if record_dir is None or server is None:
+            return frame_idx
+        clients = server.get_clients()
+        if not clients:
+            return frame_idx
+        client = next(iter(clients.values()))
+        try:
+            import imageio.v3 as iio  # type: ignore[import-not-found]
+
+            img = client.get_render(
+                height=record_size[1], width=record_size[0], transport_format="jpeg"
+            )
+            iio.imwrite(record_dir / f"frame_{frame_idx:05d}.png", img)
+        except Exception as e:
+            print(f"  record: capture failed at frame {frame_idx}: {e}", flush=True)
+        return frame_idx + 1
+
+    return _capture
+
+
 def _run_tour(
     *,
     select_arm,
@@ -1235,25 +1307,7 @@ def _run_tour(
     fps = 30
     arm_labels = {spec.label for spec in ARMS}
 
-    def _capture(frame_idx: int) -> int:
-        """Pull a server-rendered frame from the first connected client and
-        write it as a zero-padded PNG. Returns the next frame index."""
-        if record_dir is None or server is None:
-            return frame_idx
-        clients = server.get_clients()
-        if not clients:
-            return frame_idx
-        client = next(iter(clients.values()))
-        try:
-            import imageio.v3 as iio  # type: ignore[import-not-found]
-
-            img = client.get_render(
-                height=record_size[1], width=record_size[0], transport_format="jpeg"
-            )
-            iio.imwrite(record_dir / f"frame_{frame_idx:05d}.png", img)
-        except Exception as e:
-            print(f"  tour record: capture failed at frame {frame_idx}: {e}", flush=True)
-        return frame_idx + 1
+    _capture = _make_capture(server, record_dir, record_size)
 
     # Per-arm frame ranges, written to ``_manifest.json`` so a downstream
     # ffmpeg pass can carve out each arm's GIF without re-running the tour.
@@ -1380,6 +1434,189 @@ def _run_tour(
         )
 
 
+def _uniform_q(kb, rng) -> np.ndarray:
+    """A random configuration, using +/-pi for joints with no limits."""
+    out = []
+    for j in kb.joints:
+        lo, hi = j.limits if j.limits is not None else (-np.pi, np.pi)
+        out.append(rng.uniform(lo, hi))
+    return np.array(out, dtype=float)
+
+
+def _pick_self_motion_branch(arm, kb, *, rng, tries: int = 12, min_points: int = 40):
+    """A pose and branch worth animating, from ``tries`` random draws.
+
+    Scored by how far the *proximal* joints travel along the branch, not by
+    arc length. Arc length counts wrist rotation equally with shoulder
+    rotation, and a branch that spends its length spinning joint 7 barely
+    moves on screen: an early draft picked one of those and changed 2.5% of
+    the pixels across the whole sweep. Shoulder and elbow travel is what a
+    viewer actually sees, and it is also the honest illustration, since the
+    point being made is that the arm reconfigures substantially while the
+    hand holds still.
+    """
+    best = None
+    for _ in range(tries):
+        t_target = arm.fk(_uniform_q(kb, rng))
+        try:
+            manifold = arm.self_motion(t_target)
+        except Exception as e:  # a draw near a singularity is not worth animating
+            print(f"  self-motion: skipping a pose ({type(e).__name__})", flush=True)
+            continue
+        for chart in manifold.charts:
+            segments = chart.sample(400, limits=True)
+            if not segments:
+                continue
+            _, qs = max(segments, key=lambda s: len(s[0]))
+            if len(qs) < min_points:
+                continue
+            travel = float(np.sum(qs[:, :4].max(axis=0) - qs[:, :4].min(axis=0)))
+            if best is None or travel > best[0]:
+                best = (travel, t_target, len(manifold.charts), qs)
+    return None if best is None else best[1:]
+
+
+def _run_self_motion(
+    *,
+    select_arm,
+    move_marker,
+    state,
+    arm_label: str,
+    seconds: float,
+    n_ghosts: int = 0,
+    server=None,
+    record_dir: Path | None = None,
+    record_size: tuple[int, int] = (1280, 720),
+    settle_s: float = 3.0,
+    seed: int = 23,
+) -> None:
+    """Sweep one branch of a redundant arm's self-motion manifold with the
+    end-effector pinned in place.
+
+    The animation makes the feature's claim visually: the marker never moves,
+    the ghosts are frozen postures along the same continuous branch, and the
+    solid arm slides through them. Every frame is an exact IK solution for one
+    unchanging target, not an interpolation between two of them, and the
+    printed EE drift is the evidence.
+    """
+    import ssik
+
+    fps = 30
+    _capture = _make_capture(server, record_dir, record_size)
+
+    select_arm(arm_label)
+    runtime = state["arm"]
+    if runtime is None:
+        raise SystemExit(f"self-motion: could not load {arm_label!r}")
+    rt: ArmRuntime = runtime  # type: ignore[assignment]
+
+    kb = _load_ssik_kb(rt.spec, rt.module)
+    arm = ssik.Manipulator(kb)
+    if rt.dof < 7:
+        raise SystemExit(
+            f"self-motion needs a redundant arm; {arm_label!r} has {rt.dof} DOF. "
+            f"Pick a 7R, e.g. --self-motion-arm 'Franka Panda — anthropomorphic 7R'"
+        )
+
+    print(f"  self-motion: searching for a long admissible arc on {arm_label}", flush=True)
+    picked = _pick_self_motion_branch(arm, kb, rng=np.random.default_rng(seed))
+    if picked is None:
+        raise SystemExit("self-motion: no branch with a usable in-limits arc; try another --seed")
+    t_target, n_charts, qs = picked
+
+    # The claim, measured before a single frame is drawn. If this is not at
+    # FK tolerance the animation would be showing something untrue.
+    drift = max(float(np.linalg.norm(arm.fk(q) - t_target)) for q in qs)
+    print(
+        f"  self-motion: {n_charts} branches at this pose; animating {len(qs)} postures "
+        f"along one of them, EE drift <= {drift:.2e}",
+        flush=True,
+    )
+    if drift > 1e-9:
+        raise SystemExit(f"self-motion: postures do not hold the pose (drift {drift:.2e})")
+
+    # Out along the arc and back, so the GIF loops without a jump cut.
+    sweep = np.vstack([qs, qs[::-1][1:-1]]) if len(qs) > 2 else qs
+
+    # Ghosts are frozen waypoints on the same arc: the continuum the solid arm
+    # is sliding along. They are set once and never touched again, which is
+    # why this drives the renderers directly instead of going through
+    # ``_solve_and_render`` (that re-solves and rebinds every ghost per frame).
+    slots = min(n_ghosts, len(rt.ghosts))
+    picks = np.linspace(0, len(qs) - 1, slots).astype(int) if slots else np.array([], dtype=int)
+    move_marker(rt.active.base_offset @ t_target)
+    with server.atomic():
+        for slot in range(slots):
+            rt.ghosts[slot].set_visible(True)
+            rt.ghosts[slot].set_q(qs[picks[slot]])
+        for slot in range(slots, len(rt.ghosts)):
+            rt.ghosts[slot].set_visible(False)
+        rt.active.set_q(sweep[0])
+
+    # Frame the shot. The interactive default camera is wherever the user last
+    # orbited to; a captured asset needs a deliberate viewpoint, or the arm
+    # renders as a speck in the middle of an empty frame. Three-quarter view
+    # from slightly above, framed on the target the arm is holding.
+    target = (rt.active.base_offset @ t_target)[:3, 3]
+    reach = float(np.linalg.norm(target)) or 0.8
+    # Frame on the arm's mid-height rather than the target itself: the sweep
+    # moves the elbow far more than the hand, and the hand is by construction
+    # the one thing that does not move.
+    base = rt.active.base_offset[:3, 3]
+    focus = 0.5 * (base + target) + np.array([0.0, 0.0, 0.08])
+    for client in (server.get_clients() or {}).values():
+        with contextlib.suppress(Exception):
+            client.camera.position = focus + reach * np.array([0.90, -0.75, 0.30])
+            client.camera.look_at = focus
+            client.camera.up_direction = np.array([0.0, 0.0, 1.0])
+
+    # Let the meshes upload and the viewer settle before the first captured
+    # frame, then force one round-trip so the settle actually completed.
+    time.sleep(settle_s)
+    if server is not None and record_dir is not None:
+        clients = server.get_clients()
+        if clients:
+            with contextlib.suppress(Exception):
+                _ = next(iter(clients.values())).get_render(
+                    height=128, width=128, transport_format="jpeg"
+                )
+
+    # Map the requested duration onto the whole out-and-back loop. Indexing
+    # ``sweep`` by frame number instead would make the fraction of the arc
+    # covered depend on the frame count: at 30fps a 3s capture would walk 90
+    # of this branch's 800 postures and the arm would look almost still.
+    n_frames = max(int(seconds * fps), 2)
+    walk = np.linspace(0.0, len(sweep) - 1.0, n_frames).round().astype(int)
+
+    frame_idx = 0
+    for i in range(n_frames):
+        with server.atomic():
+            rt.active.set_q(sweep[walk[i]])
+        frame_idx = _capture(frame_idx)
+        if record_dir is None:
+            time.sleep(1.0 / fps)
+
+    if record_dir is not None:
+        import json
+
+        (record_dir / "_manifest.json").write_text(
+            json.dumps(
+                {
+                    "frame_ranges": {
+                        "self_motion": {
+                            "label": arm_label,
+                            "start": 0,
+                            "end_exclusive": frame_idx,
+                        }
+                    },
+                    "fps": fps,
+                },
+                indent=2,
+            )
+        )
+        print(f"  self-motion: captured {frame_idx} frames to {record_dir}", flush=True)
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -1430,6 +1667,38 @@ if __name__ == "__main__":
         default="1280x720",
         help="WxH of captured PNGs (default 1280x720). 1920x1080 also works.",
     )
+    parser.add_argument(
+        "--self-motion",
+        action="store_true",
+        help="animate one branch of a redundant arm's self-motion manifold with "
+        "the end-effector pinned (for the README asset). Reuses --tour-record-dir "
+        "and --tour-record-size for capture.",
+    )
+    parser.add_argument(
+        "--self-motion-arm",
+        default="Franka Panda — anthropomorphic 7R",
+        help="which arm to sweep; must be 7-DOF (default: the Panda)",
+    )
+    parser.add_argument(
+        "--self-motion-seconds",
+        type=float,
+        default=8.0,
+        help="length of the sweep in seconds at 30fps (default 8)",
+    )
+    parser.add_argument(
+        "--self-motion-seed",
+        type=int,
+        default=23,
+        help="seed for the pose search; change it to get a different branch",
+    )
+    parser.add_argument(
+        "--self-motion-ghosts",
+        type=int,
+        default=0,
+        help="frozen waypoint arms along the same branch (default 0). Ghosts "
+        "render in the same color as the active arm, which reads as a fan of "
+        "peers rather than a trail, so the sweep is clearer without them.",
+    )
     args = parser.parse_args()
     w, h = (int(s) for s in args.tour_record_size.lower().split("x"))
     main(
@@ -1442,4 +1711,9 @@ if __name__ == "__main__":
         tour_max_ghosts=args.tour_max_ghosts,
         tour_record_dir=args.tour_record_dir,
         tour_record_size=(w, h),
+        self_motion=args.self_motion,
+        self_motion_arm=args.self_motion_arm,
+        self_motion_seconds=args.self_motion_seconds,
+        self_motion_seed=args.self_motion_seed,
+        self_motion_ghosts=args.self_motion_ghosts,
     )
