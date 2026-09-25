@@ -18,6 +18,7 @@ import ssik
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.chart import Chart, SelfMotionManifold, charts
 from ssik.kinematics.poe_fk import poe_forward_kinematics
+from ssik.refinement import kinbody_jacobian
 from ssik.solvers.seven_r import spherical_shoulder, srs
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -293,6 +294,78 @@ def test_tangent_scalar_and_off_branch() -> None:
         d_off, r_off = chart.tangent(lo - 0.005)
         assert np.isnan(r_off)
         assert np.all(np.isnan(d_off))
+
+
+def test_tangent_is_defined_at_every_fold() -> None:
+    """A fold is a critical point of the chart coordinate, not of the manifold,
+    so ``direction`` stays well defined there and only ``rate`` diverges
+    (#588). Every endpoint of a bounded domain is a fold, and ``sample(...,
+    limits=True)`` returns exactly those endpoints, so this is the first place
+    a caller mapping ``tangent`` over a branch lands. An endpoint cut by a
+    gate rather than by a fold keeps a finite rate; what must never happen on
+    the branch is a ``NaN``.
+
+    The direction is checked against the manifold itself rather than against
+    another estimate of it: a self-motion moves no end-effector frame, so
+    ``J @ direction`` must vanish to machine precision.
+    """
+    kb = _kb("franka_panda")
+    rng = np.random.default_rng(17)
+    worst_residual = 0.0
+    worst_alignment = 1.0
+    n_folds = 0
+    for _ in range(4):
+        fam = charts(
+            kb,
+            poe_forward_kinematics(kb, _random_q(kb, rng)),
+            solver_name="seven_r.spherical_shoulder",
+        )
+        for chart in fam:
+            for lo, hi in chart.domain:
+                if hi - lo < 1e-6:
+                    continue
+                for t, inward in ((lo, +1.0), (hi, -1.0)):
+                    q = chart.q(t)
+                    if not np.all(np.isfinite(q)):
+                        continue  # off the branch: NaN is the contract there
+                    direction, rate = chart.tangent(t)
+                    assert np.all(np.isfinite(direction)), f"NaN direction at t={t}"
+                    assert not np.isnan(rate), f"NaN rate on the branch at t={t}"
+                    assert abs(np.linalg.norm(direction) - 1.0) < 1e-12
+                    res = float(np.linalg.norm(kinbody_jacobian(kb, q) @ direction))
+                    worst_residual = max(worst_residual, res)
+                    # Oriented by increasing t, i.e. continuous with the branch
+                    # just inside the domain rather than with its reflection.
+                    inside, _r = chart.tangent(t + inward * 1e-5)
+                    worst_alignment = min(worst_alignment, float(direction @ inside))
+                    # Not every bounded endpoint is a fold: a gate can cut the
+                    # domain where the coordinate is still regular.
+                    n_folds += int(np.isinf(rate))
+    assert n_folds >= 16, f"only {n_folds} folds exercised"
+    assert worst_residual < 1e-12, f"|J @ direction| = {worst_residual:.2e} at a fold"
+    assert worst_alignment > 0.99, f"fold direction misoriented, dot = {worst_alignment:.3f}"
+
+
+def test_frame_is_defined_at_a_fold() -> None:
+    """:meth:`Chart.frame` reads the same recovered tangent, so a fold gives a
+    genuine split there instead of a ``NaN`` basis (#588)."""
+    kb = _kb("franka_panda")
+    rng = np.random.default_rng(17)
+    fam = charts(
+        kb,
+        poe_forward_kinematics(kb, _random_q(kb, rng)),
+        solver_name="seven_r.spherical_shoulder",
+    )
+    chart = max(fam, key=lambda c: c.length(limits=True))
+    t_fold = chart.domain[0][1]
+    d, v = chart.frame(t_fold)
+    assert np.all(np.isfinite(d))
+    assert np.all(np.isfinite(v))
+    assert v.shape == (7, 6)
+    assert np.max(np.abs(d @ v)) < 1e-12
+    assert np.allclose(v.T @ v, np.eye(6), atol=1e-12)
+    # The coordinate is singular at a fold, so its pulled-back metric diverges.
+    assert np.isinf(chart.pullback_metric(t_fold))
 
 
 def _wrap_pi_arr(a):

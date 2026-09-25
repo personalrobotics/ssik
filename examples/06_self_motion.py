@@ -74,18 +74,19 @@ qs = in_the_box(np.vstack([q for _, q in segments]))
 
 drift = np.array([float(np.linalg.norm(arm.fk(q) - T)) for q in qs])
 
-# An arc ends where the branch folds back, and at a fold the parameterization
-# has a critical point: the rate of travel diverges and the tangent there is
-# reported as NaN (issue #588). The direction has a limit, so measure the
-# invariant on the interior and leave the two endpoints out of it.
-interior = ts[1:-1]
+# An arc ends where the branch folds back. A fold is a critical point of the
+# parameterization, not of the manifold: the rate of travel diverges there
+# while the direction stays well defined, so the invariant is measurable on
+# every sample, endpoints included.
 null_resid = max(
-    float(np.linalg.norm(kinbody_jacobian(kb, chart.q(t)) @ chart.tangent(t)[0])) for t in interior
+    float(np.linalg.norm(kinbody_jacobian(kb, chart.q(t)) @ chart.tangent(t)[0])) for t in ts
 )
+rates = np.array([chart.tangent(t)[1] for t in ts])
 print(f"\nover {len(qs)} postures along that branch:")
-print(f"  end-effector drift       : {drift[1:-1].max():.2e}  ({len(interior)} interior points)")
-print(f"  |J @ tangent direction|  : {null_resid:.2e}")
-print(f"  drift at the two folds   : {drift[[0, -1]].max():.2e}  (worse there, see #588)")
+print(f"  end-effector drift       : {drift[1:-1].max():.2e}  ({len(ts) - 2} interior points)")
+print(f"  |J @ tangent direction|  : {null_resid:.2e}  (all {len(ts)} points)")
+print(f"  folds (infinite rate)    : {int(np.isinf(rates).sum())} of {len(ts)}")
+print(f"  drift at the two folds   : {drift[[0, -1]].max():.2e}  (worse there, see #591)")
 
 # ---------------------------------------------------------------------------
 # Why it is useful: the branch is a free choice, so spend it on something.
