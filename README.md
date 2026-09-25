@@ -601,6 +601,30 @@ Ranking accounts for it. A finite joint's configuration space is an interval, no
 
 Returning 32× more configurations costs proportionally more, but a capped solve never pays for what it discards: `solve(T, q_seed=q, max_solutions=1)` — the tracking idiom — returns the globally nearest configuration for the same cost as the un-enumerated solve, and is identical to enumerating, ranking and truncating.
 
+### The redundant arm's other answers: self-motion charts
+
+A 7R arm holding a 6-DOF pose is not at a point in configuration space, it is on a curve: the **self-motion manifold**, the one-parameter family of postures with the same end-effector pose. `solve()` samples that curve and hands back points. Since v6.1 you can ask for the curve itself.
+
+```python
+manifold = arm.self_motion(T_target)   # every branch at this pose
+chart = manifold.charts[0]             # one continuous branch q(t)
+
+chart.q(t)          # the posture at t
+chart.tangent(t)    # the self-motion direction and rate; J @ direction == 0
+chart.domain        # the intervals of t where the branch exists
+chart.in_limits()   # the sub-arcs of those that stay inside the joint box
+chart.sample(20)    # ~20 postures along the branch, spaced evenly in arc length
+                    # (returned per continuous segment, as (t, q) arrays)
+```
+
+The closed-form solvers already compute this internally, as a branch label plus a redundancy coordinate, and used to discard both at the `Solution` boundary. The tangent comes from implicit differentiation of `FK(q(t)) = T`, so `J·q' = 0` holds by construction rather than by choosing a step size, and a fold returns `NaN` instead of a fabricated direction.
+
+Beyond one branch, the manifold knows its own structure: `sheets()` glues charts that meet at folds, so you get the components a controller can actually reach by self-motion; `gap(a, b)` and `escape(a, b)` measure how close two sheets come and the task-space twist that closes the distance fastest; `locate(q)` inverts back to a chart and parameter. Along a path, `solve_path(poses)` tracks every branch by label, reporting folds, unreachable poses, and on a closed loop the monodromy permutation.
+
+Available for `seven_r.spherical_shoulder` (Panda, FR3), `seven_r.srs` (iiwa and other exactly-concurrent SRS arms), and `ikgeo.three_parallel` (UR-class 6R, where the charts are the isolated solutions with geometric labels). Other families raise `NotImplementedError`. What a `label` promises differs per family and is written down in the `ssik.chart` module docstring, because the joint-lock and polished solvers cannot offer the same guarantee.
+
+On the native backend a family builds in roughly 20 µs and `q(t)` costs a few µs, so this fits inside a 1 kHz loop. See [`docs/api.md`](docs/api.md) for the full surface.
+
 ### Diagnosing an empty result: `explain=True`
 
 If `solve()` returns `[]`, you can attribute the failure with `explain=True` instead of guessing:
