@@ -105,6 +105,7 @@ class Manipulator:
         "_kb",
         "_plan",
         "_policy",
+        "_prebuilt",
         "_solver_module",
         "_solver_params",
         "_warned_cold_coverage",
@@ -136,6 +137,10 @@ class Manipulator:
         )
         # Guards the one-time cold-coverage warning (#328).
         self._warned_cold_coverage: bool = False
+        # Set only by :meth:`from_prebuilt`, which routes solve() back to the
+        # artifact's own solver. ``__slots__`` has no class-level default, so
+        # this has to be assigned on every construction path.
+        self._prebuilt: ModuleType | None = None
 
     # ------------------------------------------------------------------
     # Factories
@@ -200,6 +205,60 @@ class Manipulator:
 
         kb = load_urdf_kinbody_robust(path, base, ee, xacro_args=xacro_args)
         return cls(kb, policy=policy)
+
+    @classmethod
+    def from_prebuilt(
+        cls,
+        name: str,
+        *,
+        policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    ) -> Manipulator:
+        """Build a :class:`Manipulator` on one of the arms ssik ships, by name.
+
+        This is the supported way to reach the chart API on a prebuilt arm
+        (#587). A shipped artifact exposes ``solve`` and ``fk``, but
+        :meth:`self_motion` and :meth:`solve_path` live here, so before this
+        constructor the only route was the artifact's private baked KinBody --
+        which ``docs/semver_policy.md`` explicitly places outside the semver
+        contract. ``ssik.list_arms()`` is the catalog; this turns a row of it
+        into an arm you can ask for its self-motion manifold.
+
+        :meth:`solve` on the result is the **artifact's** solver, not the live
+        one. That matters: the artifact bakes per-arm work the live path redoes
+        on every call, and on the Panda the two measure 0.089 ms against 3.627
+        ms for the same 502 solutions. So the object is not a slower stand-in
+        for ``import panda_ik`` -- it is that same solver, with the chart API
+        attached. The two cases that cannot be delegated fall back to the live
+        path: ``explain=True`` (artifacts do not build a :class:`Diagnostic`)
+        and any ``solver_kwargs`` beyond ``native`` (artifacts take a fixed
+        parameter set). Everything else -- :meth:`fk`, :meth:`self_motion`,
+        :meth:`solve_path`, the introspection properties -- is computed here
+        from the artifact's own geometry.
+
+        Four spellings resolve, tried in that order, so an exact catalog name
+        can never be shadowed by an abbreviation::
+
+            Manipulator.from_prebuilt("franka_panda_ik")   # list_arms() name
+            Manipulator.from_prebuilt("panda_ik")          # module basename
+            Manipulator.from_prebuilt("panda")             # either, without _ik
+
+        Imports exactly the one artifact named, so this stays as lazy as
+        ``list_arms()`` itself (#421).
+
+        :param name: the arm, in any of the spellings above.
+        :param policy: tolerance policy for the dispatcher and for the live
+            fallback. Defaults to
+            :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
+
+        :raises ValueError: if no arm matches (the message lists near misses),
+            or if an abbreviation matches several (it lists them all).
+        """
+        from ssik.prebuilt import _resolve_arm
+
+        _canonical, module = _resolve_arm(name)
+        arm = cls(module._KB, policy=policy)
+        arm._prebuilt = module
+        return arm
 
     @classmethod
     def from_mjcf(
@@ -437,9 +496,11 @@ class Manipulator:
         return self._plan.solver_name
 
     def __repr__(self) -> str:
+        mod = self._prebuilt
+        origin = f", prebuilt {mod.__name__.rpartition('.')[2]}" if mod is not None else ""
         return (
             f"<Manipulator: {self.dof}-DOF, dispatched to "
-            f"{self._plan.solver_name} (tier {self._plan.tier})>"
+            f"{self._plan.solver_name} (tier {self._plan.tier}){origin}>"
         )
 
     # ------------------------------------------------------------------
@@ -670,6 +731,31 @@ class Manipulator:
                 raise ValueError(f"q_seed expected shape ({self.dof},), got {q_seed_arr.shape}")
         else:
             q_seed_arr = None
+
+        # Built by from_prebuilt: answer from the artifact's own solver, which
+        # bakes per-arm work this path redoes per call (0.089 ms against 3.627
+        # ms on the Panda, same 502 solutions). Placed after the argument
+        # checks above so a bad T_target or q_seed raises identically either
+        # way, and before the live kwargs below so nothing is computed twice.
+        # ``explain`` and extra solver_kwargs have no artifact equivalent, so
+        # those calls fall through; every artifact takes exactly the fixed
+        # parameter set used here, which test_prebuilt_namespace pins.
+        if self._prebuilt is not None and not explain and set(solver_kwargs) <= {"native"}:
+            sols: list[Solution] = self._prebuilt.solve(
+                T,
+                max_solutions=max_solutions,
+                q_seed=q_seed_arr,
+                respect_limits=respect_limits,
+                allow_refinement=allow_refinement,
+                allow_rescue=allow_rescue,
+                policy=policy,
+                refinement_max_iters=refinement_max_iters,
+                seed_metric=seed_metric,
+                seed_tolerance=seed_tolerance,
+                enumerate_windings=enumerate_windings,
+                **solver_kwargs,
+            )
+            return sols
 
         # Filter kwargs by the dispatched solver's signature so callers can
         # pass q_seed (or any other not-universally-supported kwarg) without

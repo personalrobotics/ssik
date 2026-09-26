@@ -76,6 +76,10 @@ def test_dir_exposes_aliases_and_vendors() -> None:
         "import ssik.prebuilt.universal_robots.ur5_ik, sys; "
         "n=sum(1 for m in sys.modules if m.startswith('ssik.prebuilt.') and m.endswith('_ik')); "
         "assert n==1, n",
+        # from_prebuilt(): resolving by name loads exactly the arm asked for (#587)
+        "import ssik, sys; ssik.Manipulator.from_prebuilt('panda'); "
+        "loaded=[m for m in sys.modules if m.startswith('ssik.prebuilt.') and m.endswith('_ik')]; "
+        "assert loaded==['ssik.prebuilt.franka.panda_ik'], loaded",
     ],
 )
 def test_laziness_in_fresh_interpreter(snippet: str) -> None:
@@ -83,3 +87,42 @@ def test_laziness_in_fresh_interpreter(snippet: str) -> None:
     by other tests)."""
     r = subprocess.run([sys.executable, "-c", snippet], capture_output=True, text=True)
     assert r.returncode == 0, f"laziness violated:\n{r.stderr}"
+
+
+# The parameter set ``Manipulator.solve`` forwards when it delegates to an
+# artifact (#587). Hard-coded there rather than inspected per call, so it is
+# pinned here instead.
+_ARTIFACT_SOLVE_PARAMS = frozenset(
+    {
+        "T_target",
+        "max_solutions",
+        "q_seed",
+        "respect_limits",
+        "allow_refinement",
+        "allow_rescue",
+        "policy",
+        "refinement_max_iters",
+        "seed_metric",
+        "seed_tolerance",
+        "enumerate_windings",
+        "native",
+    }
+)
+
+
+def test_every_artifact_takes_the_delegated_solve_signature() -> None:
+    """``Manipulator.from_prebuilt(...).solve`` forwards a fixed keyword set to
+    the artifact. Codegen emits one ``solve`` signature for all 72 arms, so a
+    change there would break delegation at runtime on whichever arm a user
+    happened to pick; catch it here instead.
+    """
+    import inspect
+
+    offenders = {}
+    for name, arm in load_manifest().items():
+        params = frozenset(
+            inspect.signature(importlib.import_module(arm.hier_module).solve).parameters
+        )
+        if params != _ARTIFACT_SOLVE_PARAMS:
+            offenders[name] = sorted(params ^ _ARTIFACT_SOLVE_PARAMS)
+    assert not offenders, f"artifact solve() signatures drifted from the delegated set: {offenders}"

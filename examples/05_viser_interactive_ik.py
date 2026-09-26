@@ -606,16 +606,18 @@ class PrimitiveArmRenderer:
 # ---------------------------------------------------------------------------
 
 
-def _load_ssik_kb(spec: ArmSpec, module):
-    """KinBody for the primitive fallback path. Prefer the prebuilt's
-    baked ``_KB`` (specs-only arms); else load the fixture URDF."""
-    if hasattr(module, "_KB"):
-        return module._KB
+def _load_ssik_kb(spec: ArmSpec):
+    """KinBody for the primitive fallback path. Prefer the shipped arm's own
+    geometry (specs-only arms); else load the fixture URDF."""
+    from ssik import Manipulator
+
+    with contextlib.suppress(ValueError):
+        return Manipulator.from_prebuilt(spec.module_name).kinbody
     if spec.ssik_fixture:
         return load_urdf_kinbody_normalized(
             spec.ssik_fixture, base_link=spec.ssik_base_link, ee_link=spec.ssik_ee_link
         )
-    raise RuntimeError(f"{spec.module_name}: no _KB and no fixture URDF; cannot render")
+    raise RuntimeError(f"{spec.module_name}: not a prebuilt arm and no fixture URDF")
 
 
 @dataclass
@@ -768,7 +770,7 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
                     f"  ! mesh load failed for {spec.label}: "
                     f"{type(e).__name__}: {e}  -- falling back to primitives"
                 )
-        kb = _load_ssik_kb(spec, module)
+        kb = _load_ssik_kb(spec)
         return PrimitiveArmRenderer(server, kb, root, rgba, cast_shadow=cast_shadow)
 
     active = _build("/arm/active", ACTIVE_COLOR_RGBA, cast_shadow=True)
@@ -1510,7 +1512,7 @@ def _run_self_motion(
         raise SystemExit(f"self-motion: could not load {arm_label!r}")
     rt: ArmRuntime = runtime  # type: ignore[assignment]
 
-    kb = _load_ssik_kb(rt.spec, rt.module)
+    kb = _load_ssik_kb(rt.spec)
     arm = ssik.Manipulator(kb)
     if rt.dof < 7:
         raise SystemExit(

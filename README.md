@@ -610,6 +610,8 @@ A 7R arm holding a 6-DOF pose is not at a point in configuration space, it is on
 One Panda, one target, one branch. The shoulder and elbow travel several radians while the hand does not move: every frame is an exact IK solution for the same pose, not an interpolation between two of them. Reproduce it with `python examples/06_self_motion.py` (no display needed) or `python examples/05_viser_interactive_ik.py --self-motion`.
 
 ```python
+arm = ssik.Manipulator.from_prebuilt("panda")   # charts live on Manipulator
+
 manifold = arm.self_motion(T_target)   # every branch at this pose
 chart = manifold.charts[0]             # one continuous branch q(t)
 
@@ -713,9 +715,12 @@ from ssik.postprocess import (
     respect_limits, wrap_to_limits, nearest_to_seed, within_seed_tolerance, take_first,
 )
 
-sols = my_arm_ik.solve(T_target, respect_limits=False)       # raw geometric set
-sols = wrap_to_limits(sols, my_arm_ik._KB)                   # try q ± 2π to bring in
-sols = respect_limits(sols, my_arm_ik._KB)                   # drop anything still outside
+arm = ssik.Manipulator.from_prebuilt("my_arm")               # same solver, plus the geometry
+kb = arm.kinbody
+
+sols = arm.solve(T_target, respect_limits=False)             # raw geometric set
+sols = wrap_to_limits(sols, kb)                              # try q ± 2π to bring in
+sols = respect_limits(sols, kb)                              # drop anything still outside
 sols = within_seed_tolerance(sols, q_current, np.deg2rad(6)) # drop big-jump branches (may empty)
 sols = nearest_to_seed(sols, q_current, metric="wrap_linf")  # rank by max-joint-move
 sols = take_first(sols, k=4)                                 # top-k after ranking
