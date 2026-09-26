@@ -19,12 +19,11 @@ import numpy as np
 
 import ssik
 from ssik.postprocess import wrap_to_limits
-from ssik.prebuilt.franka import panda_ik
 from ssik.refinement import kinbody_jacobian
 
-# Charts live on Manipulator, and reaching one from a prebuilt arm currently
-# needs its baked KinBody. See issue #587 for the missing constructor.
-arm = ssik.Manipulator(panda_ik._KB)
+# Charts live on Manipulator, so this is how a shipped arm reaches them. solve()
+# on the result is the artifact's own solver, not a slower live stand-in.
+arm = ssik.Manipulator.from_prebuilt("panda")
 kb = arm.kinbody
 lower = np.array([j.limits[0] for j in kb.joints])
 upper = np.array([j.limits[1] for j in kb.joints])

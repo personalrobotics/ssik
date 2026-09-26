@@ -172,6 +172,51 @@ def vendors() -> list[str]:
     return sorted({a.vendor for a in list_arms()})
 
 
+def _resolve_arm(name: str) -> tuple[str, ModuleType]:
+    """Catalog name -> ``(canonical name, imported artifact module)``.
+
+    Backs :meth:`ssik.Manipulator.from_prebuilt`. Private: the supported
+    public surface is that constructor, not a second way to import an arm.
+
+    Four spellings reach the same arm, tried in that order so that an exact
+    catalog name can never be shadowed by someone else's abbreviation:
+
+    1. the :func:`list_arms` name -- ``"franka_panda_ik"``
+    2. the hierarchical basename -- ``"panda_ik"``
+    3. either of those with ``_ik`` dropped -- ``"franka_panda"``, ``"panda"``
+
+    Imports exactly the one artifact it resolves to.
+
+    :raises ValueError: if nothing matches (the message lists near misses) or
+        if an abbreviation matches several arms (the message lists them all).
+    """
+    from ssik.prebuilt._manifest import load_manifest
+
+    manifest = load_manifest()
+    for key in (name, f"{name}_ik"):
+        arm = manifest.get(key)
+        if arm is not None:
+            return arm.name, importlib.import_module(arm.hier_module)
+
+    hits = [
+        a
+        for a in manifest.values()
+        if name in (a.module_basename, a.module_basename.removesuffix("_ik"))
+    ]
+    if len(hits) == 1:
+        return hits[0].name, importlib.import_module(hits[0].hier_module)
+    if hits:
+        found = ", ".join(sorted(a.name for a in hits))
+        raise ValueError(f"prebuilt arm {name!r} is ambiguous; name one of: {found}")
+
+    near = sorted(a.name for a in manifest.values() if name in a.name or a.name in name)
+    hint = f"; did you mean {', '.join(near)}?" if near else ""
+    raise ValueError(
+        f"no prebuilt arm named {name!r}{hint} -- ssik.list_arms() lists all "
+        f"{len(manifest)} of them"
+    )
+
+
 def __getattr__(name: str) -> ModuleType:  # PEP 562: ``from ssik.prebuilt import ur5_ik``
     # Return type is ``ModuleType`` (not ``object``) so mypy keeps resolving the
     # legacy flat form ``from ssik.prebuilt import ur5_ik`` to a module -- its

@@ -4,7 +4,10 @@ Public surface (v1.0):
 
 - :class:`Manipulator` -- runtime classifier + dispatcher; load via
   :meth:`Manipulator.from_urdf` (interactive) or build an artifact
-  once via ``ssik build`` and ``import <arm>_ik`` (production).
+  once via ``ssik build`` and ``import <arm>_ik`` (production). For an
+  arm ssik already ships, :meth:`Manipulator.from_prebuilt` gives you
+  that artifact's own solver plus the geometry it bakes, which is how
+  the self-motion chart API is reached on a shipped arm.
 - :class:`Solution` -- analytical IK result (``q``, ``fk_residual``,
   ``refinement_used``).
 - :class:`TolerancePolicy` / :data:`DEFAULT_TOLERANCE_POLICY` --

@@ -122,19 +122,15 @@ FIXTURES = [
 
 class _ArtifactArm:
     """Adapter: prebuilt artifact module for IK (production path).
-    Most artifacts bake ``_fk(q)``; SRS-class artifacts (iiwa14, gen3)
-    don't but bake ``_KB``, so build a Manipulator(kb) for FK."""
+    Every artifact exports a public ``fk(q)``, so nothing here needs the
+    module's baked privates."""
 
     def __init__(self, module_name: str, dof: int):
         import importlib
 
         self._module = importlib.import_module(f"ssik.prebuilt.{module_name}")
         self.dof = dof
-        if hasattr(self._module, "_fk"):
-            self._fk = self._module._fk
-        else:
-            manip = ssik.Manipulator(self._module._KB)
-            self._fk = manip.fk
+        self._fk = self._module.fk
 
     def fk(self, q):
         return self._fk(q)
