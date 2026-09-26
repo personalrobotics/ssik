@@ -23,14 +23,17 @@ These cover ~95% of real-world post-processing:
 
 Production pipeline pattern::
 
-    from franka_panda_ik import _KB, solve
+    import ssik
     from ssik.postprocess import (
         respect_limits, wrap_to_limits, nearest_to_seed, take_first,
     )
 
-    sols = solve(T_target, respect_limits=False)
-    sols = wrap_to_limits(sols, _KB)
-    sols = respect_limits(sols, _KB)
+    arm = ssik.Manipulator.from_prebuilt("panda")
+    kb = arm.kinbody
+
+    sols = arm.solve(T_target, respect_limits=False)
+    sols = wrap_to_limits(sols, kb)
+    sols = respect_limits(sols, kb)
     sols = nearest_to_seed(sols, q_current)
     sols = take_first(sols, k=4)
 

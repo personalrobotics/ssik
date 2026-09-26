@@ -21,7 +21,7 @@ ssik follows [SemVer 2.0](https://semver.org/spec/v2.0.0.html): `MAJOR.MINOR.PAT
 - `ssik.refinement.*` (LM polish internals)
 - `ssik.codegen.*` (artifact emission internals)
 - Leading-underscore modules: `ssik._kinbody`, `ssik._urdf`, `ssik._pencil`, `ssik._version`
-- The `_solve_algebraic`, `_KB`, `_LOCK_IDX`, `_LOCK_SAMPLES`, `_DISPATCH_CACHE` etc. in prebuilt artifacts (private to the codegen)
+- The `_solve_algebraic`, `_KB`, `_LOCK_IDX`, `_LOCK_SAMPLES`, `_DISPATCH_CACHE` etc. in prebuilt artifacts (private to the codegen). For an artifact's geometry — its `KinBody`, its self-motion charts — the supported route is `Manipulator.from_prebuilt("<arm>")`, whose `solve` is the artifact's own solver (#587)
 
 If a downstream depends on a non-public name, that's a "fragile dependency" the user owns; we may rename or remove it in any release.
 

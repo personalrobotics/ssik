@@ -16,8 +16,10 @@ already exist (e.g. test_kinova_gen3.py); this file is the API contract.
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -264,6 +266,108 @@ def test_construct_from_kinbody_directly() -> None:
     # not reachability under Franka's tight joint limits.
     sols = arm.solve(T, max_solutions=1, respect_limits=False)
     assert sols
+
+
+# ---------------------------------------------------------------------------
+# Construction from a shipped arm (#587)
+# ---------------------------------------------------------------------------
+
+
+def _panda_module():
+    import importlib
+
+    return importlib.import_module("ssik.prebuilt.franka.panda_ik")
+
+
+@pytest.mark.parametrize("name", ["franka_panda_ik", "panda_ik", "franka_panda", "panda"])
+def test_from_prebuilt_resolves_every_spelling(name: str) -> None:
+    """The catalog name, the module basename, and either without ``_ik`` all
+    reach the same arm, and the result is built on that artifact's own baked
+    geometry rather than on a re-derived one."""
+    arm = ssik.Manipulator.from_prebuilt(name)
+    mod = _panda_module()
+    assert arm.kinbody is mod._KB
+    assert arm.solver_name == mod.SOLVER_NAME
+    assert arm.dof == mod.DOF
+    assert "panda_ik" in repr(arm)
+
+
+def test_from_prebuilt_rejects_unknown_and_ambiguous_names() -> None:
+    """Both failures name candidates: a caller who guessed wrong should be able
+    to fix the call from the message alone."""
+    with pytest.raises(ValueError, match="no prebuilt arm named 'nope'"):
+        ssik.Manipulator.from_prebuilt("nope")
+    # A near miss lists what it was near.
+    with pytest.raises(ValueError, match=r"did you mean.*rizon4_ik"):
+        ssik.Manipulator.from_prebuilt("rizon")
+
+
+def test_from_prebuilt_ambiguity_is_refused_not_guessed() -> None:
+    """No two shipped arms share a basename today, so this is a forward guard:
+    when a second vendor ships the same model name, resolution must refuse
+    rather than hand back whichever the manifest happened to list first."""
+    from ssik.prebuilt import _resolve_arm
+    from ssik.prebuilt._manifest import load_manifest
+
+    real = load_manifest()
+    panda = real["franka_panda_ik"]
+    twin = dataclasses.replace(panda, name="panda_ik", vendor="kuka")
+    with (
+        mock.patch(
+            "ssik.prebuilt._manifest.load_manifest",
+            return_value={"franka_panda_ik": panda, "other_panda_ik": twin},
+        ),
+        pytest.raises(ValueError, match="ambiguous"),
+    ):
+        _resolve_arm("panda")
+
+
+def test_from_prebuilt_solve_is_the_artifacts_solver() -> None:
+    """The whole point of routing solve() back to the artifact: it bakes
+    per-arm work the live path redoes per call (0.089 ms against 3.627 ms on
+    the Panda). Pinned by routing, not by timing, which would be flaky.
+
+    ``explain=True`` has no artifact equivalent and must fall back instead of
+    failing or silently dropping the diagnostic.
+    """
+    arm = ssik.Manipulator.from_prebuilt("panda")
+    mod = _panda_module()
+    T = arm.fk(np.zeros(7))
+
+    calls = []
+    real_solve = mod.solve
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return real_solve(*args, **kwargs)
+
+    with mock.patch.object(mod, "solve", spy):
+        delegated = arm.solve(T, respect_limits=False)
+        assert len(calls) == 1, "solve() did not reach the artifact"
+        sols, diag = arm.solve(T, explain=True, respect_limits=False)
+        assert len(calls) == 1, "explain=True must fall back to the live path"
+
+    assert isinstance(diag, ssik.Diagnostic)
+    # The two engines must agree, or the constructor would change results.
+    assert sorted(tuple(np.round(s.q, 9)) for s in delegated) == sorted(
+        tuple(np.round(s.q, 9)) for s in sols
+    )
+    assert sorted(tuple(np.round(s.q, 9)) for s in delegated) == sorted(
+        tuple(np.round(s.q, 9)) for s in real_solve(T, respect_limits=False)
+    )
+
+
+def test_from_prebuilt_reaches_the_chart_api() -> None:
+    """#587's acceptance criterion: a redundant shipped arm reaches
+    ``self_motion`` with no underscore-prefixed access."""
+    arm = ssik.Manipulator.from_prebuilt("panda")
+    rng = np.random.default_rng(17)
+    lo, hi = np.array(arm.joint_limits).T
+    T = arm.fk(rng.uniform(lo, hi))
+    manifold = arm.self_motion(T)
+    assert manifold.charts
+    chart = max(manifold.charts, key=lambda c: c.length(limits=True))
+    assert chart.length(limits=True) > 0.0
 
 
 # ---------------------------------------------------------------------------
