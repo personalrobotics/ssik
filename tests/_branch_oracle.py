@@ -120,7 +120,12 @@ def enumerate_branches(
     :param fk_atol: LM convergence threshold. Tight on purpose: this is the
         reference the solvers are measured against.
     """
-    policy = replace(DEFAULT_TOLERANCE_POLICY, subproblem_numerical=fk_atol)
+    # The LM backstop's own merge radius is the solvers' policy value; the
+    # oracle must not inherit it, or it would merge a fold's twin branches
+    # exactly as a solver might and could never catch that loss (#582).
+    policy = replace(
+        DEFAULT_TOLERANCE_POLICY, subproblem_numerical=fk_atol, subproblem_dedup=dedup_tol
+    )
     found: list[NDArray[np.float64]] = []
     counts: list[int] = []
     budget_used = 0
