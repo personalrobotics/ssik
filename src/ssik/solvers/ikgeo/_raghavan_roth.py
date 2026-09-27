@@ -1111,6 +1111,20 @@ def solve_x2_roots(
 # M\u00f6bius reparameterization fallback (Manocha-Canny IV-C).
 # ---------------------------------------------------------------------------
 
+# Below this, a tan-half-angle denominator is taken to be zero, i.e. the joint
+# is at pi and its coordinate is the point at infinity (#571). This is a
+# recognition threshold, not a rejection one: the root is kept either way, and
+# the only thing the threshold decides is whether it is named ``inf`` or a
+# large finite number. Both give the same angle to within an ulp of pi, so the
+# value is uncritical.
+_X_AT_INFINITY_TOL = 1e-12
+
+# A v_12 entry below this fraction of |v_12|_inf is the unit-normalised
+# eigenvector's own float noise rather than a monomial value. Only used to
+# decide when a homogeneous pair carries nothing at all; a pair with one large
+# entry is readable however small the other is (that is the pole).
+_V12_NOISE_REL_TOL = 1e-12
+
 
 def _mobius_transform(
     m_quad: NDArray[np.float64],
@@ -1269,16 +1283,25 @@ def solve_x2_roots_mobius(
         cond_threshold=cond_threshold,
     )
     # Map x_tilde -> x_2 = (aa * x_tilde + bb) / (cc * x_tilde + dd).
+    #
+    # A vanishing denominator is a real root, not a failure: it is exactly
+    # x_2 -> infinity, i.e. the joint at pi (#571). The Mobius search has
+    # already done the hard part -- it found a transform under which that root
+    # is an ordinary finite x_tilde on a well-conditioned pencil (cond 1.1e16
+    # -> 34 on the #571 reproducer), and the eigenvector is as good as any
+    # other. Dropping it here threw away a branch the algebra had recovered.
+    #
+    # Infinity carries it through unchanged: the only consumer is
+    # ``q_lin = 2 * arctan(x_lin)`` in _back_substitute_inner, and
+    # ``arctan(inf)`` is exactly ``pi/2``, so q_lin is exactly ``pi``. The
+    # projective line has one point at infinity, so it is always ``+inf``: the
+    # sign of a vanishing denominator is noise, and native does the same.
     real_roots = []
     real_eigvecs = []
     for x_tilde, evec in zip(x_tilde_roots, eigvecs, strict=True):
         denom = cc * x_tilde + dd
-        if abs(denom) < 1e-12:
-            # x_2 -> infinity; corresponds to q_2 = pi. Skip (we'd need a
-            # secondary parameterization to handle this; rare).
-            continue
-        x2 = (aa * x_tilde + bb) / denom
-        real_roots.append(float(x2))
+        x2 = np.inf if abs(denom) < _X_AT_INFINITY_TOL else float((aa * x_tilde + bb) / denom)
+        real_roots.append(x2)
         real_eigvecs.append(evec)
     return real_roots, real_eigvecs
 
@@ -1336,8 +1359,7 @@ def _back_substitute_inner(
     # reparameterization was used). The top half is v_12 in either case.
     v_12 = np.real(eigvec_24[:12])
 
-    # Robust ratio selection (Manocha-Canny IV-C, "use entries with largest
-    # magnitude as denominators to minimize error"). v_12 entries:
+    # Ratio selection (Manocha-Canny IV-C). v_12 entries:
     #   0:  x_lb0^2 x_lb1^2     6:  x_lb1^2
     #   1:  x_lb0^2 x_lb1       7:  x_lb1
     #   2:  x_lb0^2             8:  1
@@ -1345,25 +1367,44 @@ def _back_substitute_inner(
     #   4:  x_lb0 x_lb1        10:  x_lb0^3 x_lb1
     #   5:  x_lb0              11:  x_lb0^3
     #
-    # Each ratio (num, den) below has algebraic value = x_lb0 (or x_lb1).
-    # Picking the pair where |v_12[den]| is largest minimizes amplified noise
-    # (when x is large the canonical "1" entry is small in unit-normalized
-    # eigenvectors, so v_12[5]/v_12[8] becomes ill-conditioned -- avoid).
+    # Each pair below differs by one degree in its variable, so the pair *is*
+    # that variable's homogeneous coordinate [num : den] and ``2*atan2`` reads
+    # an angle off it directly. Dividing first is what loses the pole: a joint
+    # at pi sends its variable to infinity, v_12 is unit-normalised, and the
+    # whole low-degree block falls to ~1e-16 -- so every ratio that divides by
+    # it divides two noise values (#571). Reading [num : den] projectively
+    # instead makes a vanishing denominator the answer (pi) rather than a
+    # failure, which is exactly how the dropped joint and the right-bilinear
+    # pair already recover pi below, via honest atan2 on (sin, cos).
     x0_ratio_candidates = [(5, 8), (2, 5), (11, 2), (4, 7), (10, 1), (3, 6), (9, 0)]
     x1_ratio_candidates = [(7, 8), (6, 7), (1, 2), (4, 5), (10, 11)]
 
-    num_idx, den_idx = max(x0_ratio_candidates, key=lambda nd: abs(v_12[nd[1]]))
-    if abs(v_12[den_idx]) < 1e-12:
+    # Pick the pair carrying the most signal, not the largest denominator:
+    # at the pole every admissible denominator is noise, and it is the
+    # *numerator* that survives. Relative to |v_12|_inf, so the test means
+    # "this pair is above the eigenvector's own noise floor".
+    scale = float(np.max(np.abs(v_12)))
+    if not np.isfinite(scale) or scale <= 0.0:
         return None
-    x_l0 = float(v_12[num_idx] / v_12[den_idx])
+    floor = _V12_NOISE_REL_TOL * scale
 
-    num_idx, den_idx = max(x1_ratio_candidates, key=lambda nd: abs(v_12[nd[1]]))
-    if abs(v_12[den_idx]) < 1e-12:
+    def _angle_from(candidates: list[tuple[int, int]]) -> float | None:
+        num_idx, den_idx = max(candidates, key=lambda nd: max(abs(v_12[nd[0]]), abs(v_12[nd[1]])))
+        num, den = float(v_12[num_idx]), float(v_12[den_idx])
+        if max(abs(num), abs(den)) < floor:
+            return None  # both entries are noise: this branch is unreadable
+        # [num : den] == [-num : -den], but 2*atan2 of the two differs by 2*pi,
+        # and the eigenvector's sign is the eigensolver's arbitrary choice
+        # (LAPACK and Eigen disagree). Canonicalise so q lands in (-pi, pi],
+        # the range 2*arctan(num/den) always had, on both backends.
+        if den < 0.0 or (den == 0.0 and num < 0.0):
+            num, den = -num, -den
+        return 2.0 * float(np.arctan2(num, den))
+
+    q_l0 = _angle_from(x0_ratio_candidates)
+    q_l1 = _angle_from(x1_ratio_candidates)
+    if q_l0 is None or q_l1 is None:
         return None
-    x_l1 = float(v_12[num_idx] / v_12[den_idx])
-
-    q_l0 = 2.0 * np.arctan(x_l0)
-    q_l1 = 2.0 * np.arctan(x_l1)
 
     # Step 4: solve Q v_right = P_eff @ v_left for v_right via the
     # precomputed pseudoinverse (faster than per-branch lstsq).

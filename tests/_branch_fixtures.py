@@ -88,44 +88,52 @@ FIXTURES: tuple[BranchFixture, ...] = (
         description=(
             "The reproducer from #571, q2 at pi. This chain's auto-selected "
             "leftvar is 0, so q2 is a LEFT-bilinear joint rather than the "
-            "polynomial variable: defect B. The root IS found; back-substitution "
-            "cannot read it, because v_12 is a normalised monomial vector whose "
-            "lower-degree entries underflow to ~1e-16 once the variable goes to "
-            "infinity, so every candidate ratio divides two noise values."
+            "polynomial variable: the back-substitution half of the defect. "
+            "The root is found; reading it was what failed, because v_12 is a "
+            "normalised monomial vector whose low-degree block falls to ~1e-16 "
+            "once the variable goes to infinity. Fixed by reading each pair as "
+            "a homogeneous coordinate via atan2 instead of dividing. Guards "
+            "that: here the old code's own chosen pair already yielded pi, and "
+            "the branch was then deleted by an absolute denominator guard."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(0.0, PI / 2, PI, PI / 2, PI / 2, 0.0),
-        issue="#571",
     ),
     BranchFixture(
         name="pi_at_linearity_variable_q0",
         description=(
-            "q0 at pi, which IS the polynomial variable under leftvar 0: defect A. "
-            "The root is absent from the raw 24 eigenvalues before any filtering, so "
-            "nothing is being rejected, there is simply no finite eigenvalue to find. "
-            "This is the case homogeneous (alpha, beta) pairs address."
+            "q0 at pi, which IS the polynomial variable under leftvar 0: the "
+            "root-finding half of the defect. cond(m_quad) is 1.1e16 here, so "
+            "the direct route is skipped and the Mobius search runs -- and it "
+            "succeeds, conditioning the pencil down to 34 and recovering the "
+            "root as an ordinary finite x_tilde. The inverse map then deleted "
+            "it, because mapping back to x_2 divides by a denominator that "
+            "vanishes exactly when the joint is at pi. Guards that the map "
+            "keeps the root and names it infinity rather than dropping it."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(PI, 0.62, 0.93, -0.44, 0.75, -0.26),
-        issue="#571",
     ),
     BranchFixture(
         name="pi_at_left_bilinear_q1",
         description=(
-            "q1 at pi, the other LEFT-bilinear joint: defect B, and its cleanest "
-            "demonstration. The linearity joint stays at 0.31 so its root is found "
-            "correctly, and q* is still missed by 1.218 rad, which isolates the loss "
-            "to back-substitution rather than root finding."
+            "q1 at pi, the other LEFT-bilinear joint, and the cleanest isolation "
+            "of the back-substitution half: the linearity joint stays at 0.31 and "
+            "its root is found correctly, yet q* was missed by 1.218 rad, so the "
+            "loss was provably in the read and not in root finding. Here the "
+            "surviving x0^3 block still carries q2 exactly (v[10]/v[11] = 0.50172 "
+            "-> 0.9300), while every x0 pair has its denominator in the noise "
+            "block -- which is why selecting on the largest denominator failed "
+            "and selecting on the largest entry works."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(0.31, PI, 0.93, -0.44, 0.75, -0.26),
-        issue="#571",
     ),
     BranchFixture(
         name="pi_at_dropped_joint_q3",

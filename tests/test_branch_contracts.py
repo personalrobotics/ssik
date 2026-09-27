@@ -16,7 +16,7 @@ pose". A solver returning seven of eight branches usually still passes, because
 the sampled ``q*`` is usually one of the seven.
 
 **Completeness** the returned set matches the full branch set. This is the one
-#571 fails, and the only one that can fail while the other two pass.
+#571 failed, and the only one that can fail while the other two pass.
 
 The expected branch sets come from ``tests/data/branch_goldens.json``, computed
 offline by a chart-free oracle (``scripts/regen_branch_goldens.py``). Nothing
@@ -152,11 +152,7 @@ def _expect(fx: BranchFixture) -> Any:
         return pytest.param(
             fx.name,
             marks=pytest.mark.xfail(
-                reason=f"{fx.issue}: a joint at pi is unreachable through the affine "
-                f"tan-half coordinate. As the polynomial variable the root is absent "
-                f"from the spectrum; as a left-bilinear variable the root is found but "
-                f"the eigenvector's lower-degree monomials have underflowed, so the "
-                f"ratio that would recover it divides two noise values.",
+                reason=f"{fx.issue}: {fx.description}",
                 strict=True,
             ),
         )
@@ -190,15 +186,35 @@ def test_completeness_matches_the_golden(name: str, solved: dict[str, Any]) -> N
 
 
 def test_the_three_contracts_are_not_redundant(solved: dict[str, Any]) -> None:
-    """Pins the distinction this module exists to make: on #571's fixture the
-    solver is sound and incomplete at once, so a gate that only checks FK
-    closure reports success while a branch is missing."""
+    """Pins the distinction this module exists to make: soundness does not imply
+    completeness, so a gate that only checks FK closure can report success while
+    a branch is missing.
+
+    This used to assert that #571's fixture *was* incomplete, which stopped
+    being true when #571 was fixed. The distinction it was demonstrating is not
+    about that defect, though, so it is pinned structurally instead: a strict
+    subset of a fixture's own branches is sound by construction and incomplete
+    by construction, which is the combination FK-closure gates cannot see.
+    """
     name = "pi_at_left_bilinear_q2"
     arm, t, sols = solved[name]
-    assert all(
-        float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, s.q) - t)) <= _FK_TOL for s in sols
-    ), "expected soundness to hold here"
-    assert len(sols) < len(_branches(name)), (
-        "expected this fixture to be incomplete; if the solver now returns every "
-        "branch, #571 is fixed and the xfails above should be removed"
+    branches = _branches(name)
+    assert len(branches) >= 2, "need at least two branches to drop one"
+
+    truncated = [s.q for s in sols][:-1]
+    assert truncated, "need a non-empty subset"
+    for q in truncated:
+        resid = float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, q) - t))
+        assert resid <= _FK_TOL, f"a subset of real branches must stay sound, got {resid:.2e}"
+
+    missing = [b for b in branches if min(wrapped_linf(q, b) for q in truncated) > _EQUIV_TOL]
+    assert missing, (
+        "dropping a branch must be visible to the completeness contract; if it "
+        "is not, completeness is not testing anything soundness does not"
+    )
+
+    # And the full set the solver returns is both sound and complete, which is
+    # the state #571's fix established.
+    assert not [b for b in branches if min(wrapped_linf(s.q, b) for s in sols) > _EQUIV_TOL], (
+        f"{name}: expected the solver to be complete here after #571"
     )

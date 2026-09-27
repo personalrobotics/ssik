@@ -25,6 +25,7 @@
 #include <array>
 #include <cmath>
 #include <complex>
+#include <limits>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -209,9 +210,32 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
   const auto betas = ges.betas();
 
   for (int i = 0; i < 24; ++i) {
+    // Work the pair (alpha, beta) projectively rather than forming alpha/beta
+    // straight away (#571). beta == 0 is a QZ eigenvalue at infinity, which in
+    // this coordinate is x = tan(q/2) -> infinity, i.e. the joint at exactly
+    // pi: a real root of the pencil, not a failure. Normalising the pair puts
+    // the "is beta zero" test on a scale-free footing.
+    const std::complex<double> alpha = alphas(i);
     const double beta = betas(i);
-    if (std::abs(beta) < 1e-12) continue;  // QZ infinite eigenvalue (singular A)
-    const std::complex<double> lambda = alphas(i) / beta;
+    const double pair_norm = std::hypot(std::abs(alpha), std::abs(beta));
+    if (!(pair_norm > 0.0) || !std::isfinite(pair_norm)) continue;  // degenerate pencil row
+    const std::complex<double> a_n = alpha / pair_norm;
+    const double b_n = beta / pair_norm;
+
+    if (std::abs(b_n) < 1e-12) {
+      // Root at infinity. Non-real alpha here is not a real branch; a real
+      // alpha gives q = pi, and M(alpha, 0) = alpha^2 * A, so the null
+      // vector is A's -- no division by the vanishing beta anywhere. The
+      // projective line has one point at infinity, so it is always +inf (the
+      // sign of the pair is QZ's choice); Python's Mobius path does the same.
+      if (std::abs(a_n.imag()) > imag_rel_tol) continue;
+      Eigen::JacobiSVD<Mat12> svd(a_mat, Eigen::ComputeFullV);
+      roots.push_back(std::numeric_limits<double>::infinity());
+      vecs.push_back(svd.matrixV().col(11));
+      continue;
+    }
+
+    const std::complex<double> lambda = a_n / b_n;
     const double re = lambda.real(), im = std::abs(lambda.imag());
     if (std::abs(im - 1.0) < spurious_tol && std::abs(re) < spurious_tol) continue;  // near +/-i
     if (im > imag_rel_tol * std::max(std::abs(re), 1.0)) continue;                    // non-real
@@ -229,27 +253,41 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
 inline bool back_substitute(double x_lin, const Vec12& v12, const PqCoeffs& pq, const RrConsts& rr,
                             const Eigen::Matrix4d& t_dh, std::array<double, 6>& q_out,
                             double& fk_err) {
-  // Robust ratio selection: value == x_lb0 (or x_lb1); pick the pair whose
-  // denominator entry has the largest magnitude to minimise amplified noise.
+  // Each pair differs by one degree in its variable, so it *is* that
+  // variable's homogeneous coordinate [num : den] and 2*atan2 reads the angle
+  // off it. Dividing first loses the pole (#571): a joint at pi sends its
+  // variable to infinity, v12 is unit-normalised, and the whole low-degree
+  // block drops to ~1e-16, so every ratio that divides by it divides noise.
+  // Hence: select on the entry carrying signal, not on the denominator.
   static const int x0c[7][2] = {{5, 8}, {2, 5}, {11, 2}, {4, 7}, {10, 1}, {3, 6}, {9, 0}};
   static const int x1c[5][2] = {{7, 8}, {6, 7}, {1, 2}, {4, 5}, {10, 11}};
 
-  auto pick = [&](const int (*cands)[2], int n, double& x) -> bool {
+  const double v_scale = v12.cwiseAbs().maxCoeff();
+  if (!(v_scale > 0.0) || !std::isfinite(v_scale)) return false;
+  const double floor = 1e-12 * v_scale;
+
+  auto pick = [&](const int (*cands)[2], int n, double& q) -> bool {
+    auto signal = [&](int k) {
+      return std::max(std::abs(v12(cands[k][0])), std::abs(v12(cands[k][1])));
+    };
     int best = 0;
     for (int k = 1; k < n; ++k)
-      if (std::abs(v12(cands[k][1])) > std::abs(v12(cands[best][1]))) best = k;
-    const double den = v12(cands[best][1]);
-    if (std::abs(den) < 1e-12) return false;
-    x = v12(cands[best][0]) / den;
+      if (signal(k) > signal(best)) best = k;
+    if (signal(best) < floor) return false;  // both entries are noise
+    // [num : den] == [-num : -den] but 2*atan2 differs by 2*pi, and the
+    // eigenvector sign is the eigensolver's choice; canonicalise so q is in
+    // (-pi, pi] on both backends (Python mirrors this).
+    double num = v12(cands[best][0]), den = v12(cands[best][1]);
+    if (den < 0.0 || (den == 0.0 && num < 0.0)) { num = -num; den = -den; }
+    q = 2.0 * std::atan2(num, den);
     return true;
   };
 
-  double x_l0, x_l1;
-  if (!pick(x0c, 7, x_l0) || !pick(x1c, 5, x_l1)) return false;
+  double q_l0, q_l1;
+  if (!pick(x0c, 7, q_l0) || !pick(x1c, 5, q_l1)) return false;
 
+  // atan(inf) is exactly pi/2, so a root at infinity gives q_lin = pi.
   const double q_lin = 2.0 * std::atan(x_lin);
-  const double q_l0 = 2.0 * std::atan(x_l0);
-  const double q_l1 = 2.0 * std::atan(x_l1);
 
   const double s_lin = std::sin(q_lin), c_lin = std::cos(q_lin);
   const double s_l0 = std::sin(q_l0), c_l0 = std::cos(q_l0);
