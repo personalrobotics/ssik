@@ -335,10 +335,11 @@ def srs_native_geometry(kb: Any, policy: Any = None) -> dict[str, Any] | None:
     the self-contained artifact always cover exactly the same arms -- adding an
     SRS arm enrols it in both automatically.
 
-    ``general_path`` mirrors the Python ``use_canonical`` dispatch (reach_slack
-    == 0): canonical-ZYZ + offset-free wrist -> the canonical fast-path core,
+    ``general_path`` mirrors the Python ``use_canonical`` dispatch:
+    canonical-ZYZ + offset-free wrist -> the canonical fast-path core,
     everything else (non-ZYZ shoulder/wrist, laterally-offset wrist) -> the
-    general Davenport core (#354). Both are native.
+    general Davenport core (#354). Both are native, and the approximate-SRS
+    caller follows the same flag (#598).
 
     ``policy`` defaults to the strict tolerance policy; :func:`srs_polished_native_
     geometry` passes a relaxed one (axis_intersect = max_drift) so the approximate-

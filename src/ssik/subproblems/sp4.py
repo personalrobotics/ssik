@@ -50,7 +50,30 @@ from numpy.typing import NDArray
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.subproblems._rotation import _cross3, _dot3
 
-__all__ = ["solve"]
+__all__ = ["solve", "within_tangent_band"]
+
+
+# Relative round-off allowance on |rhs / R| when the inputs are exact.
+_TANGENT_REL_TOL = 1e-9
+
+
+def within_tangent_band(
+    rhs: float | NDArray[np.float64],
+    amplitude: float | NDArray[np.float64],
+    drift: float = 0.0,
+) -> bool | NDArray[np.bool_]:
+    """Whether ``A cos(theta) + B sin(theta) = rhs`` has a real (double) root.
+
+    ``amplitude`` is ``R = |A, B|``. Exact inputs are feasible when
+    ``|rhs| <= R`` up to relative round-off. A caller whose ``rhs`` carries
+    a known approximation error of at most ``drift`` (same units as
+    ``rhs``) also accepts ``|rhs|`` up to ``R + drift``: such a near-tangent
+    pair is a double root pushed past tangency by that error, and the caller
+    clamps ``rhs / R`` to +-1 to recover it (#598). With ``drift == 0``,
+    exact callers are unaffected, and a ratio meaningfully above 1 still
+    means the target is unreachable. Works elementwise on arrays.
+    """
+    return np.abs(rhs) <= amplitude * (1.0 + _TANGENT_REL_TOL) + drift
 
 
 def solve(

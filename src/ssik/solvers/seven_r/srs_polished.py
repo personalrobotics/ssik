@@ -15,9 +15,15 @@ Algorithm:
    so it returns all algebraic candidates -- the candidates' FK
    residuals are ~``max_drift_m`` because the solver assumes axes
    meet exactly.
+   ``srs.solve`` extracts the angles with the formulas that match the
+   arm's axes (the general Davenport path for every shipped arm), and
+   keeps a near-straight elbow whose SP4 is pushed just past tangency by
+   the pivot drift as its double root (#598).
 3. LM-polish each candidate against the **original** (non-snapped)
    URDF FK. Newton converges in 4-15 iterations from any seed inside
-   the basin; divergent seeds are dropped.
+   the basin; divergent seeds are dropped. If none survives, the
+   canonical z-y-z sweep's candidates are polished instead, as a fixed
+   multistart set.
 4. Cluster-merge to drop duplicate IKs that polished into the same
    solution (different SRS branches may collapse under perturbation).
 
@@ -142,40 +148,55 @@ def solve(
     # the cosine-rule envelope. LM polish later filters truly-unreachable
     # candidates by FK residual; the cost of the extra LM iterations on
     # spurious seeds is much smaller than dropping reachable poses.
-    raw, _is_ls = srs.solve(
-        kb,
-        T_target,
-        policy=relaxed_policy,
-        swivel_samples=swivel_samples,
-        fk_atol=10.0,
-        # Don't cap raw candidates here -- some won't polish, and
-        # we want to maximise survivors.
-        max_solutions=None,
-        reach_slack=2.0 * max_drift_m,
-    )
+    def _seeds(canonical_seeds: bool) -> list[Solution]:
+        raw, _is_ls = srs.solve(
+            kb,
+            T_target,
+            policy=relaxed_policy,
+            swivel_samples=swivel_samples,
+            fk_atol=10.0,
+            # Don't cap raw candidates here -- some won't polish, and
+            # we want to maximise survivors.
+            max_solutions=None,
+            reach_slack=2.0 * max_drift_m,
+            canonical_seeds=canonical_seeds,
+        )
+        return raw
 
-    if not raw:
-        # SRS produced nothing even at huge fk_atol; truly unreachable.
-        return [], True
+    def _polish(raw: list[Solution]) -> list[Solution]:
+        # Steps 3+4: batched LM polish for all candidates simultaneously (#205),
+        # then cluster-merge -- the shared polished-7R tail (#467). ``batched``
+        # runs the vectorised FK+Jacobian (~30-50% faster on Gen3, N=75-128);
+        # the divergence detection (factor=2.0, min_iters=2 from #203) is
+        # lm_refine_batch's default. Candidates carry SRS branch metadata, so
+        # preserve it via ``replace`` rather than a fresh Solution.
+        if not raw:
+            return []
+        return polish_candidates(
+            kb,
+            np.array([c.q for c in raw], dtype=np.float64),
+            T_target,
+            accept_fk_atol=polish_fk_atol,
+            dedup_tol=policy.subproblem_dedup,
+            lm_fk_atol=polish_fk_atol,
+            lm_max_iters=polish_max_iters,
+            batched=True,
+            solution_factory=lambda i, q, r: replace(
+                raw[i], q=q, fk_residual=r, refinement_used="lm"
+            ),
+            max_solutions=max_solutions,
+        )
 
-    # Steps 3+4: batched LM polish for all candidates simultaneously (#205),
-    # then cluster-merge -- the shared polished-7R tail (#467). ``batched=True``
-    # runs the vectorised FK+Jacobian (~30-50% faster on Gen3, N=75-128); the
-    # divergence detection (factor=2.0, min_iters=2 from #203) is lm_refine_batch's
-    # default. Candidates carry SRS branch metadata, so preserve it via ``replace``
-    # rather than a fresh Solution.
-    deduped = polish_candidates(
-        kb,
-        np.array([c.q for c in raw], dtype=np.float64),
-        T_target,
-        accept_fk_atol=polish_fk_atol,
-        dedup_tol=policy.subproblem_dedup,
-        lm_fk_atol=polish_fk_atol,
-        lm_max_iters=polish_max_iters,
-        batched=True,
-        solution_factory=lambda i, q, r: replace(raw[i], q=q, fk_residual=r, refinement_used="lm"),
-        max_solutions=max_solutions,
-    )
+    # Geometric seeds: the SRS solve of the approximated arm, whose candidates
+    # sit within the pivot drift of true solutions. When they polish to
+    # nothing -- a coarse approximation (YuMi's pivots drift ~3 cm) can put
+    # the elbow latitude past what the model reaches -- fall back to the
+    # canonical sweep's candidates as a fixed multistart set, which is what
+    # every approximate arm used before #598.
+    raw = _seeds(canonical_seeds=False)
+    deduped = _polish(raw)
+    if not deduped:
+        deduped = _polish(_seeds(canonical_seeds=True))
 
     if not deduped:
         return [], True

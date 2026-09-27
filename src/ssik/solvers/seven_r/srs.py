@@ -83,6 +83,7 @@ from ssik.kinematics.predicates import (
     joint_origins,
 )
 from ssik.refinement import dedup_by_wrap_close
+from ssik.subproblems.sp4 import within_tangent_band
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
     from ssik._kinbody import KinBody
@@ -243,13 +244,19 @@ def _sp4_branches_batch(
     k: NDArray[np.float64],
     p: NDArray[np.float64],
     delta: NDArray[np.float64],
+    drift: float = 0.0,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
     """Vectorised :func:`_sp4_branches` over ``(N, 3)`` vector stacks.
 
+    :param drift: bound on the error in ``delta`` from an approximate arm's
+        pivots (``reach_slack``); a near-tangent pair pushed past tangency by
+        at most this much is kept as its double root (#598). ``0`` for exact
+        arms.
     :returns: ``(q_a, q_b, valid)`` -- the two elbow branches ``(N,)`` and a
         ``(N,)`` mask that is ``False`` where the projection is unreachable
-        (``|C| > |A,B|``) or the amplitude degenerates. Both branches coincide
-        where ``off -> 0``; the duplicate is collapsed downstream by dedup."""
+        (``|C| > |A,B|``, see :func:`ssik.subproblems.sp4.within_tangent_band`)
+        or the amplitude degenerates. Both branches coincide where
+        ``off -> 0``; the duplicate is collapsed downstream by dedup."""
     h_dot_k = np.einsum("ni,ni->n", h, k)
     k_dot_p = np.einsum("ni,ni->n", k, p)
     a_coef = np.einsum("ni,ni->n", h, p) - h_dot_k * k_dot_p
@@ -258,7 +265,7 @@ def _sp4_branches_batch(
     amplitude = np.hypot(a_coef, b_coef)
     valid = amplitude >= 1e-12
     ratio = np.where(valid, c_const / np.where(valid, amplitude, 1.0), 2.0)
-    valid &= np.abs(ratio) <= 1.0 + 1e-9
+    valid &= within_tangent_band(c_const, amplitude, drift)
     base = np.arctan2(b_coef, a_coef)
     off = np.arccos(np.clip(ratio, -1.0, 1.0))
     return base + off, base - off, valid
@@ -325,7 +332,7 @@ def _sp4_branches(
     if amplitude < 1e-12:
         return ()
     ratio = c_const / amplitude
-    if abs(ratio) > 1.0 + 1e-9:
+    if not within_tangent_band(c_const, amplitude):
         return ()
     base = float(np.arctan2(b_coef, a_coef))
     off = float(np.arccos(np.clip(ratio, -1.0, 1.0)))
@@ -381,6 +388,7 @@ def solve(
     max_solutions: int | None = None,
     fk_atol: float | None = None,
     reach_slack: float = 0.0,
+    canonical_seeds: bool = False,
 ) -> tuple[list[Solution], bool]:
     """Native SRS-class 7R analytical IK via Singh-Kreutz parameterization.
 
@@ -405,6 +413,11 @@ def solve(
         ``L_se + L_ew``. Spurious candidates from slackening fail FK closure
         downstream; the cost is a few extra LM-polish iterations on those
         seeds, not incorrect IKs.
+    :param canonical_seeds: run the canonical z-y-z extraction even on an arm
+        whose axes are not z-y-z. The candidates are then not IK solutions of
+        any model of the arm, only a fixed, diverse set of LM starts;
+        :mod:`ssik.solvers.seven_r.srs_polished` uses them as a fallback when
+        the geometric seeds polish to nothing (#598). Default ``False``.
 
     :returns: ``(solutions, is_ls)``. ``is_ls=True`` iff zero candidates
         passed FK closure.
@@ -463,13 +476,15 @@ def solve(
     # general path (#354), which references the wrist pivot explicitly and
     # solves them to machine precision.
     wrist_offset_free = bool(np.allclose(origins[5], cls.wrist_pivot, atol=policy.axis_intersect))
-    # Approximate-SRS callers (``reach_slack > 0``; only ``srs_polished``,
-    # which is Z*Z-gated so the arm is canonical z-y-z up to its small pivot
-    # drift, with an offset-free wrist) keep the canonical path: it is the ZYZ
-    # warm-start factory their LM polish + near-singular q_2-sweep (#223) were
-    # tuned against. The general path targets exact concurrent-axis arms
-    # (reach_slack == 0) and carries no reach-slack / elbow-singular handling.
-    use_canonical = (canonical_zyz and wrist_offset_free) or reach_slack > 0.0
+    # The path is chosen by the arm's axes alone. Approximate-SRS callers
+    # (``reach_slack > 0``, i.e. ``srs_polished``) used to be forced onto the
+    # canonical path too, but none of the shipped ones is canonical z-y-z
+    # (j2s7's axes are -z,-y,+z,+y,-z,-y,+z; YuMi's are tilted), so every
+    # seed came out ~pi wrong and the "polish" was a cold global LM solve
+    # that failed outright on some poses (#598). The general path is exact
+    # for any concurrent-axis triple; the reach clamp below and the
+    # drift-scaled SP4 tangency band give it what the approximation needs.
+    use_canonical = (canonical_zyz and wrist_offset_free) or canonical_seeds
 
     t_target = np.asarray(T_target, dtype=np.float64)
     R_target = t_target[:3, :3]
@@ -696,7 +711,12 @@ def solve(
         # q_3 (elbow): wrist-pivot latitude along the upper arm fixes it; SP4 on
         # the forearm rotated by R0. Two elbow branches, both computed.
         delta_sp4 = np.einsum("ni,ni->n", wrist_vecs, d)  # wrist_vec . d_hat
-        q3a, q3b, sp4_valid = _sp4_branches_batch(d, k_elbow, v_forearm0, delta_sp4)
+        # An approximate arm's pivots (and the d_sw clamp) shift the latitude
+        # by at most reach_slack, which can push a near-straight elbow's double
+        # root just past tangency; keep it (#598). Exact arms pass 0.
+        q3a, q3b, sp4_valid = _sp4_branches_batch(
+            d, k_elbow, v_forearm0, delta_sp4, drift=reach_slack
+        )
 
         # Wrist post-rotation folded once (r_res = r_pre_elbow^T @ R_target @ R_post^T).
         M_wrist = R_target @ R_post_wrist.T  # (3, 3)

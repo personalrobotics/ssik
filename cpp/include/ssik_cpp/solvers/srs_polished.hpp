@@ -4,8 +4,11 @@
 // so the exact SRS core returns cm-off algebraic candidates that an LM polish
 // against the TRUE FK corrects. Mirrors ssik.solvers.seven_r.srs_polished.solve:
 //
-//   1. raw candidates from the canonical SRS core with reach_slack = 2*max_drift
-//      and a keep-all FK threshold (srs.solve(reach_slack=..., fk_atol=10.0)).
+//   1. raw candidates from the SRS core that matches the arm's axes (general
+//      Davenport for every shipped arm), with reach_slack = 2*max_drift and a
+//      keep-all FK threshold (srs.solve(reach_slack=..., fk_atol=10.0)); the
+//      canonical sweep's candidates only as a fallback when those polish to
+//      nothing (#598).
 //   2. LM-polish every candidate against the real JointConsts FK, keep those that
 //      close to polish_fk_atol, cluster-merge.
 //   3. finalize (limits -> in-limits fallback -> rescue -> seed/truncate).
@@ -25,6 +28,7 @@
 #include "ssik_cpp/rescue.hpp"
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"
+#include "ssik_cpp/solvers/srs_general.hpp"
 
 namespace ssik {
 
@@ -100,7 +104,16 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
   }
 
   // core: exact SRS candidates (reach-slackened, keep-all) -> LM-polish -> dedup.
+  // The extraction follows the arm's axes (s.general_path, #598); when those
+  // geometric seeds polish to nothing, the canonical sweep's candidates are a
+  // fixed multistart fallback (mirrors srs_polished.solve).
   const auto core = [&](const Pose& Tp) {
+    if (s.general_path) {
+      auto sols = srs_polished_detail::polish(
+          c, srs_general_solve(c, s, Tp, kSrsPolishedReachSlack, kSrsPolishedKeepAll), Tp,
+          kSrsPolishedMaxIters);
+      if (!sols.empty()) return sols;
+    }
     const auto raw =
         srs_canonical_solve(c, s, Tp, kSrsPolishedReachSlack, kSrsPolishedKeepAll);
     return srs_polished_detail::polish(c, raw, Tp, kSrsPolishedMaxIters);

@@ -19,6 +19,7 @@
 #include "ssik_cpp/rotation.hpp"  // rotation_matrix
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"  // SrsConsts, srs_detail::swivel_basis
+#include "ssik_cpp/subproblems.hpp"             // within_tangent_band
 
 namespace ssik {
 namespace srs_swivel {
@@ -66,7 +67,7 @@ inline std::vector<double> sp4_branches(const Eigen::Vector3d& h, const Eigen::V
   const double amp = std::hypot(a, b);
   if (amp < 1e-12) return {};
   const double ratio = cc / amp;
-  if (std::abs(ratio) > 1.0 + 1e-9) return {};
+  if (!within_tangent_band(cc, amp)) return {};
   const double base = std::atan2(b, a);
   const double off = std::acos(std::max(-1.0, std::min(1.0, ratio)));
   if (off < 1e-12) return {base + off};

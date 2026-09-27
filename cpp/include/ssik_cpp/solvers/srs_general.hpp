@@ -6,10 +6,14 @@
 // swivel; per swivel, SP4 fixes the elbow q3, an SP1 roll aligns the forearm, and
 // the generalized-Euler decomposition extracts the shoulder + wrist triples. Up
 // to 2 (q3) x 2 (shoulder) x 2 (wrist) = 8 candidates per swivel, FK-verified +
-// deduped. Strict path only (reach_slack == 0); the singular/clamp handling is
-// srs_polished's and is not needed here.
+// deduped. reach_slack / fk_keep_threshold default to the strict path; the
+// approximate-SRS caller (srs_polished, #598) passes reach_slack = 2*max_drift,
+// which slackens the reach check, clamps d_sw inside the cosine-rule envelope and
+// lets a near-tangent elbow SP4 pushed past tangency by the drift keep its double
+// root, plus a keep-all threshold so every seed reaches its LM polish.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <vector>
@@ -21,6 +25,7 @@
 #include "ssik_cpp/rotation.hpp"
 #include "ssik_cpp/seven_r/srs_swivel_limits.hpp"  // srs_swivel::min_rotation
 #include "ssik_cpp/solvers/srs_canonical.hpp"      // SrsConsts, srs_detail::swivel_basis, kSrs*
+#include "ssik_cpp/subproblems.hpp"                // within_tangent_band
 
 namespace ssik {
 
@@ -34,7 +39,7 @@ struct Sp4Two {
   bool valid;
 };
 inline Sp4Two sp4_two(const Eigen::Vector3d& h, const Eigen::Vector3d& k, const Eigen::Vector3d& p,
-                      double delta) {
+                      double delta, double drift = 0.0) {
   const double hk = h.dot(k), kp = k.dot(p);
   const double a = h.dot(p) - hk * kp;
   const double b = h.dot(k.cross(p));
@@ -42,7 +47,7 @@ inline Sp4Two sp4_two(const Eigen::Vector3d& h, const Eigen::Vector3d& k, const 
   const double amp = std::hypot(a, b);
   bool valid = amp >= 1e-12;
   const double ratio = valid ? cc / amp : 2.0;
-  valid = valid && std::abs(ratio) <= 1.0 + 1e-9;
+  valid = valid && within_tangent_band(cc, amp, drift);
   const double base = std::atan2(b, a);
   const double off = std::acos(std::max(-1.0, std::min(1.0, ratio)));
   return {base + off, base - off, valid};
@@ -54,18 +59,29 @@ inline Sp4Two sp4_two(const Eigen::Vector3d& h, const Eigen::Vector3d& k, const 
 // concurrent-axis (spherical shoulder + spherical wrist) SRS arm; geometry comes
 // from the baked SrsConsts (classifier + _arm_constants).
 inline std::vector<Solution<7>> srs_general_solve(const JointConsts<7>& c, const SrsConsts& s,
-                                                  const Pose& T) {
+                                                  const Pose& T, double reach_slack = 0.0,
+                                                  double fk_keep_threshold = kSrsFkThreshold) {
+  constexpr double kSingularEps = 1e-6;  // srs.py _SINGULAR_EPS (d_sw clamp margin)
   const Eigen::Matrix3d R_target = T.block<3, 3>(0, 0);
   const Eigen::Vector3d p_target = T.block<3, 1>(0, 3);
   const Eigen::Vector3d W_t = p_target - R_target * s.ee_offset_local;
 
   const Eigen::Vector3d SW = W_t - s.shoulder_pivot;
   const double d_sw = SW.norm();
-  if (d_sw > s.l_se + s.l_ew || d_sw < std::abs(s.l_se - s.l_ew) || d_sw < 1e-12) return {};
+  if (d_sw > s.l_se + s.l_ew + reach_slack ||
+      d_sw < std::max(0.0, std::abs(s.l_se - s.l_ew) - reach_slack) || d_sw < 1e-12)
+    return {};
   const Eigen::Vector3d u_sw = SW / d_sw;
 
+  // As srs_canonical_solve: approximate callers clamp d_sw strictly inside the
+  // envelope so the swivel circle keeps r_circle > 0; strict callers do not.
+  const double d_sw_eff =
+      reach_slack > 0.0 ? std::max(std::abs(s.l_se - s.l_ew) + kSingularEps,
+                                   std::min(d_sw, s.l_se + s.l_ew - kSingularEps))
+                        : d_sw;
+
   const double x_c =
-      (s.l_se * s.l_se - s.l_ew * s.l_ew + d_sw * d_sw) / (2.0 * d_sw);
+      (s.l_se * s.l_se - s.l_ew * s.l_ew + d_sw_eff * d_sw_eff) / (2.0 * d_sw_eff);
   const double r_circle = std::sqrt(std::max(s.l_se * s.l_se - x_c * x_c, 0.0));
   Eigen::Vector3d u_p1, u_p2;
   srs_detail::swivel_basis(u_sw, u_p1, u_p2);
@@ -87,7 +103,8 @@ inline std::vector<Solution<7>> srs_general_solve(const JointConsts<7>& c, const
     const Eigen::Matrix3d r0 = srs_swivel::min_rotation(s.upper_home, upper);
     const Eigen::Vector3d k_elbow = r0 * n3;
     const Eigen::Vector3d v_forearm0 = r0 * s.forearm_home;
-    const auto sp4 = srs_general_detail::sp4_two(d, k_elbow, v_forearm0, wrist_vec.dot(d));
+    const auto sp4 =
+        srs_general_detail::sp4_two(d, k_elbow, v_forearm0, wrist_vec.dot(d), reach_slack);
     if (!sp4.valid) continue;
     const double dw = d.dot(wrist_vec);
 
@@ -143,7 +160,8 @@ inline std::vector<Solution<7>> srs_general_solve(const JointConsts<7>& c, const
   std::vector<Solution<7>> verified;
   for (const auto& cand : deduped) {
     const double resid = (fk<7>(c, cand.q) - T).norm();
-    if (resid <= kSrsFkThreshold) verified.push_back(Solution<7>{cand.q, resid, Refinement::None});
+    if (resid <= fk_keep_threshold)
+      verified.push_back(Solution<7>{cand.q, resid, Refinement::None});
   }
   return verified;
 }

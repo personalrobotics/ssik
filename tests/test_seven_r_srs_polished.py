@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from ssik._kinbody import build_kinbody
@@ -202,27 +202,26 @@ def test_gen3_random_pose_fk_closure(seed: int) -> None:
 
 def test_gen3_elbow_near_singular_500_poses() -> None:
     """Bulletproof: 500-pose Hypothesis-style fuzz over q_3 in [-0.05, 0.05]
-    on Gen3, validating the #200 reach_slack (#222) + #223 layer 2 (clamp)
-    + #223 layer 3 (q_2-redundancy reparameterisation) singularity fixes
-    stack to ≥90% success.
+    on Gen3, validating that the #200 reach_slack (#222), the #223 d_sw
+    clamp and the #598 axis-matched extraction stack to ≥95% success.
 
     Scoring evolution across PRs:
 
-    +---------+--------+--------------------------------------------------+
-    | Pre-#222 | <50%  | bare cosine-rule reach check rejects offset poses |
-    | Post-#222 | ~84% | reach_slack=2*max_drift_m absorbs offset error    |
-    | Post-#223 | ~91% | layer 2 clamp + layer 3 q_2 reparam recover near- |
-    |          |       | singular poses where SP1 atan2 was numerically    |
-    |          |       | unstable                                          |
-    +---------+--------+--------------------------------------------------+
+    +-----------+-------+-------------------------------------------------+
+    | Pre-#222  | <50%  | bare cosine-rule reach check rejects offset     |
+    |           |       | poses                                           |
+    | Post-#222 | ~84%  | reach_slack=2*max_drift_m absorbs offset error  |
+    | Post-#223 | ~91%  | layer 2 clamp + layer 3 q_2 reparam recover     |
+    |           |       | near-singular poses on the canonical path       |
+    | Post-#598 | ~99.6%| seeds come from the general (Davenport) path    |
+    |           |       | that matches Gen3's axes, with a drift-scaled   |
+    |           |       | tangency band on the elbow SP4                  |
+    +-----------+-------+-------------------------------------------------+
 
-    Remaining 9% are at the offset + boundary intersection (d_sw within
-    0.2 mm of L_se+L_ew on a 12 mm-offset arm). The algebraic algorithm
-    produces seeds whose (q_0, q_1) are >2 rad off truth, beyond LM
-    polish's basin -- a deeper fix would require iterative shoulder-pivot
-    refinement, tracked as a follow-up to #223 if it becomes a real
-    user-blocking issue. Real callers actively avoid q_3 ≈ 0 anyway
-    (kinematic singularity for any 7DOF arm).
+    The "(q_0, q_1) seeds >2 rad off truth" that capped the canonical path
+    (#225) were not offset error: Gen3's axes are not canonical z-y-z, so
+    the z-y-z formulas put every seed in the wrong convention. Real callers
+    still avoid q_3 ≈ 0 (kinematic singularity for any 7DOF arm).
 
     Speed gate: median solve at the singular slice must not exceed 2x
     the median at q_3 in [0.2, 0.8] (the well-conditioned regime).
@@ -248,9 +247,9 @@ def test_gen3_elbow_near_singular_500_poses() -> None:
                     f"sol={sol.q.tolist()} fk={fk_err:.2e}"
                 )
     success_rate = n_solved / n_total
-    assert success_rate >= 0.90, (
-        f"#223 regression: only {n_solved}/{n_total} = "
-        f"{100 * success_rate:.1f}% near-singular poses solved (want >= 90%)"
+    assert success_rate >= 0.95, (
+        f"#223/#598 regression: only {n_solved}/{n_total} = "
+        f"{100 * success_rate:.1f}% near-singular poses solved (want >= 95%)"
     )
 
 
@@ -345,6 +344,10 @@ def test_dispatcher_routes_j2s7_to_srs_polished_not_spherical_shoulder() -> None
 
 
 @given(seed=st.integers(min_value=0, max_value=2**31 - 1))
+# Elbow 5.3 mrad from straight, 0.1 mm short of full reach: the canonical
+# z-y-z extraction put every seed ~pi off j2s7's axes and the polish failed,
+# returning [] for a reachable pose (#598).
+@example(seed=18409)
 @settings(
     max_examples=50,
     deadline=None,

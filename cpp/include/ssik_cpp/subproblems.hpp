@@ -42,6 +42,18 @@ inline std::pair<double, bool> sp1(const Eigen::Vector3d& k, const Eigen::Vector
   return {theta, is_ls};
 }
 
+// Whether A cos(theta) + B sin(theta) = rhs has a real (double) root, with
+// amplitude = |A, B| (ssik.subproblems.sp4.within_tangent_band). Exact inputs
+// are feasible when |rhs| <= amplitude up to relative round-off. A caller whose
+// rhs carries a known approximation error of at most `drift` also accepts
+// |rhs| up to amplitude + drift: a double root pushed past tangency by that
+// error, recovered by clamping rhs / amplitude to +-1 (#598). drift == 0 leaves
+// exact callers unchanged.
+inline bool within_tangent_band(double rhs, double amplitude, double drift = 0.0) {
+  constexpr double kTangentRelTol = 1e-9;
+  return std::abs(rhs) <= amplitude * (1.0 + kTangentRelTol) + drift;
+}
+
 // SP4: the angles theta rotating p about k such that h . (rot(k, theta) p) = d.
 // Returns {thetas (0/1/2), is_ls}.
 inline std::pair<std::vector<double>, bool> sp4(const Eigen::Vector3d& h, const Eigen::Vector3d& k,

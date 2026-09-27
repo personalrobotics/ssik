@@ -52,16 +52,20 @@ GROUP_A = [
         4,
         id="280_kassow",
     ),
-    # #299 gen3 exercises the *thin-wrapper* rescue path (seven_r.srs_polished),
-    # which #358 wired to match the orchestrator arms above. Raw srs_polished
-    # returns 0 sols here; the rescue recovers dozens (86 on macOS).
-    pytest.param(
-        "gen3_ik",
-        np.array([0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875]),
-        4,
-        id="299_gen3",
-    ),
 ]
+
+# #299 gen3 exercises the *thin-wrapper* rescue path (seven_r.srs_polished),
+# which #358 wired to match the orchestrator arms above. It is not a ridge: raw
+# srs_polished returned 0 sols here only because it extracted Gen3's seeds with
+# the canonical z-y-z formulas, which do not fit Gen3's axes. With the
+# extraction matched to the axes (#598) the direct path returns the full set,
+# so the pose stays only as a rescue-wiring check, not a direct-zero baseline.
+GEN3_299 = pytest.param(
+    "gen3_ik",
+    np.array([0.51171875, 0.51171875, 1.01953125, 0.625, -0.6484375, -2.75, 0.875]),
+    4,
+    id="299_gen3",
+)
 
 
 @pytest.mark.parametrize(("arm_name", "q_star", "n_expected_min"), GROUP_A)
@@ -95,7 +99,7 @@ def test_direct_solve_at_ridge_returns_zero(
     )
 
 
-@pytest.mark.parametrize(("arm_name", "q_star", "n_expected_min"), GROUP_A)
+@pytest.mark.parametrize(("arm_name", "q_star", "n_expected_min"), [*GROUP_A, GEN3_299])
 def test_rescue_recovers_solutions_at_ridge(
     arm_name: str, q_star: np.ndarray, n_expected_min: int
 ) -> None:
@@ -128,7 +132,7 @@ def test_rescue_recovers_solutions_at_ridge(
         )
 
 
-@pytest.mark.parametrize(("arm_name", "q_star", "n_expected_min"), GROUP_A)
+@pytest.mark.parametrize(("arm_name", "q_star", "n_expected_min"), [*GROUP_A, GEN3_299])
 def test_bulletproof_solve_auto_recovers_ridge(
     arm_name: str, q_star: np.ndarray, n_expected_min: int
 ) -> None:
