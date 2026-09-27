@@ -26,6 +26,8 @@
 #include <cmath>
 #include <complex>
 #include <limits>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -188,6 +190,193 @@ inline Mat12 embed_e(const Mat6x9& e) {
   return m;
 }
 
+// Repeated roots (#595). When k real branches share the linearity-joint value
+// (finite, or pi), M(x) has a k-dimensional null space there, and any single
+// null vector is an arbitrary mix of the k branches' monomial vectors: back-
+// substitution reads nonsense and FK certification drops the branch. Close
+// roots do the same more softly (a lone null vector's error is ~eps/delta).
+// The monomial structure resolves it: every genuine v_12 satisfies
+// v[hi] = x_lb0 * v[lo] over the index pairs below, so inside the null space N
+// (12 x k) the branch vectors are exactly the eigenvectors c of the k x k
+// pencil N[hi] c = w N[lo] c. When the branches share x_lb0 too, the x_lb1
+// shift separates them. Mirrors _raghavan_roth.split_repeated_roots.
+
+// Numerical rank tolerance for M(x), relative to its largest singular value:
+// sqrt(eps). A lone null vector read from a space whose next singular value is
+// s has error ~eps/s, which passes sqrt(eps) exactly when s drops below it; the
+// split reads each branch from its own root's space at ~eps however close the
+// roots are.
+inline constexpr double kNullRankRtol = 1.4901161193847656e-08;  // sqrt(DBL_EPSILON)
+
+inline constexpr int kShiftLb0Lo[9] = {8, 7, 6, 5, 4, 3, 2, 1, 0};
+inline constexpr int kShiftLb0Hi[9] = {5, 4, 3, 2, 1, 0, 11, 10, 9};
+inline constexpr int kShiftLb1Lo[8] = {8, 7, 5, 4, 2, 1, 11, 10};
+inline constexpr int kShiftLb1Hi[8] = {7, 6, 4, 3, 1, 0, 10, 9};
+
+using NullBasis = Eigen::Matrix<double, 12, Eigen::Dynamic>;
+
+// Branch vectors in span(n_basis) from one shift; false when the shift does not
+// give k distinct real values.
+template <int R>
+inline bool shift_split_one(const NullBasis& n_basis, const int (&lo)[R], const int (&hi)[R],
+                            double imag_tol, std::vector<Vec12>& out) {
+  const int k = static_cast<int>(n_basis.cols());
+  if (k > R) return false;
+  Eigen::MatrixXd low(R, k), high(R, k);
+  for (int r = 0; r < R; ++r) {
+    low.row(r) = n_basis.row(lo[r]);
+    high.row(r) = n_basis.row(hi[r]);
+  }
+  // Both sides map into the same k-dim span, even where w is infinite and the
+  // low side vanishes; square the pencil up on that span.
+  Eigen::MatrixXd both(R, 2 * k);
+  both << low, high;
+  Eigen::JacobiSVD<Eigen::MatrixXd> span(both, Eigen::ComputeThinU);
+  const Eigen::MatrixXd u = span.matrixU().leftCols(k);
+  const Eigen::MatrixXd low_k = u.transpose() * low, high_k = u.transpose() * high;
+
+  Eigen::GeneralizedEigenSolver<Eigen::MatrixXd> ges;
+  ges.compute(high_k, low_k, /*computeEigenvectors=*/false);
+  if (ges.info() != Eigen::Success) return false;
+  std::vector<Vec12> parts;
+  for (int i = 0; i < k; ++i) {
+    const std::complex<double> alpha = ges.alphas()(i);
+    const double beta = ges.betas()(i);
+    const double scale = std::hypot(std::abs(alpha), std::abs(beta));
+    if (!(scale > 0.0) || !std::isfinite(scale)) return false;
+    const std::complex<double> a = alpha / scale;
+    if (std::abs(a.imag()) > imag_tol) return false;  // complex pair: not real branches
+    // c spans the null space of beta*H - alpha*L; read it by SVD, not from a QZ
+    // eigenvector, which is ill-defined at beta = 0.
+    const Eigen::MatrixXd p = (beta / scale) * high_k - a.real() * low_k;
+    Eigen::JacobiSVD<Eigen::MatrixXd> null(p, Eigen::ComputeFullV);
+    const auto& s = null.singularValues();
+    if (k > 1 && s(k - 2) <= kNullRankRtol * s(0)) return false;  // w repeats
+    const Vec12 v = n_basis * null.matrixV().col(k - 1);
+    parts.push_back(v.normalized());
+  }
+  out = std::move(parts);
+  return true;
+}
+
+inline bool shift_split(const NullBasis& n_basis, double imag_tol, std::vector<Vec12>& out) {
+  return shift_split_one(n_basis, kShiftLb0Lo, kShiftLb0Hi, imag_tol, out) ||
+         shift_split_one(n_basis, kShiftLb1Lo, kShiftLb1Hi, imag_tol, out);
+}
+
+// Distance of two points of the projective line (bounded, inf-safe).
+inline double chordal(double x, double y) {
+  if (!std::isfinite(x)) return std::isfinite(y) ? 1.0 / std::hypot(1.0, y) : 0.0;
+  if (!std::isfinite(y)) return 1.0 / std::hypot(1.0, x);
+  return std::abs(x - y) / (std::hypot(1.0, x) * std::hypot(1.0, y));
+}
+
+// An accepted root with M(x) (A at infinity) and its SVD.
+struct RootSvd {
+  double x;
+  Mat12 m;
+  Vec12 sv;  // singular values, descending
+  Mat12 v;   // right singular vectors
+};
+
+// Emit (root, v_12) pairs, splitting every repeated root into its branches.
+// Multiplicity is read from M(x)'s singular values rather than from how close
+// the eigenvalues are: a defective double root has two equal eigenvalues and a
+// one-dimensional null space, and needs no split. A root whose null space is
+// one-dimensional keeps its null vector as before. A root with a k-dim null
+// space (k >= 2) is grouped with up to k-1 other roots for which that space is
+// also null (QZ's copies of a k-fold root, or the close roots of a near
+// repeat); the space is split into its k branches; each branch goes to the
+// member it fits best, one each; and a member reads its branch from the split
+// of its OWN null space, exact at its own root rather than only to within the
+// roots' separation. Branches no member took are still emitted, so a missing
+// eigenvalue copy cannot lose one. A group whose space does not split into k
+// distinct real branches is emitted exactly as before.
+inline void emit_split_roots(const std::vector<RootSvd>& acc, double imag_tol,
+                             std::vector<double>& roots, std::vector<Vec12>& vecs) {
+  const int n = static_cast<int>(acc.size());
+  std::vector<int> ks(n);
+  for (int j = 0; j < n; ++j) {
+    int k = 0;
+    for (int r = 0; r < 12; ++r)
+      if (acc[j].sv(r) <= kNullRankRtol * acc[j].sv(0)) ++k;
+    ks[j] = k;
+  }
+  auto basis = [&](int j) -> NullBasis { return acc[j].v.rightCols(ks[j]); };
+  auto residual = [&](int j, const Vec12& w) { return (acc[j].m * w).norm() / acc[j].sv(0); };
+  auto emit = [&](int j, const Vec12& w) {
+    roots.push_back(acc[j].x);
+    vecs.push_back(w);
+  };
+
+  std::vector<bool> used(n, false);
+  for (int i = 0; i < n; ++i) {
+    if (used[i]) continue;
+    const int k = ks[i];
+    if (k < 2) {
+      used[i] = true;
+      emit(i, acc[i].v.col(11));
+      continue;
+    }
+    const NullBasis nb = basis(i);
+    std::vector<int> members{i};
+    std::vector<std::pair<double, int>> partners;
+    for (int j = 0; j < n; ++j)
+      if (j != i && !used[j] && ks[j] >= 2) partners.emplace_back(chordal(acc[i].x, acc[j].x), j);
+    std::sort(partners.begin(), partners.end());
+    for (const auto& pj : partners) {
+      if (static_cast<int>(members.size()) == k) break;
+      const int j = pj.second;
+      if ((acc[j].m * nb).norm() <= kNullRankRtol * acc[j].sv(0)) members.push_back(j);
+    }
+    for (int j : members) used[j] = true;
+
+    std::vector<Vec12> branches;
+    if (!shift_split(nb, imag_tol, branches)) {
+      for (int j : members) emit(j, acc[j].v.col(11));
+      continue;
+    }
+    // One branch per member, cheapest fit first.
+    std::vector<std::tuple<double, int, int>> costs;
+    for (int j : members)
+      for (int b = 0; b < static_cast<int>(branches.size()); ++b)
+        costs.emplace_back(residual(j, branches[b]), j, b);
+    std::sort(costs.begin(), costs.end());
+    std::vector<int> taken_members;
+    std::vector<bool> taken_branch(branches.size(), false);
+    for (const auto& [cost, j, b] : costs) {
+      (void)cost;
+      if (taken_branch[b] ||
+          std::find(taken_members.begin(), taken_members.end(), j) != taken_members.end())
+        continue;
+      taken_members.push_back(j);
+      taken_branch[b] = true;
+      Vec12 w = branches[b];
+      if (j != i && ks[j] == k) {
+        std::vector<Vec12> own;
+        if (shift_split(basis(j), imag_tol, own)) {
+          double best = -1.0;
+          for (const auto& o : own) {
+            const double overlap = std::abs(o.dot(branches[b]));
+            if (overlap > best) {
+              best = overlap;
+              w = o;
+            }
+          }
+        }
+      }
+      emit(j, w);
+    }
+    for (int b = 0; b < static_cast<int>(branches.size()); ++b) {
+      if (taken_branch[b]) continue;
+      int best_j = members[0];
+      for (int j : members)
+        if (residual(j, branches[b]) < residual(best_j, branches[b])) best_j = j;
+      emit(best_j, branches[b]);
+    }
+  }
+}
+
 // Real tan(q2/2) roots of det M(x)=0 with their v_12 null-vectors, via the
 // Manocha-Canny pencil M1 - x*M2 solved by RealQZ. Filters spurious roots near
 // +/-i (the (1+x^2)^4 factor) and non-real eigenvalues, exactly as the Python
@@ -220,6 +409,11 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
   const auto alphas = ges.alphas();
   const auto betas = ges.betas();
 
+  std::vector<RootSvd> accepted;
+  auto accept = [&](double x, const Mat12& m) {
+    Eigen::JacobiSVD<Mat12> svd(m, Eigen::ComputeFullV);
+    accepted.push_back(RootSvd{x, m, svd.singularValues(), svd.matrixV()});
+  };
   for (Eigen::Index i = 0; i < alphas.size(); ++i) {
     // Work the pair (alpha, beta) projectively rather than forming alpha/beta
     // straight away (#571). beta == 0 is a QZ eigenvalue at infinity, which in
@@ -240,9 +434,7 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
       // projective line has one point at infinity, so it is always +inf (the
       // sign of the pair is QZ's choice); Python's Mobius path does the same.
       if (std::abs(a_n.imag()) > imag_rel_tol) continue;
-      Eigen::JacobiSVD<Mat12> svd(a_mat, Eigen::ComputeFullV);
-      roots.push_back(std::numeric_limits<double>::infinity());
-      vecs.push_back(svd.matrixV().col(11));
+      accept(std::numeric_limits<double>::infinity(), a_mat);
       continue;
     }
 
@@ -251,11 +443,9 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
     if (std::abs(im - 1.0) < spurious_tol && std::abs(re) < spurious_tol) continue;  // near +/-i
     if (im > imag_rel_tol * std::max(std::abs(re), 1.0)) continue;                    // non-real
     // v_12 = right null-vector of the real 12x12 M(re) = A re^2 + B re + C.
-    const Mat12 m_x = a_mat * (re * re) + b_mat * re + c_mat;
-    Eigen::JacobiSVD<Mat12> svd(m_x, Eigen::ComputeFullV);
-    roots.push_back(re);
-    vecs.push_back(svd.matrixV().col(11));
+    accept(re, a_mat * (re * re) + b_mat * re + c_mat);
   }
+  emit_split_roots(accepted, imag_rel_tol, roots, vecs);
 }
 
 // eigenvector -> (q0..q5) in DH frame + FK-closure residual. Mirrors

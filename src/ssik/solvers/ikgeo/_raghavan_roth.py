@@ -1307,6 +1307,211 @@ def solve_x2_roots_mobius(
 
 
 # ---------------------------------------------------------------------------
+# Repeated roots: split a k-dimensional null space into its branches (#595).
+# ---------------------------------------------------------------------------
+#
+# When k real branches share the linearity-joint value (finite, or pi), M(x)
+# has a k-dimensional null space at that root, and every basis vector an
+# eigensolver returns for it is an arbitrary mix of the k branches' monomial
+# vectors. Back-substitution reads angles off ratios of v_12 entries, so a mix
+# reads nonsense and FK certification drops the branch. The same happens, more
+# softly, when two roots are merely close: the single null vector's error is
+# ~eps/delta, so the branch is lost once the roots are within ~1e-8.
+#
+# The monomial structure resolves it (Moller-Stetter; Manocha-Canny's shift
+# matrices). Every genuine v_12 satisfies v[hi] = x_lb0 * v[lo] over the index
+# pairs below, so inside the null space N (12 x k) the branch vectors are
+# exactly the eigenvectors c of the k x k pencil N[hi] c = w N[lo] c, and w is
+# each branch's x_lb0. When branches share x_lb0 too, the x_lb1 shift separates
+# them; when they share both, v_12 itself coincides and nothing here can help.
+
+# Numerical rank tolerance for M(x), relative to its largest singular value.
+# Below sqrt(eps) the direction is null for the purpose of reading a branch
+# off it: a single null vector read from a space whose next singular value is
+# s has error ~eps/s, which passes sqrt(eps) exactly when s drops below it,
+# while the split below reads each branch from its own root's space at ~eps
+# regardless of how close the roots are.
+_NULL_RANK_RTOL = float(np.sqrt(np.finfo(np.float64).eps))
+
+# Monomial index pairs with v_12[hi] = x_lb0 * v_12[lo] (and likewise x_lb1);
+# see the v_12 layout in _back_substitute_inner.
+_SHIFT_LB0 = ((8, 7, 6, 5, 4, 3, 2, 1, 0), (5, 4, 3, 2, 1, 0, 11, 10, 9))
+_SHIFT_LB1 = ((8, 7, 5, 4, 2, 1, 11, 10), (7, 6, 4, 3, 1, 0, 10, 9))
+
+# A shift value whose normalised (alpha, beta) pair has an imaginary part above
+# this is complex, so the space it came from is not a set of real branches.
+# Same default as solve_x2_roots' imag_rel_tol.
+_SPLIT_IMAG_TOL = 1e-3
+
+
+def _m_at(
+    m_quad: NDArray[np.float64],
+    m_lin: NDArray[np.float64],
+    m_const: NDArray[np.float64],
+    x: float,
+) -> NDArray[np.float64]:
+    """M(x), with the root at infinity read projectively: M(x)/x^2 -> A."""
+    if not np.isfinite(x):
+        return m_quad
+    return m_quad * (x * x) + m_lin * x + m_const
+
+
+def _chordal(x: float, y: float) -> float:
+    """Distance of two points of the projective line (bounded, inf-safe)."""
+    if not np.isfinite(x):
+        return 0.0 if not np.isfinite(y) else 1.0 / float(np.hypot(1.0, y))
+    if not np.isfinite(y):
+        return 1.0 / float(np.hypot(1.0, x))
+    return abs(x - y) / float(np.hypot(1.0, x) * np.hypot(1.0, y))
+
+
+def _shift_split_one(
+    null_basis: NDArray[np.float64], lo: tuple[int, ...], hi: tuple[int, ...]
+) -> list[NDArray[np.float64]] | None:
+    """Branch vectors in ``span(null_basis)`` from one shift, or None when
+    the shift does not give k distinct real values."""
+    from scipy.linalg import eigvals as scipy_eigvals
+
+    k = null_basis.shape[1]
+    if k > len(lo):
+        return None
+    low, high = null_basis[list(lo)], null_basis[list(hi)]
+    # Both sides map into the same k-dim span, even where w is infinite and
+    # the low side vanishes; square the pencil up on that span.
+    u = np.linalg.svd(np.hstack([low, high]), full_matrices=False)[0][:, :k]
+    low_k, high_k = u.T @ low, u.T @ high
+    alpha, beta = scipy_eigvals(high_k, low_k, homogeneous_eigvals=True)
+    out = []
+    for a, b in zip(alpha, beta, strict=True):
+        scale = float(np.hypot(abs(a), abs(b)))
+        if not np.isfinite(scale) or scale <= 0.0:
+            return None
+        a, b = a / scale, b / scale
+        if abs(a.imag) > _SPLIT_IMAG_TOL or abs(b.imag) > _SPLIT_IMAG_TOL:
+            return None  # complex pair: these are not real branches
+        # c spans the null space of beta*H - alpha*L: read it by SVD rather
+        # than from an eigensolver's eigenvector, which is ill-defined at beta=0.
+        _, s, vt = np.linalg.svd(b.real * high_k - a.real * low_k)
+        if k > 1 and s[-2] <= _NULL_RANK_RTOL * s[0]:
+            return None  # w repeats: this shift cannot tell the branches apart
+        v = null_basis @ vt[-1]
+        out.append(v / np.linalg.norm(v))
+    return out
+
+
+def _shift_split(null_basis: NDArray[np.float64]) -> list[NDArray[np.float64]] | None:
+    """Split by x_lb0, falling back to x_lb1 when the branches share x_lb0."""
+    parts = _shift_split_one(null_basis, *_SHIFT_LB0)
+    if parts is None:
+        parts = _shift_split_one(null_basis, *_SHIFT_LB1)
+    return parts
+
+
+def split_repeated_roots(
+    m_quad: NDArray[np.float64],
+    m_lin: NDArray[np.float64],
+    m_const: NDArray[np.float64],
+    roots: list[float],
+    eigvecs: list[NDArray[np.complex128]],
+) -> tuple[list[float], list[NDArray[np.complex128]]]:
+    """Replace the eigenvectors of every repeated root by its branches' own
+    monomial vectors (#595).
+
+    Multiplicity is read from M(x)'s singular values, not from how close the
+    eigenvalues are: a defective double root has two equal eigenvalues and a
+    one-dimensional null space, and needs no split. Roots with a
+    one-dimensional null space keep the eigensolver's vector untouched.
+
+    A root with a k-dimensional null space (k >= 2) is grouped with the other
+    roots whose M(x) that same space is also null for, up to k of them: the
+    k copies QZ returns for a k-fold root, or the k close roots of a near
+    repeat. The group's null space is split into its k branch vectors, each
+    branch is given to the group member it fits best (one each), and a member
+    then reads its branch from the split of its own null space, which is
+    exact at that member's root rather than only within the roots' separation.
+    Branches no member took are still returned (at the member they fit best),
+    so a missing eigenvalue copy cannot lose one. A group whose space does not
+    split into k real branches is left exactly as the eigensolver gave it.
+    """
+    n = len(roots)
+    if n < 2:
+        return roots, eigvecs
+    stack = np.stack([_m_at(m_quad, m_lin, m_const, x) for x in roots])
+    sv = np.linalg.svd(stack, compute_uv=False)  # (n, 12), descending
+    ks = [int(np.count_nonzero(s <= _NULL_RANK_RTOL * s[0])) for s in sv]
+    if max(ks) < 2:
+        return roots, eigvecs
+
+    null_cache: dict[int, NDArray[np.float64]] = {}
+
+    def null_basis(j: int) -> NDArray[np.float64]:
+        if j not in null_cache:
+            null_cache[j] = np.linalg.svd(stack[j])[2][-ks[j] :].T
+        return null_cache[j]
+
+    def residual(j: int, v: NDArray[np.float64]) -> float:
+        return float(np.linalg.norm(stack[j] @ v)) / float(sv[j][0])
+
+    out_roots: list[float] = []
+    out_vecs: list[NDArray[np.complex128]] = []
+    used = [False] * n
+    for i in range(n):
+        if used[i]:
+            continue
+        k = ks[i]
+        if k < 2:
+            used[i] = True
+            out_roots.append(roots[i])
+            out_vecs.append(eigvecs[i])
+            continue
+        basis = null_basis(i)
+        members = [i]
+        partners = sorted(
+            (_chordal(roots[i], roots[j]), j)
+            for j in range(n)
+            if j != i and not used[j] and ks[j] >= 2
+        )
+        for _, j in partners:
+            if len(members) == k:
+                break
+            if np.linalg.norm(stack[j] @ basis) <= _NULL_RANK_RTOL * sv[j][0]:
+                members.append(j)
+        for j in members:
+            used[j] = True
+
+        branches = _shift_split(basis)
+        if branches is None:
+            for j in members:
+                out_roots.append(roots[j])
+                out_vecs.append(eigvecs[j])
+            continue
+
+        # One branch per member, cheapest fit first.
+        costs = sorted((residual(j, b), j, idx) for j in members for idx, b in enumerate(branches))
+        taken_members: set[int] = set()
+        taken_branches: set[int] = set()
+        for _, j, idx in costs:
+            if j in taken_members or idx in taken_branches:
+                continue
+            taken_members.add(j)
+            taken_branches.add(idx)
+            v = branches[idx]
+            if j != i and ks[j] == k:
+                own = _shift_split(null_basis(j))
+                if own is not None:
+                    ref = branches[idx]
+                    v = own[int(np.argmax([abs(float(w @ ref)) for w in own]))]
+            out_roots.append(roots[j])
+            out_vecs.append(np.concatenate([v, v]).astype(np.complex128))
+        for idx, b in enumerate(branches):
+            if idx not in taken_branches:
+                j = members[int(np.argmin([residual(jj, b) for jj in members]))]
+                out_roots.append(roots[j])
+                out_vecs.append(np.concatenate([b, b]).astype(np.complex128))
+    return out_roots, out_vecs
+
+
+# ---------------------------------------------------------------------------
 # Back-substitution: eigenvector -> (x_3, x_4) -> (q_0, q_1, q_5).
 # ---------------------------------------------------------------------------
 
@@ -1805,6 +2010,9 @@ def solve_all_ik(
     # Use the M\u00f6bius-fallback variant: well-conditioned -> direct path; otherwise
     # try a few random reparameterizations to recondition the leading matrix.
     roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
+    # A root shared by several branches has a multi-dimensional null space,
+    # and its eigenvector is a mix of them: read each branch out (#595).
+    roots, eigvecs = split_repeated_roots(m_quad, m_lin, m_const, roots, eigvecs)
 
     fk_fn = lambda q: _fk_dh(q, dh)  # noqa: E731
     jacobian_fn = lambda q: _spatial_jacobian(q, dh)  # noqa: E731

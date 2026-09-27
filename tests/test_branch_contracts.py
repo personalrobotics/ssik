@@ -218,3 +218,68 @@ def test_the_three_contracts_are_not_redundant(solved: dict[str, Any]) -> None:
     assert not [b for b in branches if min(wrapped_linf(s.q, b) for s in sols) > _EQUIV_TOL], (
         f"{name}: expected the solver to be complete here after #571"
     )
+
+
+# ---------------------------------------------------------------------------
+# Completeness per backend and per linearity choice.
+#
+# The production solve above runs one backend under one representation. A
+# branch lost in the representation (#571's pole, #595's shared root value)
+# can hide there: Python and native read different vectors of the same
+# degenerate space, and a different linearity choice moves the degeneracy
+# somewhere else. So each fixture also declares the choices under which the
+# complete golden set is owed, and both backends are held to it under each.
+# ---------------------------------------------------------------------------
+
+_CHOICE_CASES = [
+    pytest.param(fx.name, lin, backend, id=f"{fx.name}-lin{lin}-{backend}")
+    for fx in FIXTURES
+    for lin in fx.linearity_choices
+    for backend in ("python", "native")
+]
+
+
+def _solve_under_choice(arm: Any, t: np.ndarray, lin: int, backend: str) -> list[np.ndarray]:
+    if backend == "python":
+        from ssik.solvers.ikgeo.general_6r import solve
+
+        # allow_refinement mirrors the production spec (force_refine, #528).
+        sols, _ = solve(arm.kinbody, t, linearity_joint=lin, allow_refinement=True)
+        return [np.asarray(s.q) for s in sols]
+
+    from tests._cpp_backend import cpp_available
+
+    if not cpp_available():
+        pytest.skip("native extension not built")
+    from ssik._native import rr_native_geometry, try_native_solve
+
+    geometry = rr_native_geometry(arm.kinbody, linearity_joint=lin)
+    native = try_native_solve(
+        "ikgeo.general_6r", arm.kinbody, t, respect_limits=False, rr_geometry=geometry
+    )
+    assert native is not None, "native general_6r path declined the solve"
+    return [np.asarray(s.q) for s in native]
+
+
+@pytest.mark.parametrize(("name", "lin", "backend"), _CHOICE_CASES)
+def test_completeness_per_backend_and_linearity_choice(
+    name: str, lin: int, backend: str, solved: dict[str, Any]
+) -> None:
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+    arm, t, _ = solved[name]
+    qs = _solve_under_choice(arm, t, lin, backend)
+    # Soundness at the gate the solver certifies with. A non-default choice can
+    # be less well conditioned than the arm's own (xArm 6 under linearity 1
+    # returns genuine branches at ~1e-9), which is a conditioning fact, not a
+    # lost or wrong branch; the equivalence check below still pins each one.
+    gate = DEFAULT_TOLERANCE_POLICY.subproblem_numerical
+    for q in qs:
+        resid = float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, q) - t))
+        assert resid <= gate, f"{name} lin{lin} {backend}: unsound branch, FK {resid:.2e}"
+    branches = _branches(name)
+    missing = [b for b in branches if not any(wrapped_linf(q, b) <= _EQUIV_TOL for q in qs)]
+    assert not missing, (
+        f"{name} lin{lin} {backend}: returned {len(qs)} of {len(branches)} branches; "
+        f"missing {[np.round(b, 4).tolist() for b in missing]}"
+    )

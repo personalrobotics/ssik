@@ -53,10 +53,19 @@ class BranchFixture:
     q_star: tuple[float, ...]
     issue: str | None = None
     """Issue this fixture exists for, when it encodes a known defect."""
+    prebuilt: str | None = None
+    """A shipped arm to use instead of the DH chain (whose fields are then empty)."""
+    linearity_choices: tuple[int, ...] = ()
+    """RR linearity-joint choices under which both backends must return the
+    complete branch set. Empty: only the production solve is checked. A choice
+    is left out where the elimination itself is degenerate for the geometry
+    (no representation fix can recover branches the pencil does not carry)."""
 
     def build(self) -> Any:
         import ssik
 
+        if self.prebuilt is not None:
+            return ssik.Manipulator.from_prebuilt(self.prebuilt)
         return ssik.Manipulator.from_dh(
             dh_alpha=list(self.dh_alpha), dh_a=list(self.dh_a), dh_d=list(self.dh_d)
         )
@@ -70,15 +79,15 @@ class BranchFixture:
         Changing any of them invalidates the committed branch set, and the
         tests check this rather than trusting the file's name.
         """
-        payload = json.dumps(
-            {
-                "alpha": list(self.dh_alpha),
-                "a": list(self.dh_a),
-                "d": list(self.dh_d),
-                "q_star": list(self.q_star),
-            },
-            sort_keys=True,
-        )
+        numbers: dict[str, Any] = {
+            "alpha": list(self.dh_alpha),
+            "a": list(self.dh_a),
+            "d": list(self.dh_d),
+            "q_star": list(self.q_star),
+        }
+        if self.prebuilt is not None:
+            numbers["prebuilt"] = self.prebuilt
+        payload = json.dumps(numbers, sort_keys=True)
         return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
@@ -100,6 +109,7 @@ FIXTURES: tuple[BranchFixture, ...] = (
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(0.0, PI / 2, PI, PI / 2, PI / 2, 0.0),
+        linearity_choices=(0, 1, 2),
     ),
     BranchFixture(
         name="pi_at_linearity_variable_q0",
@@ -117,6 +127,7 @@ FIXTURES: tuple[BranchFixture, ...] = (
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(PI, 0.62, 0.93, -0.44, 0.75, -0.26),
+        linearity_choices=(0, 1, 2),
     ),
     BranchFixture(
         name="pi_at_left_bilinear_q1",
@@ -134,6 +145,7 @@ FIXTURES: tuple[BranchFixture, ...] = (
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(0.31, PI, 0.93, -0.44, 0.75, -0.26),
+        linearity_choices=(0, 1, 2),
     ),
     BranchFixture(
         name="pi_at_dropped_joint_q3",
@@ -148,6 +160,7 @@ FIXTURES: tuple[BranchFixture, ...] = (
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(0.31, 0.62, 0.93, PI, 0.75, -0.26),
         issue=None,
+        linearity_choices=(0, 1, 2),
     ),
     BranchFixture(
         name="regular_pose_control",
@@ -160,6 +173,80 @@ FIXTURES: tuple[BranchFixture, ...] = (
         dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
         q_star=(0.3, -0.7, 0.9, -0.4, 0.8, 0.2),
         issue=None,
+        linearity_choices=(0, 1, 2),
+    ),
+    # Repeated roots (#595). Each q* shares its linearity-joint value with a
+    # second branch of the same pose, so M(x) has a two-dimensional null space
+    # at that root and any single null vector mixes the two branches. q* and
+    # its partner were constructed by Gauss-Newton on FK(q_a) = FK(q_b) with
+    # q_lin held equal (see the #595 comment for the construction and the
+    # chart-free oracle check); linearity 0 is this chain's auto choice.
+    BranchFixture(
+        name="repeated_root_finite_q0",
+        description=(
+            "q0 = 0.7 is shared with the branch (0.7, -2.4715, 2.8772, -0.7956, "
+            "-2.4356, -0.3428): a finite double root of the linearity variable "
+            "under leftvar 0. Both backends read one arbitrary vector of the "
+            "2-D null space and dropped one or both branches. Fixed by splitting "
+            "the null space with the x_lb0 shift of the monomial vector."
+        ),
+        dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
+        dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
+        dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
+        q_star=(
+            0.7,
+            0.896449747236101,
+            -2.6490492624428175,
+            -1.3012631260053205,
+            2.476895205304505,
+            -3.1067183864736414,
+        ),
+        linearity_choices=(0, 1, 2),
+    ),
+    BranchFixture(
+        name="repeated_root_at_pi_q0",
+        description=(
+            "q0 = pi is shared with the branch (-pi, -0.2269, -2.0328, -1.7930, "
+            "1.7203, -0.3324): the double root is the point at infinity, where "
+            "native reads A's null space and Python the Mobius-mapped pencil's. "
+            "The #571 infinite-root handling alone keeps the root but still "
+            "reads one mixed vector for two branches."
+        ),
+        dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
+        dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
+        dh_d=(1 / 10, 1 / 9, 1 / 8, 1 / 7, 1 / 6, 1 / 5),
+        q_star=(
+            PI,
+            2.8180583116169835,
+            -3.1285452622210848,
+            -1.433222632883318,
+            -1.8335345562224923,
+            1.6653420782413804,
+        ),
+        linearity_choices=(0, 1, 2),
+    ),
+    BranchFixture(
+        name="xarm6_repeated_root_finite",
+        description=(
+            "UFactory xArm 6, as shipped (auto linearity 0), q0 = 0.7 shared "
+            "with the branch (0.7, -1.7207, 0.6964, 2.0329, 0.9698, 2.1290). "
+            "A real arm's production solve lost one branch natively and two in "
+            "Python. Linearity 2 is degenerate on this arm (the pencil misses "
+            "most branches at every pose), so it is not a completeness claim."
+        ),
+        dh_alpha=(),
+        dh_a=(),
+        dh_d=(),
+        q_star=(
+            0.7,
+            1.186123607965735,
+            -0.2221316738437733,
+            -1.1086668248502818,
+            -2.171757479090648,
+            -2.7097702948263684,
+        ),
+        prebuilt="xarm6_ik",
+        linearity_choices=(0, 1),
     ),
 )
 
