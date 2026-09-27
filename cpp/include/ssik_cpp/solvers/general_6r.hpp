@@ -205,11 +205,22 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
 
   // det(M1 - x*M2) = 0. GeneralizedEigenSolver on (M1, M2): eigenvalue = x.
   Eigen::GeneralizedEigenSolver<Eigen::MatrixXd> ges;
+  // RealQZ's default cap is 400 iterations without a deflation. A pencil that
+  // is numerically singular (det M(x) ~ 0 for every x, as JACO 2 gives under
+  // linearity 0 or 2) can exhaust it on the rounding-level indeterminate
+  // eigenvalues before the regular ones deflate; Eigen 3.5 does on #599's
+  // pose, 3.4 does not. Same generous budget the Husty-Pfurner QZ uses.
+  ges.setMaxIterations(400 * 24);
   ges.compute(Eigen::MatrixXd(m1), Eigen::MatrixXd(m2), /*computeEigenvectors=*/false);
+  // A QZ that still fails leaves alphas/betas unsized, so reading them indexes
+  // past an empty buffer (#599's segfault). No converged Schur form means no
+  // eigenvalues to trust: report no roots, which the FK-certified caller
+  // treats like any other pose with nothing found (rescue, then empty).
+  if (ges.info() != Eigen::Success) return;
   const auto alphas = ges.alphas();
   const auto betas = ges.betas();
 
-  for (int i = 0; i < 24; ++i) {
+  for (Eigen::Index i = 0; i < alphas.size(); ++i) {
     // Work the pair (alpha, beta) projectively rather than forming alpha/beta
     // straight away (#571). beta == 0 is a QZ eigenvalue at infinity, which in
     // this coordinate is x = tan(q/2) -> infinity, i.e. the joint at exactly

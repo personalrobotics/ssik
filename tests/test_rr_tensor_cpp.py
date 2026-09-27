@@ -11,6 +11,7 @@ matches the Python lambdified RR reference to machine precision, on real arms.
 from __future__ import annotations
 
 import importlib
+from typing import Any
 
 import numpy as np
 import pytest
@@ -175,3 +176,97 @@ def test_rr_tensor_production_path_matches_python(arm: str, tmp_path) -> None:
                 f"{arm}: production native path missed an in-limits sol"
             )
     assert worst_fk <= 1e-6, f"{arm}: production native path worst FK {worst_fk:.2e}"
+
+
+def _tensor_solve(
+    ext: Any, kb: Any, g: dict[str, Any], t: np.ndarray, **overrides: Any
+) -> np.ndarray:
+    """``general_6r_tensor_solve`` on a baked geometry, any argument overridable."""
+    po_r, po_c, po_m, po_co = g["po_coo"]
+    q_r, q_c, q_m, q_co = g["q_coo"]
+    args: dict[str, Any] = {
+        "axes": np.array([j.axis for j in kb.joints], dtype=np.float64),
+        "t_left": np.array([j.T_left for j in kb.joints], dtype=np.float64),
+        "t_right": np.array([j.T_right for j in kb.joints], dtype=np.float64),
+        "types": np.zeros(6, dtype=np.int32),
+        "po_rc": np.stack([po_r, po_c], axis=1).astype(np.int32),
+        "po_mono": po_m,
+        "po_coeff": po_co,
+        "q_rc": np.stack([q_r, q_c], axis=1).astype(np.int32),
+        "q_mono": q_m,
+        "q_coeff": q_co,
+        "target": t,
+    }
+    for k in ("alpha", "a", "d", "theta_offset", "t_pre_inv", "t_post_inv", "linearity_joint"):
+        args[k] = g[k]
+    for k in ("left_bilinear", "right_bilinear", "drop_joint", "p_sin", "p_cos", "mono_factors"):
+        args[k] = g[k]
+    args.update(overrides)
+    (qs,) = ext.general_6r_tensor_solve(**args)
+    return np.asarray(qs).reshape(-1, 6)
+
+
+# #599's pose: JACO 2 with two branches sharing the linearity-joint value.
+_JACO2_Q599 = np.array(
+    [-1.4727977381108381, 0.7, -2.01813233300296, 2.1421719518123634, 1.1191069085880105,
+     -2.4229836465189396]
+)  # fmt: skip
+
+
+@pytest.mark.parametrize("linearity_joint", [0, 1, 2])
+def test_rr_tensor_solve_is_sound_under_every_linearity_choice(linearity_joint: int) -> None:
+    """Re-solving under a linearity choice other than the baked one must be safe.
+
+    JACO 2 bakes linearity 1. Under 0 or 2 its pencil M(x) is numerically
+    singular (rank-deficient for every x). With Eigen 3.5 the QZ then stopped
+    without converging, the solver read eigenvalues that were never written,
+    and the process died with SIGSEGV (#599). A degenerate choice may find
+    fewer branches, but whatever it returns must close FK, and it must return.
+    """
+    from ssik.kinematics.poe_fk import poe_forward_kinematics
+
+    ext = _load_ext()
+    kb = importlib.import_module("ssik.prebuilt.jaco2_ik")._KB
+    g = rr_native_geometry(kb, linearity_joint=linearity_joint)
+    assert g["linearity_joint"] == linearity_joint
+    rng = np.random.default_rng(599)
+    poses = [_JACO2_Q599, *(rng.uniform(-np.pi, np.pi, 6) for _ in range(20))]
+    for q in poses:
+        t = np.asarray(poe_forward_kinematics(kb, q), dtype=np.float64)
+        for s in _tensor_solve(ext, kb, g, t):
+            resid = float(np.linalg.norm(poe_forward_kinematics(kb, s) - t))
+            assert resid <= 1e-5, f"linearity {linearity_joint}: unsound branch, FK {resid:.1e}"
+
+
+def test_rr_tensor_solve_rejects_malformed_geometry() -> None:
+    """The RR bundle's COO entries and joint roles are used as indices into
+    fixed-size matrices and the six-joint q, so a malformed bundle must be
+    refused at the binding rather than written through (#599)."""
+    ext = _load_ext()
+    kb = importlib.import_module("ssik.prebuilt.jaco2_ik")._KB
+    g = rr_native_geometry(kb)
+    t = np.eye(4)
+    po_r, po_c, po_m, po_co = g["po_coo"]
+    bad_row = np.stack([po_r, po_c], axis=1).astype(np.int32)
+    bad_row[0, 0] = 14
+    bad_col = np.stack([po_r, po_c], axis=1).astype(np.int32)
+    bad_col[0, 1] = -1
+    bad_mono = po_m.copy()
+    bad_mono[0] = len(g["mono_factors"])
+    bad_factor = g["mono_factors"].copy()
+    bad_factor[0, 0] = 12
+    cases: dict[str, dict[str, Any]] = {
+        "row out of range": {"po_rc": bad_row},
+        "col out of range": {"po_rc": bad_col},
+        "monomial out of range": {"po_mono": bad_mono},
+        "short coefficient list": {"po_coeff": po_co[:-1]},
+        "factor out of range": {"mono_factors": bad_factor},
+        "p_sin wrong shape": {"p_sin": g["p_sin"][:, :8]},
+        "roles not a permutation": {"drop_joint": int(g["left_bilinear"][0])},
+        "role out of range": {"linearity_joint": 6},
+        "alpha too short": {"alpha": g["alpha"][:5]},
+    }
+    for override in cases.values():
+        with pytest.raises(ValueError, match="RR geometry"):
+            _tensor_solve(ext, kb, g, t, **override)
+    _tensor_solve(ext, kb, g, t)  # the unmodified bundle is accepted

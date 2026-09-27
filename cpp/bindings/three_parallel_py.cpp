@@ -557,6 +557,43 @@ py::list decompose_3axis_test_py(py::array_t<double> R_arr, py::array_t<double> 
 // HP f/g kernel parity (#537): given the baked (4,8,2) tensors T_u / T_w_pre,
 // the target's Study DQ sigma_E, and drop_idx, return (f (9,7), g (6,5)) exactly
 // as _eliminate.compute_fg_numeric. Validates the sigma_E injection + Cramer
+// RR geometry validation (#599). The baked RR bundle is not just data: its COO
+// row/col/monomial entries and its joint-role indices are used as indices into
+// fixed-size matrices and the 6-joint q array, so a malformed bundle would write
+// out of bounds rather than fail. Reject it at the boundary. (Target, seed and
+// the shared JointConsts arrays are the general #574 hardening.)
+template <class T>
+void require_shape(const py::array_t<T>& arr, std::initializer_list<py::ssize_t> shape,
+                   const char* name) {
+  bool ok = arr.ndim() == static_cast<py::ssize_t>(shape.size());
+  py::ssize_t k = 0;
+  for (py::ssize_t s : shape) {
+    if (!ok) break;
+    ok = s < 0 || arr.shape(k) == s;  // s < 0: any length
+    ++k;
+  }
+  if (!ok) throw std::invalid_argument(std::string("RR geometry: bad shape for ") + name);
+}
+
+void require_in_range(int v, int lo, int hi, const char* name) {
+  if (v < lo || v >= hi)
+    throw std::invalid_argument(std::string("RR geometry: ") + name + " index out of range");
+}
+
+// linearity, the two left- and two right-bilinear joints and the dropped joint
+// must name each of the six joints exactly once.
+void require_joint_roles(const ssik::RrConsts& rr) {
+  const int roles[6] = {rr.linearity_joint,  rr.left_bilinear[0], rr.left_bilinear[1],
+                        rr.right_bilinear[0], rr.right_bilinear[1], rr.drop_joint};
+  bool seen[6] = {false, false, false, false, false, false};
+  for (int r : roles) {
+    require_in_range(r, 0, 6, "joint role");
+    if (seen[r])
+      throw std::invalid_argument("RR geometry: joint roles must be a permutation of 0..5");
+    seen[r] = true;
+  }
+}
+
 // Build an RrCoeffTensor from the baked arrays (ssik._native.rr_native_geometry).
 ssik::rr_detail::RrCoeffTensor make_rr_tensor(const py::array_t<double>& p_sin,
                                               const py::array_t<double>& p_cos,
@@ -567,6 +604,9 @@ ssik::rr_detail::RrCoeffTensor make_rr_tensor(const py::array_t<double>& p_sin,
                                               const py::array_t<int>& q_rc,
                                               const py::array_t<int>& q_mono,
                                               const py::array_t<double>& q_coeff) {
+  require_shape(p_sin, {14, 9}, "p_sin");
+  require_shape(p_cos, {14, 9}, "p_cos");
+  require_shape(mono_factors, {-1, 3}, "mono_factors");
   ssik::rr_detail::RrCoeffTensor t;
   auto ps = p_sin.unchecked<2>();
   auto pc = p_cos.unchecked<2>();
@@ -576,23 +616,34 @@ ssik::rr_detail::RrCoeffTensor make_rr_tensor(const py::array_t<double>& p_sin,
       t.p_cos(r, c) = pc(r, c);
     }
   auto mf = mono_factors.unchecked<2>();  // (n_mono, 3)
-  for (py::ssize_t m = 0; m < mf.shape(0); ++m)
+  for (py::ssize_t m = 0; m < mf.shape(0); ++m) {
+    // -1 pads a monomial of degree < 3; otherwise a factor is a t12 index.
+    for (int f = 0; f < 3; ++f) require_in_range(mf(m, f), -1, 12, "mono_factors");
     t.mono_factors.push_back({mf(m, 0), mf(m, 1), mf(m, 2)});
-  auto load_coo = [](const py::array_t<int>& rc, const py::array_t<int>& mono,
-                     const py::array_t<double>& coeff, std::vector<int>& rows, std::vector<int>& cols,
-                     std::vector<int>& mo, std::vector<double>& co) {
-    auto rcm = rc.unchecked<2>();  // rc (n,2)
+  }
+  const int n_mono = static_cast<int>(mf.shape(0));
+  auto load_coo = [n_mono](const py::array_t<int>& rc, const py::array_t<int>& mono,
+                           const py::array_t<double>& coeff, int n_cols, std::vector<int>& rows,
+                           std::vector<int>& cols, std::vector<int>& mo, std::vector<double>& co) {
+    require_shape(rc, {-1, 2}, "COO (row, col)");
+    const py::ssize_t n = rc.shape(0);
+    require_shape(mono, {n}, "COO monomial");
+    require_shape(coeff, {n}, "COO coefficient");
+    auto rcm = rc.unchecked<2>();
     auto mm = mono.unchecked<1>();
     auto cc = coeff.unchecked<1>();
-    for (py::ssize_t i = 0; i < rcm.shape(0); ++i) {
+    for (py::ssize_t i = 0; i < n; ++i) {
+      require_in_range(rcm(i, 0), 0, 14, "COO row");
+      require_in_range(rcm(i, 1), 0, n_cols, "COO col");
+      require_in_range(mm(i), 0, n_mono, "COO monomial");
       rows.push_back(rcm(i, 0));
       cols.push_back(rcm(i, 1));
       mo.push_back(mm(i));
       co.push_back(cc(i));
     }
   };
-  load_coo(po_rc, po_mono, po_coeff, t.po_row, t.po_col, t.po_mono, t.po_coeff);
-  load_coo(q_rc, q_mono, q_coeff, t.q_row, t.q_col, t.q_mono, t.q_coeff);
+  load_coo(po_rc, po_mono, po_coeff, 9, t.po_row, t.po_col, t.po_mono, t.po_coeff);
+  load_coo(q_rc, q_mono, q_coeff, 8, t.q_row, t.q_col, t.q_mono, t.q_coeff);
   return t;
 }
 
@@ -604,6 +655,14 @@ ssik::RrConsts make_rr_consts(const py::array_t<double>& alpha, const py::array_
                               const py::array_t<double>& t_post_inv, int linearity_joint,
                               const py::array_t<int>& left_bilinear,
                               const py::array_t<int>& right_bilinear, int drop_joint) {
+  require_shape(alpha, {6}, "alpha");
+  require_shape(a, {6}, "a");
+  require_shape(d, {6}, "d");
+  require_shape(theta_offset, {6}, "theta_offset");
+  require_shape(t_pre_inv, {4, 4}, "t_pre_inv");
+  require_shape(t_post_inv, {4, 4}, "t_post_inv");
+  require_shape(left_bilinear, {2}, "left_bilinear");
+  require_shape(right_bilinear, {2}, "right_bilinear");
   ssik::RrConsts rr;
   auto al = alpha.unchecked<1>(), av = a.unchecked<1>(), dv = d.unchecked<1>(),
        to = theta_offset.unchecked<1>();
@@ -624,6 +683,7 @@ ssik::RrConsts make_rr_consts(const py::array_t<double>& alpha, const py::array_
   auto lb = left_bilinear.unchecked<1>(), rb = right_bilinear.unchecked<1>();
   rr.left_bilinear = {lb(0), lb(1)};
   rr.right_bilinear = {rb(0), rb(1)};
+  require_joint_roles(rr);
   return rr;
 }
 
@@ -1185,6 +1245,16 @@ py::tuple jointlock_rr_artifact_solve_py(
   for (int i = 0; i < N; ++i) jl.q_lock[i] = ql(i);
 
   // 16 RrConsts from the stacked fixed-size arrays.
+  require_shape(alpha, {N, 6}, "alpha");
+  require_shape(a, {N, 6}, "a");
+  require_shape(d, {N, 6}, "d");
+  require_shape(theta_offset, {N, 6}, "theta_offset");
+  require_shape(t_pre_inv, {N, 4, 4}, "t_pre_inv");
+  require_shape(t_post_inv, {N, 4, 4}, "t_post_inv");
+  require_shape(linearity_joint, {N}, "linearity_joint");
+  require_shape(drop_joint, {N}, "drop_joint");
+  require_shape(left_bilinear, {N, 2}, "left_bilinear");
+  require_shape(right_bilinear, {N, 2}, "right_bilinear");
   auto al = alpha.unchecked<2>(), av = a.unchecked<2>(), dv = d.unchecked<2>(),
        to = theta_offset.unchecked<2>();
   auto tpi = t_pre_inv.unchecked<3>(), tpo = t_post_inv.unchecked<3>();
@@ -1207,6 +1277,7 @@ py::tuple jointlock_rr_artifact_solve_py(
     rr[i].drop_joint = dj(i);
     rr[i].left_bilinear = {lb(i, 0), lb(i, 1)};
     rr[i].right_bilinear = {rb(i, 0), rb(i, 1)};
+    require_joint_roles(rr[i]);
   }
 
   // 16 RrCoeffTensors from the variable-length COO py::lists; type-erase each into

@@ -404,7 +404,7 @@ def srs_polished_native_geometry(kb: Any) -> dict[str, Any] | None:
     return srs_native_geometry(kb, policy=relaxed)
 
 
-def rr_native_geometry(kb: Any) -> dict[str, Any]:
+def rr_native_geometry(kb: Any, *, linearity_joint: int | None = None) -> dict[str, Any]:
     """Baked Raghavan-Roth constants + the elimination-coefficient NUMERIC TENSOR
     for a 6R KinBody (#555). The per-arm sympy->C emitted rr_coeffs() is replaced
     by a sparse tensor: p_sin/p_cos are constant in the target; p_one (14x9) and q
@@ -413,19 +413,37 @@ def rr_native_geometry(kb: Any) -> dict[str, Any]:
     A generic C++ rr_eval_coeffs evaluates them, so the single shipped ext covers
     every RR arm with no per-arm code. Single source shared by the runtime native
     path and (eventually) the emit; mathematically identical to the lambdified RR
-    (validated ~1e-14)."""
+    (validated ~1e-14).
+
+    ``linearity_joint`` overrides the AE-3 choice (default: the cached best, as
+    production bakes it), so the native path can be checked under every choice.
+    """
     import sympy as sp
 
     from ssik.kinematics.poe_to_dh import poe_to_dh
-    from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar, _derive_pq_for_arm
+    from ssik.solvers.ikgeo._raghavan_roth import (
+        _cached_best_leftvar,
+        _cached_derivation,
+        _derive_pq_for_arm,
+    )
 
     if len(kb.joints) != 6:
         raise ValueError(f"rr_native_geometry requires a 6R chain, got {len(kb.joints)}")
     dh = poe_to_dh(kb)
     alpha, a, d = dh.to_dh_tuple()
     at, bt, dt = tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())
-    lin = int(_cached_best_leftvar(at, bt, dt))
-    *_fns, meta = _derive_pq_for_arm(at, bt, dt, linearity_joint=lin)
+    if linearity_joint is None:
+        lin = int(_cached_best_leftvar(at, bt, dt))
+    elif linearity_joint in (0, 1, 2):
+        lin = int(linearity_joint)
+    else:
+        raise ValueError(f"linearity_joint must be 0, 1 or 2; got {linearity_joint!r}")
+    # Reuse the process-wide derivation when it carries the symbolic matrices
+    # (the AE-3 pick has usually just derived every choice); an entry primed
+    # from a shipped artifact carries only callables, so derive afresh then.
+    *_fns, meta = _cached_derivation(at, bt, dt, lin)
+    if "_sym_q" not in meta:
+        *_fns, meta = _derive_pq_for_arm(at, bt, dt, linearity_joint=lin)
     tsyms = list(cast("list[Any]", meta["_sym_t_target"]))
 
     # Shared monomial basis: exponent tuple -> index; stored as up to-3 factor
