@@ -737,7 +737,7 @@ sols = ur5_ik.solve(T_target)                                # native by default
 sols = ur5_ik.solve(T_target, native=False)                  # identical algorithm, pure Python
 ```
 
-- **Same answers.** Native reproduces the Python result's solution *set*. Without a seed the *order* and the near-singular *representative* may differ (numpy vs Eigen), and redundant-7R arms may sample the self-motion manifold differently; with a seed the nearest solution is stable. Parity is gated in CI against the Python `solve()` across every arm and option (limits / seed / max / tolerance).
+- **Same answers.** Native reproduces the Python result's solution *set*, with every angle in the same representative ([the ±π convention](docs/api.md#angle-representatives)). Without a seed the *order* may differ (numpy vs Eigen), and redundant-7R arms may sample the self-motion manifold differently; with a seed the nearest solution is stable. Parity is gated in CI against the Python `solve()` across every arm and option (limits / seed / max / tolerance).
 - **Automatic fallback.** Where the native extension isn't bundled (Windows wheels, source installs), `solve()` transparently runs the identical pure-Python path — it never fails for unavailability. Pass `native=False` to force it explicitly (e.g. for bit-reproducible results across machines).
 ### Using ssik from C++ (no Python)
 

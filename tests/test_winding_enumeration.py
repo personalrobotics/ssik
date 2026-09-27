@@ -331,6 +331,7 @@ def test_expansion_order_is_the_ascending_cartesian_product(ur5: ssik.Manipulato
 # soundness below instead of set equality.
 _EXACT_NATIVE_ARMS = [
     "universal_robots.ur5e_ik",  # three_parallel, 5 wide joints -> x32
+    "universal_robots.ur3e_ik",  # joint 2 limits exactly [-pi, pi]: both ends of the cut
     "fanuc.m710ic_ik",  # spherical_two_parallel
     "ufactory.xarm6_ik",  # general_6r (RR)
     "abb.irb1600_ik",  # wide joint with a 3-representative span
@@ -340,6 +341,20 @@ _EXACT_NATIVE_ARMS = [
     "kinova.jaco2_ik",  # continuous joints, never enumerated
 ]
 
+# Poses with a joint exactly on the +-pi cut (#596), where each solver picks a
+# side ad hoc and the backends used to return representatives 2*pi apart.
+_CUT_POSES = {
+    # Home-like pose: theta_offset[0] = pi puts the DH cut at q0 = 0, which came
+    # back as q0 = -2*pi from both backends, and other continuous joints flipped.
+    "kinova.jaco2_ik": [[0.0, 4.207047497, 3.386762076, 2.733640661, 1.98456641, -3.12438615]],
+    # Elbow folded exactly to pi on a [-pi, pi] joint: +pi on one backend and -pi
+    # on the other, which also reordered the seeded ranking.
+    "universal_robots.ur3e_ik": [[1.2, -2.0, np.pi, -1.3, 1.1, -0.6]],
+}
+# At the fold the elbow is a double root, so the backends agree on the other
+# joints only to ~1e-6 there; a 2*pi flip is still six orders beyond this.
+_CUT_TOL = 1e-5
+
 
 def _module(arm: str):
     import importlib
@@ -347,26 +362,70 @@ def _module(arm: str):
     return importlib.import_module(f"ssik.prebuilt.{arm}")
 
 
+def _continuous(kb) -> np.ndarray:
+    return np.array([j.joint_type == "revolute" and j.limits is None for j in kb.joints])
+
+
+def _same_config(kb, a: np.ndarray, b: np.ndarray, tol: float) -> bool:
+    """The parity contract: a continuous joint is compared on the circle (its
+    coordinate is a representative, not a configuration), every other joint by
+    its coordinate, since a finite joint's +-pi really are 2*pi apart."""
+    d = np.abs(np.asarray(a) - np.asarray(b))
+    circ = np.abs((d + np.pi) % TWO_PI - np.pi)
+    return float(np.max(np.where(_continuous(kb), circ, d))) <= tol
+
+
+def _same_set(kb, A: list[Solution], B: list[Solution], tol: float) -> bool:
+    if len(A) != len(B):
+        return False
+    left = list(B)
+    for a in A:
+        k = next((k for k, b in enumerate(left) if _same_config(kb, a.q, b.q, tol)), None)
+        if k is None:
+            return False
+        left.pop(k)
+    return True
+
+
 @pytest.mark.skipif(not native_available(), reason="native extension not built")
 @pytest.mark.parametrize("arm", _EXACT_NATIVE_ARMS)
 def test_native_enumeration_matches_python(arm: str) -> None:
     m = _module(arm)
+    kb = m._KB
+    cont = _continuous(kb)
     rng = np.random.default_rng(0)
-    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in m._KB.joints]
-    for _ in range(6):
-        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+    ranges = [j.limits if j.limits else (-np.pi, np.pi) for j in kb.joints]
+    poses = [(np.array([rng.uniform(lo, hi) for lo, hi in ranges]), 1e-6, False) for _ in range(6)]
+    poses += [(np.array(q), _CUT_TOL, True) for q in _CUT_POSES.get(arm, [])]
+    for q, tol, cut in poses:
         T = m.fk(q)
         nat, pyth = m.solve(T, native=True), m.solve(T, native=False)
         assert len(nat) == len(pyth), f"{arm}: {len(nat)} native vs {len(pyth)} python"
-        key = lambda s: tuple(np.round(s.q, 6))  # noqa: E731
-        assert {key(s) for s in nat} == {key(s) for s in pyth}, f"{arm}: different lifts"
+        assert _same_set(kb, nat, pyth, tol), f"{arm}: different lifts at q={q.tolist()}"
+        # One representative for a continuous joint: (-pi, pi], never -2*pi.
+        for s in nat + pyth:
+            assert np.all((s.q[cont] > -np.pi) & (s.q[cont] <= np.pi)), f"{arm}: {s.q}"
 
-        # Ranked order must agree too, not just the set.
-        a = m.solve(T, q_seed=q, max_solutions=12, native=True)
-        b = m.solve(T, q_seed=q, max_solutions=12, native=False)
-        assert len(a) == len(b)
-        for i, (u, v) in enumerate(zip(a, b, strict=True)):
-            assert np.max(np.abs(u.q - v.q)) < 1e-6, f"{arm}: rank {i} differs"
+        # Ranked order must agree too, not just the set -- from the seed itself
+        # and, for a finite joint on the cut, from the far end of its range.
+        seeds = [q]
+        if cut and np.any(np.isclose(q, np.pi)):
+            seeds.append(np.where(np.isclose(q, np.pi), -np.pi, q))
+        for seed in seeds:
+            a = m.solve(T, q_seed=seed, max_solutions=12, native=True)
+            b = m.solve(T, q_seed=seed, max_solutions=12, native=False)
+            assert len(a) == len(b)
+            for i, (u, v) in enumerate(zip(a, b, strict=True)):
+                assert _same_config(kb, u.q, v.q, tol), f"{arm}: rank {i} differs, seed {seed}"
+            if cut:
+                # With a seed the nearest solution is stable: the posed
+                # configuration, in the representative at the seed's end of a
+                # [-pi, pi] joint (enumeration off: that span is not lifted).
+                for native in (True, False):
+                    top = m.solve(
+                        T, q_seed=seed, max_solutions=1, native=native, enumerate_windings=False
+                    )
+                    assert _same_config(kb, top[0].q, seed, tol), f"{arm}: nearest {top[0].q}"
 
 
 @pytest.mark.skipif(not native_available(), reason="native extension not built")

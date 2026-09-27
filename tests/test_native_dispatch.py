@@ -60,6 +60,19 @@ def _set_match(A: list[Any], B: list[Any], tol: float = 1e-3) -> bool:
     return len(A) == len(B) and all(any(_close(a.q, b.q, tol) for b in B) for a in A)
 
 
+def _same_config(kb: Any, a: Any, b: Any, tol: float = 1e-3) -> bool:
+    """Continuous joints on the circle (the coordinate is only a representative),
+    every other joint by coordinate: a finite joint's representative is the
+    point of the comparison, since its +-pi are 2*pi apart."""
+    for i, joint in enumerate(kb.joints):
+        d = float(a[i] - b[i])
+        if joint.joint_type == "revolute" and joint.limits is None:
+            d = _wrap(d)
+        if abs(d) >= tol:
+            return False
+    return True
+
+
 def _subset(A: list[Any], B: list[Any], tol: float = 1e-3) -> bool:
     return all(any(_close(a.q, b.q, tol) for b in B) for a in A)
 
@@ -110,11 +123,12 @@ def test_native_matches_python(arm_name: str) -> None:
         ), f"{arm_name}: respect_limits=False"
 
         # respect_limits="wrap": the raw set, nothing dropped, each joint in its
-        # range where a +-2pi representative is -- compared WITHOUT wrapping, since
-        # the representative is the point of the mode. One representative per
-        # branch (enumerate_windings=False) is what matches the raw set 1:1; with
-        # enumeration (the default, #562) wrap also lifts wide-limit joints, and the
-        # two backends must still agree on that set.
+        # range where a +-2pi representative is -- a limited joint compared WITHOUT
+        # wrapping, since the representative is the point of the mode; a continuous
+        # joint has no range, so it is compared on the circle. One representative
+        # per branch (enumerate_windings=False) is what matches the raw set 1:1;
+        # with enumeration (the default, #562) wrap also lifts wide-limit joints,
+        # and the two backends must still agree on that set.
         raw_n = len(mod.solve(t, respect_limits=False))
         for enumerate_windings in (False, True):
             py_w = mod.solve(t, respect_limits="wrap", enumerate_windings=enumerate_windings)
@@ -126,7 +140,7 @@ def test_native_matches_python(arm_name: str) -> None:
                 assert len(py_w) == raw_n, f"{arm_name}: wrap drops nothing"
             else:
                 assert len(py_w) >= raw_n, f"{arm_name}: wrap lifts, never drops"
-            assert all(any(np.max(np.abs(a.q - b.q)) < 1e-3 for b in py_w) for a in nat_w), (
+            assert all(any(_same_config(kb, a.q, b.q) for b in py_w) for a in nat_w), (
                 f"{arm_name}: wrap representatives ({enumerate_windings})"
             )
 

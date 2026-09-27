@@ -95,6 +95,32 @@ The `solve()` pipeline already applies these by default (when `respect_limits=Tr
       show_root_heading: false
       show_root_full_path: false
 
+### Angle representatives
+
+Every `solve()` result, on either backend and under every `respect_limits`
+mode, reports each angle in one canonical coordinate. It is chosen before the
+limit pass, seed ranking and winding enumeration, so all of them see the same
+values:
+
+- A **continuous** revolute joint (`limits=None`) is reported in `(-pi, pi]`.
+  An angle within round-off (`1e-9` rad) of the cut is reported as exactly
+  `+pi`. Either side of the cut is the same configuration of a continuous
+  joint, so compare such joints on the circle.
+- A **finite** revolute joint whose limits admit more than one representative
+  of `pi` (exactly `[-pi, pi]`, or the UR family's `[-2*pi, 2*pi]`) reports an
+  angle within `1e-6` rad of `pi` (modulo `2*pi`) on the `+pi` side: the
+  in-limit representative nearest `+pi`, and exactly `+pi` when a limit sits
+  there, so that both ends of a `[-pi, pi]` range stay available to a seed.
+- Every other angle keeps the solver's value, then `wrap_to_limits`, winding
+  enumeration and `rewrap_to_seed` apply as documented below.
+
+The coordinate moves by a multiple of `2*pi`, which is the same configuration.
+The only other movements are the `1e-9` snap and the snap onto a limit at
+`+pi`, which is at most `1e-6` rad. The finite-joint band is that wide because
+where a folded elbow meets the cut, the angle is a double root and the solvers
+determine it only to a few `1e-7` rad. The derivation is at
+`ssik.postprocess._CUT_BAND`.
+
 ### Winding representatives
 
 A revolute joint whose limits span more than one turn (the UR family's

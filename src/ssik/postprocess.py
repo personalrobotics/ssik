@@ -403,6 +403,107 @@ def _snap(x: float) -> float:
     return float(round(x / _RANK_QUANTUM))
 
 
+# Two tolerances decide which coordinate an angle at the +-pi cut gets (#596).
+# The solvers pick a side of the cut ad hoc (per atan2 site, per backend, and
+# theta_offset moves the cut), so at an exact pi the two backends can return a
+# value just either side of it. They differ in what they are allowed to cost.
+#
+# _CUT_SNAP moves a value onto exactly pi, which moves the configuration, so it
+# is held to round-off: the spread between the backends' computations of one
+# well-conditioned angle (<= 1e-12 measured at exact-pi poses). It is the grid
+# the seeded ranking already uses to make equal things compare equal across
+# backends, and a snap this size moves the tool by at most 1e-9 x reach. A
+# wider snap is not free: a redundant arm samples its self-motion manifold
+# densely enough that accurate values land within 1e-6 of pi on ordinary poses
+# (xArm 7 joint 7, a few per pose), and snapping those broke FK by ~1e-6.
+#
+# _CUT_BAND only chooses between representatives 2*pi apart, which costs
+# nothing, so it can be as wide as the solvers' angle uncertainty at the cut.
+# That is round-off except where the cut coincides with a boundary singularity:
+# an elbow folded back on itself (UR joint 2 at pi) is a double root of its
+# subproblem, so round-off r in its cosine becomes an angle error of sqrt(2 r),
+# about 4e-7 for r ~ 1e-13. Measured over 150 exact-fold poses per UR arm: up to
+# 3.6e-7, with 1-2% of poses beyond 1e-7. The band is 1e-6 =
+# subproblem_numerical / 10: above that uncertainty, three orders below
+# subproblem_dedup (1e-3), so it cannot confuse distinct branches. The one case
+# where it moves a value is a joint whose limit sits on the cut (exactly
+# [-pi, pi]). There a value just inside +pi has one in-limit representative and
+# exact pi has two (both ends of the range), so the backends' seeded choices
+# would still differ; the value is set to exactly pi instead. That moves the
+# tool by at most 1e-6 x reach, well inside the subproblem_numerical (1e-5) FK
+# gate, and every shipped joint of this kind is on a 6R arm, whose isolated
+# solutions land in the band only at a genuine exact-pi pose.
+#
+# Continuous joints need only the snap: their parity is compared on the circle,
+# where values either side of the cut are already the same configuration.
+_CUT_SNAP = _RANK_QUANTUM  # C++ kCutSnap
+_CUT_BAND = 1e-6  # DEFAULT_TOLERANCE_POLICY.subproblem_numerical / 10; C++ kCutBand
+
+
+def _pi_class_offset(q_i: float) -> float:
+    """Distance from ``q_i`` to the nearest odd multiple of ``pi``."""
+    return abs(abs(_wrap_to_pi(q_i)) - math.pi)
+
+
+def _canonicalize_representatives(sols: list[Solution], kb: KinBody) -> list[Solution]:
+    """Pick one deterministic coordinate for every angle that has a choice (#596).
+
+    - **continuous** revolute joints (``limits is None``) are wrapped to
+      ``(-pi, pi]``, and a value within :data:`_CUT_SNAP` of the cut is set to
+      exactly ``+pi``;
+    - a **finite** revolute joint whose limits admit two or more
+      representatives of ``pi`` (for example exactly ``[-pi, pi]``, or UR's
+      ``[-2*pi, 2*pi]``) takes, when its value is within :data:`_CUT_BAND` of
+      the ``pi`` class, the ``2*pi`` shift nearest the in-limit representative
+      closest to ``+pi`` -- or exactly that representative when a limit sits on
+      it. Every other finite value is left alone for :func:`wrap_to_limits` and
+      winding enumeration, as before;
+    - prismatic joints are untouched.
+
+    Values away from the cut keep their exact bits. A coordinate moves only by a
+    multiple of ``2*pi``, except for the snaps onto ``pi`` (round-off for a
+    continuous joint, the band for a limit on the cut), each bounded by its
+    tolerance.
+    Idempotent, so the repeated finalize passes of one solve agree.
+    """
+    # (joint index, in-limit representative of pi nearest +pi or None for a
+    # continuous joint, whether a limit sits on that representative)
+    targets: list[tuple[int, float | None, bool]] = []
+    for i, joint in enumerate(kb.joints):
+        if joint.joint_type != "revolute":
+            continue
+        if joint.limits is None:
+            targets.append((i, None, False))
+            continue
+        lo, hi = joint.limits
+        reps = [v for v in _reps(math.pi, lo, hi) if lo <= v <= hi]
+        if len(reps) >= 2:
+            rep = min(reps, key=lambda v: abs(v - math.pi))
+            on_limit = abs(rep - lo) <= _CUT_BAND or abs(rep - hi) <= _CUT_BAND
+            targets.append((i, rep, on_limit))
+    if not targets:
+        return sols
+    out: list[Solution] = []
+    for sol in sols:
+        q_new: NDArray[np.float64] | None = None
+        for i, pi_rep, on_limit in targets:
+            q_i = float(sol.q[i])
+            if pi_rep is None:
+                if -math.pi + _CUT_SNAP < q_i < math.pi - _CUT_SNAP:
+                    continue
+                w = math.pi if _pi_class_offset(q_i) <= _CUT_SNAP else _wrap_to_pi(q_i)
+            elif _pi_class_offset(q_i) <= _CUT_BAND:
+                w = pi_rep if on_limit else q_i + _TWO_PI * round((pi_rep - q_i) / _TWO_PI)
+            else:
+                continue
+            if w != q_i:
+                if q_new is None:
+                    q_new = np.asarray(sol.q, dtype=np.float64).copy()
+                q_new[i] = w
+        out.append(sol if q_new is None else replace(sol, q=q_new))
+    return out
+
+
 def _rank_key(
     deltas: list[float], metric: str, q: NDArray[np.float64]
 ) -> tuple[float, tuple[float, ...], tuple[float, ...]]:
@@ -641,7 +742,9 @@ def finalize_solutions(
 
     This is the one definition of the tail that ``Manipulator.solve`` and every
     emitted artifact ``solve()`` used to hand-duplicate (four copies, already
-    drifted). Order matters and is fixed: ``wrap_to_limits`` (try +/-2pi to bring
+    drifted). Order matters and is fixed: :func:`_canonicalize_representatives`
+    (one coordinate per angle at the +-pi cut, every mode), then
+    ``wrap_to_limits`` (try +/-2pi to bring
     branches into range) then ``respect_limits`` (drop the rest); then, if a seed
     is given, ``within_seed_tolerance`` (hard bound) then ``nearest_to_seed``
     (rank); then truncate to ``max_solutions``.
@@ -652,7 +755,7 @@ def finalize_solutions(
         so the full geometric set comes back in canonical representatives --
         the raw ``False`` set is unwrapped, and a limit-margin score on it
         reads an in-range branch as a violation; ``False`` leaves the set as
-        the solver produced it.
+        the solver produced it, apart from the canonical representative.
     :param in_limits_fallback: optional zero-arg callable invoked when the limit
         pass empties the set -- the redundant-7R exact in-limits resolver (#359),
         which recovers a narrow in-limits arc the coarse sweep missed. ``None``
@@ -682,6 +785,11 @@ def finalize_solutions(
         means it was never built.
     :returns: the post-processed solution list.
     """
+    # One representative per angle before anything else looks at the values
+    # (#596): the solvers choose a side of the +-pi cut ad hoc, so without this
+    # the two backends disagree by 2*pi on the same configuration, and on a
+    # [-pi, pi] joint even the seeded ranking diverges.
+    sols = _canonicalize_representatives(sols, kb)
     if respect_limits == "wrap":
         sols = wrap_to_limits(sols, kb)
         if counts is not None:

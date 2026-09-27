@@ -205,6 +205,74 @@ inline std::vector<double> winding_reps(double q, double lo, double hi) {
   return out;
 }
 
+// Which coordinate an angle at the +-pi cut gets (#596); postprocess._CUT_SNAP
+// and _CUT_BAND, where both values are argued in full. kCutSnap moves a value
+// onto exactly pi, so it is held to round-off (the rank grid). kCutBand only
+// chooses between representatives 2pi apart, so it is as wide as the angle
+// uncertainty at the cut (a folded elbow is a double root, ~sqrt(2 x round-off),
+// measured up to 3.6e-7): subproblem_numerical / 10. It moves a value only on a
+// joint whose limit sits on the cut, onto exactly pi.
+inline constexpr double kCutSnap = finalize_detail::kRankQuantum;
+inline constexpr double kCutBand = 1e-6;
+
+// Distance from q to the nearest odd multiple of pi. (postprocess._pi_class_offset)
+inline double pi_class_offset(double q) {
+  return std::abs(std::abs(finalize_detail::wrap_to_pi(q)) - M_PI);
+}
+
+// One deterministic coordinate for every angle that has a choice (#596).
+// Continuous revolute joints wrap to (-pi, pi], a value within kCutSnap of the
+// cut becoming exactly +pi. A finite revolute joint whose limits admit two or
+// more representatives of pi, with a value within kCutBand of the pi class,
+// takes the 2pi shift nearest the in-limit representative closest to +pi, or
+// exactly that representative when a limit sits on it. Everything else,
+// including every value away from the cut, keeps its exact bits. Idempotent.
+// (postprocess._canonicalize_representatives)
+template <int N>
+std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> sols,
+                                                      const JointConsts<N>& consts,
+                                                      const JointLimits<N>& lim) {
+  constexpr double kTwoPi = 2.0 * M_PI;
+  std::array<bool, N> active{};
+  std::array<bool, N> continuous{};
+  std::array<double, N> pi_rep{};
+  std::array<bool, N> on_limit{};
+  bool any = false;
+  for (int i = 0; i < N; ++i) {
+    if (consts.type[i] != JointType::Revolute) continue;
+    if (!lim.present[i]) {
+      active[i] = continuous[i] = any = true;
+      continue;
+    }
+    std::vector<double> reps;
+    for (double v : winding_reps(M_PI, lim.lo[i], lim.hi[i]))
+      if (lim.lo[i] <= v && v <= lim.hi[i]) reps.push_back(v);
+    if (reps.size() < 2) continue;
+    double best = reps[0];
+    for (double v : reps)
+      if (std::abs(v - M_PI) < std::abs(best - M_PI)) best = v;
+    active[i] = any = true;
+    pi_rep[i] = best;
+    on_limit[i] =
+        std::abs(best - lim.lo[i]) <= kCutBand || std::abs(best - lim.hi[i]) <= kCutBand;
+  }
+  if (!any) return sols;
+  for (auto& sol : sols) {
+    for (int i = 0; i < N; ++i) {
+      if (!active[i]) continue;
+      const double qi = sol.q[i];
+      if (continuous[i]) {
+        if (-M_PI + kCutSnap < qi && qi < M_PI - kCutSnap) continue;
+        sol.q[i] = pi_class_offset(qi) <= kCutSnap ? M_PI : finalize_detail::wrap_to_pi(qi);
+      } else if (pi_class_offset(qi) <= kCutBand) {
+        sol.q[i] =
+            on_limit[i] ? pi_rep[i] : qi + kTwoPi * std::round((pi_rep[i] - qi) / kTwoPi);
+      }
+    }
+  }
+  return sols;
+}
+
 // How many configurations expand_windings would produce, without building them.
 // Keeps diagnostics truthful when a cap means the set is never materialized.
 template <int N>
@@ -496,6 +564,9 @@ std::vector<Solution<N>> finalize_solutions(
     std::vector<Solution<N>> sols, const JointConsts<N>& consts, const JointLimits<N>& lim,
     const ArtifactParams<N>& p,
     const std::function<std::vector<Solution<N>>()>& in_limits_fallback = nullptr) {
+  // One representative per angle before anything else looks at the values
+  // (#596): the solvers choose a side of the +-pi cut ad hoc.
+  sols = canonicalize_representatives<N>(std::move(sols), consts, lim);
   if (p.respect_limits) {
     sols = wrap_to_limits<N>(sols, consts, lim);
     if (!p.wrap_only) {
