@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 
 from ssik._kinbody import Joint, KinBody, Link
 from ssik._urdf import load_urdf_kinbody_normalized
@@ -242,6 +242,10 @@ def test_synthetic_spherical_two_parallel_fk_roundtrip(
 
 
 @given(non_singular_q6r())
+# Near Puma's shoulder fold the q1 SP4 is nearly tangent (1 - |cos| = 1e-7),
+# so q* has a twin root 9.2e-4 rad away. Both are exact solutions; dedup
+# used to merge them within 1e-3 and could keep the twin (#566, #559).
+@example(np.array([0.0, -0.6112615544956004, 2.841592653589793, -1.0, 1.0, 0.0]))
 @settings(
     max_examples=500,
     deadline=None,
@@ -251,12 +255,10 @@ def test_random_q_roundtrip_fk(puma_kb: Any, q_star: np.ndarray) -> None:
     """500 random non-singular q*: seeded q* is recovered, all returned
     solutions reproduce T_star under FK.
 
-    Seed-recovery tolerance is 5e-4 rad (not 1e-4): when the underlying
-    SP6 / SP3 quartic has near-double real roots at unanticipated
-    near-singular poses, dedup-by-residual picks a representative correct
-    in T-space (FK closure at machine precision, gated at 1e-8 above)
-    but drifted by O(1e-4) rad in q-space. The tolerance reflects what
-    the solver numerically achieves rather than an aspirational limit.
+    The solver computes q*'s own branch to machine precision, so recovery
+    is checked at 1e-4 rad. A miss here is a lost branch, not drift: near a
+    fold q* has a distinct twin root within a milliradian, and the returned
+    set must contain both (#559, #600).
     """
     T_star = _fk(puma_kb, q_star)
     solutions, is_ls = spherical_two_parallel.solve(puma_kb, T_star)
@@ -266,7 +268,7 @@ def test_random_q_roundtrip_fk(puma_kb: Any, q_star: np.ndarray) -> None:
         assert np.allclose(_fk(puma_kb, sol.q), T_star, atol=1e-8), (
             f"FK mismatch at q={sol.q.tolist()}"
         )
-    assert any(_q_matches(s.q, q_star, tol=5e-4) for s in solutions), (
+    assert any(_q_matches(s.q, q_star, tol=1e-4) for s in solutions), (
         f"seeded q*={q_star.tolist()} not recovered"
     )
 

@@ -1,13 +1,14 @@
 // Shared self-contained-artifact conformance check (THE GATE). Each per-arm test
 // is a 3-line main() over this: it includes ONLY the generated artifact + its
 // oracle golden (no pybind, no Python) and asserts ssik::<arm>::solve(T) closes
-// FK and agrees with the Python oracle set under wrap-to-pi dedup.
+// FK and agrees with the Python oracle set under same-root dedup (#600).
 #pragma once
 
 #include <array>
 #include <cmath>
 #include <cstdio>
 
+#include "ssik_cpp/dedup.hpp"
 #include "ssik_cpp/fk.hpp"
 
 namespace ssik::artifact_test {
@@ -67,10 +68,16 @@ int run(const char* name, const JointConsts<DOF>& c, const Cases& cases, SolveFn
         if (wrap_close<DOF>(e, s.q, 1e-3)) { found = true; break; }
       if (!found) miss = true;  // C++ dropped a solution the oracle found
     }
+    // A duplicate is two returned solutions that are the same root (#600).
+    // Two within 1e-3 are not enough: near a fold, twin roots a fraction of a
+    // milliradian apart are distinct branches the golden also contains.
     bool has_dup = false;
+    const double floor = same_root_floor(T);
     for (std::size_t i = 0; i < sols.size(); ++i)
       for (std::size_t j = i + 1; j < sols.size(); ++j)
-        if (wrap_close<DOF>(sols[i].q, sols[j].q, 1e-3)) has_dup = true;  // duplicate branch
+        if (wrap_close<DOF>(sols[i].q, sols[j].q, 1e-3) &&
+            is_same_root<DOF>(c, T, sols[i], sols[j], floor))
+          has_dup = true;  // duplicate branch
     if (sols.size() > tc.solutions.size()) extensions += sols.size() - tc.solutions.size();
     if (miss) {
       ++incomplete;

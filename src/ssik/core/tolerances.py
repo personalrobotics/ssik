@@ -67,13 +67,21 @@ class TolerancePolicy:
             coefficient or sin-of-angle-between-axes below this value
             marks the input as degenerate and SP6/aux return
             ``([], is_ls=True)`` rather than produce nonsense.
-        subproblem_dedup: angle-space tolerance for deduplicating SP5/SP6
-            solutions. Two solutions within this radian distance (on every
-            joint, mod 2pi) collapse to one. Larger than
-            ``subproblem_numerical`` because the quartic-root backsolve
-            amplifies residual-level error into coarser angle-level error;
-            default ``1e-3`` (~0.06 degrees) is the physical
-            indistinguishability threshold for robot kinematics.
+        subproblem_dedup: per-joint radian radius (mod 2pi) of the
+            duplicate search; default ``1e-3``. It is *not* a claim that
+            closer solutions are indistinguishable (#600). A solution is a
+            distinct exact root: for arms whose roots are isolated (6R
+            solvers, the 6-DOF LM backstop, the 6R artifacts and their
+            native twins) two candidates within this radius on every joint
+            merge only if they are the same root -- their midpoint also
+            closes FK (``ssik.refinement.dedup_same_root``). Near a fold,
+            two genuine roots a fraction of a milliradian apart are both
+            returned, so a pose can report 8 solutions where it once
+            reported 4. Pairs farther apart are distinct without that test,
+            which keeps it off the hot path. Where solutions sample a
+            continuum instead (a redundant 7R arm's self-motion manifold)
+            the radius remains the sampling resolution: samples closer than
+            it merge. SP5's internal root merge also uses it.
     """
 
     axis_parallel: float = 1e-8

@@ -669,7 +669,7 @@ policy = TolerancePolicy(
     subproblem_feasibility=1e-9,# is_ls boundary inside SP1-SP6
     subproblem_numerical=1e-5,  # FK-closure filter on algebraic candidates
     subproblem_degeneracy=1e-12,# rank-drop threshold; below this, return []
-    subproblem_dedup=1e-3,      # angle-space tolerance for collapsing duplicates
+    subproblem_dedup=1e-3,      # duplicate-search radius; only the same root merges
 )
 sols = my_arm_ik.solve(T_target, policy=policy)
 ```

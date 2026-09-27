@@ -16,6 +16,7 @@
 
 #include <Eigen/Dense>
 
+#include "ssik_cpp/dedup.hpp"
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/newton.hpp"
@@ -91,7 +92,7 @@ inline std::vector<Solution<6>> spherical_two_parallel_solve(const JointConsts<6
   }
 
   // verify_candidates tail: FK-closure gate (+ optional Newton polish), then
-  // dedup_by_wrap_close (lowest fk_residual per cluster, first-seen order).
+  // dedup_same_root (merge only the same root, #600).
   std::vector<Solution<6>> verified;
   for (const auto& q : candidates) {
     const Pose fk_q = fk<6>(c, q);
@@ -104,29 +105,7 @@ inline std::vector<Solution<6>> spherical_two_parallel_solve(const JointConsts<6
     }
   }
 
-  std::vector<Solution<6>> deduped;
-  for (const auto& cand : verified) {
-    int match = -1;
-    for (int j = 0; j < static_cast<int>(deduped.size()); ++j) {
-      bool close = true;
-      for (int i = 0; i < 6; ++i) {
-        if (std::abs(detail::wrap_pi(cand.q[i] - deduped[j].q[i])) > tol.dedup) {
-          close = false;
-          break;
-        }
-      }
-      if (close) {
-        match = j;
-        break;
-      }
-    }
-    if (match == -1) {
-      deduped.push_back(cand);
-    } else if (cand.fk_residual < deduped[match].fk_residual) {
-      deduped[match] = cand;
-    }
-  }
-  return deduped;
+  return dedup_same_root<6>(verified, c, T, tol.dedup);
 }
 
 // Full artifact-contract solve (#513): core solve (force-refined, as the artifact

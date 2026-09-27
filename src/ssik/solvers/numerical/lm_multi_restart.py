@@ -33,7 +33,7 @@ from numpy.typing import NDArray
 from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.refinement import dedup_by_wrap_close, kinbody_jacobian, lm_refine
+from ssik.refinement import dedup_by_wrap_close, dedup_same_root, kinbody_jacobian, lm_refine
 from ssik.subproblems._rotation import rotation_matrix
 
 __all__ = ["solve"]
@@ -99,7 +99,8 @@ def solve(
     :param T_target: 4x4 target end-effector pose in the base frame.
     :param policy: tolerance policy. ``subproblem_numerical`` is the
         per-restart FK convergence threshold. ``subproblem_dedup`` is the
-        wrap-to-pi distance below which two solutions collapse to one.
+        wrap-to-pi radius within which two converged restarts are tested
+        for being the same root (6-DOF) or merged outright (redundant).
     :param allow_refinement: kept for solver-protocol consistency. The
         whole solver IS Newton refinement, so this kwarg has no effect;
         accepted to match :func:`ssik.solvers.ikgeo.spherical_two_parallel.solve`
@@ -166,11 +167,16 @@ def solve(
         )
 
     # Sort by FK residual (smallest first) for stable downstream selection,
-    # then dedup. dedup_by_wrap_close keeps the first occurrence on
-    # collision -- with sort-by-residual that's the lowest-residual
-    # representative.
+    # then dedup; both merges keep the first occurrence of a cluster, which
+    # with sort-by-residual is the lowest-residual representative. A
+    # non-redundant chain has isolated roots, so restarts merge only when
+    # they converged to the same root (#600). A redundant chain's restarts
+    # sample a self-motion continuum, merged at the sampling resolution.
     candidates.sort(key=lambda s: s.fk_residual)
-    solutions = dedup_by_wrap_close(candidates, policy.subproblem_dedup)
+    if n_dof <= 6:
+        solutions = dedup_same_root(candidates, policy.subproblem_dedup, fk_fn, T_target)
+    else:
+        solutions = dedup_by_wrap_close(candidates, policy.subproblem_dedup)
     _LOG.info(
         "%s: %d/%d restarts converged -> %d unique solutions (is_ls=%s)",
         _SOLVER_NAME,

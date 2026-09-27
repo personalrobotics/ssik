@@ -50,11 +50,14 @@ _FK_EYE4 = np.eye(4, dtype=np.float64)
 _FK_EYE4.flags.writeable = False
 
 __all__ = [
+    "dedup_same_root",
+    "is_same_root",
     "kinbody_fk_jacobian_batch",
     "kinbody_jacobian",
     "lm_refine",
     "lm_refine_batch",
     "numerical_jacobian",
+    "same_root_floor",
     "se3_log_residual",
     "seeded_track",
     "verify_candidates",
@@ -918,6 +921,12 @@ def dedup_by_wrap_close(candidates: list[Solution], tol: float) -> list[Solution
     Streaming order matches the first-match-wins semantics so output
     ordering is stable.
 
+    This is a *sampling-resolution* merge, not a root identity: it is for
+    sets that sample a continuum (a redundant arm's self-motion manifold)
+    or carry no FK to test with. Solvers whose solutions are isolated roots
+    use :func:`dedup_same_root`, which merges two candidates only when they
+    are the same root (#600).
+
     Two implementations under one entry point. Cython compiles
     ``cython.compiled`` to ``True`` and dead-strips the other branch:
 
@@ -936,6 +945,100 @@ def dedup_by_wrap_close(candidates: list[Solution], tol: float) -> list[Solution
     if cython.compiled:
         return _dedup_scalar(candidates, tol)
     return _dedup_numpy(candidates, tol)
+
+
+# Round-off allowance, in units of machine epsilon times the target's scale,
+# for an FK residual evaluated against ``t_target``. A 6-7 joint POE chain
+# accumulates a few dozen roundings, so exact roots evaluate to ~1e-16..1e-15
+# on metre-scale arms; 64 eps (1 + ||T||_F) sits just above that.
+_ROUNDOFF_ULPS: float = 64.0
+_EPS: float = float(np.finfo(np.float64).eps)
+
+
+def same_root_floor(t_target: NDArray[np.float64]) -> float:
+    """FK round-off level for residuals measured against ``t_target``.
+
+    Residual differences below this are evaluation noise: the same-root
+    test allows it as slack, and a merge never picks its survivor on a
+    difference this small.
+    """
+    return _ROUNDOFF_ULPS * _EPS * (1.0 + float(np.linalg.norm(t_target)))
+
+
+def is_same_root(
+    q_a: NDArray[np.float64],
+    r_a: float,
+    q_b: NDArray[np.float64],
+    r_b: float,
+    fk_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    t_target: NDArray[np.float64],
+    floor: float,
+) -> bool:
+    """Whether two FK-closing candidates approximate the same root (#600).
+
+    Evaluates the residual at their wrap-aware midpoint. If ``q_a`` and
+    ``q_b`` both approximate one regular root, FK is affine to first order
+    across the segment, so the midpoint residual is at most the mean of the
+    endpoint residuals plus a second-order term; ``r_a + r_b`` bounds both.
+    Two *distinct* roots each close FK, but the segment between them leaves
+    the solution set and the midpoint residual grows with the separation
+    squared times the FK curvature -- ~2e-8 for Puma's fold twins 7.6e-4
+    rad apart (#597), whose endpoints close at 1e-16. A midpoint residual
+    above ``r_a + r_b + floor`` therefore certifies two roots. Below it the
+    pair is unresolvable at the candidates' own accuracy and is merged.
+
+    :param floor: :func:`same_root_floor` of ``t_target`` (hoisted so a
+        dedup pass computes it once).
+    """
+    d = (q_b - q_a + math.pi) % _TWO_PI - math.pi
+    t_err = fk_fn(q_a + 0.5 * d) - t_target
+    r_mid = math.sqrt(float(np.sum(t_err * t_err)))
+    return r_mid <= r_a + r_b + floor
+
+
+def dedup_same_root(
+    candidates: list[Solution],
+    gate: float,
+    fk_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    t_target: NDArray[np.float64],
+) -> list[Solution]:
+    """Merge candidates that are the same root; keep every distinct root (#600).
+
+    A solution is a distinct exact root. Two candidates merge only when
+    :func:`is_same_root` says so, never merely because they are close: near
+    a fold, twin roots a fraction of a milliradian apart are both returned.
+    ``gate`` (``policy.subproblem_dedup``) is only a cheap pre-filter --
+    pairs farther apart than ``gate`` on some joint are distinct without an
+    FK evaluation, so the structural test costs one FK per *near* pair.
+
+    When a merge happens the first-seen candidate survives unless a later
+    one closes FK better by more than :func:`same_root_floor`, so the
+    representative is chosen by the candidate order and genuine accuracy,
+    not by round-off in the last few bits.
+    """
+    if not candidates:
+        return []
+    floor = same_root_floor(t_target)
+    deduped: list[Solution] = []
+    for cand in candidates:
+        match_idx = -1
+        for j, existing in enumerate(deduped):
+            if _q_close(cand.q, existing.q, gate) and is_same_root(
+                cand.q,
+                cand.fk_residual,
+                existing.q,
+                existing.fk_residual,
+                fk_fn,
+                t_target,
+                floor,
+            ):
+                match_idx = j
+                break
+        if match_idx == -1:
+            deduped.append(cand)
+        elif cand.fk_residual < deduped[match_idx].fk_residual - floor:
+            deduped[match_idx] = cand
+    return deduped
 
 
 def verify_candidates(
@@ -962,14 +1065,14 @@ def verify_candidates(
     3. ``fk_residual > fk_atol`` AND ``allow_refinement=True``: run one
        :func:`lm_refine` pass; on success wrap with ``refinement_used="lm"``.
        On failure or when ``allow_refinement=False``: drop the candidate.
-    4. If ``dedup_atol`` is given, collapse solutions whose joint vectors
-       agree (mod 2pi) within ``dedup_atol`` per joint -- keep the one
-       with lower ``fk_residual``.
+    4. If ``dedup_atol`` is given, merge candidates that are the same
+       root (:func:`dedup_same_root`); ``dedup_atol`` is the per-joint
+       pre-filter radius within which the same-root test runs.
 
     The pattern is identical across every solver in
     :mod:`ssik.solvers.ikgeo` and :mod:`ssik.solvers.jointlock`; centralising
     it here keeps one source of truth for the algebraic-first / opt-in-
-    refinement / dedup-by-residual contract that GitHub #74 specifies.
+    refinement / same-root-dedup contract that GitHub #74 and #600 specify.
 
     :param candidates: raw joint vectors produced by the solver's algebraic
         machinery (typically the SP1-SP6 back-substitution branches).
@@ -977,8 +1080,9 @@ def verify_candidates(
     :param t_target: 4x4 target pose in the FK frame.
     :param fk_atol: closure threshold in Frobenius norm.
     :param solver_name: tag stored on each returned :class:`Solution`.
-    :param dedup_atol: per-joint wrap-to-pi tolerance for collapsing
-        equivalent solutions. ``None`` skips deduplication (useful when the
+    :param dedup_atol: per-joint wrap-to-pi radius within which two
+        solutions are tested for being the same root (farther pairs are
+        always distinct). ``None`` skips deduplication (useful when the
         solver has its own dedup invariant).
     :param allow_refinement: opt into Newton polish for near-misses.
     :param refinement_max_iters: cap on Newton iterations per candidate.
@@ -1032,7 +1136,7 @@ def verify_candidates(
         if appended and max_solutions is not None and len(verified) >= max_solutions:
             if dedup_atol is None:
                 return verified[:max_solutions]
-            deduped = dedup_by_wrap_close(verified, dedup_atol)
+            deduped = dedup_same_root(verified, dedup_atol, fk_fn, t_target)
             if len(deduped) >= max_solutions:
                 return deduped[:max_solutions]
 
@@ -1040,7 +1144,7 @@ def verify_candidates(
         if max_solutions is not None:
             return verified[:max_solutions]
         return verified
-    deduped_final = dedup_by_wrap_close(verified, dedup_atol)
+    deduped_final = dedup_same_root(verified, dedup_atol, fk_fn, t_target)
     if max_solutions is not None:
         return deduped_final[:max_solutions]
     return deduped_final

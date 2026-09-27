@@ -43,7 +43,7 @@ import sympy as sp
 from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
-from ssik.refinement import dedup_by_wrap_close, lm_refine
+from ssik.refinement import dedup_same_root, lm_refine
 
 __all__ = [
     "back_substitute",
@@ -1866,27 +1866,14 @@ def solve_all_ik(
         # Early-exit gate (#198): once we have enough unique solutions, stop
         # back-substituting remaining algebraic roots.
         if appended and max_solutions is not None and len(candidates) >= max_solutions:
-            deduped_partial = dedup_by_wrap_close(candidates, dedup_atol)
+            deduped_partial = dedup_same_root(candidates, dedup_atol, fk_fn, t_target)
             if len(deduped_partial) >= max_solutions:
                 return deduped_partial[:max_solutions], False
 
-    # Deduplicate with wrap-to-pi joint distance. Keep the lower-fk_residual
-    # candidate when two collapse.
-    solutions: list[Solution] = []
-    for cand in candidates:
-        dup_idx = None
-        for j, existing in enumerate(solutions):
-            diffs = [
-                abs(((float(cand.q[i] - existing.q[i]) + np.pi) % (2 * np.pi)) - np.pi)
-                for i in range(len(cand.q))
-            ]
-            if max(diffs) < dedup_atol:
-                dup_idx = j
-                break
-        if dup_idx is None:
-            solutions.append(cand)
-        elif cand.fk_residual < solutions[dup_idx].fk_residual:
-            solutions[dup_idx] = cand
+    # Merge only candidates that are the same root (#600): two eigenvalues
+    # can back-substitute to one configuration, but twin roots near a fold
+    # are distinct solutions however close. ``dedup_atol`` is the pre-filter.
+    solutions = dedup_same_root(candidates, dedup_atol, fk_fn, t_target)
 
     if max_solutions is not None and len(solutions) > max_solutions:
         solutions = solutions[:max_solutions]

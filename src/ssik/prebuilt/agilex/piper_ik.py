@@ -55,6 +55,7 @@ from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
+from ssik.refinement import is_same_root as _is_same_root, same_root_floor as _same_root_floor
 import functools as _functools
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
 from ssik.postprocess import finalize_solutions as _ps_finalize
@@ -1090,19 +1091,24 @@ def solve(
         q_ref, resid_ref, iters = refined
         verified.append((q_ref, resid_ref, "lm", iters))
 
-    # Wrap-to-pi dedup; keep lowest fk_residual on collision.
-    # Inner check via ``_q_close_wrap`` -- typed scalar loop, no per-
-    # iteration numpy allocation (#137 Slice 3).
+    # Same-root dedup (#600), mirroring ``ssik.refinement.dedup_same_root``:
+    # a pair within ``dedup_atol`` merges only if its midpoint also
+    # closes FK, so twin roots near a fold both survive. The survivor
+    # changes only on a residual gain above round-off. ``_q_close_wrap``
+    # is the cheap pre-filter (typed scalar loop, #137 Slice 3).
+    _floor = _same_root_floor(T)
     deduped: list[tuple[np.ndarray, float, str, int]] = []
     for cand_q, cand_res, ref_used, ref_iters in verified:
         dup_idx = None
-        for j, (existing_q, _, _, _) in enumerate(deduped):
-            if _q_close_wrap(cand_q, existing_q, dedup_atol):
+        for j, (existing_q, existing_res, _, _) in enumerate(deduped):
+            if _q_close_wrap(cand_q, existing_q, dedup_atol) and _is_same_root(
+                cand_q, cand_res, existing_q, existing_res, _fk, T, _floor
+            ):
                 dup_idx = j
                 break
         if dup_idx is None:
             deduped.append((cand_q, cand_res, ref_used, ref_iters))
-        elif cand_res < deduped[dup_idx][1]:
+        elif cand_res < deduped[dup_idx][1] - _floor:
             deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)
 
     solutions = [

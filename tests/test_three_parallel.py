@@ -303,49 +303,35 @@ def test_random_q_roundtrip_fk(
 
 # ---------------------------------------------------------------------------
 # Regression: issue #56 -- three_parallel dropped the seeded q* on UR5's
-# shoulder-wrist alignment pose (q0=0, q5=0) where SP6's Bezout quartic
-# has near-double real roots. Dedup was picking an insertion-order-
-# earlier drifted representative instead of the exact one. After the fix
-# (SP6 sort-by-residual before dedup + Gauss-Newton refinement), q* is
-# recovered at machine precision.
+# shoulder-wrist alignment pose (q0=0, q5=0), next to a fold where q* has a
+# twin root 7.7e-4 rad away. Dedup at a fixed 1e-3 radius merged the twins;
+# same-root dedup (#600) keeps both.
 # ---------------------------------------------------------------------------
 
 
 def test_recovers_shoulder_wrist_alignment_pose_issue_56(
     ur5_kb: Any, three_parallel_backend: Any
 ) -> None:
-    """Regression for #56.
+    """Regression for #56, restated by #600.
 
-    Before the fix: SP6's ellipse-intersection produced 4 candidates
-    split into 2 clusters by near-double Bezout quartic roots. Dedup
-    merged each cluster to the first-seen member, which for this pose
-    happened to be the drifted representative (~7.7e-4 rad off q*).
-    That drift propagated through SP3/SP1 to the final q vector, failing
-    the ``1e-4`` seeded-recovery threshold.
+    This pose is 2.3e-5 in sigma_min(J) from a fold, so UR5 has 8 distinct
+    IK solutions here: four pairs of twin roots 7.7e-4 rad apart, each
+    closing FK at ~1e-16. The chart-free LM branch oracle
+    (``tests/_branch_oracle.py``, budgets up to 4000, stabilized) finds
+    exactly these 8, and every returned solution lies within 3e-12 of one.
 
-    After the fix: SP6 sorts candidates by pre-refinement residual and
-    GN-refines; three_parallel dedupes at the q-vector level preserving
-    insertion order. Seeded q* is recovered to ~1e-3 rad per joint
-    reliably across platforms.
-
-    The 1e-3 rad tolerance reflects a genuine algorithmic precision
-    floor at this near-singular pose: SP6's Bezout quartic has a near-
-    triple root and GN-refined candidates land on distinct local minima
-    within ~1e-3 rad of q*. Different LAPACK backends (Accelerate vs
-    OpenBLAS) pick different specific minima as the cluster
-    representative. All returned q's still reproduce T_star at 1e-10
-    (the property that actually matters for IK correctness); the
-    specific angle representation of q_star is not unique at this
-    pose.
+    The original #56 diagnosis read the 7.7e-4 gap as numerical drift of one
+    branch, and the count was pinned at 4 with a 1e-3 recovery tolerance.
+    In fact the old 1e-3 dedup merged each twin pair and kept one of the
+    two by round-off, so q* itself was sometimes discarded. Dedup now
+    merges only the same root, so q* is recovered at machine precision.
     """
     q_star = np.array([0.0, 1.0, 1.0, 0.36474982, -1.0, 0.0])
     T_star = _fk(ur5_kb, q_star)
     solutions, is_ls = three_parallel_backend(ur5_kb, T_star)
 
     assert not is_ls
-    # UR5 at this shoulder-wrist alignment pose has 4 distinct IK
-    # branches (the shoulder-flip degenerates to identity).
-    assert len(solutions) == 4
+    assert len(solutions) == 8
 
     for sol in solutions:
         T_check = _fk(ur5_kb, sol.q)
@@ -355,8 +341,8 @@ def test_recovers_shoulder_wrist_alignment_pose_issue_56(
         return max(abs(_wrap(float(qi - qs))) for qi, qs in zip(sol.q, q_star, strict=True))  # type: ignore[attr-defined]
 
     closest = min(solutions, key=_max_abs_wrap)
-    assert any(_q_matches(s.q, q_star, tol=1e-3) for s in solutions), (
-        f"seeded q* not recovered within 1e-3 rad; closest: {closest.q.tolist()}"
+    assert any(_q_matches(s.q, q_star, tol=1e-9) for s in solutions), (
+        f"seeded q* not recovered within 1e-9 rad; closest: {closest.q.tolist()}"
     )
 
 

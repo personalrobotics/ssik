@@ -48,6 +48,17 @@ _RELATIVE_ARMS = [
 ]
 
 
+# Poses a few tenths of a milliradian from a fold, where two exact roots sit
+# closer than ``subproblem_dedup``. Both backends must return both twins
+# (#597, #566, #600), which uniform sampling almost never reaches.
+_NEAR_FOLD_Q = {
+    "puma560_ik": (
+        np.array([0.0, 1.0, -1.5234375, 2.0, 2.0, 0.0]),
+        np.array([0.0, -0.6112615544956004, 2.841592653589793, -1.0, 1.0, 0.0]),
+    ),
+}
+
+
 def _wrap(a: float) -> float:
     return float(((a + np.pi) % (2 * np.pi)) - np.pi)
 
@@ -99,8 +110,9 @@ def test_native_matches_python(arm_name: str) -> None:
         (float(j.limits[0]), float(j.limits[1])) if j.limits else (-np.pi, np.pi) for j in kb.joints
     ]
     rng = np.random.default_rng(2)
-    for _ in range(25):
-        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
+    near_fold = _NEAR_FOLD_Q.get(arm_name, ())
+    for i in range(25 + len(near_fold)):
+        q = np.array([rng.uniform(lo, hi) for lo, hi in ranges]) if i < 25 else near_fold[i - 25]
         t = np.asarray(poe_forward_kinematics(kb, q), dtype=np.float64)
         seed = q + rng.uniform(-0.2, 0.2, len(q))
 

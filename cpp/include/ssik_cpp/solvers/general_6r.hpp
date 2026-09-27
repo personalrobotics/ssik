@@ -31,6 +31,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
+#include "ssik_cpp/dedup.hpp"
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/ik_types.hpp"
 #include "ssik_cpp/newton.hpp"  // lm_refine (force_refine path)
@@ -332,29 +333,13 @@ inline bool back_substitute(double x_lin, const Vec12& v12, const PqCoeffs& pq, 
   return true;
 }
 
-// Wrap-to-pi max-joint-distance dedup, keeping the lower-residual duplicate
-// (mirrors solve_all_ik's dedup loop).
+// Same-root dedup (#600): two eigenvalues can back-substitute to one
+// configuration, but twin roots near a fold are distinct however close.
+// dedup_atol is the pre-filter radius (mirrors solve_all_ik's dedup).
 inline std::vector<Solution<6>> dedup_wrap_close(const std::vector<Solution<6>>& cands,
+                                                 const JointConsts<6>& c, const Pose& t_poe,
                                                  double dedup_atol) {
-  constexpr double kPi = 3.14159265358979323846;
-  std::vector<Solution<6>> out;
-  for (const auto& cand : cands) {
-    int dup = -1;
-    for (std::size_t j = 0; j < out.size() && dup < 0; ++j) {
-      double worst = 0.0;
-      for (int i = 0; i < 6; ++i) {
-        double dd = std::fmod(cand.q[i] - out[j].q[i] + kPi, 2.0 * kPi);
-        if (dd < 0) dd += 2.0 * kPi;
-        worst = std::max(worst, std::abs(dd - kPi));
-      }
-      if (worst < dedup_atol) dup = static_cast<int>(j);
-    }
-    if (dup < 0)
-      out.push_back(cand);
-    else if (cand.fk_residual < out[dup].fk_residual)
-      out[dup] = cand;
-  }
-  return out;
+  return dedup_same_root<6>(cands, c, t_poe, dedup_atol);
 }
 
 }  // namespace rr_detail
@@ -415,7 +400,7 @@ std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts
       if (refined) cands.push_back(Solution<6>{refined->first, refined->second, Refinement::Lm});
     }
   }
-  return dedup_wrap_close(cands, dedup_atol);
+  return dedup_wrap_close(cands, c, t_poe, dedup_atol);
 }
 
 // Full artifact-contract solve for a general 6R (RR) arm. All geometry is baked

@@ -26,6 +26,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 
+#include "ssik_cpp/dedup.hpp"
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/newton.hpp"   // lm_refine
 #include "ssik_cpp/quartic.hpp"  // np_roots (companion-matrix roots) for _initial_w_for
@@ -684,27 +685,10 @@ inline std::vector<JointTuple> solve_ik(const HpConsts& hp, const Vec8& sigma_E)
   return out;
 }
 
-// Wrap-to-pi max-joint dedup for 6-DOF, keeping the lower-FK duplicate.
-inline std::vector<Solution<6>> dedup6(const std::vector<Solution<6>>& cands, double atol) {
-  constexpr double kPi = 3.14159265358979323846;
-  std::vector<Solution<6>> out;
-  for (const auto& cand : cands) {
-    int dup = -1;
-    for (std::size_t j = 0; j < out.size() && dup < 0; ++j) {
-      double worst = 0.0;
-      for (int i = 0; i < 6; ++i) {
-        double dd = std::fmod(cand.q[i] - out[j].q[i] + kPi, 2.0 * kPi);
-        if (dd < 0) dd += 2.0 * kPi;
-        worst = std::max(worst, std::abs(dd - kPi));
-      }
-      if (worst < atol) dup = static_cast<int>(j);
-    }
-    if (dup < 0)
-      out.push_back(cand);
-    else if (cand.fk_residual < out[dup].fk_residual)
-      out[dup] = cand;
-  }
-  return out;
+// Same-root dedup for 6-DOF (#600): merge only candidates that are one root.
+inline std::vector<Solution<6>> dedup6(const std::vector<Solution<6>>& cands,
+                                       const JointConsts<6>& c, const Pose& tp, double atol) {
+  return dedup_same_root<6>(cands, c, tp, atol);
 }
 
 }  // namespace hp_detail
@@ -740,7 +724,7 @@ inline std::vector<Solution<6>> hp_core(const JointConsts<6>& c, const HpConsts&
         sols.push_back(Solution<6>{r->first, r->second, Refinement::Lm});
     }
   }
-  return hp_detail::dedup6(sols, kHpDedupAtol);
+  return hp_detail::dedup6(sols, c, tp, kHpDedupAtol);
 }
 
 // Full self-contained HP universal-6R solve (#539). hp_core + the limit-gate ->

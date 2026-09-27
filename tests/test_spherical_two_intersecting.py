@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 
 from ssik._kinbody import Joint, KinBody, Link
 from ssik._urdf import load_urdf_kinbody_normalized
@@ -228,6 +228,12 @@ def test_synthetic_spherical_two_intersecting_fk_roundtrip(
 
 
 @given(non_singular_q6r())
+# 3.8e-4 rad from Puma's offset-elbow fold: the elbow SP3 is nearly tangent
+# and q* has a twin root 7.6e-4 rad away. Dedup used to merge the pair and
+# keep whichever closed FK better by round-off, dropping q* half the time
+# (#597). Pinned here because the strategy's per-joint sine filter cannot
+# see this fold, so a fresh example database rarely reaches it.
+@example(np.array([0.0, 1.0, -1.5234375, 2.0, 2.0, 0.0]))
 @settings(
     max_examples=500,
     deadline=None,

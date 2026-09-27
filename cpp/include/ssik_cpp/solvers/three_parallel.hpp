@@ -17,6 +17,7 @@
 
 #include <Eigen/Dense>
 
+#include "ssik_cpp/dedup.hpp"
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/newton.hpp"
@@ -105,8 +106,8 @@ inline std::vector<Solution<6>> three_parallel_solve(const JointConsts<6>& c, co
     }
   }
 
-  // verify_candidates tail: FK-closure gate, then dedup_by_wrap_close (keep
-  // lowest fk_residual per wrap-close cluster, first-match-wins order).
+  // verify_candidates tail: FK-closure gate, then dedup_same_root (merge only
+  // the same root, #600; first-seen survivor unless a later one is better).
   std::vector<Solution<6>> verified;
   for (const auto& q : candidates) {
     const Pose fk_q = fk<6>(c, q);
@@ -123,30 +124,7 @@ inline std::vector<Solution<6>> three_parallel_solve(const JointConsts<6>& c, co
     }
   }
 
-  std::vector<Solution<6>> deduped;
-  for (const auto& cand : verified) {
-    int match = -1;
-    for (int j = 0; j < static_cast<int>(deduped.size()); ++j) {
-      bool close = true;
-      for (int i = 0; i < 6; ++i) {
-        const double diff = detail::wrap_to_pi(cand.q[i] - deduped[j].q[i]);
-        if (std::abs(diff) > tol.dedup) {
-          close = false;
-          break;
-        }
-      }
-      if (close) {
-        match = j;
-        break;
-      }
-    }
-    if (match == -1) {
-      deduped.push_back(cand);
-    } else if (cand.fk_residual < deduped[match].fk_residual) {
-      deduped[match] = cand;
-    }
-  }
-  return deduped;
+  return dedup_same_root<6>(verified, c, T, tol.dedup);
 }
 
 // Full artifact-contract solve -- the C++ replica of <arm>_ik.solve() (#503):
