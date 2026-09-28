@@ -22,6 +22,9 @@ Usage:
   ``python scripts/cpp_emit.py <arm>``    emit one arm
   ``python scripts/cpp_emit.py --all``    re-emit every arm in cpp/gen
   ``python scripts/cpp_emit.py --check``  CI drift guard (constants headers)
+  ``python scripts/cpp_emit.py --all --shard 2/4`` then ``--check-committed --shard 2/4``
+      CI: one of N shards emits and drift-checks its part of the arms; after
+      merging every shard's output, ``--artifact-gate`` builds the gate
 """
 
 from __future__ import annotations
@@ -443,12 +446,38 @@ _HP_DEFERRED_JOINTLOCK_ARMS: set[str] = set()
 _HP_JOINTLOCK_ARMS = {"kassow_kr810_ik"}
 
 
+def _render_jointlock_rr_unit(args: tuple[KinBody, int, float, int]) -> list[str]:
+    """One lock sample's RR unit. Top-level so a process pool can pickle it."""
+    from ssik.solvers.jointlock.seven_r import _lock_joint
+
+    kb, lock, q_lock, i = args
+    # zero_threshold: degenerate lock samples (near-parallel axes) push
+    # poe_to_dh coefficient products down to ~1e-18 noise whose low bits are
+    # BLAS-backend-sensitive; drop them so the emitted header is byte-
+    # deterministic across platforms (#536). 1e-12 relative is far below any
+    # genuine RR coefficient (DH products, O(1e-3)..O(1)).
+    return _render_rr_unit(_lock_joint(kb, lock, q_lock), f"_{i}", zero_threshold=1e-12)
+
+
+def _map_processes(fn: Any, items: list[Any]) -> list[Any]:
+    """``[fn(x) for x in items]`` across a process pool, in order. Falls back to
+    serial when there is one CPU or a pool cannot start (as in :func:`emit_all`)."""
+    workers = min(len(items), os.cpu_count() or 1)
+    if workers > 1:
+        try:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
+                return list(pool.map(fn, items))
+        except OSError as exc:
+            print(f"[cpp_emit] process pool unavailable ({exc}); running serially")
+    return [fn(x) for x in items]
+
+
 def _render_jointlock_solve(arm: str, kb: KinBody) -> tuple[str, list[str]] | None:
     """Self-contained jointlock.seven_r solve(): bake the lock joint + 16-sample
     schedule + each locked 6R sub-chain's inner unit, and compose the sweep. RR
     units + jointlock_artifact_solve for RR-covered arms; HP units +
     jointlock_hp_artifact_solve for HP-covered arms (kassow, #491)."""
-    from ssik.solvers.jointlock.seven_r import _lock_joint, choose_lock_joint
+    from ssik.solvers.jointlock.seven_r import choose_lock_joint
 
     if len(kb.joints) != 7 or arm in _HP_DEFERRED_JOINTLOCK_ARMS:
         return None
@@ -470,14 +499,14 @@ def _render_jointlock_solve(arm: str, kb: KinBody) -> tuple[str, list[str]] | No
     ]
     if arm in _HP_JOINTLOCK_ARMS:
         return _render_jointlock_hp(kb, lock, samples, body)
-    for i, q_lock in enumerate(samples):
+    # The 16 units are independent symbolic derivations and dominate this arm's
+    # emit, so they fan out across processes (same text, rendered in order).
+    units = _map_processes(
+        _render_jointlock_rr_unit, [(kb, lock, float(q), i) for i, q in enumerate(samples)]
+    )
+    for i, (q_lock, unit) in enumerate(zip(samples, units, strict=True)):
         body += ["", f"// --- lock sample {i} (q_lock = {_f(q_lock)}) ---"]
-        # zero_threshold: degenerate lock samples (near-parallel axes) push
-        # poe_to_dh coefficient products down to ~1e-18 noise whose low bits are
-        # BLAS-backend-sensitive; drop them so the emitted header is byte-
-        # deterministic across platforms (#536). 1e-12 relative is far below any
-        # genuine RR coefficient (DH products, O(1e-3)..O(1)).
-        body += _render_rr_unit(_lock_joint(kb, lock, float(q_lock)), f"_{i}", zero_threshold=1e-12)
+        body += unit
     body += [
         "",
         "inline std::array<RrConsts, 16> jl_rr() {",
@@ -725,7 +754,9 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
     # solve() output per pose, so a standalone C++ program (which can't call
     # Python) can validate ssik::<arm>::solve(T) against the oracle. Emitted for
     # arms with a self-contained C++ solve().
-    if _render_solve(load_manifest()[arm].solver, kb, arm) is not None:
+    # Reuses the render above: re-rendering a jointlock / general-6R arm re-derives
+    # every RR unit from scratch (sympy, not cached), which doubled its emit time.
+    if rendered_solve is not None:
         _emit_solve_parity(arm, out_dir, ns, ranges, seed=seed + 2)
 
 
@@ -1120,6 +1151,8 @@ def emit_all(arms: list[str], out_dir: Path) -> None:
     CPU or a pool cannot start (sandboxes without working semaphores).
     """
     workers = min(len(arms), os.cpu_count() or 1)
+    # Start the slowest arms first so they don't trail alone at the end.
+    arms = sorted(arms, key=lambda a: -_emit_cost(a))
     if workers > 1:
         try:
             with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as pool:
@@ -1132,7 +1165,43 @@ def emit_all(arms: list[str], out_dir: Path) -> None:
         emit(arm, out_dir)
 
 
-def check_committed(gen_dir: Path) -> int:
+def _emit_cost(arm: str) -> float:
+    """Rough relative CPU cost of emitting ``arm``, used only to order and balance
+    the work. An RR jointlock arm derives 16 RR units symbolically and runs a
+    16-sample Python sweep per golden pose (~400 s); a general-6R arm derives one
+    (~50 s); the rest take seconds. A wrong weight only unbalances the shards:
+    which arms get emitted and checked never depends on it."""
+    solver = load_manifest()[arm].solver
+    if solver == "jointlock.seven_r" and arm not in _HP_JOINTLOCK_ARMS:
+        return 60.0
+    return 8.0 if solver == "ikgeo.general_6r" else 1.0
+
+
+def parse_shard(spec: str) -> tuple[int, int]:
+    """Parse ``K/N`` (1-based shard K of N)."""
+    m = re.fullmatch(r"(\d+)/(\d+)", spec)
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        raise argparse.ArgumentTypeError(f"--shard wants K/N with 1 <= K <= N, got {spec!r}")
+    return int(m.group(1)), int(m.group(2))
+
+
+def shard_arms(arms: list[str], k: int, n: int) -> list[str]:
+    """The arms shard ``k`` of ``n`` owns: a partition of ``arms``, so the N
+    shards together cover every arm exactly once.
+
+    Greedy longest-first by :func:`_emit_cost`, ties broken by name, so every
+    shard computes the same assignment independently."""
+    cost = {a: _emit_cost(a) for a in arms}
+    loads = [0.0] * n
+    owned: list[list[str]] = [[] for _ in range(n)]
+    for a in sorted(arms, key=lambda a: (-cost[a], a)):
+        i = min(range(n), key=lambda i: (loads[i], i))
+        loads[i] += cost[a]
+        owned[i].append(a)
+    return sorted(owned[k - 1])
+
+
+def check_committed(gen_dir: Path, arms: list[str] | None = None) -> int:
     """Compare the artifacts now in ``gen_dir`` against their committed blobs.
 
     Same guarantee as :func:`check_no_drift` -- a committed constants header
@@ -1143,9 +1212,10 @@ def check_committed(gen_dir: Path) -> int:
 
     Comparison is the same structural-exact, numeric-tolerant one, so it keeps
     tolerating the cross-platform ULP variance a byte diff would false-positive
-    on.
+    on. ``arms`` restricts the check to one shard's arms (default: all).
     """
-    arms = emitted_arms(gen_dir)
+    if arms is None:
+        arms = emitted_arms(gen_dir)
     if not arms:
         print("[cpp_emit] --check-committed: no emitted arms found in", gen_dir)
         return 0
@@ -1244,18 +1314,44 @@ def main() -> int:
         action="store_true",
         help="verify committed artifacts match a fresh emit (CI drift guard); no writes",
     )
+    ap.add_argument(
+        "--shard",
+        type=parse_shard,
+        metavar="K/N",
+        help="with --all / --check-committed: only shard K of N (the N shards partition "
+        "the arms). --all --shard skips the artifact gate; build it with --artifact-gate "
+        "once every shard's output is in --out-dir",
+    )
+    ap.add_argument(
+        "--artifact-gate",
+        action="store_true",
+        help="only regenerate artifact_gate.hpp from the headers in --out-dir",
+    )
     ap.add_argument("--out-dir", type=Path, default=_REPO / "cpp" / "gen")
     args = ap.parse_args()
+    if args.shard and not (args.all or args.check_committed):
+        ap.error("--shard applies to --all and --check-committed")
+
+    def arms_to_do() -> list[str]:
+        arms = emitted_arms(args.out_dir)
+        return shard_arms(arms, *args.shard) if args.shard else arms
 
     if args.check_committed:
-        return check_committed(args.out_dir)
+        return check_committed(args.out_dir, arms_to_do())
     if args.check:
         return check_no_drift(args.out_dir)
+    if args.artifact_gate:
+        emit_artifact_gate(args.out_dir)
+        return 0
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     if args.all:
-        emit_all(emitted_arms(args.out_dir), args.out_dir)
-        emit_artifact_gate(args.out_dir)
+        arms = arms_to_do()
+        if args.shard:
+            print(f"[cpp_emit] shard {args.shard[0]}/{args.shard[1]}: {', '.join(arms)}")
+        emit_all(arms, args.out_dir)
+        if not args.shard:
+            emit_artifact_gate(args.out_dir)
         return 0
     if not args.arm:
         ap.error("provide an arm name, or --all / --check")

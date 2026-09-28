@@ -127,20 +127,78 @@ jobs:
         # measured without cross-worker CPU contention. Small, fast set. (#348)
         run: uv run pytest -q -m "not slow and perf"
 
-  cpp:
+  cpp_emit:
     # Native C++ backend (#482): the end-to-end no-drift guard (#495). Two
     # halves, both red-on-recurrence:
-    #   1. cpp_emit --check: the committed constants headers (cpp/gen/<arm>.hpp,
-    #      the shippable artifacts) are byte-identical to a fresh emit -- the
-    #      KinBody/oracle can't silently drift from what's shipped. These are
-    #      repr() of baked floats, so byte-portable across platforms.
-    #   2. --all + build + ctest: regenerate the parity fixtures fresh from the
-    #      *current* Linux oracle (they are FP results, not byte-portable, so not
-    #      committed -- #82), then check the native solver reproduces them (FK +
-    #      set-agreement conformance).
+    #   1. cpp_emit --check-committed: the committed constants headers
+    #      (cpp/gen/<arm>.hpp, the shippable artifacts) match a fresh emit -- the
+    #      KinBody/oracle can't silently drift from what's shipped.
+    #   2. The `cpp` job below: build + ctest against parity fixtures regenerated
+    #      fresh from the *current* Linux oracle (they are FP results, not
+    #      byte-portable, so not committed -- #82).
     # Neither runs in the pytest matrix, so this is the only place the native
     # artifacts are validated in CI.
+    #
+    # The emit is the slow part (~19 min on one runner for all 72 arms), and the
+    # arms are independent, so it is split across shards. `--shard K/N`
+    # partitions the arms, so the N shards together emit and drift-check every
+    # arm exactly once; `cpp` refuses to build unless every arm's fixtures
+    # arrived. Changing the shard count means changing both the matrix and N.
+    name: C++ emit + drift guard (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --dev --python 3.12
+
+      - name: Emit this shard's arms from the current oracle (parity fixtures + artifacts)
+        # Parallel across arms within the shard, slowest (jointlock) arms first.
+        run: uv run python scripts/cpp_emit.py --all --shard ${{ matrix.shard }}/4
+
+      - name: Drift guard (committed artifacts match the Python oracle)
+        # Compares what this shard just emitted against the committed blobs, with
+        # the structural-exact / numeric-tolerant comparison, so cross-platform
+        # ULP variance still does not false-positive.
+        run: uv run python scripts/cpp_emit.py --check-committed --shard ${{ matrix.shard }}/4
+
+      - name: Collect this shard's output
+        # Everything the emit wrote: new (git-ignored) parity fixtures, plus any
+        # constants header whose fresh emit differs from the committed bytes
+        # within the drift tolerance. Other arms' files are untouched, so shards
+        # never overlap.
+        run: |
+          mkdir -p shard-out
+          { git ls-files --others --ignored --exclude-standard cpp/gen; git ls-files --modified cpp/gen; } \
+            | sort -u | tee shard-files.txt | xargs -r cp -t shard-out
+          test -s shard-files.txt
+
+      - name: Upload this shard's output
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: cpp-gen-${{ matrix.shard }}
+          path: shard-out/
+          if-no-files-found: error
+          retention-days: 3
+
+  cpp:
+    # Builds and runs the native conformance against every shard's freshly
+    # emitted fixtures: ctest (FK + Newton goldens and the artifact gate over
+    # every self-contained arm) and the external-consumer smoke.
     name: C++ conformance + drift guard
+    needs: cpp_emit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -159,19 +217,27 @@ jobs:
       - name: Install Eigen + CMake
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libeigen3-dev
 
-      - name: Emit every arm from the current oracle (parity fixtures + artifacts)
-        # One pass, parallel across arms. This used to be two serial 72-arm
-        # passes -- --check regenerated everything into a temp dir to compare,
-        # then --all regenerated everything again -- which was 71 of this job's
-        # 77 minutes. The arms are independent, so the pass now fans out across
-        # the runner's cores and the drift check reads what it produced.
-        run: uv run python scripts/cpp_emit.py --all
+      - name: Download every shard's emitted output
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: cpp-gen-*
+          path: cpp/gen
+          merge-multiple: true
 
-      - name: Drift guard (committed artifacts match the Python oracle)
-        # Compares what --all just emitted against the committed blobs, with the
-        # same structural-exact / numeric-tolerant comparison as before, so
-        # cross-platform ULP variance still does not false-positive.
-        run: uv run python scripts/cpp_emit.py --check-committed
+      - name: Every arm was emitted
+        # Guards the shard wiring: a shard missing from the matrix would leave its
+        # arms with no fresh fixtures and no drift check. Every arm's emit writes
+        # <arm>_fk_parity.hpp, so its absence means the arm was never emitted.
+        run: |
+          missing=0
+          for h in $(git ls-files 'cpp/gen/*.hpp'); do
+            f="${h%.hpp}_fk_parity.hpp"
+            [ -f "$f" ] || { echo "not emitted by any shard: $h"; missing=1; }
+          done
+          exit $missing
+
+      - name: Generate the artifact gate over every arm
+        run: uv run python scripts/cpp_emit.py --artifact-gate
 
       - name: Configure + build
         run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
@@ -186,6 +252,28 @@ jobs:
         # example, and runs it -- no ssik source tree, no Python (#493).
         run: bash cpp/examples/consumer/smoke.sh
 
+  cpp_suite:
+    # The reused Python suite needs only the pybind extension, not the emitted
+    # cpp/gen artifacts, so it runs alongside the emit instead of after it.
+    name: Reused Python suite vs the C++ backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --dev --python 3.12
+
+      - name: Install Eigen
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
+
       - name: Build native extension into the package (pybind11)
         # Compiles the C++ solver as ssik._ssik_native (the shipped import path,
         # #506/#507) so the reused suite drives the native backend AND the
@@ -198,8 +286,8 @@ jobs:
         # logic duplicated in C++. test_three_parallel: deep 500-pose fuzz +
         # singular + #56 on UR5. test_three_parallel_family: the 17-arm family.
         # test_native_dispatch: solve(native=True) parity + fallback (#507). cpp
-        # legs / native tests skip when the ext is absent (the main matrix); here
-        # it is built, so they execute.
+        # legs / native tests skip when the ext is absent; here it is built, so
+        # they execute.
         run: uv run pytest tests/test_three_parallel.py tests/test_three_parallel_family.py tests/test_three_parallel_boundary.py tests/test_three_parallel_artifact.py tests/test_native_dispatch.py tests/test_feasible_arcs.py -q
 
   native_wheel:
