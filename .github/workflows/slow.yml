@@ -60,12 +60,10 @@ jobs:
       - name: Pre-warm robot_descriptions
         run: uv run python scripts/prewarm_descriptions.py
 
-      - name: Install Eigen
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
-
       - name: Build native extension into the package (pybind11)
         # native=True is the shipped default, so the slow suite must run
-        # against it, not the Python fallback.
+        # against it, not the Python fallback. build_cpp_ext.py fetches the
+        # pinned Eigen itself (#606); no system Eigen.
         run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
 
       - name: pytest -m slow (parallel)
