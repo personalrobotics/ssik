@@ -19,7 +19,7 @@ Test contract:
   primed DH and ``None`` for an unprimed one.
 - The jointlock dispatch's ``_try_cached_rr`` returns ``None`` (falls
   back to original solver) when the cache isn't primed.
-- The composer's ``_RR_PRIME_DHS`` list excludes Franka (all-tier-0
+- The composer's ``_AOT_PRIME_DATA`` block excludes Franka (all-tier-0
   dispatch) and includes Rizon 4 / Kassow KR810 (non-tier-0).
 """
 
@@ -146,9 +146,9 @@ def test_urdf_loaded_rizon_does_not_trigger_cached_rr() -> None:
 
 
 def test_composer_skips_priming_for_franka() -> None:
-    """Franka's all-tier-0 dispatch -> ``_RR_PRIME_DHS`` should be omitted
-    from the artifact entirely, keeping the artifact byte-stable with
-    pre-#210.
+    """Franka's all-tier-0 dispatch -> the ``_AOT_PRIME_DATA`` block (#320)
+    should be omitted from the artifact entirely, keeping the artifact
+    byte-stable with pre-#210.
 
     Franka's 16 samples all route to ``reversed:spherical`` or
     ``reversed:spherical_two_parallel``; ``spherical`` is excluded from
@@ -165,14 +165,15 @@ def test_composer_skips_priming_for_franka() -> None:
 
     kb = build_kinbody(franka_panda_specs())
     artifact_source = compose(kb)
-    assert "_RR_PRIME_DHS" not in artifact_source
+    assert "_AOT_PRIME_DATA" not in artifact_source
     assert "_ssik_rr_prime" not in artifact_source
 
 
 @pytest.mark.slow
 def test_composer_emits_priming_for_rizon4() -> None:
     """Rizon 4's non-tier-0 inner samples (HP / two_parallel) trigger the
-    composer to emit ``_RR_PRIME_DHS`` and the module-init prime loop.
+    composer to emit the AOT-baked ``_AOT_PRIME_DATA`` block (#320) and the
+    module-init prime loop.
 
     Marked slow because :func:`compose` runs ``_cached_best_leftvar``
     (AE-3 leftvar probing) at codegen time -- ~30 s per unique sub-chain
@@ -190,10 +191,10 @@ def test_composer_emits_priming_for_rizon4() -> None:
         "flange",
     )
     artifact_source = compose(kb)
-    assert "_RR_PRIME_DHS = (" in artifact_source
-    assert "_ssik_rr_prime" in artifact_source
+    assert "_AOT_PRIME_DATA = (" in artifact_source
+    assert "_ssik_rr_prime_aot" in artifact_source
     # Module-init prime loop is present.
-    assert "for _alpha, _a, _d, _lin in _RR_PRIME_DHS:" in artifact_source
+    assert "for _aot_entry in _AOT_PRIME_DATA:" in artifact_source
 
 
 # ---------------------------------------------------------------------------

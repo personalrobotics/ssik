@@ -4,7 +4,9 @@ The build pipeline pre-computes Raghavan-Roth's symbolic derivation at codegen
 time, serializes the sympy matrices via :func:`serialize_derivation`, and
 embeds the bytes in the artifact. At module-init the artifact deserializes
 via :func:`prime_derivation_from_blob` -- ~0.25 s per blob vs ~7 s cold
-sympy derivation, ~30x faster import.
+sympy derivation, ~30x faster import. ``ssik build`` has since moved to
+AOT-baked callables (#320, covered by ``tests/test_aot_prime.py``); the blob
+path stays for artifacts built before that, and these tests keep it working.
 
 Test contract:
 - serialize -> deserialize roundtrip preserves solver behavior bit-for-bit.
@@ -163,28 +165,3 @@ def test_solve_from_blob_matches_cold_derivation(fresh_cache) -> None:
     for c, w in zip(cold_sorted, warm_sorted, strict=True):
         # Bit-identical q-vectors (same lambdas + same lapack).
         np.testing.assert_array_equal(c.q, w.q)
-
-
-@pytest.mark.slow
-def test_codegen_artifact_with_baked_blobs_imports_quickly(tmp_path) -> None:
-    """End-to-end: build a Rizon 4 artifact and verify the resulting .py
-    file contains the b85 blob block. Marked ``slow`` because the actual
-    artifact build takes 5-7 min (16 cold sympy derivations x ~7 s each).
-    """
-    from ssik.core.codegen import emit_artifact
-    from ssik.core.dispatcher import dispatch
-
-    plan = dispatch(_RIZON4_KB)
-    out = tmp_path / "rizon4_baked_smoke.py"
-    result = emit_artifact(
-        kb=_RIZON4_KB,
-        plan=plan,
-        module_name="rizon4_baked_smoke",
-        output_path=str(out),
-    )
-    src = result.source
-    assert "_RR_PRIME_BLOBS_B85" in src, "expected baked blobs in the artifact"
-    assert "prime_derivation_from_blob" in src
-    # The artifact should have at least 100 KB of base85-encoded blob
-    # data (Rizon 4 has 14+ non-tier-0 samples x ~5 KB each compressed).
-    assert len(src) > 100_000, f"artifact too small: {len(src)} bytes"
