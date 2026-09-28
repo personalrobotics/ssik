@@ -553,29 +553,7 @@ def test_back_substitute_random_dh() -> None:
     assert np.allclose(t_recovered, t_target, atol=1e-7)
 
 
-_MC_TABLE_I_XFAIL_REASON = (
-    "MC Table I coverage gap (GitHub #82): the solver returns 3 valid FK-closing "
-    "IK solutions but the seeded q* is not always among them. Which seeds recover "
-    "vs miss is platform-sensitive (LAPACK backend variance: macOS Accelerate vs "
-    "Linux OpenBLAS produce slightly different intermediate residuals which "
-    "propagate through the dedup-by-residual gate and pick different cluster "
-    "representatives). All four seeds marked xfail with strict=False so the test "
-    "still RUNS and reports xpassed/xfailed counts -- when the bug closes those "
-    "counts will tell us. The test asserts seeded-q* recovery, NOT FK closure; "
-    "all returned q's still satisfy FK at machine precision."
-)
-
-
-@pytest.mark.parametrize(
-    "q_star",
-    [
-        pytest.param(
-            q,
-            marks=pytest.mark.xfail(strict=False, reason=_MC_TABLE_I_XFAIL_REASON),
-        )
-        for q in _SEEDED_Q
-    ],
-)
+@pytest.mark.parametrize("q_star", _SEEDED_Q)
 def test_solve_all_ik_recovers_q_star_and_alternatives(q_star: NDArray[np.float64]) -> None:
     """The full driver must (a) include the seeded q* among returned solutions
     and (b) return at least one alternative (MC Table I has up to 16
