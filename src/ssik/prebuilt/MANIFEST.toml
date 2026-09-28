@@ -2249,7 +2249,14 @@ build_time_sec = 1
 artifact_size_kb = 34
 sample_q = [1.72, -1.45, -2.56, -6.07, 3.94, 5.18]
 fk_ceiling_fuzz = 1e-07  # from the validation smoke (~10x worst FK)
-platform_drift = false
+# The URDF's joint origins carry non-canonical rpy angles (1.5358662...,
+# -1.5708028...), and Linux's normalized KinBody differs from macOS's in the
+# last digits (KinBody hash too), so the artifact is byte-compared on macOS only.
+platform_drift = true
+drift_markers = [
+    'SOLVER_NAME = "ikgeo.three_parallel"',
+    "def solve(",
+]
 
 [arms.nova5_ik.bench]  # filled by scripts/regen_bench.py
 ms_mean = 0.01
