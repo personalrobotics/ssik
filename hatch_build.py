@@ -116,7 +116,15 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
             # test-command asserts ssik._ssik_native imports) + the native_wheel
             # CI job -- so a native-less wheel can never be published silently.
             native_built = False
-            if _native_supported():
+            # The sdist does not carry the C++ sources, so a build from it has
+            # nothing native to compile.
+            if _native_supported() and not (root / NATIVE_EXT_SOURCE).is_file():
+                print(
+                    f"[hatch_build] skipping {NATIVE_EXT_MODULE}: {NATIVE_EXT_SOURCE} is not in "
+                    f"this source tree.",
+                    file=sys.stderr,
+                )
+            elif _native_supported():
                 eigen = _eigen_include(root)
                 if eigen is None:
                     print(
