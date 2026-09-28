@@ -5,7 +5,9 @@ name: Release
 # Tag patterns:
 #   v*rc*    -> build wheels + sdist, publish to TestPyPI (dry run)
 #   v*       -> build wheels + sdist, publish to real PyPI
-#   (manual workflow_dispatch also builds + publishes to TestPyPI)
+#   manual workflow_dispatch -> build wheels + sdist only (a pre-merge check of
+#                               the artifacts users install); publishes to
+#                               TestPyPI only with publish_testpypi=true
 #
 # Auth: Trusted Publishing (PyPI / TestPyPI OIDC). No API tokens in CI.
 # The publish jobs run inside named GitHub environments (`release` /
@@ -15,6 +17,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish_testpypi:
+        description: "Also publish the built artifacts to TestPyPI"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,9 +84,12 @@ jobs:
     name: Publish → TestPyPI
     needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
-    # Run on RC tags (e.g. v1.0.0rc1) and manual triggers. The real PyPI
-    # job below runs on non-RC v* tags only.
-    if: contains(github.ref, 'rc') || github.event_name == 'workflow_dispatch'
+    # Run on RC tags (e.g. v1.0.0rc1), and on manual triggers only when asked:
+    # a plain dispatch is build-only. The real PyPI job below runs on non-RC
+    # v* tags only.
+    if: >-
+      (startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish_testpypi)
     environment:
       name: testpypi-release
       url: https://test.pypi.org/p/ssik
