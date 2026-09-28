@@ -141,6 +141,14 @@ def test_hp_artifact_solve_is_sound(arm: str) -> None:
     assert worst_fk <= 1e-6
 
 
+def _angle_gap(cands: np.ndarray, v: np.ndarray) -> float:
+    """Smallest max-joint gap, in radians, between tan-half vectors ``cands``
+    and ``v``. Tan-half space is not the metric: near q = pi, v = tan(q/2) is in
+    the thousands and a 1e-9 rad agreement shows up as a 1e-3 gap in v."""
+    d = 2.0 * np.arctan(cands) - 2.0 * np.arctan(v)
+    return float(np.min(np.max(np.abs(np.angle(np.exp(1j * d))), axis=1)))
+
+
 @pytest.mark.parametrize("dh_name", list(_CLEAN_DH))
 def test_hp_kernel_complete_on_wellconditioned_dh(dh_name: str) -> None:
     """On well-conditioned HP DH (the shipping locked-7R contract), the native
@@ -163,9 +171,7 @@ def test_hp_kernel_complete_on_wellconditioned_dh(dh_name: str) -> None:
         assert len(cpp), f"{dh_name}: native returned no candidates"
         # True root recovered.
         tv = np.array(v)
-        assert np.min(np.max(np.abs(cpp - tv), axis=1)) < 1e-4, (
-            f"{dh_name}: native missed the true root"
-        )
+        assert _angle_gap(cpp, tv) < 1e-4, f"{dh_name}: native missed the true root"
         # Every Python-oracle candidate recovered (oracle subset of C++).
         oracle = py_solve_ik(
             pre,
@@ -187,6 +193,6 @@ def test_hp_kernel_complete_on_wellconditioned_dh(dh_name: str) -> None:
         )
         for pt in oracle:
             pt = np.asarray(pt)
-            assert np.min(np.max(np.abs(cpp - pt), axis=1)) < 1e-4, (
+            assert _angle_gap(cpp, pt) < 1e-4, (
                 f"{dh_name}: native missed a Python-oracle candidate {np.round(pt, 4)}"
             )
