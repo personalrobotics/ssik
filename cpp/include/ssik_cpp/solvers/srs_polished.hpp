@@ -41,20 +41,33 @@ inline constexpr int kSrsPolishedMaxIters = 30;          // polish_max_iters (cm
 
 namespace srs_polished_detail {
 
+// In-limits acceptance slack for polished candidates (_polish._LIMIT_SLACK).
+inline constexpr double kPolishLimitSlack = 1e-9;
+
 // LM-polish every raw candidate against the true FK, keep residual <= atol, then
 // wrap-to-pi cluster-merge (mirrors _polish.polish_candidates, which uses
 // lm_refine_batch's tighter divergence guard 2.0/2 -- passed explicitly so a seed
 // stays on its local branch instead of wandering across the redundant manifold to
 // a different solution, which would both miss the oracle's branch and add a dup).
-inline std::vector<Solution<7>> polish(const JointConsts<7>& c,
-                                       const std::vector<Solution<7>>& raw, const Pose& T,
-                                       int max_iters) {
+// With `limits`, a polished candidate outside them is dropped before the merge
+// (_polish._within_limits): the polish moves a seed, so an in-limits seed can
+// land out of limits (#621).
+inline std::vector<Solution<7>> polish(
+    const JointConsts<7>& c, const std::vector<Solution<7>>& raw, const Pose& T, int max_iters,
+    const std::array<std::array<double, 2>, 7>* limits = nullptr) {
   std::vector<Solution<7>> polished;
   for (const auto& cand : raw) {
     auto r = lm_refine<7>(c, cand.q, T, kSrsPolishedFkAtol, max_iters, /*divergence_factor=*/2.0,
                           /*divergence_min_iters=*/2, /*fixed_damping=*/1e-9);
-    if (r && r->second <= kSrsPolishedFkAtol)
-      polished.push_back(Solution<7>{r->first, r->second, Refinement::Lm});
+    if (!r || r->second > kSrsPolishedFkAtol) continue;
+    if (limits) {
+      bool within = true;
+      for (int i = 0; i < 7 && within; ++i)
+        within = (*limits)[i][0] - kPolishLimitSlack <= r->first[i] &&
+                 r->first[i] <= (*limits)[i][1] + kPolishLimitSlack;
+      if (!within) continue;
+    }
+    polished.push_back(Solution<7>{r->first, r->second, Refinement::Lm});
   }
   // Cluster-merge in wrap-to-pi max-joint distance (keep lower-residual dup).
   std::vector<Solution<7>> out;
@@ -121,7 +134,9 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
 
   // Limit pass + #359 in-limits fallback (the SRS swivel resolver, wired for
   // srs_polished by codegen). Its exact-geometry solutions are cm-off for these
-  // approximate arms, so polish them too before the limit filter.
+  // approximate arms, so they are polished, and the polished vectors are then
+  // held to the limits: finalize trusts the fallback's output to be in limits
+  // and does not filter it again (_swivel_limits.resolve_in_limits, #621).
   ArtifactParams<7> p_limits;
   // Intermediate pass: never lift here, or the lifts would be produced
   // twice (see ArtifactParams::enumerate_windings).
@@ -132,7 +147,7 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits, [&]() {
     return srs_polished_detail::polish(
         c, srs_swivel::resolve_in_limits(c, s, T, limits, kSrsPolishedKeepAll), T,
-        kSrsPolishedMaxIters);
+        kSrsPolishedMaxIters, &limits);
   });
 
   // Rescue gate: nothing in-limits at a reachable target -> singular pose.

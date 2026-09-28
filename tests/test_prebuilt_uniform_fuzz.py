@@ -329,8 +329,8 @@ def test_prebuilt_7r_in_limits_default_path(arm_name: str) -> None:
     """Every reachable *in-limits* pose returns >= 1 IK on the DEFAULT
     ``solve()`` path (``respect_limits=True``) -- the path users take (the
     round-trip fuzz above uses ``respect_limits=False``). 200 deterministic
-    in-limits poses per arm. Redundant tight-limit arms are xfailed for the
-    swivel-vs-limits gap (#359)."""
+    in-limits poses per arm, and every solution returned is itself in limits.
+    Redundant tight-limit arms are xfailed for the swivel-vs-limits gap (#359)."""
     if arm_name in _LIMITS_GAP_7R:
         pytest.xfail(
             f"{arm_name}: redundant 7R with tight joint limits -- the elbow-swivel "
@@ -340,12 +340,19 @@ def test_prebuilt_7r_in_limits_default_path(arm_name: str) -> None:
     mod = _load(arm_name)
     ranges = _joint_ranges(mod._KB)
     rng = np.random.default_rng(0)
+    limited = [(i, j.limits) for i, j in enumerate(mod._KB.joints) if j.limits is not None]
     for _ in range(200):
         q = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
-        assert mod.solve(mod.fk(q)), (
+        sols = mod.solve(mod.fk(q))
+        assert sols, (
             f"{arm_name}: reachable in-limits pose q={q.tolist()} returned [] "
             "on the default respect_limits=True path"
         )
+        # Exact bounds: no slack for boundary round-off yet (#624).
+        for s in sols:
+            assert all(lo <= s.q[i] <= hi for i, (lo, hi) in limited), (
+                f"{arm_name}: solve returned q={s.q.tolist()} outside the joint limits (#621)"
+            )
 
 
 # Fast-CI companion to the thorough @slow test above. The @slow 200-pose /

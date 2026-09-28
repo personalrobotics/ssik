@@ -88,6 +88,18 @@ def _subset(A: list[Any], B: list[Any], tol: float = 1e-3) -> bool:
     return all(any(_close(a.q, b.q, tol) for b in B) for a in A)
 
 
+def _limit_violation(kb: Any, q: Any) -> float:
+    """How far q lies outside the joint limits, 0.0 when within them. Exact
+    bounds: no slack for boundary round-off yet (#624)."""
+    worst = 0.0
+    for joint, x in zip(kb.joints, q, strict=True):
+        if joint.limits is None:
+            continue
+        lo, hi = joint.limits
+        worst = max(worst, float(lo - x), float(x - hi))
+    return worst
+
+
 def test_native_true_falls_back_when_unavailable(monkeypatch: Any) -> None:
     """native=True silently returns the Python result when the ext is absent."""
     monkeypatch.setattr(_native, "_ext", None)
@@ -229,10 +241,95 @@ def test_native_relative_completeness(arm_name: str) -> None:
             continue
         kept += 1
         nat = mod.solve(t, native=True)
-        for s in nat:  # soundness: every native solution is a real IK
+        for s in nat:  # soundness: every native solution is a real, in-limits IK
             assert np.linalg.norm(poe_forward_kinematics(kb, s.q) - t) <= 1e-6, (
                 f"{arm_name}: native returned an unsound solution"
+            )
+            assert _limit_violation(kb, s.q) == 0.0, (
+                f"{arm_name}: native returned q={s.q.tolist()} outside the joint limits"
             )
         # non-emptiness parity: native finds solutions exactly when Python does.
         assert bool(nat) == bool(py), f"{arm_name}: native/python emptiness disagree"
     assert kept >= 10, f"{arm_name}: too few stable poses sampled ({kept})"
+
+
+# Poses where every in-limits configuration sits on a short arc of the swivel
+# circle, so the default solve reaches the in-limits resolver. Native polished
+# the resolver's output without holding it to the limits and returned
+# configurations outside them: 0.105 rad for the yumi_left pose (#621).
+_SRS_POLISHED_LIMIT_Q = [
+    pytest.param(
+        "yumi_left_ik",
+        [
+            -1.9451154001868338,
+            -0.18549152986334183,
+            -2.841459643980648,
+            -1.9480498381501008,
+            2.069309562439483,
+            1.6282648038822964,
+            -1.1423062671879276,
+        ],
+        id="yumi_left",
+    ),
+    pytest.param(
+        "yumi_right_ik",
+        [
+            -2.938220369378702,
+            -2.5033956871033363,
+            2.938692891752213,
+            -0.10508555149089675,
+            -0.7516448924411382,
+            0.1790573476332662,
+            1.7790886217577082,
+        ],
+        id="yumi_right",
+    ),
+    pytest.param(
+        "gen3_ik",
+        [
+            3.1403201643032714,
+            2.2394833145946627,
+            0.1722556723182658,
+            -1.3466040349229238,
+            -3.1372139785758324,
+            2.0894567430243076,
+            3.1410378989985057,
+        ],
+        id="gen3",
+    ),
+    pytest.param(
+        "j2s7s300_ik",
+        [
+            -3.1399681260977976,
+            0.8221045098769837,
+            2.299456665494478,
+            1.7375783909708418,
+            -3.139296028447983,
+            1.1347011394328865,
+            -3.1384327390987354,
+        ],
+        id="j2s7s300",
+    ),
+]
+
+
+@pytest.mark.skipif(
+    not _native.native_available(),
+    reason="ssik._ssik_native not built (see scripts/build_cpp_ext.py --out-dir src/ssik)",
+)
+@pytest.mark.parametrize(("arm_name", "q"), _SRS_POLISHED_LIMIT_Q)
+def test_native_srs_polished_respects_limits(arm_name: str, q: list[float]) -> None:
+    """The default solve (respect_limits=True) returns only in-limits
+    configurations on native, as on Python, at poses that reach the in-limits
+    resolver. Each pose is its own in-limits solution, so both backends must
+    find at least one (#621)."""
+    mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
+    kb = mod._KB
+    t = np.asarray(poe_forward_kinematics(kb, np.asarray(q)), dtype=np.float64)
+    nat = mod.solve(t, native=True)
+    assert nat, f"{arm_name}: native returned nothing for an in-limits pose"
+    for s in nat:
+        assert np.linalg.norm(poe_forward_kinematics(kb, s.q) - t) <= 1e-6
+        assert _limit_violation(kb, s.q) == 0.0, (
+            f"{arm_name}: native returned q={s.q.tolist()} outside the joint limits"
+        )
