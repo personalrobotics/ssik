@@ -39,13 +39,20 @@ permissions:
 
 jobs:
   test:
-    name: Linux py${{ matrix.python-version }}
+    # Each Python version's suite is split across two jobs (`pytest --shard`,
+    # tests/conftest.py), which halves the worst case: on the slowest runner CPU
+    # the unsplit pytest step took ~20 min. Lint, docs and perf gates run once
+    # per version, in shard 1. `pytest shards cover the suite` proves the shards
+    # together ran every collected test exactly once. Changing the shard count
+    # means changing both the matrix and the /2 in the pytest step.
+    name: Linux py${{ matrix.python-version }} (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         # Full support range: 3.10 (ROS2 Humble floor, #477) through 3.14.
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -90,15 +97,19 @@ jobs:
         run: uv run python scripts/prewarm_descriptions.py
 
       - name: ruff check
+        if: matrix.shard == 1
         run: uv run ruff check
 
       - name: ruff format --check
+        if: matrix.shard == 1
         run: uv run ruff format --check
 
       - name: mypy
+        if: matrix.shard == 1
         run: uv run mypy
 
       - name: regen_docs --check
+        if: matrix.shard == 1
         # Fail if MANIFEST.toml and the AUTOGEN doc-table regions are
         # out of sync. The script regenerates anchored tables from
         # the manifest; this gate enforces "edit MANIFEST.toml + run
@@ -125,12 +136,48 @@ jobs:
         # pre-warmed above so workers never clone concurrently. perf gates are
         # excluded here and run serially below. (#348) worksteal rebalances the
         # queue as workers finish, so a few long tests don't strand one worker.
-        run: uv run pytest -q -n 4 --dist worksteal -m "not slow and not perf"
+        # --shard keeps this job's half, balanced by tests/_shard_durations.json.
+        run: >-
+          uv run pytest -q -n 4 --dist worksteal -m "not slow and not perf"
+          --shard ${{ matrix.shard }}/2
+          --shard-record shard-record/py${{ matrix.python-version }}/shard-${{ matrix.shard }}.json
+
+      - name: Upload this shard's test selection
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: pytest-shard-py${{ matrix.python-version }}-${{ matrix.shard }}
+          path: shard-record/
+          if-no-files-found: error
+          retention-days: 3
 
       - name: pytest (perf gates, serial)
+        if: matrix.shard == 1
         # Wall-clock performance gates: run serially (no -n) so timing is
         # measured without cross-worker CPU contention. Small, fast set. (#348)
         run: uv run pytest -q -m "not slow and perf"
+
+  test_shards:
+    # Fails unless, for every Python version, shards 1..N all ran, agree on N,
+    # collected the same tests, and ran disjoint slices whose union is the whole
+    # collection -- so a dropped shard or a partition bug cannot skip tests.
+    name: pytest shards cover the suite
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download every shard's test selection
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: pytest-shard-*
+          path: shard-record
+          merge-multiple: true
+
+      - name: Shards are disjoint and complete
+        run: |
+          # One directory per Python version in the test matrix (keep in sync).
+          test "$(find shard-record -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 5
+          python3 scripts/check_pytest_shards.py shard-record/*/*.json
 
   cpp_emit:
     # Native C++ backend (#482): the end-to-end no-drift guard (#495). Two

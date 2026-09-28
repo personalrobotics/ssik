@@ -25,7 +25,11 @@ DH, so re-adding a wiped entry is exact.
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
+import re
+from pathlib import Path
 
 import pytest
 from hypothesis import settings
@@ -43,6 +47,63 @@ from ssik.solvers.ikgeo import _raghavan_roth as _rr_mod
 settings.register_profile("ci", derandomize=True)
 settings.register_profile("dev", derandomize=False)
 settings.load_profile("ci" if os.environ.get("CI") else "dev")
+
+
+# --shard K/N: CI splits each Python version's suite across N jobs. Every job
+# collects the same items and keeps a deterministic slice, so the N slices are
+# disjoint and together cover the collection exactly. Slices are balanced by
+# the measured durations in _shard_durations.json (regenerate with
+# scripts/regen_test_durations.py); a stale file only unbalances them.
+# --shard-record writes {k, n, collected, selected} so a CI job can prove the
+# union of the N shards is the whole collection (scripts/check_pytest_shards.py).
+_SHARD_DURATIONS = Path(__file__).with_name("_shard_durations.json")
+_SHARD_DEFAULT_S = 0.1
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--shard", type=_parse_shard, metavar="K/N", help="run only shard K of N (1-based)"
+    )
+    parser.addoption("--shard-record", metavar="PATH", help="write the shard's selection here")
+
+
+def _parse_shard(spec: str) -> tuple[int, int]:
+    m = re.fullmatch(r"(\d+)/(\d+)", spec)
+    if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+        raise argparse.ArgumentTypeError(f"wants K/N with 1 <= K <= N, got {spec!r}")
+    return int(m.group(1)), int(m.group(2))
+
+
+def shard_partition(nodeids: list[str], n: int, cost: dict[str, float]) -> list[list[str]]:
+    """Split ``nodeids`` into ``n`` disjoint lists covering them all: greedy
+    longest-first onto the least-loaded shard, ties broken by nodeid."""
+    loads = [0.0] * n
+    shards: list[list[str]] = [[] for _ in range(n)]
+    for nid in sorted(nodeids, key=lambda x: (-cost.get(x, _SHARD_DEFAULT_S), x)):
+        i = min(range(n), key=lambda i: (loads[i], i))
+        loads[i] += cost.get(nid, _SHARD_DEFAULT_S)
+        shards[i].append(nid)
+    return shards
+
+
+@pytest.hookimpl(trylast=True)  # after -m / -k deselection: shard what would run
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    shard = config.getoption("--shard")
+    if not shard:
+        return
+    k, n = shard
+    cost = json.loads(_SHARD_DURATIONS.read_text()) if _SHARD_DURATIONS.exists() else {}
+    collected = [it.nodeid for it in items]
+    mine = set(shard_partition(collected, n, cost)[k - 1])
+    keep = [it for it in items if it.nodeid in mine]
+    config.hook.pytest_deselected(items=[it for it in items if it.nodeid not in mine])
+    items[:] = keep
+    record = config.getoption("--shard-record")
+    # Under xdist every worker collects the same items; one of them records.
+    if record and os.environ.get("PYTEST_XDIST_WORKER", "gw0") == "gw0":
+        payload = {"k": k, "n": n, "collected": collected, "selected": [it.nodeid for it in keep]}
+        Path(record).parent.mkdir(parents=True, exist_ok=True)
+        Path(record).write_text(json.dumps(payload))
 
 
 @pytest.fixture(params=["python", "cpp"])
