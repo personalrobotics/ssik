@@ -966,7 +966,7 @@ def _render_manifest_stanza(
         lines += [
             "drift_markers = [",
             f"    'SOLVER_NAME = \"{plan.solver_name}\"',",
-            '    "def fk(q):",',
+            '    "def solve(",',
             "]",
         ]
     lines += [

@@ -2400,7 +2400,7 @@ fk_ceiling_fuzz = 1e-04  # from the validation smoke (~10x worst FK)
 platform_drift = true
 drift_markers = [
     'SOLVER_NAME = "ikgeo.general_6r"',
-    "def fk(q):",
+    "def solve(",
 ]
 
 [arms.m1013_ik.bench]  # filled by scripts/regen_bench.py
@@ -2436,7 +2436,7 @@ fk_ceiling_fuzz = 1e-04  # from the validation smoke (~10x worst FK)
 platform_drift = true
 drift_markers = [
     'SOLVER_NAME = "ikgeo.general_6r"',
-    "def fk(q):",
+    "def solve(",
 ]
 
 [arms.m0609_ik.bench]  # filled by scripts/regen_bench.py
@@ -2472,7 +2472,7 @@ fk_ceiling_fuzz = 1e-05  # from the validation smoke (~10x worst FK)
 platform_drift = true
 drift_markers = [
     'SOLVER_NAME = "ikgeo.general_6r"',
-    "def fk(q):",
+    "def solve(",
 ]
 
 [arms.hc10_ik.bench]  # filled by scripts/regen_bench.py
@@ -2540,7 +2540,7 @@ fk_ceiling_fuzz = 1e-04  # from the validation smoke (~10x worst FK)
 platform_drift = true
 drift_markers = [
     'SOLVER_NAME = "ikgeo.general_6r"',
-    "def fk(q):",
+    "def solve(",
 ]
 
 [arms.xmatecr7_ik.bench]  # filled by scripts/regen_bench.py
@@ -2576,7 +2576,7 @@ fk_ceiling_fuzz = 1e-4  # from the validation smoke (~10x worst FK)
 platform_drift = true
 drift_markers = [
     'SOLVER_NAME = "ikgeo.general_6r"',
-    "def fk(q):",
+    "def solve(",
 ]
 
 [arms.xmatesr3_ik.bench]  # filled by scripts/regen_bench.py

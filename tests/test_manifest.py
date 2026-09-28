@@ -129,7 +129,15 @@ def test_manifest_sample_q_length_matches_dof(arm_name: str, manifest: dict[str,
 def test_drift_markers_present_when_platform_drift_true(manifest: dict[str, Arm]) -> None:
     """Arms with ``platform_drift = true`` must declare ``drift_markers``
     so the snapshot test can fall back to structural checks on non-macOS.
+
+    Each marker must also appear in the committed artifact. That structural
+    check runs only off macOS and only under ``-m slow``, so a marker the
+    codegen never emits would otherwise go unnoticed until then.
     """
+    prebuilt = Path(__file__).parent.parent / "src" / "ssik" / "prebuilt"
     for name, arm in manifest.items():
         if arm.platform_drift:
             assert arm.drift_markers, f"{name}: platform_drift = true but drift_markers is empty"
+            text = (prebuilt / arm.vendor / f"{arm.module_basename}.py").read_text()
+            missing = [m for m in arm.drift_markers if m not in text]
+            assert not missing, f"{name}: drift_markers not in the committed artifact: {missing}"
