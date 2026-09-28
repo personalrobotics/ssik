@@ -423,24 +423,27 @@ def test_pencil_eigenvalues_match_sympy_rational_resultant() -> None:
     u, w = sp.symbols("u w", real=True)
 
     def to_rational(coef: np.ndarray) -> sp.Expr:
+        # Each float64 coefficient converted to its exact binary value, so the
+        # resultant below is the exact resultant of the f, g the pencil sees.
         expr = sp.S.Zero
         for p in range(coef.shape[0]):
             for q in range(coef.shape[1]):
                 c = float(coef[p, q])
                 if c == 0.0:
                     continue
-                expr += sp.Rational(c).limit_denominator(10**12) * u**p * w**q
+                expr += sp.Rational(c) * u**p * w**q
         return expr
 
     f_sym = to_rational(f)
     g_sym = to_rational(g)
     r_uw = sp.resultant(sp.Poly(f_sym, w), sp.Poly(g_sym, w), w)
     r_poly = sp.Poly(r_uw, u)
-    coef_desc = [float(c) for c in r_poly.all_coeffs()]
-    sympy_roots = np.roots(coef_desc)
-    sympy_real = sorted(
-        float(np.real(r)) for r in sympy_roots if abs(np.imag(r)) < 1e-6 * (1 + abs(np.real(r)))
-    )
+    # Roots of the exact degree-56 resultant to 30 digits. Rounding its
+    # coefficients to float64 and calling np.roots is not an oracle: the
+    # problem is ill-conditioned enough that a near-real complex pair (imag
+    # ~1e-8 at u ~ 0.22497) comes back as two real roots ~1e-5 apart.
+    sympy_roots = [complex(r) for r in r_poly.nroots(n=30, maxsteps=500)]
+    sympy_real = sorted(r.real for r in sympy_roots if abs(r.imag) < 1e-6 * (1 + abs(r.real)))
     pencil_real = list(eliminate_uw_numeric(pre, sigma_E, drop_indices=(7,)))
 
     # Pencil may include extra eigenvalues not present in the resultant
