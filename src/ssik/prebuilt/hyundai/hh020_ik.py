@@ -620,7 +620,9 @@ def solve(
         near-singular *representative* may differ (numpy vs Eigen), and
         redundant-7R arms may sample the self-motion manifold differently.
         Silently falls back to the Python path when the native extension
-        isn't bundled (Windows / source installs). Pass ``native=False``
+        isn't bundled (Windows / source installs), and when ``policy`` is
+        not equal to ``DEFAULT_TOLERANCE_POLICY`` or ``allow_refinement``
+        is ``True``, which native does not implement. Pass ``native=False``
         for the pure-Python path (identical algorithm, no C++ dependency).
         Default ``True``.
     :returns: list of :class:`Solution`; empty list iff no IK
@@ -642,6 +644,8 @@ def solve(
             allow_rescue=allow_rescue,
             enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
+            policy=policy,
+            allow_refinement=allow_refinement,
         )
         if _native_sols is not None:
             return _native_sols

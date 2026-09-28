@@ -739,6 +739,7 @@ sols = ur5_ik.solve(T_target, native=False)                  # identical algorit
 
 - **Same answers.** Native reproduces the Python result's solution *set*, with every angle in the same representative ([the ±π convention](docs/api.md#angle-representatives)). Without a seed the *order* may differ (numpy vs Eigen), and redundant-7R arms may sample the self-motion manifold differently; with a seed the nearest solution is stable. Parity is gated in CI against the Python `solve()` across every arm and option (limits / seed / max / tolerance).
 - **Automatic fallback.** Where the native extension isn't bundled (Windows wheels, source installs), `solve()` transparently runs the identical pure-Python path — it never fails for unavailability. Pass `native=False` to force it explicitly (e.g. for bit-reproducible results across machines).
+- **Default options only.** Native implements the default `policy` and `allow_refinement=False`. A call that passes a `TolerancePolicy` differing from `DEFAULT_TOLERANCE_POLICY`, or `allow_refinement=True`, runs the Python path, which honours them.
 ### Using ssik from C++ (no Python)
 
 The same solvers are also emitted as **zero-runtime-Python, header-only** artifacts — `cpp/gen/<arm>_ik.hpp` — for MoveIt / real-time / any-C++ use where the Python library isn't an option. Each header bakes one robot's geometry and exposes `solve(T)` returning every IK branch, depending only on Eigen:

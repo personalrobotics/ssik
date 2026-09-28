@@ -21,6 +21,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 
 # Solver families with a native implementation in _ssik_native. The 6R geometric
 # families run the full artifact via try_native_solve; seven_r.srs runs the full
@@ -60,6 +61,23 @@ def _load_ext() -> Any:
 def native_available() -> bool:
     """True when the native extension is importable (shipped for this platform)."""
     return _load_ext() is not None
+
+
+def honours_options(policy: TolerancePolicy, allow_refinement: bool) -> bool:
+    """Whether the native backend implements a solve with these options.
+
+    Native runs fixed internal tolerance gates and never applies the optional
+    Newton polish, so it implements only the defaults: ``policy`` equal *by
+    value* to :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY` (a fresh
+    ``TolerancePolicy()`` qualifies) and ``allow_refinement=False``, the
+    default of every generated ``solve()``. Any other value makes the
+    ``try_native_*`` entry points return ``None``, so the artifact runs the
+    Python path, which honours it (#625). Threading the options through the
+    native solvers is #575.
+    """
+    return not allow_refinement and (
+        policy is DEFAULT_TOLERANCE_POLICY or policy == DEFAULT_TOLERANCE_POLICY
+    )
 
 
 def _validate_seed_metric(seed_metric: str, q_seed: NDArray[np.float64] | None) -> None:
@@ -173,6 +191,8 @@ def try_native_solve(
     refinement_max_iters: int = 15,
     enumerate_windings: bool = True,
     rr_geometry: dict[str, Any] | None = None,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    allow_refinement: bool = False,
 ) -> list[Solution] | None:
     """Native artifact solve for a supported family, or ``None`` to fall back.
 
@@ -183,8 +203,11 @@ def try_native_solve(
     ``rr_geometry`` is the baked RR tensor (:func:`load_rr_native_geometry`) that
     the ``ikgeo.general_6r`` runtime path needs; the artifact loads it once from
     its sidecar ``.npz`` and passes it here (the ~30s derivation is build-time).
+
+    A ``policy`` or ``allow_refinement`` other than the default returns ``None``
+    (:func:`honours_options`).
     """
-    if solver_name not in _NATIVE_SOLVERS:
+    if solver_name not in _NATIVE_SOLVERS or not honours_options(policy, allow_refinement):
         return None
     _validate_seed_metric(seed_metric, q_seed)
     ext = _load_ext()
@@ -890,12 +913,18 @@ def try_native_jointlock_solve(
     refinement_max_iters: int = 15,
     enumerate_windings: bool = True,
     jointlock_geometry: dict[str, Any] | None = None,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    allow_refinement: bool = False,
 ) -> list[Solution] | None:
     """FULL native jointlock.seven_r artifact solve (#554), or ``None`` to fall
     back. Dispatches by the baked ``kind``: RR-inner (rizon4/rizon10) via the
     16 numeric RR tensors; HP-inner (kassow) via the Study-quaternion kernel.
-    Redundant 7R sampling solver -> relative-completeness contract."""
+    Redundant 7R sampling solver -> relative-completeness contract. A
+    non-default ``policy`` or ``allow_refinement`` returns ``None``
+    (:func:`honours_options`)."""
     if solver_name != "jointlock.seven_r" or jointlock_geometry is None:
+        return None
+    if not honours_options(policy, allow_refinement):
         return None
     _validate_seed_metric(seed_metric, q_seed)
     ext = _load_ext()
@@ -1182,14 +1211,20 @@ def try_native_solve_7r(
     solver_name: str,
     kb: Any,
     t_target: NDArray[np.float64],
+    *,
+    policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
+    allow_refinement: bool = False,
     **kwargs: Any,
 ) -> list[Solution] | None:
     """Unified native entry for the thin-wrapper 7R families (the artifact hook
     calls this). Routes by ``solver_name`` to the focused per-family solve, or
     returns ``None`` to fall back to Python: SRS + srs_polished ->
     :func:`try_native_srs_solve`; spherical_shoulder{,_polished} ->
-    :func:`try_native_spherical_shoulder_solve`."""
+    :func:`try_native_spherical_shoulder_solve`. A non-default ``policy`` or
+    ``allow_refinement`` returns ``None`` (:func:`honours_options`)."""
     _validate_seed_metric(kwargs.get("seed_metric", "wrap_linf"), kwargs.get("q_seed"))
+    if not honours_options(policy, allow_refinement):
+        return None
     if solver_name in ("seven_r.srs", "seven_r.srs_polished"):
         return try_native_srs_solve(solver_name, kb, t_target, **kwargs)
     if solver_name in ("seven_r.spherical_shoulder", "seven_r.spherical_shoulder_polished"):

@@ -227,6 +227,8 @@ def solve(
             allow_rescue=allow_rescue,
             enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
+            policy=policy,
+            allow_refinement=allow_refinement,
         )
         if _native_sols is not None:
             return _native_sols

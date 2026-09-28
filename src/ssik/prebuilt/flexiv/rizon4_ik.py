@@ -911,6 +911,8 @@ def solve(
             allow_rescue=allow_rescue,
             enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
+            policy=policy,
+            allow_refinement=allow_refinement,
             jointlock_geometry=_jointlock_native_geometry(),
         )
         if _native_sols is not None:

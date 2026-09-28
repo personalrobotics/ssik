@@ -20,7 +20,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from ssik import _native
+from ssik import TolerancePolicy, _native
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
 
@@ -108,6 +108,41 @@ def test_native_kwarg_accepted() -> None:
     t = mod.fk(np.zeros(6))
     assert mod.solve(t, native=False) is not None
     assert mod.solve(t, native=True) is not None  # True is safe even without the ext
+
+
+# Options native does not implement, at a pose where honouring them changes the
+# answer. Each hook family is covered: 6R, thin-wrapper 7R and jointlock 7R.
+_Q_OPTIONS = [0.3, 0.5, -0.4, 0.2, 0.9, -0.1, 0.4]
+_TIGHT = TolerancePolicy(subproblem_numerical=1e-15)
+
+
+@pytest.mark.skipif(
+    not _native.native_available(),
+    reason="ssik._ssik_native not built (see scripts/build_cpp_ext.py --out-dir src/ssik)",
+)
+@pytest.mark.parametrize(
+    ("arm_name", "options"),
+    [
+        pytest.param("puma560_ik", {"policy": _TIGHT}, id="puma560-policy"),
+        pytest.param("iiwa14_ik", {"policy": _TIGHT}, id="iiwa14-policy"),
+        pytest.param("rizon4_ik", {"policy": _TIGHT, "allow_rescue": False}, id="rizon4-policy"),
+        pytest.param("rizon4_ik", {"allow_refinement": True}, id="rizon4-refinement"),
+    ],
+)
+def test_non_default_options_run_the_python_path(arm_name: str, options: dict[str, Any]) -> None:
+    """The default solve (native) honours a non-default ``policy`` or
+    ``allow_refinement`` by running the Python path, and returns exactly what
+    ``native=False`` returns (#625)."""
+    mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
+    t = mod.fk(np.asarray(_Q_OPTIONS[: len(mod._KB.joints)]))
+    py = mod.solve(t, native=False, **options)
+    # Premise: the option changes the answer here, so ignoring it is visible.
+    assert not _set_match(py, mod.solve(t, native=False)), f"{arm_name}: option has no effect"
+    got = mod.solve(t, **options)
+    assert len(got) == len(py)
+    for a, b in zip(got, py, strict=True):
+        assert np.array_equal(a.q, b.q)
+        assert a.refinement_used == b.refinement_used
 
 
 @pytest.mark.skipif(

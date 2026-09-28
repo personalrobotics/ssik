@@ -332,6 +332,8 @@ _NATIVE_HOOK = """\
             allow_rescue=allow_rescue,
             enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
+            policy=policy,
+            allow_refinement=allow_refinement,
         )
         if _native_sols is not None:
             return _native_sols
@@ -341,8 +343,8 @@ _NATIVE_HOOK = """\
 # from the sidecar .npz. A single shipped ext covers every RR arm via the numeric
 # tensor (#555); no per-arm C code.
 _NATIVE_HOOK_RR = _NATIVE_HOOK.replace(
-    "            refinement_max_iters=refinement_max_iters,\n        )",
-    "            refinement_max_iters=refinement_max_iters,\n"
+    "            allow_refinement=allow_refinement,\n        )",
+    "            allow_refinement=allow_refinement,\n"
     "            rr_geometry=_rr_native_geometry(),\n        )",
 )
 
@@ -388,7 +390,9 @@ _NATIVE_DOC = """\
         near-singular *representative* may differ (numpy vs Eigen), and
         redundant-7R arms may sample the self-motion manifold differently.
         Silently falls back to the Python path when the native extension
-        isn't bundled (Windows / source installs). Pass ``native=False``
+        isn't bundled (Windows / source installs), and when ``policy`` is
+        not equal to ``DEFAULT_TOLERANCE_POLICY`` or ``allow_refinement``
+        is ``True``, which native does not implement. Pass ``native=False``
         for the pure-Python path (identical algorithm, no C++ dependency).
         Default ``True``.
 """
@@ -897,6 +901,8 @@ _JOINTLOCK_NATIVE_HOOK = """\
             allow_rescue=allow_rescue,
             enumerate_windings=enumerate_windings,
             refinement_max_iters=refinement_max_iters,
+            policy=policy,
+            allow_refinement=allow_refinement,
             jointlock_geometry=_jointlock_native_geometry(),
         )
         if _native_sols is not None:
@@ -1752,6 +1758,8 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
             "            allow_rescue=allow_rescue,\n"
             "            enumerate_windings=enumerate_windings,\n"
             "            refinement_max_iters=refinement_max_iters,\n"
+            "            policy=policy,\n"
+            "            allow_refinement=allow_refinement,\n"
             "        )\n"
             "        if _native_sols is not None:\n"
             "            return _native_sols\n",
