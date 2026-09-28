@@ -44,7 +44,26 @@ scripts/install-hooks.sh                # one-time: install pre-push check hook
 arm, so without `ssik._ssik_native` you are testing the Python fallback, not
 what users get: around thirty native tests skip and the perf gate skips too.
 `tests/test_native_coverage.py` fails loudly rather than letting that pass
-quietly. It needs Eigen (`brew install eigen`, `apt install libeigen3-dev`).
+quietly.
+
+**Eigen is pinned.** Every native build (this one, the wheels on every platform,
+and CI) compiles against one Eigen release, pinned by version and sha256 in
+`scripts/fetch_eigen.py`. The build downloads it once into `~/.cache/ssik`
+(`SSIK_EIGEN_CACHE` moves it) and never falls back to a system Eigen: if the
+download fails, `build_cpp_ext.py` stops, and a wheel build leaves the native
+extension out with a warning, which the wheel smoke gates reject. Eigen
+releases differ numerically (#599: QZ converges on one and not another), so
+tests only speak for the wheels when they ran against the same Eigen. To try
+another Eigen on purpose, set `SSIK_EIGEN_INCLUDE_DIR=/path/to/eigen3` for the
+Python builds, or pass `-DCMAKE_PREFIX_PATH=<your Eigen prefix>` to CMake. The
+extension reports what it compiled against as `ssik._ssik_native.eigen_version`.
+For the C++ build against the pin:
+
+```bash
+cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$(python3 scripts/fetch_eigen.py --cmake-prefix)" \
+  -DSSIK_EIGEN_VERSION="$(python3 scripts/fetch_eigen.py --version)"
+```
 
 ## Pre-push gate
 

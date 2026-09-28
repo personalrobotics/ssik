@@ -12,29 +12,41 @@ Usage: ``python scripts/build_cpp_ext.py [--out-dir <dir>]`` (default: cpp/build
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import sysconfig
 from pathlib import Path
 
+import fetch_eigen
 import pybind11
 
 _REPO = Path(__file__).resolve().parent.parent
 
 
 def _eigen_include() -> str:
-    """Locate the Eigen headers (Homebrew / apt / find_package layout)."""
-    candidates = [
-        "/opt/homebrew/include/eigen3",
-        "/usr/local/include/eigen3",
-        "/usr/include/eigen3",
-    ]
-    for c in candidates:
-        if (Path(c) / "Eigen" / "Dense").exists():
-            return c
-    raise SystemExit(
-        "Eigen not found; install eigen (brew install eigen / apt install libeigen3-dev)"
-    )
+    """The pinned Eigen (scripts/fetch_eigen.py, #606), or SSIK_EIGEN_INCLUDE_DIR
+    when a developer deliberately overrides it. Fails rather than falling back
+    to whatever Eigen the system has."""
+    override = os.environ.get(fetch_eigen.OVERRIDE_ENV)
+    if override:
+        if not (Path(override) / "Eigen" / "Dense").is_file():
+            raise SystemExit(f"{fetch_eigen.OVERRIDE_ENV}={override} has no Eigen/Dense")
+        print(
+            f"[build_cpp_ext] Eigen {fetch_eigen.header_version(override)} from "
+            f"{fetch_eigen.OVERRIDE_ENV}={override} (override; the pin is "
+            f"{fetch_eigen.EIGEN_VERSION})"
+        )
+        return override
+    try:
+        inc = fetch_eigen.ensure_eigen()
+    except fetch_eigen.EigenUnavailable as exc:
+        raise SystemExit(
+            f"Pinned Eigen {fetch_eigen.EIGEN_VERSION} unavailable: {exc}\n"
+            f"Set {fetch_eigen.OVERRIDE_ENV} to build against a local Eigen instead."
+        ) from exc
+    print(f"[build_cpp_ext] Eigen {fetch_eigen.EIGEN_VERSION} (pinned) from {inc}")
+    return str(inc)
 
 
 def build(out_dir: Path) -> Path:

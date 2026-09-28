@@ -7,13 +7,19 @@ and runnable against an installed wheel. Exits 0 on success, non-zero on any
 failure. On platforms where native isn't shipped (Windows, first cut) the
 extension is absent and this script reports that and exits 0 -- the Python
 fallback is the expected behaviour there.
+
+It also asserts the extension was compiled against the pinned Eigen in
+scripts/fetch_eigen.py (#606), so the Linux and macOS wheels, each checked
+against the same pin, are known to carry the same Eigen.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 
 import numpy as np
+from fetch_eigen import EIGEN_VERSION, OVERRIDE_ENV
 
 
 def main() -> int:
@@ -24,6 +30,15 @@ def main() -> int:
             print("[native_smoke] native not shipped on Windows (Python fallback) -- OK")
             return 0
         print(f"[native_smoke] FAIL: ssik._ssik_native missing on {sys.platform}", file=sys.stderr)
+        return 1
+
+    eigen = getattr(_ssik_native, "eigen_version", None)
+    print(f"[native_smoke] compiled against Eigen {eigen} (pin: {EIGEN_VERSION})")
+    if eigen != EIGEN_VERSION and not os.environ.get(OVERRIDE_ENV):
+        print(
+            f"[native_smoke] FAIL: built against Eigen {eigen}, not the pinned {EIGEN_VERSION}",
+            file=sys.stderr,
+        )
         return 1
 
     from ssik.prebuilt import ur5_ik

@@ -17,23 +17,27 @@ if [ ! -f "$cpp_root/gen/iiwa14_ik.hpp" ]; then
   ( cd "$cpp_root/.." && python scripts/cpp_emit.py --all )
 fi
 
-# The export requires the Eigen3 CMake package (Eigen3::Eigen). On Linux
-# (libeigen3-dev) CMake finds it under /usr by default; Homebrew installs it off
-# CMake's default search path, so hint it. EIGEN_PREFIX overrides.
+# The export requires the Eigen3 CMake package (Eigen3::Eigen). By default use
+# the pinned Eigen every ssik build compiles against (#606), and require exactly
+# that version in both the install and the consumer. EIGEN_PREFIX overrides it
+# with a CMake prefix of your own Eigen (any version).
 eigen_prefix="${EIGEN_PREFIX:-}"
-if [ -z "$eigen_prefix" ] && command -v brew >/dev/null 2>&1; then
-  eigen_prefix="$(brew --prefix eigen 2>/dev/null || true)"
+eigen_version=""
+if [ -z "$eigen_prefix" ]; then
+  eigen_prefix="$(python3 "$cpp_root/../scripts/fetch_eigen.py" --cmake-prefix)"
+  eigen_version="$(python3 "$cpp_root/../scripts/fetch_eigen.py" --version)"
 fi
+echo "== Eigen: ${eigen_version:-any version} from $eigen_prefix =="
 
 echo "== configure + install ssik_cpp -> $prefix =="
 cmake -S "$cpp_root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
   -DSSIK_CPP_EXAMPLES=OFF -DCMAKE_INSTALL_PREFIX="$prefix" \
-  ${eigen_prefix:+-DCMAKE_PREFIX_PATH="$eigen_prefix"} >/dev/null
+  -DCMAKE_PREFIX_PATH="$eigen_prefix" -DSSIK_EIGEN_VERSION="$eigen_version" >/dev/null
 cmake --install "$build" >/dev/null
 
 echo "== configure + build the standalone consumer against the installed package =="
 cmake -S "$cpp_root/examples/consumer" -B "$cons" -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="$prefix${eigen_prefix:+;$eigen_prefix}" >/dev/null
+  -DCMAKE_PREFIX_PATH="$prefix;$eigen_prefix" -DSSIK_EIGEN_VERSION="$eigen_version" >/dev/null
 cmake --build "$cons" >/dev/null
 
 echo "== run =="

@@ -10,14 +10,23 @@ endif()
 
 # Eigen (header-only). Prefer the CMake package (needed to export a clean
 # ssik::ssik_cpp for downstream find_package); fall back to common include paths
-# so a bare in-tree `cmake ..` still builds without Eigen3Config on the path. No
-# version pin: ssik uses only stable Eigen basics, and pinning a MAJOR (e.g. 3.3)
-# makes SameMajorVersion reject a newer Eigen (5.x on current Homebrew).
+# so a bare in-tree `cmake ..` still builds without Eigen3Config on the path.
+# Consumers may use any Eigen: pinning a MAJOR (e.g. 3.3) would make
+# SameMajorVersion reject a newer Eigen (5.x on current Homebrew). ssik's own
+# gates build against one pinned release (#606): they pass
+# -DSSIK_EIGEN_VERSION=<pin> and a CMAKE_PREFIX_PATH from
+# scripts/fetch_eigen.py --cmake-prefix, and then any other Eigen is an error.
 # std::thread (parallel.hpp, #546) needs the platform thread library linked.
 find_package(Threads REQUIRED)
-find_package(Eigen3 QUIET NO_MODULE)
+set(SSIK_EIGEN_VERSION "" CACHE STRING "Require exactly this Eigen version (empty: any)")
+if(SSIK_EIGEN_VERSION)
+  find_package(Eigen3 ${SSIK_EIGEN_VERSION} EXACT REQUIRED NO_MODULE)
+else()
+  find_package(Eigen3 QUIET NO_MODULE)
+endif()
 if(TARGET Eigen3::Eigen)
   set(SSIK_EIGEN Eigen3::Eigen)
+  message(STATUS "ssik_cpp: Eigen ${Eigen3_VERSION} (${Eigen3_DIR})")
 else()
   find_path(EIGEN3_INCLUDE_DIR Eigen/Dense
     PATHS /opt/homebrew/include/eigen3 /usr/local/include/eigen3 /usr/include/eigen3)

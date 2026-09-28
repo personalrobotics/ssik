@@ -64,7 +64,9 @@ target_link_libraries(my_app PRIVATE ssik::ssik_cpp)
 That puts the primitives (`ssik_cpp/…`) and every committed `<arm>_ik.hpp` on the
 include path. The only dependency is **Eigen** (header-only) — the exported
 package `find_dependency()`s it, so Eigen must be findable
-(`brew install eigen` / `apt install libeigen3-dev`).
+(`brew install eigen` / `apt install libeigen3-dev`). ssik's own tests and wheels
+use the Eigen release pinned in `scripts/fetch_eigen.py`; other releases can
+differ in the last bits and in which degenerate poses their QZ converges on.
 
 Or bare, without CMake:
 

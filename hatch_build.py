@@ -57,21 +57,46 @@ def _native_supported() -> bool:
 
 
 def _eigen_include(root: Path) -> str | None:
-    """Locate the Eigen headers: EIGEN_INCLUDE_DIR (set by CIBW_BEFORE_ALL) or
-    the standard system paths for local builds. Header-only, so no link step."""
+    """The Eigen include dir to compile the native extension against (#606).
+
+    Always the pinned release from scripts/fetch_eigen.py (downloaded once and
+    sha256-checked), so every platform's wheel carries the same Eigen. Never a
+    system Eigen, unless SSIK_EIGEN_INCLUDE_DIR asks for one explicitly. Returns
+    None only when the pin cannot be downloaded; a checksum or version mismatch
+    raises. Header-only, so no link step.
+    """
+    import importlib.util
     import os
 
-    env = os.environ.get("EIGEN_INCLUDE_DIR")
-    candidates = [env] if env else []
-    candidates += [
-        "/opt/homebrew/include/eigen3",
-        "/usr/local/include/eigen3",
-        "/usr/include/eigen3",
-    ]
-    for c in candidates:
-        if c and (Path(c) / "Eigen" / "Dense").exists():
-            return c
-    return None
+    spec = importlib.util.spec_from_file_location(
+        "_ssik_fetch_eigen", root / "scripts" / "fetch_eigen.py"
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {root / 'scripts' / 'fetch_eigen.py'}")
+    pin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pin)
+
+    override = os.environ.get(pin.OVERRIDE_ENV)
+    if override:
+        if not (Path(override) / "Eigen" / "Dense").is_file():
+            raise RuntimeError(f"{pin.OVERRIDE_ENV}={override} has no Eigen/Dense")
+        print(
+            f"[hatch_build] Eigen {pin.header_version(override)} from {pin.OVERRIDE_ENV}="
+            f"{override} (override; the pin is {pin.EIGEN_VERSION})",
+            file=sys.stderr,
+        )
+        return override
+    try:
+        inc = pin.ensure_eigen()
+    except pin.EigenUnavailable as exc:
+        print(
+            f"[hatch_build] WARNING: pinned Eigen {pin.EIGEN_VERSION} unavailable ({exc}). "
+            f"Set {pin.OVERRIDE_ENV} to build native against a local Eigen.",
+            file=sys.stderr,
+        )
+        return None
+    print(f"[hatch_build] Eigen {pin.EIGEN_VERSION} (pinned) from {inc}", file=sys.stderr)
+    return str(inc)
 
 
 class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
@@ -109,7 +134,7 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 annotate=False,
             )
             # Append the native C++ solver extension on supported platforms when
-            # Eigen is available. If Eigen is absent (a dev/editable install that
+            # the pinned Eigen is available. If it is absent (a dev/editable install that
             # doesn't need native -- the test harness uses cpp/build), skip it
             # rather than failing the build. Shipped wheels are still guaranteed
             # to carry native by the wheel smoke gate ([tool.cibuildwheel]
@@ -117,7 +142,7 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
             # CI job -- so a native-less wheel can never be published silently.
             native_built = False
             # The sdist does not carry the C++ sources, so a build from it has
-            # nothing native to compile.
+            # nothing native to compile; don't fetch Eigen for it.
             if _native_supported() and not (root / NATIVE_EXT_SOURCE).is_file():
                 print(
                     f"[hatch_build] skipping {NATIVE_EXT_MODULE}: {NATIVE_EXT_SOURCE} is not in "
@@ -128,9 +153,8 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 eigen = _eigen_include(root)
                 if eigen is None:
                     print(
-                        f"[hatch_build] Eigen not found (set EIGEN_INCLUDE_DIR); skipping "
-                        f"{NATIVE_EXT_MODULE}. Fine for a dev install; shipped wheels require it "
-                        f"(enforced by the wheel smoke gate).",
+                        f"[hatch_build] skipping {NATIVE_EXT_MODULE}: no Eigen. Fine for a dev "
+                        f"install; shipped wheels require it (enforced by the wheel smoke gate).",
                         file=sys.stderr,
                     )
                 else:

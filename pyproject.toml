@@ -140,6 +140,8 @@ path = "hatch_build.py"
 include = [
     "src/ssik",
     "hatch_build.py",
+    # hatch_build loads it to fetch the pinned Eigen for the native ext (#606).
+    "scripts/fetch_eigen.py",
     "LICENSE",
     "README.md",
     "pyproject.toml",
@@ -185,8 +187,9 @@ test-command = [
     #    CYTHON_TARGETS; tests/test_perf_extensions.py fails if it drifts.)
     'python -c "import ssik.refinement, ssik.kinematics.poe_fk as _p; assert ssik.refinement.__file__.endswith((\".so\", \".pyd\")), \"ssik.refinement not compiled in wheel\"; assert _p.__file__.endswith((\".so\", \".pyd\")), \"ssik.kinematics.poe_fk not compiled in wheel\""',
     # Native solver extension (#506) is bundled on Linux + macOS; Windows ships
-    # without it (Python fallback). Assert it imports where it should.
-    'python -c "import sys; sys.platform == \"win32\" or __import__(\"ssik._ssik_native\")"',
+    # without it (Python fallback). Assert it imports and solves where it
+    # should, compiled against the pinned Eigen (#606) on every platform.
+    "python {project}/scripts/native_smoke.py",
     'python -c "from ssik.prebuilt import iiwa14_ik; import numpy as np; q = np.array([0.3, 0.4, -0.5, 0.6, 0.2, -0.3, 0.4]); T = iiwa14_ik.fk(q); sols = iiwa14_ik.solve(T); assert sols and max(s.fk_residual for s in sols) < 1e-9, \"iiwa14_ik smoke failed\""',
     'python -c "from ssik.prebuilt import franka_panda_ik; import numpy as np; T = franka_panda_ik.fk(np.array([0.2, 0.3, -0.4, -1.2, 0.3, 1.4, 0.5])); sols = franka_panda_ik.solve(T); assert sols, \"franka_panda_ik returned no IK\""',
     # RR (general_6r) native backend (#555): the baked-tensor sidecar .npz must
@@ -205,11 +208,8 @@ test-command = [
 [tool.cibuildwheel.linux]
 # manylinux_2_28 ships GCC 14; sufficient for Cython 3.x + the C++20 native ext.
 manylinux-x86_64-image = "manylinux_2_28"
-# Provide Eigen for the native extension (#506). The manylinux container has no
-# eigen package, so fetch a pinned header-only release once per build and point
-# hatch_build at it via EIGEN_INCLUDE_DIR (env is passed through to the build).
-before-all = "curl -sSL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz | tar xz -C /opt"
-environment = { EIGEN_INCLUDE_DIR = "/opt/eigen-3.4.0" }
+# Eigen for the native extension: hatch_build fetches the pinned, sha256-checked
+# release itself (scripts/fetch_eigen.py, #606), the same one on every platform.
 
 [tool.cibuildwheel.macos]
 # Build both arm64 (native) and x86_64 (cross-compiled) on the macos-latest
@@ -220,10 +220,8 @@ environment = { EIGEN_INCLUDE_DIR = "/opt/eigen-3.4.0" }
 # same flags, just hosted on a different CPU). Test-skip above prevents
 # cibuildwheel from trying to RUN the x86_64 wheel on arm64.
 archs = ["arm64", "x86_64"]
-# Eigen for the native ext (#506); brew lands headers where hatch_build looks
-# (/opt/homebrew or /usr/local include/eigen3). Header-only, so the arm64 host
-# building the x86_64 cross-wheel still just needs the include path.
-before-all = "brew install eigen"
+# Eigen: see [tool.cibuildwheel.linux]. Header-only, so the arm64 host building
+# the x86_64 cross-wheel needs only the include path.
 
 [tool.ruff]
 line-length = 100

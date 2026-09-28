@@ -7,6 +7,7 @@
 #include <array>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <memory>
 #include <vector>
 
@@ -1667,6 +1668,17 @@ void bind_charts(py::module_& m) {
 PYBIND11_MODULE(_ssik_native, m) {
   bind_charts(m);
   m.doc() = "Native three_parallel solver binding (test conformance + shipped native backend)";
+  // The Eigen release this extension was compiled against (#606). Every build
+  // uses the pin in scripts/fetch_eigen.py; the wheel smoke gates assert it, so
+  // a build against another Eigen cannot pass unnoticed. Eigen >= 5 defines the
+  // string; 3.x only has the WORLD.MAJOR.MINOR macros.
+#ifdef EIGEN_VERSION_STRING
+  m.attr("eigen_version") = EIGEN_VERSION_STRING;
+#else
+  m.attr("eigen_version") = std::to_string(EIGEN_WORLD_VERSION) + "." +
+                            std::to_string(EIGEN_MAJOR_VERSION) + "." +
+                            std::to_string(EIGEN_MINOR_VERSION);
+#endif
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
         py::arg("n2"), py::arg("n3"));
   m.def("hp_compute_fg_test", &hp_compute_fg_test_py, py::arg("t_u"), py::arg("t_w_pre"),

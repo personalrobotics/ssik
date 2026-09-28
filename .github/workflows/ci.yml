@@ -117,10 +117,6 @@ jobs:
         # arm metadata changes.
         run: uv run python scripts/regen_docs.py --check
 
-      - name: Install Eigen
-        # Needed to compile the native extension below.
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
-
       - name: Build native extension into the package (pybind11)
         # native=True is the shipped default for every prebuilt arm (#554), so
         # the matrix must exercise it: without this the ~30 native tests here
@@ -266,8 +262,15 @@ jobs:
       - name: Sync dependencies
         run: uv sync --dev --python 3.12
 
-      - name: Install Eigen + CMake
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake libeigen3-dev
+      - name: Install CMake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+
+      - name: Pinned Eigen as a CMake package
+        # The one Eigen every native build uses (#606), downloaded and
+        # sha256-checked by fetch_eigen.py, then installed so find_package sees it.
+        run: |
+          echo "PINNED_EIGEN_PREFIX=$(python3 scripts/fetch_eigen.py --cmake-prefix)" >> "$GITHUB_ENV"
+          echo "PINNED_EIGEN_VERSION=$(python3 scripts/fetch_eigen.py --version)" >> "$GITHUB_ENV"
 
       - name: Download every shard's emitted output
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -292,7 +295,11 @@ jobs:
         run: uv run python scripts/cpp_emit.py --artifact-gate
 
       - name: Configure + build
-        run: cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release && cmake --build cpp/build -j
+        # SSIK_EIGEN_VERSION makes configure fail on any Eigen but the pin.
+        run: |
+          cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$PINNED_EIGEN_PREFIX" -DSSIK_EIGEN_VERSION="$PINNED_EIGEN_VERSION"
+          cmake --build cpp/build -j
 
       - name: ctest (FK + Newton golden conformance)
         run: ctest --test-dir cpp/build --output-on-failure
@@ -301,7 +308,8 @@ jobs:
         # Proves the self-contained artifacts are usable by an external C++
         # project: installs ssik_cpp to a temp prefix, then a standalone
         # downstream CMake project find_package(ssik_cpp)es it, builds the
-        # example, and runs it -- no ssik source tree, no Python (#493).
+        # example, and runs it -- no ssik source tree, no Python (#493). With
+        # EIGEN_PREFIX unset it uses, and requires, the pinned Eigen (#606).
         run: bash cpp/examples/consumer/smoke.sh
 
   cpp_suite:
@@ -322,9 +330,6 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --dev --python 3.12
-
-      - name: Install Eigen
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
 
       - name: Build native extension into the package (pybind11)
         # Compiles the C++ solver as ssik._ssik_native (the shipped import path,
@@ -365,19 +370,47 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      - name: Install Eigen (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
-
-      - name: Install Eigen (macOS)
-        if: runner.os == 'macOS'
-        run: brew install eigen
-
       - name: Build wheel
+        # hatch_build fetches the pinned Eigen itself (#606); no system Eigen.
         run: uv build --wheel
 
       - name: Install wheel + native smoke
+        # native_smoke asserts the wheel's extension reports the pinned Eigen
+        # version. Both OSes check against the same pin, so a Linux and a macOS
+        # wheel built from one commit carry the same Eigen.
         run: |
           uv venv .wheelenv
           uv pip install --python .wheelenv/bin/python dist/*.whl numpy
           .wheelenv/bin/python scripts/native_smoke.py
+          .wheelenv/bin/python -c "from ssik import _ssik_native as n; print(n.eigen_version)" \
+            > "eigen-version-${{ matrix.os }}.txt"
+
+      - name: Upload the Eigen version this wheel compiled against
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: eigen-version-${{ matrix.os }}
+          path: eigen-version-${{ matrix.os }}.txt
+          if-no-files-found: error
+          retention-days: 3
+
+  native_wheel_eigen:
+    # The Linux and macOS wheels must carry the same Eigen (#606): QZ
+    # convergence differs between Eigen releases (#599), so a wheel built against
+    # another one is not the artifact the Linux gates verified.
+    name: Native wheels share one Eigen
+    needs: native_wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download every wheel's Eigen version
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: eigen-version-*
+          path: eigen-version
+          merge-multiple: true
+
+      - name: Linux and macOS report the same Eigen
+        run: |
+          head eigen-version/*.txt
+          # One file per OS in the native_wheel matrix (keep in sync).
+          test "$(find eigen-version -name "*.txt" | wc -l)" -eq 2
+          test "$(cat eigen-version/*.txt | sort -u | wc -l)" -eq 1
