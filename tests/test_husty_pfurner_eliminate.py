@@ -441,9 +441,15 @@ def test_pencil_eigenvalues_match_sympy_rational_resultant() -> None:
     # Roots of the exact degree-56 resultant to 30 digits. Rounding its
     # coefficients to float64 and calling np.roots is not an oracle: the
     # problem is ill-conditioned enough that a near-real complex pair (imag
-    # ~1e-8 at u ~ 0.22497) comes back as two real roots ~1e-5 apart.
+    # ~7e-8 at u ~ 0.22497) comes back as two real roots ~1e-5 apart. At 30
+    # digits a real root's imaginary part is round-off (<= 1e-20), while the
+    # non-real roots nearest the axis have |imag| >= 1e-8, so the split is
+    # unambiguous. Only the real roots are compared: a near-double complex
+    # pair is ill-conditioned for the pencil too (its eigenvalue estimate moves
+    # ~1e-6 between LAPACK builds), so it is not a 1e-7 oracle.
     sympy_roots = [complex(r) for r in r_poly.nroots(n=30, maxsteps=500)]
-    sympy_real = sorted(r.real for r in sympy_roots if abs(r.imag) < 1e-6 * (1 + abs(r.real)))
+    sympy_real = sorted(r.real for r in sympy_roots if abs(r.imag) <= 1e-20 * (1 + abs(r.real)))
+    assert sympy_real, "the exact resultant has no real root; the fixture no longer tests anything"
     pencil_real = list(eliminate_uw_numeric(pre, sigma_E, drop_indices=(7,)))
 
     # Pencil may include extra eigenvalues not present in the resultant
