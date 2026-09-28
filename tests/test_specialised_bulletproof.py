@@ -28,6 +28,8 @@ from ssik._kinbody import KinBody
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+from ssik.refinement import kinbody_jacobian, lm_refine
 from ssik.subproblems._rotation import rotation_matrix
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -80,14 +82,23 @@ def _bulletproof_check(
     q_atol: float = 1e-3,
     max_is_ls_fraction: float = 0.0,
     max_miss_seeded_fraction: float = 0.1,
+    root_atol: float | None = None,
+    in_limits: bool = False,
 ) -> None:
     """Round-trip ``n_poses`` random poses through the specialised artifact.
 
     For each pose:
-      1. Pick random ``q*``, compute ``T_star = fk(q*)``.
+      1. Pick random ``q*`` in [-1, 1] per joint (with ``in_limits``, a
+         limited joint samples its whole limit range instead, so ``q*`` is a
+         solution the default ``respect_limits=True`` solve must return),
+         compute ``T_star = fk(q*)``.
       2. Solve via ``artifact.solve(T_star)``.
       3. Every returned solution must FK-close on T_star at ``fk_atol``.
       4. At least one returned solution should wrap-to-pi-match q*.
+      5. With ``root_atol``: Newton from every returned solution must reach an
+         exact root (FK 1e-12) within ``root_atol`` of it (wrap-to-pi), so a
+         solution accepted at a loose ``fk_atol`` is a genuine IK, not a
+         spurious near-miss.
 
     Tier-aware tolerance via the fraction kwargs:
 
@@ -100,11 +111,14 @@ def _bulletproof_check(
       bar for tier-0; tier-2 RR may need 0.3+ at non-Pieper geometries.
     """
     rng = np.random.default_rng(seed=seed)
-    n_dof = len(kb.joints)
+    ranges = [
+        (float(j.limits[0]), float(j.limits[1])) if in_limits and j.limits else (-1.0, 1.0)
+        for j in kb.joints
+    ]
     fails = 0
     miss_seeded = 0
     for trial in range(n_poses):
-        q_star = rng.uniform(-1.0, 1.0, size=n_dof)
+        q_star = np.array([rng.uniform(lo, hi) for lo, hi in ranges])
         T_star = _fk(kb, q_star)
 
         sols = artifact.solve(T_star)  # type: ignore[attr-defined]
@@ -119,6 +133,21 @@ def _bulletproof_check(
                 pytest.fail(
                     f"trial {trial}: artifact q={sol.q.tolist()} fails FK closure "
                     f"(max|diff|={float(np.max(np.abs(T_check - T_star))):.2e})"
+                )
+            if root_atol is not None:
+                polished = lm_refine(
+                    np.asarray(sol.q, dtype=np.float64),
+                    lambda q: _fk(kb, q),
+                    T_star,
+                    fk_atol=1e-12,
+                    jacobian_fn=lambda q: kinbody_jacobian(kb, q),
+                )
+                assert polished is not None, (
+                    f"trial {trial}: Newton from artifact q={sol.q.tolist()} found no root"
+                )
+                assert _q_match(polished[0], sol.q, tol=root_atol), (
+                    f"trial {trial}: artifact q={sol.q.tolist()} is not within "
+                    f"{root_atol} of an exact IK root"
                 )
 
         if not any(_q_match(np.asarray(sol.q), q_star, tol=q_atol) for sol in sols):
@@ -168,16 +197,26 @@ def test_bulletproof_jaco2_specialised(tmp_path: Path) -> None:
 
     kb = build_kinbody(jaco2_specs())
     artifact = _build_specialised(kb, "jaco2_bp", tmp_path)
-    # Tier-2 RR's per-IK FK precision is ~1e-9 (Newton refinement caps
-    # there); seeded-recovery tolerance is looser (1e-2) because RR's
-    # cluster-pick can pick FK-equivalent representatives that differ in
-    # joint coords. Some random poses are near-singular and have no
-    # algebraic solution -- matches runtime solver behaviour.
+    # The general_6r artifact accepts a solution once it FK-closes within
+    # its solver gate, policy.subproblem_numerical (1e-5 Frobenius; see
+    # ikgeo.general_6r in ssik.core.solver_registry), and polishes only
+    # candidates outside it, so a returned solution can sit anywhere under
+    # 1e-5 (some return at ~7e-6). That bounds the elementwise error
+    # asserted here; root_atol then checks each is a genuine root.
+    # Seeded-recovery tolerance is looser (1e-2) because RR's cluster-pick
+    # can pick FK-equivalent representatives that differ in joint coords.
+    # Some random poses are near-singular and have no algebraic solution --
+    # matches runtime solver behaviour. JACO 2's joints 2 and 3 are limited to
+    # ~[0.8, 5.5] and ~[0.3, 6.0], so q* is drawn in-limits: the default solve
+    # (respect_limits=True since #239) correctly returns [] for an
+    # out-of-limits q*.
     _bulletproof_check(
         kb,
         artifact,
         n_poses=30,
-        fk_atol=1e-6,
+        in_limits=True,
+        fk_atol=DEFAULT_TOLERANCE_POLICY.subproblem_numerical,
+        root_atol=1e-3,
         q_atol=1e-2,
         max_is_ls_fraction=0.2,
         max_miss_seeded_fraction=0.4,
