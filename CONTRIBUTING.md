@@ -196,6 +196,24 @@ Strips the source URDF to a kinematics-only `tests/fixtures/my_arm.urdf` (no mes
 - No `@pytest.mark.skip` to silence flaky tests. Either fix the test or document the known flake with an issue number.
 - Match existing module-docstring style: per-module docstring states the algorithm, the per-arm-constants vs per-call breakdown, and cites the published math.
 
+## Stacked PRs and squash merges
+
+PRs merge by squash, so when a PR is stacked on another and the parent merges, the child branch still carries the parent's original commits. Git sees them as different from the squashed commit on `main`, and the child conflicts even though nothing really changed.
+
+Merge in this order:
+
+```bash
+gh pr edit <child-pr> --base main      # 1. retarget the child BEFORE merging the parent
+gh pr merge <parent-pr> --squash --delete-branch   # 2. merge the parent
+git fetch origin                       # 3. replay only the child's own commits onto main
+git rebase --onto origin/main <parent-old-head> <child-branch>   # <parent-old-head>: the parent's last commit before the squash
+git push --force-with-lease origin <child-branch>
+```
+
+Step 1 matters: if the parent's branch is deleted while the child still targets it, GitHub closes the child PR, and it can't be reopened until that base branch exists again. To recover, push the parent's old head back to its branch name (`git push origin <parent-old-head>:refs/heads/<parent-branch>`), `gh pr reopen <child-pr>`, `gh pr edit <child-pr> --base main`, rebase as in step 3, then delete the parent branch again.
+
+Force-push only your own feature branches, never `main`. Don't merge `main` into the child instead: it leaves a noisy merge commit and triggers an extra full CI run.
+
 ## License
 
 By contributing, you agree your contributions are released under [BSD-3-Clause](LICENSE).
