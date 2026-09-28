@@ -54,7 +54,7 @@ CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes
 - **C++**: the native artifact drift guard and the conformance build, ctest and external-consumer smoke; plus the Python suite reused against the native backend.
 - **Wheels**: a native wheel build and smoke on Linux and macOS.
 
-Slow tests (`-m slow`) don't run in CI. Run the same checks locally before you push, so CI is a safety net rather than your test loop:
+Slow tests (`-m slow`) don't run on PRs; `.github/workflows/slow.yml` runs them nightly on Linux, and on demand (`gh workflow run slow.yml --ref <branch>`). Run the same checks locally before you push, so CI is a safety net rather than your test loop:
 
 ```bash
 scripts/check.sh                        # ruff + format + mypy + pytest (~5 min)

@@ -1,0 +1,71 @@
+name: Slow suite
+
+# The `-m slow` tests (full snapshot roster, sympy cross-checks, slow-build
+# codegen, deep per-arm fuzz) are excluded from PR CI to keep it lean, so they
+# run here nightly, on Linux with the native extension built, like ci.yml's
+# test job. Nothing else runs them, and #611 found seven of them had failed
+# unnoticed. A failure shows as a failed scheduled run. Run it by hand from the
+# Actions tab, or `gh workflow run slow.yml --ref <branch>`, before merging a
+# change that the slow suite covers.
+#
+# One job: the suite is ~30 min of CPU, and its longest test, the Rizon 4
+# composer (~6-8 min), bounds the wall-clock whatever the sharding.
+
+on:
+  schedule:
+    - cron: "17 8 * * *"  # daily, 08:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  slow:
+    name: Linux py3.12 slow suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --dev --python 3.12
+
+      - name: Runner info
+        run: |
+          echo "nproc=$(nproc)"
+          lscpu | grep "Model name"
+
+      # Shares ci.yml's robot_descriptions cache (same key), so the prewarm
+      # step only clones what a manifest change added.
+      - name: Cache robot_descriptions
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/robot_descriptions
+          key: rd-${{ hashFiles('src/ssik/prebuilt/MANIFEST.toml') }}
+          restore-keys: rd-
+
+      - name: Pre-warm robot_descriptions
+        run: uv run python scripts/prewarm_descriptions.py
+
+      - name: Install Eigen
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libeigen3-dev
+
+      - name: Build native extension into the package (pybind11)
+        # native=True is the shipped default, so the slow suite must run
+        # against it, not the Python fallback.
+        run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
+
+      - name: pytest -m slow (parallel)
+        run: uv run pytest -q -n 4 --dist worksteal -m slow --durations=25
