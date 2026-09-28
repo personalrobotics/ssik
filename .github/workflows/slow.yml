@@ -8,14 +8,14 @@ name: Slow suite
 # Actions tab, or `gh workflow run slow.yml --ref <branch>`, before merging a
 # change that the slow suite covers.
 #
-# One job: the suite is ~30 min of CPU, and its longest test, the Rizon 4
-# composer (~6-8 min), bounds the wall-clock whatever the sharding.
+# One job: pytest takes 12-14 min on a 4-vCPU runner, and ~11-13 min of that
+# is the Rizon 4 composer test alone, which bounds the wall-clock however the
+# suite is sharded.
 
 on:
   schedule:
     - cron: "17 8 * * *"  # daily, 08:17 UTC
   workflow_dispatch:
-  pull_request:  # TEMPORARY: exercise the workflow on its own PR; removed before merge
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
