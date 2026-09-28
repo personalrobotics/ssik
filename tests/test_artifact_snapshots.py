@@ -45,8 +45,8 @@ from pathlib import Path
 
 import pytest
 
+from ssik import _formats as formats
 from ssik._kinbody import build_kinbody
-from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.core.codegen import emit_artifact
 from ssik.core.dispatcher import dispatch
 from ssik.prebuilt._manifest import Arm, load_manifest
@@ -94,8 +94,12 @@ _SNAPSHOT_PARAMS = [
 
 def _emit(arm: Arm) -> str:
     """Re-emit the artifact for ``arm`` and return its source code."""
-    if arm.fixture_kind == "urdf":
-        kb = load_urdf_kinbody_normalized(FIXTURES / arm.fixture, arm.base_link, arm.ee_link)
+    if arm.fixture_kind != "specs":
+        # A registered source format (urdf, mjcf, ...): the same loader
+        # scripts/regen_artifacts.py emits the committed artifact with.
+        kb = formats.get(arm.fixture_kind).load(
+            FIXTURES / arm.fixture, arm.base_link, arm.ee_link, {}
+        )
     else:
         # specs: a Python builder module under tests/fixtures. Pass
         # base_link_name + ee_link_name kwargs so the emitted artifact
