@@ -46,9 +46,15 @@ what users get: around thirty native tests skip and the perf gate skips too.
 `tests/test_native_coverage.py` fails loudly rather than letting that pass
 quietly. It needs Eigen (`brew install eigen`, `apt install libeigen3-dev`).
 
-## Pre-push gate (replaces most of CI)
+## Pre-push gate
 
-CI is intentionally minimal — a single Linux wheel-smoke job that catches packaging-class bugs (~5 min per PR). Everything else runs locally before you push:
+CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes skip it) takes ~15-25 min. It runs:
+
+- **Linux, Python 3.10-3.14**: ruff, format, mypy, `regen_docs.py --check`, and the fast pytest suite with the native extension built, split into two shards per version plus a check that the shards together ran every test; then the serial perf gates.
+- **C++**: the native artifact drift guard and the conformance build, ctest and external-consumer smoke; plus the Python suite reused against the native backend.
+- **Wheels**: a native wheel build and smoke on Linux and macOS.
+
+Slow tests (`-m slow`) don't run in CI. Run the same checks locally before you push, so CI is a safety net rather than your test loop:
 
 ```bash
 scripts/check.sh                        # ruff + format + mypy + pytest (~5 min)
