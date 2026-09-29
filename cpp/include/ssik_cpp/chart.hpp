@@ -33,14 +33,14 @@
 
 namespace ssik::chart {
 
-inline constexpr int kSlots = 8;
+inline constexpr int kSlots = sh_detail::kShSlots;
 inline constexpr int kDomainGrid = 180;           // ssik.chart._Q6_DOMAIN_GRID
 inline constexpr double kDomainTol = 1e-10;       // bisection width on a boundary
 inline constexpr double kContainsTol = 1e-9;      // Chart.contains default tol
 inline constexpr double kSeedEps = 1e-7;          // ssik.chart._Q6_SEED_EPS
 inline constexpr double kStencilH = 1e-4;         // ssik.chart._STENCIL_H
-inline constexpr double kLockTol = 1e-9;          // spherical_shoulder._LOCK_TOL
-inline constexpr double kTangentSnap = 1e-15;     // spherical_shoulder._TANGENT_SNAP
+inline constexpr double kLockTol = sh_detail::kShLockTol;          // spherical_shoulder._LOCK_TOL
+inline constexpr double kTangentSnap = sh_detail::kShTangentSnap;  // spherical_shoulder._TANGENT_SNAP
 
 struct Interval {
   double lo, hi;
@@ -117,116 +117,13 @@ inline bool frame_from_tangent(const std::array<double, 7>& dq, const double* me
 
 namespace sh {
 
-// Batched-subproblem replicas: both roots + feasibility, never fewer roots, so
-// the slot index is a stable label (Python _sp1_batch / _sp4_batch / _sp2_batch).
-// Angle 0 where p lies on the axis (the angle is free; atan2 of rounding noise
-// would be arbitrary) -- the canonical representative, as _sp1_batch.
-inline double sp1_both(const Eigen::Vector3d& k, const Eigen::Vector3d& p,
-                       const Eigen::Vector3d& q) {
-  const Eigen::Vector3d kxp = k.cross(p);
-  if (kxp.norm() <= kLockTol * p.norm()) return 0.0;
-  return std::atan2(kxp.dot(q), p.dot(q) - k.dot(p) * k.dot(q));
-}
-
-inline bool sp4_both(const Eigen::Vector3d& h, const Eigen::Vector3d& k, const Eigen::Vector3d& p,
-                     double d, const Tolerances& tol, std::array<double, 2>& out) {
-  const double a = h.dot(p) - k.dot(p) * h.dot(k);
-  const double b = h.dot(k.cross(p));
-  const double cc = k.dot(p) * h.dot(k);
-  const double r = std::hypot(a, b);
-  const double rhs = d - cc;
-  double ratio = std::clamp(r > 1e-12 ? rhs / r : 0.0, -1.0, 1.0);
-  // Snap the tangent case to an exact double root (as _sp4_batch).
-  if (ratio >= 1.0 - kTangentSnap) ratio = 1.0;
-  if (ratio <= -1.0 + kTangentSnap) ratio = -1.0;
-  const double delta = std::acos(ratio);
-  const double phi = std::atan2(b, a);
-  out = {phi + delta, phi - delta};
-  return (std::abs(rhs) - r <= tol.feasibility) && (r * r >= tol.degeneracy * tol.degeneracy);
-}
-
-inline bool sp2_both(const Eigen::Vector3d& k1, const Eigen::Vector3d& k2, const Eigen::Vector3d& p,
-                     const Eigen::Vector3d& q, const Tolerances& tol, std::array<double, 2>& t1,
-                     std::array<double, 2>& t2) {
-  const double c = k1.dot(k2);
-  const double s_sq = 1.0 - c * c;
-  const double safe = s_sq > tol.degeneracy ? s_sq : 1.0;
-  const double d1 = k1.dot(p), d2 = k2.dot(q);
-  const double alpha = (d1 - c * d2) / safe;
-  const double beta = (d2 - c * d1) / safe;
-  const Eigen::Vector3d kxk = k1.cross(k2);
-  const double pp = p.dot(p), qq = q.dot(q);
-  double gss = 0.5 * (pp + qq) - alpha * alpha - beta * beta - 2.0 * alpha * beta * c;
-  if (std::abs(gss) <= kTangentSnap * std::max(pp, qq)) gss = 0.0;  // tangent case (as _sp2_batch)
-  const bool feas = (std::abs(pp - qq) <= tol.feasibility) && (gss >= -tol.feasibility) &&
-                    (s_sq >= tol.degeneracy);
-  const double gamma = std::sqrt(std::max(gss, 0.0) / safe);
-  const Eigen::Vector3d base = alpha * k1 + beta * k2;
-  const Eigen::Vector3d za = base + gamma * kxk;
-  const Eigen::Vector3d zb = base - gamma * kxk;
-  t1 = {sp1_both(k1, p, za), sp1_both(k1, p, zb)};
-  t2 = {sp1_both(k2, q, za), sp1_both(k2, q, zb)};
-  return feas;
-}
-
-struct SlotEval {
-  std::array<std::array<double, 7>, kSlots> q{};
-  std::array<bool, kSlots> valid{};
-};
-
-inline Eigen::Matrix3d rot(const Eigen::Vector3d& k, double th) {
-  return Eigen::AngleAxisd(th, k).toRotationMatrix();
-}
-
-// Every slot at one q6 (mirrors _slot_grid at a single grid point). With
-// valid_only the two SP1 stages are skipped (q is left unset).
-inline SlotEval slot_eval(const Eigen::Matrix<double, 3, 48>& coef, const Pose& t_rev, double q6,
-                          const Tolerances& tol, bool valid_only = false) {
-  const sh_detail::Geom g = sh_detail::eval_geom(coef, q6);
-  const auto& a = g.axes;
-  const Eigen::Vector3d p0 = g.our_p[0], p2 = g.our_p[2];
-  const Eigen::Vector3d p3 = g.our_p[3] + g.our_p[4] + g.our_p[5];
-  const Eigen::Matrix3d r_06 = t_rev.block<3, 3>(0, 0) * g.r_home.transpose();
-  const Eigen::Vector3d p_16 = t_rev.block<3, 1>(0, 3) - r_06 * g.tool - p0;
-
-  SlotEval out;
-  const double d3 = 0.5 * (p3.dot(p3) + p2.dot(p2) - p_16.dot(p_16));
-  std::array<double, 2> q3_both;
-  const bool feas3 = sp4_both(-p2, a[2], p3, d3, tol, q3_both);  // SP3 via SP4
-  for (int e = 0; e < 2; ++e) {
-    const double q3 = q3_both[e];
-    const Eigen::Vector3d sp2_arg = p2 + rot(a[2], q3) * p3;
-    std::array<double, 2> t1, t2;
-    const bool feas2 = sp2_both(-a[0], a[1], p_16, sp2_arg, tol, t1, t2);
-    for (int s = 0; s < 2; ++s) {
-      const double q1 = t1[s], q2 = t2[s];
-      const Eigen::Matrix3d r36 = rot(-a[2], q3) * rot(-a[1], q2) * rot(-a[0], q1) * r_06;
-      std::array<double, 2> q5_both;
-      const bool feas4 = sp4_both(a[3], a[4], a[5], a[3].dot(r36 * a[5]), tol, q5_both);
-      const bool ok = feas3 && feas2 && feas4;
-      for (int w = 0; w < 2; ++w) {
-        const int slot = 4 * e + 2 * s + w;
-        out.valid[slot] = ok;
-        if (valid_only) continue;
-        const double q5 = q5_both[w];
-        const Eigen::Matrix3d r45 = rot(a[4], q5);
-        const Eigen::Vector3d a5_mid = r45 * a[5];
-        double q4 = sp1_both(a[3], a5_mid, r36 * a[5]);
-        double q6i = sp1_both(-a[5], rot(-a[4], q5) * a[3], r36.transpose() * a[3]);
-        // Gimbal lock of the wrist triple (a3 || R45 a5): only q4 + q6i is
-        // determined. Canonical split as _slot_grid: q6i = 0, q4 the angle of
-        // r36 R45^T about a3 read off a4.
-        if (a[3].cross(a5_mid).norm() <= kLockTol) {
-          const Eigen::Matrix3d m = r36 * r45.transpose();
-          q4 = sp1_both(a[3], a[4], m * a[4]);
-          q6i = 0.0;
-        }
-        out.q[slot] = {q6i, q5, q4, q3, q2, q1, q6};
-      }
-    }
-  }
-  return out;
-}
+// The slot-indexed closed form lives with the solver (the in-limits resolver
+// tracks branches by slot); the chart reads it from there.
+using sh_detail::slot_eval;
+using sh_detail::SlotEval;
+using sh_detail::sp1_both;
+using sh_detail::sp2_both;
+using sh_detail::sp4_both;
 
 }  // namespace sh
 

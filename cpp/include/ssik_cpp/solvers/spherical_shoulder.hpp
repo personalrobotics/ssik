@@ -8,12 +8,15 @@
 //
 // Redundancy resolution (default path): an SP3-margin reachability bracket over
 // q6 in [-pi, pi], each reachable interval grid-sampled (16 pts), every closed
-// branch FK-gated (base) or LM-polished (polished), deduped. The exact in-limits
-// q6-tracking resolver (resolve_in_limits) is a coarse-sweep refinement that
-// rarely fires (only when no sampled q6 is in-limits); it is deferred (bounded,
-// documented gap -- see the per-arm gate allowance in cpp_emit).
+// branch FK-gated (base) or LM-polished (polished), deduped. When no sampled
+// solution survives the limit filter, the in-limits fallback runs before any
+// rescue, as in Python: the exact q6-tracking resolver
+// (spherical_shoulder.resolve_in_limits) for the base class, and the sweep
+// polished then held to the limits (spherical_shoulder_polished.resolve_in_limits)
+// for the approximate one.
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <vector>
@@ -24,6 +27,7 @@
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/newton.hpp"  // lm_refine
 #include "ssik_cpp/rescue.hpp"
+#include "ssik_cpp/seven_r/feasible_arcs.hpp"
 #include "ssik_cpp/sp6.hpp"  // detail::wrap_pi
 #include "ssik_cpp/subproblems.hpp"
 
@@ -86,14 +90,15 @@ inline double reach_margin(const Eigen::Matrix<double, 3, 48>& coef, const Pose&
   return qperp * pperp - std::abs(target - center);
 }
 
-// Reachable q6 sub-intervals of [-pi, pi]: margin >= 0 brackets on a 90-grid,
-// padded one step, merged (_reachable_intervals + merge).
+// Reachable q6 sub-intervals of [lo, hi] (default [-pi, pi]): margin >= 0
+// brackets on a 90-grid, padded one step, merged (_reachable_intervals + merge).
 inline std::vector<std::array<double, 2>> reachable_intervals(
-    const Eigen::Matrix<double, 3, 48>& coef, const Pose& t_rev) {
+    const Eigen::Matrix<double, 3, 48>& coef, const Pose& t_rev, double lo = -M_PI,
+    double hi = M_PI) {
   std::array<double, kShBracketGrid> grid;
   std::array<bool, kShBracketGrid> m;
   for (int i = 0; i < kShBracketGrid; ++i) {
-    grid[i] = -M_PI + (2.0 * M_PI) * i / (kShBracketGrid - 1);  // linspace endpoint=True
+    grid[i] = lo + (hi - lo) * i / (kShBracketGrid - 1);  // linspace endpoint=True
     m[i] = reach_margin(coef, t_rev, grid[i]) >= 0.0;
   }
   std::vector<std::array<double, 2>> raw;
@@ -162,6 +167,120 @@ inline bool round6_equal(const std::array<double, 7>& a, const std::array<double
   return true;
 }
 
+// --- slot-indexed closed form (mirrors _slot_grid) ---------------------------
+
+inline constexpr int kShSlots = 8;                // N_SLOTS
+inline constexpr double kShLockTol = 1e-9;        // _LOCK_TOL
+inline constexpr double kShTangentSnap = 1e-15;   // _TANGENT_SNAP
+
+
+// Batched-subproblem replicas: both roots + feasibility, never fewer roots, so
+// the slot index is a stable label (Python _sp1_batch / _sp4_batch / _sp2_batch).
+// Angle 0 where p lies on the axis (the angle is free; atan2 of rounding noise
+// would be arbitrary) -- the canonical representative, as _sp1_batch.
+inline double sp1_both(const Eigen::Vector3d& k, const Eigen::Vector3d& p,
+                       const Eigen::Vector3d& q) {
+  const Eigen::Vector3d kxp = k.cross(p);
+  if (kxp.norm() <= kShLockTol * p.norm()) return 0.0;
+  return std::atan2(kxp.dot(q), p.dot(q) - k.dot(p) * k.dot(q));
+}
+
+inline bool sp4_both(const Eigen::Vector3d& h, const Eigen::Vector3d& k, const Eigen::Vector3d& p,
+                     double d, const Tolerances& tol, std::array<double, 2>& out) {
+  const double a = h.dot(p) - k.dot(p) * h.dot(k);
+  const double b = h.dot(k.cross(p));
+  const double cc = k.dot(p) * h.dot(k);
+  const double r = std::hypot(a, b);
+  const double rhs = d - cc;
+  double ratio = std::clamp(r > 1e-12 ? rhs / r : 0.0, -1.0, 1.0);
+  // Snap the tangent case to an exact double root (as _sp4_batch).
+  if (ratio >= 1.0 - kShTangentSnap) ratio = 1.0;
+  if (ratio <= -1.0 + kShTangentSnap) ratio = -1.0;
+  const double delta = std::acos(ratio);
+  const double phi = std::atan2(b, a);
+  out = {phi + delta, phi - delta};
+  return (std::abs(rhs) - r <= tol.feasibility) && (r * r >= tol.degeneracy * tol.degeneracy);
+}
+
+inline bool sp2_both(const Eigen::Vector3d& k1, const Eigen::Vector3d& k2, const Eigen::Vector3d& p,
+                     const Eigen::Vector3d& q, const Tolerances& tol, std::array<double, 2>& t1,
+                     std::array<double, 2>& t2) {
+  const double c = k1.dot(k2);
+  const double s_sq = 1.0 - c * c;
+  const double safe = s_sq > tol.degeneracy ? s_sq : 1.0;
+  const double d1 = k1.dot(p), d2 = k2.dot(q);
+  const double alpha = (d1 - c * d2) / safe;
+  const double beta = (d2 - c * d1) / safe;
+  const Eigen::Vector3d kxk = k1.cross(k2);
+  const double pp = p.dot(p), qq = q.dot(q);
+  double gss = 0.5 * (pp + qq) - alpha * alpha - beta * beta - 2.0 * alpha * beta * c;
+  if (std::abs(gss) <= kShTangentSnap * std::max(pp, qq)) gss = 0.0;  // tangent case (as _sp2_batch)
+  const bool feas = (std::abs(pp - qq) <= tol.feasibility) && (gss >= -tol.feasibility) &&
+                    (s_sq >= tol.degeneracy);
+  const double gamma = std::sqrt(std::max(gss, 0.0) / safe);
+  const Eigen::Vector3d base = alpha * k1 + beta * k2;
+  const Eigen::Vector3d za = base + gamma * kxk;
+  const Eigen::Vector3d zb = base - gamma * kxk;
+  t1 = {sp1_both(k1, p, za), sp1_both(k1, p, zb)};
+  t2 = {sp1_both(k2, q, za), sp1_both(k2, q, zb)};
+  return feas;
+}
+
+struct SlotEval {
+  std::array<std::array<double, 7>, kShSlots> q{};
+  std::array<bool, kShSlots> valid{};
+};
+
+// Every slot at one q6 (mirrors _slot_grid at a single grid point). With
+// valid_only the two SP1 stages are skipped (q is left unset).
+inline SlotEval slot_eval(const Eigen::Matrix<double, 3, 48>& coef, const Pose& t_rev, double q6,
+                          const Tolerances& tol, bool valid_only = false) {
+  const Geom g = eval_geom(coef, q6);
+  const auto& a = g.axes;
+  const Eigen::Vector3d p0 = g.our_p[0], p2 = g.our_p[2];
+  const Eigen::Vector3d p3 = g.our_p[3] + g.our_p[4] + g.our_p[5];
+  const Eigen::Matrix3d r_06 = t_rev.block<3, 3>(0, 0) * g.r_home.transpose();
+  const Eigen::Vector3d p_16 = t_rev.block<3, 1>(0, 3) - r_06 * g.tool - p0;
+
+  SlotEval out;
+  const double d3 = 0.5 * (p3.dot(p3) + p2.dot(p2) - p_16.dot(p_16));
+  std::array<double, 2> q3_both;
+  const bool feas3 = sp4_both(-p2, a[2], p3, d3, tol, q3_both);  // SP3 via SP4
+  for (int e = 0; e < 2; ++e) {
+    const double q3 = q3_both[e];
+    const Eigen::Vector3d sp2_arg = p2 + rot(a[2], q3) * p3;
+    std::array<double, 2> t1, t2;
+    const bool feas2 = sp2_both(-a[0], a[1], p_16, sp2_arg, tol, t1, t2);
+    for (int s = 0; s < 2; ++s) {
+      const double q1 = t1[s], q2 = t2[s];
+      const Eigen::Matrix3d r36 = rot(-a[2], q3) * rot(-a[1], q2) * rot(-a[0], q1) * r_06;
+      std::array<double, 2> q5_both;
+      const bool feas4 = sp4_both(a[3], a[4], a[5], a[3].dot(r36 * a[5]), tol, q5_both);
+      const bool ok = feas3 && feas2 && feas4;
+      for (int w = 0; w < 2; ++w) {
+        const int slot = 4 * e + 2 * s + w;
+        out.valid[slot] = ok;
+        if (valid_only) continue;
+        const double q5 = q5_both[w];
+        const Eigen::Matrix3d r45 = rot(a[4], q5);
+        const Eigen::Vector3d a5_mid = r45 * a[5];
+        double q4 = sp1_both(a[3], a5_mid, r36 * a[5]);
+        double q6i = sp1_both(-a[5], rot(-a[4], q5) * a[3], r36.transpose() * a[3]);
+        // Gimbal lock of the wrist triple (a3 || R45 a5): only q4 + q6i is
+        // determined. Canonical split as _slot_grid: q6i = 0, q4 the angle of
+        // r36 R45^T about a3 read off a4.
+        if (a[3].cross(a5_mid).norm() <= kShLockTol) {
+          const Eigen::Matrix3d m = r36 * r45.transpose();
+          q4 = sp1_both(a[3], a[4], m * a[4]);
+          q6i = 0.0;
+        }
+        out.q[slot] = {q6i, q5, q4, q3, q2, q1, q6};
+      }
+    }
+  }
+  return out;
+}
+
 }  // namespace sh_detail
 
 // Default-path candidates for one target: reachable-interval q6 sweep -> closed
@@ -219,6 +338,226 @@ inline std::vector<Solution<7>> spherical_shoulder_core(const JointConsts<7>& c,
   return out;
 }
 
+// --- exact in-limits resolver (the #359 in-limits fallback) -------------------
+
+inline constexpr int kShTrackGrid = 180;         // _TRACK_GRID
+inline constexpr double kShTrackBreak = 0.4;     // _track_branches continuity break
+inline constexpr int kShTrackMinPoints = 4;      // _track_branches minimum curve length
+inline constexpr double kShLimitSlack = 1e-9;    // in-limits acceptance (_polish._LIMIT_SLACK)
+inline constexpr int kShPolishMaxIters = 30;     // spherical_shoulder_polished._POLISH_MAX_ITERS
+
+using ShLimits = std::array<std::array<double, 2>, 7>;
+
+namespace sh_detail {
+
+// np.linspace(a, b, n): start + k * step, last point exactly b.
+inline std::vector<double> linspace(double a, double b, int n) {
+  std::vector<double> g(n);
+  const double step = (b - a) / (n - 1);
+  for (int k = 0; k < n; ++k) g[k] = k * step + a;
+  g[n - 1] = b;
+  return g;
+}
+
+// Every valid branch at each q6 of `grid`, in slot order (_closed_branches_grid).
+inline std::vector<std::vector<std::array<double, 7>>> branches_grid(
+    const Eigen::Matrix<double, 3, 48>& coef, const Pose& t_rev, const std::vector<double>& grid,
+    const Tolerances& tol) {
+  std::vector<std::vector<std::array<double, 7>>> per(grid.size());
+  for (std::size_t k = 0; k < grid.size(); ++k) {
+    const SlotEval ev = slot_eval(coef, t_rev, grid[k], tol);
+    for (int s = 0; s < kShSlots; ++s)
+      if (ev.valid[s]) per[k].push_back(ev.q[s]);
+  }
+  return per;
+}
+
+// One tracked branch: its values on the contiguous grid run it covers.
+struct TrackedCurve {
+  std::vector<double> g;
+  std::vector<std::array<double, 7>> q;
+};
+
+// Link the per-grid-point branches into continuous curves by greedy nearest
+// neighbour (_track_branches): a curve stops where the grid has no branch, where
+// the nearest one is already taken, or where it is more than 0.4 away; curves
+// shorter than 4 points are dropped.
+inline std::vector<TrackedCurve> track_branches(
+    const std::vector<std::vector<std::array<double, 7>>>& per, const std::vector<double>& grid) {
+  const std::size_t n = grid.size();
+  std::vector<std::vector<bool>> used(n);
+  for (std::size_t k = 0; k < n; ++k) used[k].assign(per[k].size(), false);
+  auto dist = [](const std::array<double, 7>& a, const std::array<double, 7>& b) {
+    double s = 0.0;
+    for (int i = 0; i < 7; ++i) s += (a[i] - b[i]) * (a[i] - b[i]);
+    return std::sqrt(s);
+  };
+  std::vector<TrackedCurve> curves;
+  for (std::size_t k0 = 0; k0 < n; ++k0) {
+    for (std::size_t b0 = 0; b0 < per[k0].size(); ++b0) {
+      if (used[k0][b0]) continue;
+      TrackedCurve curve;
+      curve.g.push_back(grid[k0]);
+      curve.q.push_back(per[k0][b0]);
+      used[k0][b0] = true;
+      std::array<double, 7> prev = per[k0][b0];
+      for (std::size_t k = k0 + 1; k < n; ++k) {
+        if (per[k].empty()) break;
+        std::size_t j = 0;
+        double dj = dist(per[k][0], prev);
+        for (std::size_t m = 1; m < per[k].size(); ++m) {
+          const double dm = dist(per[k][m], prev);
+          if (dm < dj) {  // first minimum, as np.argmin
+            dj = dm;
+            j = m;
+          }
+        }
+        if (used[k][j] || dj > kShTrackBreak) break;
+        curve.g.push_back(grid[k]);
+        curve.q.push_back(per[k][j]);
+        used[k][j] = true;
+        prev = per[k][j];
+      }
+      if (static_cast<int>(curve.g.size()) >= kShTrackMinPoints) curves.push_back(std::move(curve));
+    }
+  }
+  return curves;
+}
+
+// np.interp of one tracked curve at t (clamped to its end values outside it).
+inline std::vector<double> interp_curve(const TrackedCurve& cv, double t) {
+  const auto& g = cv.g;
+  std::vector<double> out(7);
+  if (t < g.front() || t >= g.back()) {
+    const auto& q = t < g.front() ? cv.q.front() : cv.q.back();
+    for (int i = 0; i < 7; ++i) out[i] = q[i];
+    return out;
+  }
+  const std::size_t j =
+      static_cast<std::size_t>(std::upper_bound(g.begin(), g.end(), t) - g.begin()) - 1;
+  for (int i = 0; i < 7; ++i) {
+    const double slope = (cv.q[j + 1][i] - cv.q[j][i]) / (g[j + 1] - g[j]);
+    out[i] = slope * (t - g[j]) + cv.q[j][i];
+  }
+  return out;
+}
+
+// In-limits q vectors for one reachable interval (_solutions_in_interval): track
+// each branch, take its exact in-limits q6 arcs, and at each arc centre emit
+// every closed branch that lands in limits (wrapped to them) and closes FK.
+inline std::vector<std::array<double, 7>> solutions_in_interval(
+    const JointConsts<7>& c, const Eigen::Matrix<double, 3, 48>& coef, const Pose& t_rev,
+    const Pose& T, double a, double b, const ShLimits& limits, const Tolerances& tol) {
+  static const std::vector<int> kSwept = {0, 1, 2, 3, 4, 5};  // _SWEPT
+  feasible::Arcs lim_arcs(7);
+  for (int i = 0; i < 7; ++i) lim_arcs[i] = {limits[i][0], limits[i][1]};
+
+  const std::vector<double> grid = linspace(a, b, kShTrackGrid);
+  std::vector<std::array<double, 7>> out;
+  for (const TrackedCurve& cv : track_branches(branches_grid(coef, t_rev, grid, tol), grid)) {
+    const auto q_scalar = [&cv](double t) { return interp_curve(cv, t); };
+    for (const auto& [u, w] : feasible::feasible_arcs_bounded(q_scalar, kSwept, lim_arcs, cv.g)) {
+      const double q6c = 0.5 * (u + w);
+      for (const auto& q : closed_branches(coef, t_rev, q6c, tol)) {
+        std::array<double, 7> qw;
+        bool in_lim = true;
+        for (int i = 0; i < 7; ++i) {
+          qw[i] = feasible::to_limits(q[i], limits[i][0], limits[i][1]);
+          in_lim = in_lim && limits[i][0] - kShLimitSlack <= qw[i] &&
+                   qw[i] <= limits[i][1] + kShLimitSlack;
+        }
+        if (in_lim && (fk<7>(c, qw) - T).norm() <= kShFkAtol) out.push_back(qw);
+      }
+    }
+  }
+  return out;
+}
+
+}  // namespace sh_detail
+
+// Exact in-limits IK for the exact class (spherical_shoulder.resolve_in_limits):
+// the q6 redundancy resolved over the reachable intervals of joint 6's own range
+// intersected with every joint's in-limits arcs, so a reachable in-limits target
+// the coarse 16-sample sweep misses still gets an in-limits, FK-verified solution.
+inline std::vector<Solution<7>> spherical_shoulder_resolve_in_limits(
+    const JointConsts<7>& c, const SphericalShoulderConsts& sh, const Pose& T,
+    const ShLimits& limits) {
+  const Tolerances tol;
+  const Pose t_rev = T.inverse();
+  std::vector<Solution<7>> out;
+  std::vector<std::array<double, 7>> seen;
+  for (const auto& iv : sh_detail::reachable_intervals(sh.coef, t_rev, limits[6][0], limits[6][1])) {
+    for (const auto& q :
+         sh_detail::solutions_in_interval(c, sh.coef, t_rev, T, iv[0], iv[1], limits, tol)) {
+      bool dup = false;
+      for (const auto& s : seen)
+        if (sh_detail::round6_equal(q, s)) {
+          dup = true;
+          break;
+        }
+      if (dup) continue;
+      seen.push_back(q);
+      out.push_back(Solution<7>{q, (fk<7>(c, q) - T).norm(), Refinement::None});
+    }
+  }
+  return out;
+}
+
+// In-limits IK for the approximate class
+// (spherical_shoulder_polished.resolve_in_limits): the default sweep's closed-form
+// seeds over [-pi, pi], LM-polished against the true FK, held to the limits AFTER
+// the polish (a polish moves a seed, so it can leave the limits -- #621), then
+// cluster-merged keeping the lower residual. finalize does not re-filter a
+// fallback's output, so nothing out of limits may leave here.
+inline std::vector<Solution<7>> spherical_shoulder_polished_resolve_in_limits(
+    const JointConsts<7>& c, const SphericalShoulderConsts& sh, const Pose& T,
+    const ShLimits& limits) {
+  const Tolerances tol;
+  const Pose t_rev = T.inverse();
+  std::vector<Solution<7>> kept;
+  for (const auto& iv : sh_detail::reachable_intervals(sh.coef, t_rev)) {
+    const std::vector<double> grid = sh_detail::linspace(iv[0], iv[1], kShSampleGrid);
+    for (const auto& branch_list : sh_detail::branches_grid(sh.coef, t_rev, grid, tol)) {
+      for (const auto& q : branch_list) {
+        std::array<double, 7> qc = q;
+        double resid = (fk<7>(c, qc) - T).norm();
+        if (resid > kShFkAtol) {
+          // lm_refine_batch semantics, as spherical_shoulder_core's polish.
+          auto r = lm_refine<7>(c, qc, T, kShFkAtol, kShPolishMaxIters, 2.0, 2, 1e-9);
+          if (!r) continue;
+          qc = r->first;
+          resid = r->second;
+        }
+        if (resid > kShFkAtol) continue;
+        bool within = true;
+        for (int i = 0; i < 7 && within; ++i)
+          within = limits[i][0] - kShLimitSlack <= qc[i] && qc[i] <= limits[i][1] + kShLimitSlack;
+        if (!within) continue;
+        kept.push_back(Solution<7>{qc, resid, Refinement::Lm});
+      }
+    }
+  }
+  // dedup_by_wrap_close: first-match clusters, keeping the lower residual.
+  std::vector<Solution<7>> out;
+  for (const auto& cand : kept) {
+    int dup = -1;
+    for (std::size_t j = 0; j < out.size() && dup < 0; ++j) {
+      bool close = true;
+      for (int i = 0; i < 7; ++i)
+        if (std::abs(detail::wrap_pi(cand.q[i] - out[j].q[i])) > kShDedupAtol) {
+          close = false;
+          break;
+        }
+      if (close) dup = static_cast<int>(j);
+    }
+    if (dup < 0)
+      out.push_back(cand);
+    else if (cand.fk_residual < out[dup].fk_residual)
+      out[dup] = cand;
+  }
+  return out;
+}
+
 // Full artifact-contract solve for a spherical-shoulder arm (base or polished).
 inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
     const JointConsts<7>& c, const SphericalShoulderConsts& sh, const JointLimits<7>& lim,
@@ -239,6 +578,12 @@ inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
   const auto core = [&](const Pose& Tp) {
     return spherical_shoulder_core(c, sh, Tp, polished, p.refinement_max_iters);
   };
+  // _joint_limits(kb): baked limits, [-pi, pi] where absent -- the box the
+  // Python in-limits fallback resolves against.
+  ShLimits limits;
+  for (int i = 0; i < 7; ++i)
+    limits[i] = lim.present[i] ? std::array<double, 2>{lim.lo[i], lim.hi[i]}
+                               : std::array<double, 2>{-M_PI, M_PI};
   ArtifactParams<7> p_limits;
   // Intermediate pass: never lift here, or the lifts would be produced
   // twice (see ArtifactParams::enumerate_windings).
@@ -246,7 +591,13 @@ inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
   p_limits.respect_limits = p.respect_limits;
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
-  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);
+  // Limit pass + #359 in-limits fallback (#615): the coarse sweep can miss a
+  // thin in-limits q6 arc, so an empty limit-filtered set is resolved exactly
+  // before the rescue gate below sees it.
+  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits, [&]() {
+    return polished ? spherical_shoulder_polished_resolve_in_limits(c, sh, T, limits)
+                    : spherical_shoulder_resolve_in_limits(c, sh, T, limits);
+  });
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
     in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, p_limits);
   }
