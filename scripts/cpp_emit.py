@@ -1015,9 +1015,6 @@ _MATCH_TOL = {6: 1e-3, 7: 1e-2}
 # are strict xfails in tests/test_native_parity.py, which attributes them.
 # Every other arm must cover its whole golden.
 _KNOWN_INCOMPLETE: dict[str, tuple[dict[str, int], str]] = {
-    # Native has no in-limits resolver: where the limit-filtered sweep is
-    # empty, Python resolves the in-limits arc and native falls to the rescue.
-    "fr3_ik": ({"darwin": 5, "linux": 5}, "#615 (spherical-shoulder in-limits resolver)"),
     # The monic-companion eigensolve loses real roots at degenerate lock samples.
     "kassow_kr810_ik": ({"darwin": 1, "linux": 3}, "#544 (HP jointlock eigensolve)"),
     # These golden poses' solutions come from Python's T-perturbation rescue

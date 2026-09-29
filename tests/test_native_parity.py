@@ -57,10 +57,6 @@ pytestmark = pytest.mark.skipif(
 ALL = ("darwin", "linux")
 
 KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
-    "A": {
-        "fr3_ik": ALL,
-        "franka_panda_ik": ALL,
-    },
     "C": {
         "rizon10_ik": ALL,
         "rizon4_ik": ALL,

@@ -802,16 +802,8 @@
   },
   "fr3_ik": {
    "fast_pins": {
-    "darwin": [
-     "uniform/82",
-     "uniform/117",
-     "uniform/125"
-    ],
-    "linux": [
-     "uniform/82",
-     "uniform/117",
-     "uniform/125"
-    ]
+    "darwin": [],
+    "linux": []
    },
    "near_singular": [
     [-2.2526393631443944, 0.7968465934934434, -0.240446376367251, -0.5420041666666666, -1.8599999999999999, 3.9441126168599303, -2.2296309871770656],
@@ -864,24 +856,16 @@
     [0.6541208218884059, -1.1795344636179894, -0.4227210322856666, -0.5419070358249538, -0.7585509214185152, 3.789859624567613, -2.3392800874851467]
    ],
    "cells": {
-    "darwin": [
-     "forward:A"
-    ],
-    "linux": [
-     "forward:A"
-    ]
+    "darwin": [],
+    "linux": []
    }
   },
   "franka_panda_ik": {
    "fast_pins": {
     "darwin": [
-     "uniform/169",
-     "near_limit/2",
      "near_singular/37"
     ],
     "linux": [
-     "uniform/169",
-     "near_limit/2",
      "near_singular/37"
     ]
    },
@@ -937,11 +921,9 @@
    ],
    "cells": {
     "darwin": [
-     "forward:A",
      "forward:E"
     ],
     "linux": [
-     "forward:A",
      "forward:E"
     ]
    }

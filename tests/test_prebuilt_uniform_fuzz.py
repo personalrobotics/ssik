@@ -35,7 +35,6 @@ import numpy as np
 import pytest
 from hypothesis import HealthCheck, given, settings
 
-from ssik._native import native_available
 from ssik.prebuilt._manifest import load_manifest
 from tests._hypothesis_strategies import non_singular_q6r, non_singular_q7r
 
@@ -287,25 +286,6 @@ def test_prebuilt_7r_tight_policy_machine_precision(arm_name: str, q_star: np.nd
 # it (verified), which is not a principled closed-form path. Tracked in #462.
 _LIMITS_GAP_7R: set[str] = {"yumi_left_ik"}
 
-# The native spherical-shoulder solve (the default backend) has no port of
-# Python's resolve_in_limits, so fr3 returns [] for one of the 200 poses that
-# the Python path solves (#615). Strict: it XPASSes, and fails, once the port
-# lands. Conditional on the extension: without it the Python path runs.
-_NATIVE_LIMITS_GAP_7R: dict[str, str] = {
-    "fr3_ik": "native spherical_shoulder lacks the in-limits resolver (#615)",
-}
-
-
-def _in_limits_default_path_param(arm_name: str) -> object:
-    if arm_name in _NATIVE_LIMITS_GAP_7R:
-        return pytest.param(
-            arm_name,
-            marks=pytest.mark.xfail(
-                native_available(), reason=_NATIVE_LIMITS_GAP_7R[arm_name], strict=True
-            ),
-        )
-    return arm_name
-
 
 def _joint_ranges(kb: object) -> list[tuple[float, float]]:
     """Per-joint (lo, hi) sampling range; continuous joints (no limit) -> +/-pi."""
@@ -322,7 +302,7 @@ def _joint_ranges(kb: object) -> list[tuple[float, float]]:
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "arm_name",
-    [_in_limits_default_path_param(a[0]) for a in PREBUILT_ARMS_7R],
+    [a[0] for a in PREBUILT_ARMS_7R],
     ids=[a[0] for a in PREBUILT_ARMS_7R],
 )
 def test_prebuilt_7r_in_limits_default_path(arm_name: str) -> None:
