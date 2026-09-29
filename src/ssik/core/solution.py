@@ -40,9 +40,11 @@ class Solution:
         returned the candidate. The caller can compare against any target
         tolerance; the solver's own ``fk_atol`` was a *filter*, not a
         contract on the value reported here.
-    :param refinement_used: ``"none"`` if the solution came directly from
-        the algebraic / closed-form path; ``"lm"`` if Levenberg-Marquardt
-        refinement polished it (when ``allow_refinement=True``).
+    :param refinement_used: ``"none"`` if the solution passed the solver's
+        acceptance gate on its own (``general_6r`` then polishes it to machine
+        precision on the same branch, see ``docs/api.md``); ``"lm"`` if it
+        failed the gate and Levenberg-Marquardt refinement rescued it (when
+        ``allow_refinement=True``) or the T-perturbation rescue recovered it.
     """
 
     q: NDArray[np.float64]

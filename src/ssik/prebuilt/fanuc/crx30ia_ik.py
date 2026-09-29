@@ -55,6 +55,7 @@ from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
+from ssik.refinement.polish import Chain as _PolishChain, polish_accepted as _polish_accepted
 from ssik.refinement import is_same_root as _is_same_root, same_root_floor as _same_root_floor
 import functools as _functools
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
@@ -687,6 +688,9 @@ def _solve_algebraic(T_target):
 # loop (Cython compiles ``_TWO_PI`` to a typed C ``double``).
 _TWO_PI: float = 2.0 * math.pi
 
+# The POE chain accepted candidates are polished on (ssik.refinement.polish).
+_POLISH_CHAIN = _PolishChain.from_kinbody(_KB)
+
 # Cached 4x4 identity reused inside ``_fk`` / ``_spatial_jacobian``
 # so each call avoids ``len(_JOINT_AXES)+1`` per-iteration ``np.eye(4)``
 # allocations -- the orchestrator's #1 hotspot per Slice 4 profile
@@ -1033,6 +1037,19 @@ def solve(
             continue
         q_ref, resid_ref, iters = refined
         verified.append((q_ref, resid_ref, "lm", iters))
+
+    # Polish every accepted candidate to machine precision on its own
+    # branch, before the dedup sees it (ssik.refinement.polish).
+    _accepted = [i for i, v in enumerate(verified) if v[2] == "none"]
+    if _accepted:
+        _q_pol, _r_pol, _polished = _polish_accepted(
+            np.array([verified[i][0] for i in _accepted]),
+            T,
+            _POLISH_CHAIN,
+        )
+        for _k, _i in enumerate(_accepted):
+            if _polished[_k]:
+                verified[_i] = (_q_pol[_k], float(_r_pol[_k]), "none", 0)
 
     # Same-root dedup (#600), mirroring ``ssik.refinement.dedup_same_root``:
     # a pair within ``dedup_atol`` merges only if its midpoint also

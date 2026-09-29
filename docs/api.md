@@ -24,6 +24,27 @@ Auto-generated from docstrings. The public surface is small by design — most u
     options:
       show_root_heading: false
 
+### Polished `general_6r` solutions
+
+`general_6r` (Raghavan-Roth, including the jointlock sub-solves of Rizon 4 and
+Rizon 10) finds its candidates with an ill-conditioned eigen-solve and accepts
+one when its FK residual is within `TolerancePolicy.subproblem_numerical`
+(`1e-5`). An accepted angle is then only as accurate as that residual over the
+Jacobian's smallest singular value. So, on both backends and by default, every
+accepted candidate gets a few Newton steps on the true FK before duplicates are
+merged. The polished point replaces the candidate only if its residual drops to
+`1e-12` and it stays within twice the first Newton step of the candidate, the
+region where Newton's method provably converges to the candidate's own root.
+Otherwise the candidate is returned exactly as the solver produced it, which
+happens near a singularity. Polish never changes which candidates are accepted,
+and never moves one to another branch. `refinement_used` stays `"none"`. The
+definition is in `ssik.refinement.polish`.
+
+This is not `allow_refinement`. That option (off by default) tries to rescue a
+candidate that *failed* the acceptance gate, and tags a candidate it rescues
+`"lm"`. It stops as soon as the residual is within the gate, so a rescued
+solution is only as accurate as the gate.
+
 ## Diagnostic record: `Diagnostic`
 
 Returned alongside the solution list when `solve(T, explain=True)`.
@@ -138,11 +159,12 @@ solver's values as they are.
 The band is round-off, not the solvers' worst-case angle error, because it
 moves a configuration. It covers the closed-form families at a regular or
 moderately conditioned pose, which land within `1.2e-10` rad of an exact
-limit. Near a singularity, where an angle is a multiple root, and on the
-`general_6r` family, whose angles are only as accurate as its `1e-5` FK gate,
-an angle can land further from the limit than the band. Such a configuration
-at an exact limit can then still be kept by one backend and dropped by the
-other. The derivation is at `ssik.postprocess._LIMIT_BAND`.
+limit, and `general_6r`, whose accepted solutions are polished
+([Polished `general_6r` solutions](#polished-general_6r-solutions)).
+Near a singularity, where an angle is a multiple root, an angle can land
+further from the limit than the band. Such a configuration at an exact limit
+can then still be kept by one backend and dropped by the other. The
+derivation is at `ssik.postprocess._LIMIT_BAND`.
 
 `Solution.fk_residual` is measured by the solver before this step, as it is
 before the angle-representative snaps above. It does not include the clamp,

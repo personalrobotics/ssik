@@ -45,6 +45,12 @@ class SolverSpec:
     :param force_refine: whether the emitted artifact always runs the LM polish
         (independent of the caller's ``allow_refinement``); artifact-only, the
         live solver still honours the caller.
+    :param polish_accepted: whether every candidate that passes the acceptance
+        gate is Newton-polished to machine precision on its own branch before
+        deduplication (:mod:`ssik.refinement.polish`). Unlike ``force_refine``
+        it never admits a candidate the gate rejected. On for the numerically
+        eigen-solved general_6r, whose accepted angles are otherwise only as
+        accurate as the gate (#632).
     :param auto_dispatch: whether :func:`ssik.core.dispatcher.dispatch` can route
         an arm here automatically. False for the tier-1 univariate-search solvers,
         which are documented as explicit-use-only (RR is ~50-200x faster).
@@ -58,6 +64,7 @@ class SolverSpec:
     composer: str | None = None
     fk_atol_expr: str = "policy.subproblem_numerical"
     force_refine: bool = False
+    polish_accepted: bool = False
     auto_dispatch: bool = True
 
     @property
@@ -135,6 +142,7 @@ SOLVERS: dict[str, SolverSpec] = {
             needs_symbolic_precompute=True,
             composer=f"{_COMPOSE}.general_6r",
             force_refine=True,
+            polish_accepted=True,
         ),
         _spec("husty_pfurner.general_6r", 2, 120.0, 50_000_000),
         _spec("seven_r.srs", 0, 8.5, 1_900),

@@ -44,6 +44,7 @@ from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
 from ssik.refinement import dedup_same_root, lm_refine
+from ssik.refinement.polish import Chain, polish_accepted
 
 __all__ = [
     "back_substitute",
@@ -1957,8 +1958,10 @@ def solve_all_ik(
          When ``allow_refinement=True``, candidates that miss ``fk_atol``
          algebraically get one :func:`~ssik.refinement.lm_refine` pass before
          the drop decision; the resulting :class:`Solution` records
-         ``refinement_used="lm"`` and ``refinement_iters``.
-      8. Deduplicate via wrap-to-pi joint-distance threshold.
+         ``refinement_used="lm"``.
+      8. Polish every candidate that met ``fk_atol`` on its own to machine
+         precision on its own branch (:func:`ssik.refinement.polish.polish_accepted`).
+      9. Merge candidates that are the same root (:func:`dedup_same_root`).
 
     :param dh: Tuple ``(alpha, a, d)`` of length-6 numpy arrays.
     :param t_target: 4x4 target end-effector pose.
@@ -2016,6 +2019,22 @@ def solve_all_ik(
 
     fk_fn = lambda q: _fk_dh(q, dh)  # noqa: E731
     jacobian_fn = lambda q: _spatial_jacobian(q, dh)  # noqa: E731
+    # Candidates that passed the gate on their own are polished to machine
+    # precision on their own branch before any same-root dedup sees them
+    # (ssik.refinement.polish), in one batch; refined near-misses are not.
+    polish_chain = Chain.from_dh(dh)
+    unpolished: list[int] = []
+
+    def polish_pending() -> None:
+        if not unpolished:
+            return
+        q_pol, r_pol, polished = polish_accepted(
+            np.array([candidates[i].q for i in unpolished]), t_target, polish_chain
+        )
+        for k, i in enumerate(unpolished):
+            if polished[k]:
+                candidates[i] = Solution(q=q_pol[k], fk_residual=float(r_pol[k]))
+        unpolished.clear()
 
     # Precompute pinv(q_mat) once; reused across all back-substitution
     # branches. Saves the SVD per branch (#86 Tier 2).
@@ -2042,6 +2061,7 @@ def solve_all_ik(
         q_cand, fk_err_alg = bs_result
         appended = False
         if fk_err_alg <= fk_atol:
+            unpolished.append(len(candidates))
             candidates.append(
                 Solution(
                     q=q_cand,
@@ -2074,6 +2094,7 @@ def solve_all_ik(
         # Early-exit gate (#198): once we have enough unique solutions, stop
         # back-substituting remaining algebraic roots.
         if appended and max_solutions is not None and len(candidates) >= max_solutions:
+            polish_pending()
             deduped_partial = dedup_same_root(candidates, dedup_atol, fk_fn, t_target)
             if len(deduped_partial) >= max_solutions:
                 return deduped_partial[:max_solutions], False
@@ -2081,6 +2102,7 @@ def solve_all_ik(
     # Merge only candidates that are the same root (#600): two eigenvalues
     # can back-substitute to one configuration, but twin roots near a fold
     # are distinct solutions however close. ``dedup_atol`` is the pre-filter.
+    polish_pending()
     solutions = dedup_same_root(candidates, dedup_atol, fk_fn, t_target)
 
     if max_solutions is not None and len(solutions) > max_solutions:

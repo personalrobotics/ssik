@@ -20,11 +20,11 @@ Pipeline:
 5. FK-validate each candidate against the POE chain (cross-check that
    the conversion + DH solve round-trips).
 
-The DH-frame solver does the heavy lifting (algebraic-first then
-Newton-on-spatial-Jacobian polish, hand-rolled to avoid scipy LM
-overhead). Per-arm cold-cache cost is one-time sympy preprocessing
-(~30-100s for AE-3 leftvar selection); subsequent IKs are warm-cache
-single-digit milliseconds.
+The DH-frame solver does the heavy lifting: algebraic candidates, each one
+that passes the FK gate polished to machine precision on its own branch
+(:mod:`ssik.refinement.polish`), and opt-in Newton refinement of near-misses.
+Per-arm cold-cache cost is one-time sympy preprocessing (~30-100s for AE-3
+leftvar selection); subsequent IKs are warm-cache single-digit milliseconds.
 
 Tier-2 alternative: :mod:`ssik.solvers.husty_pfurner.general_6r` uses
 Husty-Pfurner Study quaternion algebra. RR is faster on well-conditioned
@@ -75,8 +75,9 @@ def solve(
         wrap-to-pi tolerance for collapsing equivalent solutions.
     :param allow_refinement: opt into Newton-on-spatial-Jacobian polish for
         algebraic candidates that don't meet ``policy.subproblem_numerical``
-        on their own. Default off (#74); the algebraic path is exact for
-        well-conditioned poses on most arms thanks to AE-3 leftvar choice.
+        on their own. Default off (#74). Candidates that do meet it are always
+        polished to machine precision (:mod:`ssik.refinement.polish`); this
+        flag only decides whether the ones that miss get a chance.
     :param refinement_max_iters: cap on Newton iterations per candidate
         when ``allow_refinement=True``.
     :returns: ``(solutions, is_ls)``. Each :class:`Solution.q` is in the

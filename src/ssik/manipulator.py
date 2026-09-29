@@ -691,6 +691,9 @@ class Manipulator:
             path is already at machine precision on tier-0 / SRS arms.
             Set ``True`` on tier-2 RR arms to recover edge-case
             candidates whose algebraic FK drifts above ``fk_atol``.
+            Independent of the polish ``general_6r`` always applies to
+            candidates that already pass (``docs/api.md``, "Polished
+            general_6r solutions").
         :param allow_rescue: when ``True`` (default), if the analytical
             path returns no solutions for a target within the arm's reach
             (a measure-zero rank-deficient ridge), recover the IK via the

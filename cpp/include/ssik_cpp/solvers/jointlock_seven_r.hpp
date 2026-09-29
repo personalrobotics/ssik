@@ -82,8 +82,11 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
     static const JointConsts<6> kNoRefineConsts{};
     std::array<std::vector<Solution<7>>, NSamples> per;
     parallel_for(NSamples, [&](std::size_t i) {
+      // Accepted sub-chain candidates are polished on the DH chain, which needs
+      // no POE consts (Python's solve_all_ik polishes the same chain).
       const auto sub = general_6r_core(kNoRefineConsts, rr[i], coeffs[i], tp, kGeneral6rFkAtol,
-                                       kGeneral6rDedupAtol, /*allow_refinement=*/false, 15);
+                                       kGeneral6rDedupAtol, /*allow_refinement=*/false, 15,
+                                       RrPolish::Dh);
       for (const auto& s6 : sub) {
         Solution<7> s7;
         int j = 0;

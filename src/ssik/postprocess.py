@@ -90,12 +90,15 @@ __all__ = [
 # arm, every shipped 6R arm, both backends), the closed-form families
 # (spherical_two_parallel, three_parallel) land within 2.5e-13 of the limit
 # where sigma_min(J) >= 1e-2 and within 1.2e-10 where it is >= 1e-4; 1e-9
-# covers both. It cannot cover the rest, and is not widened to: near a
-# singularity an angle is a multiple root whose error is ~sqrt(round-off) (up
-# to 3e-4 measured), and general_6r's eigen-solve is accurate only to its FK
-# gate (angle errors to 1e-5 even at regular poses). A band that wide would move
-# ordinary configurations by 1e-5 rad; there an exact-limit tie stays one
-# (#632).
+# covers both. general_6r's eigen-solve alone is accurate only to its FK gate
+# (angle errors to 1e-5 even at regular poses), but its accepted solutions are
+# polished to machine precision (ssik.refinement.polish, #636), after which it
+# lands within 1.3e-12 where sigma_min >= 1e-2 and 9.3e-11 where it is >= 1e-4
+# (a near-miss rescued by allow_refinement / force_refine is not polished).
+# The band cannot cover singular poses, and is not widened to: there an angle is
+# a multiple root whose error is ~sqrt(round-off) (up to 1e-3 measured). A band
+# that wide would move ordinary configurations; there an exact-limit tie stays
+# one (#632).
 #
 # 1e-9 is the seeded ranking's grid (_RANK_QUANTUM), the +-pi snap (_CUT_SNAP)
 # and the 7R in-limits resolvers' acceptance slack (seven_r._polish and

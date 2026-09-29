@@ -37,6 +37,7 @@
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/ik_types.hpp"
 #include "ssik_cpp/newton.hpp"  // lm_refine (force_refine path)
+#include "ssik_cpp/polish.hpp"
 #include "ssik_cpp/rescue.hpp"
 
 namespace ssik {
@@ -534,6 +535,30 @@ inline bool back_substitute(double x_lin, const Vec12& v12, const PqCoeffs& pq, 
   return true;
 }
 
+// FK and spatial Jacobian of the standard-DH chain at q (DH frame), columns
+// (p_i x z_i ; z_i): the convention of spatial_jacobian<N> and of the twist
+// se3_log_residual measures, so a Newton step on it converges quadratically.
+// Mirrors ssik.refinement.polish.Chain.from_dh.
+inline Eigen::Matrix4d dh_fk(const RrConsts& rr, const std::array<double, 6>& q) {
+  Eigen::Matrix4d t = Eigen::Matrix4d::Identity();
+  for (int i = 0; i < 6; ++i) t = t * dh_matrix(q[i], rr.alpha[i], rr.a[i], rr.d[i]);
+  return t;
+}
+
+inline Eigen::Matrix<double, 6, 6> dh_spatial_jacobian(const RrConsts& rr,
+                                                       const std::array<double, 6>& q) {
+  Eigen::Matrix<double, 6, 6> jac;
+  Eigen::Matrix4d t = Eigen::Matrix4d::Identity();
+  for (int i = 0; i < 6; ++i) {
+    const Eigen::Vector3d z = t.block<3, 1>(0, 2);
+    const Eigen::Vector3d p = t.block<3, 1>(0, 3);
+    jac.col(i).head<3>() = p.cross(z);
+    jac.col(i).tail<3>() = z;
+    t = t * dh_matrix(q[i], rr.alpha[i], rr.a[i], rr.d[i]);
+  }
+  return jac;
+}
+
 // Same-root dedup (#600): two eigenvalues can back-substitute to one
 // configuration, but twin roots near a fold are distinct however close.
 // dedup_atol is the pre-filter radius (mirrors solve_all_ik's dedup).
@@ -552,15 +577,23 @@ using RrCoeffFn = void (*)(const double t12[12], rr_detail::Mat14x9& p_sin,
                            rr_detail::Mat14x9& p_cos, rr_detail::Mat14x9& p_one,
                            rr_detail::Mat14x8& q);
 
+// Which chain the core polishes accepted candidates on (polish.hpp), or none.
+// The 6R artifact polishes on its POE chain `c`, as the Python artifact does;
+// the jointlock sweep has no POE sub-chain here, so it polishes on the DH chain,
+// as Python's solve_all_ik does.
+enum class RrPolish : std::uint8_t { Off, Poe, Dh };
+
 // The RR analytical core: every in-frame algebraic solution for the POE target,
-// FK-filtered and deduplicated. q is in the POE frame (q_dh - theta_offset);
-// fk_residual is the DH-frame Frobenius residual (== POE residual under the
-// rigid bridge). No limit/seed/refine/rescue logic -- that is the artifact layer.
+// FK-filtered, polished (`polish`) and deduplicated. q is in the POE frame
+// (q_dh - theta_offset); fk_residual is the DH-frame Frobenius residual (== POE
+// residual under the rigid bridge), or the polished chain's. No limit/seed/
+// rescue logic -- that is the artifact layer.
 template <class CoeffFn>
 std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts& rr,
                                          CoeffFn&& coeffs, const Pose& t_poe, double fk_atol,
                                          double dedup_atol, bool allow_refinement,
-                                         int refinement_max_iters) {
+                                         int refinement_max_iters,
+                                         RrPolish polish = RrPolish::Off) {
   using namespace rr_detail;
   const Eigen::Matrix4d t_dh = rr.t_pre_inv * t_poe * rr.t_post_inv;
 
@@ -585,9 +618,20 @@ std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts
     std::array<double, 6> q_dh{};
     double fk_err = 0.0;
     if (!back_substitute(roots[k], vecs[k], pq, rr, t_dh, q_dh, fk_err)) continue;
+    // Accepted: polish to machine precision on the same branch before the
+    // same-root dedup below sees it (polish.hpp; Python polishes the same chain).
+    const bool accepted = fk_err <= fk_atol;
+    if (accepted && polish == RrPolish::Dh)
+      polish_accepted<6>([&](const std::array<double, 6>& x) { return dh_fk(rr, x); },
+                         [&](const std::array<double, 6>& x) { return dh_spatial_jacobian(rr, x); },
+                         t_dh, q_dh, fk_err);
     std::array<double, 6> q_poe;
     for (int i = 0; i < 6; ++i) q_poe[i] = q_dh[i] - rr.theta_offset[i];
-    if (fk_err <= fk_atol) {
+    if (accepted) {
+      if (polish == RrPolish::Poe)
+        polish_accepted<6>([&](const std::array<double, 6>& x) { return fk<6>(c, x); },
+                           [&](const std::array<double, 6>& x) { return spatial_jacobian<6>(c, x); },
+                           t_poe, q_poe, fk_err);
       cands.push_back(Solution<6>{q_poe, fk_err, Refinement::None});
     } else if (allow_refinement && fk_err < 0.1) {
       // Refine only near-misses (fk < 0.1): a candidate already >0.1 off is an
@@ -620,7 +664,8 @@ std::vector<Solution<6>> general_6r_artifact_solve(const JointConsts<6>& c, cons
   // Python oracle.
   const auto core = [&](const Pose& tp) {
     auto sols = general_6r_core(c, rr, coeffs, tp, kGeneral6rFkAtol, kGeneral6rDedupAtol,
-                               /*allow_refinement=*/true, p.refinement_max_iters);
+                               /*allow_refinement=*/true, p.refinement_max_iters,
+                               RrPolish::Poe);
     // POE-FK re-verify (#533): general_6r_core filters the DH-frame residual, but
     // the rigid poe_to_dh bridge is slightly inconsistent at degenerate geometry
     // (DH-FK closes, POE-FK does not). Re-verify against the actual POE target,

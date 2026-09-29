@@ -13,7 +13,9 @@ Design constraints (see GitHub #74):
   -- candidates that don't already meet ``fk_atol`` get dropped, not
   polished. When ``True``, each near-miss gets one
   :func:`lm_refine` pass; the resulting :class:`~ssik.core.solution.Solution`
-  reports ``refinement_used="lm"`` and ``refinement_iters``.
+  reports ``refinement_used="lm"``. (Separately, ``general_6r`` polishes the
+  candidates that *do* meet ``fk_atol`` to machine precision by default,
+  :mod:`ssik.refinement.polish`; that never changes which candidates pass.)
 - **FK-tolerance-driven termination.** Iterate until ``||r|| < fk_atol``
   or ``max_iters`` hit. Two convergence guards abort a trajectory that is
   clearly not going to reach ``fk_atol`` -- ``divergence_factor`` (the

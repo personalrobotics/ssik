@@ -242,6 +242,11 @@ def _render_specialised(
     # only refinement primitive imported from runtime is the generic
     # Levenberg-Marquardt step.
     buf.write("from ssik.refinement import lm_refine as _lm_refine\n")
+    if SOLVERS[plan.solver_name].polish_accepted:
+        buf.write(
+            "from ssik.refinement.polish import Chain as _PolishChain, "
+            "polish_accepted as _polish_accepted\n"
+        )
     if plan.solver_name != "jointlock.seven_r":
         # 6R roots are isolated: the orchestrator merges only the same root
         # (#600). The 7R orchestrator's merge is a sampling resolution.
@@ -305,6 +310,7 @@ def _render_specialised(
             _render_specialised_solve_orchestrator(
                 _spec.fk_atol_expr,
                 force_refine=_spec.force_refine,
+                polish_accepted=_spec.polish_accepted,
                 emit_native=plan.solver_name in _NATIVE_SOLVER_FAMILIES,
                 native_rr=plan.solver_name == "ikgeo.general_6r",
             )
@@ -430,9 +436,32 @@ def _render_jointlock_native_loader() -> str:
     )
 
 
+# Inserted before the 6R orchestrator's same-root dedup when the solver's spec
+# sets ``polish_accepted``: every candidate that passed the gate on its own
+# ("none") is polished to machine precision on its own branch, or left exactly
+# as it was (ssik.refinement.polish owns the definition; the native core runs
+# the same one). Refined near-misses ("lm") keep allow_refinement's semantics.
+_POLISH_ACCEPTED_BLOCK = """\
+    # Polish every accepted candidate to machine precision on its own
+    # branch, before the dedup sees it (ssik.refinement.polish).
+    _accepted = [i for i, v in enumerate(verified) if v[2] == "none"]
+    if _accepted:
+        _q_pol, _r_pol, _polished = _polish_accepted(
+            np.array([verified[i][0] for i in _accepted]),
+            T,
+            _POLISH_CHAIN,
+        )
+        for _k, _i in enumerate(_accepted):
+            if _polished[_k]:
+                verified[_i] = (_q_pol[_k], float(_r_pol[_k]), "none", 0)
+
+"""
+
+
 def _render_specialised_solve_orchestrator(
     fk_atol_expr: str = "policy.subproblem_numerical",
     force_refine: bool = False,
+    polish_accepted: bool = False,
     emit_native: bool = False,
     native_rr: bool = False,
 ) -> str:
@@ -860,6 +889,21 @@ def _render_specialised_solve_orchestrator(
             )
         '''
     ).replace("fk_atol = policy.subproblem_numerical", f"fk_atol = {fk_atol_expr}")
+    if polish_accepted:
+        # Polish accepted candidates before the same-root dedup (see
+        # SolverSpec.polish_accepted); other artifacts stay byte-identical.
+        marker = "    # Same-root dedup (#600), mirroring"
+        assert marker in template
+        template = template.replace(marker, _POLISH_ACCEPTED_BLOCK + marker, 1)
+        two_pi = "_TWO_PI: float = 2.0 * math.pi\n"
+        assert two_pi in template
+        template = template.replace(
+            two_pi,
+            two_pi
+            + "\n# The POE chain accepted candidates are polished on (ssik.refinement.polish).\n"
+            + "_POLISH_CHAIN = _PolishChain.from_kinbody(_KB)\n",
+            1,
+        )
     if force_refine:
         # Always polish near-misses (see SolverSpec.force_refine). Only rewrite
         # the gate when set, so non-forced artifacts stay byte-identical.
