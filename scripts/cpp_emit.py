@@ -44,17 +44,18 @@ from typing import Any, cast
 import numpy as np
 
 from ssik._kinbody import KinBody
+from ssik.cpp import JointData, _joint_data
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
 
 _REPO = Path(__file__).resolve().parent.parent
 
 
-def _render_limits(joints: list[Any]) -> list[str]:
+def _render_limits(jd: JointData) -> list[str]:
     """Baked JointLimits<DOF> so the self-contained artifact needs no runtime kb."""
-    lo = ", ".join(_f(j.limits[0]) if j.limits else "0.0" for j in joints)
-    hi = ", ".join(_f(j.limits[1]) if j.limits else "0.0" for j in joints)
-    present = ", ".join("true" if j.limits else "false" for j in joints)
+    lo = ", ".join(_f(v) for v in jd.lo)
+    hi = ", ".join(_f(v) for v in jd.hi)
+    present = ", ".join("true" if v else "false" for v in jd.present)
     return [
         "inline JointLimits<DOF> limits() {",
         "  JointLimits<DOF> l;",
@@ -64,6 +65,19 @@ def _render_limits(joints: list[Any]) -> list[str]:
         "  return l;",
         "}",
     ]
+
+
+def _render_joint_consts(jd: JointData) -> list[str]:
+    """The body of a `JointConsts<N> c` initializer: every joint's axis, frames
+    and type, from the same data the public ssik.cpp.joint_data returns."""
+    out = []
+    for i in range(jd.dof):
+        jt = "Revolute" if jd.joint_type[i] == 0 else "Prismatic"
+        out.append(f"  c.axis[{i}] = {_vec3(jd.axis[i])};")
+        out.append(f"  c.t_left[{i}] = {_mat4(jd.t_left[i])};")
+        out.append(f"  c.t_right[{i}] = {_mat4(jd.t_right[i])};")
+        out.append(f"  c.type[{i}] = JointType::{jt};")
+    return out
 
 
 # Per-solver self-contained C++ solve(): (include, body-lines). The artifact
@@ -153,18 +167,16 @@ def _render_hp_consts(bake: dict[str, Any], suffix: str) -> list[str]:
     ]
 
 
-def _render_joint_consts6(joints: list[Any], suffix: str) -> list[str]:
+def _render_joint_consts6(jd: JointData, suffix: str) -> list[str]:
     """Emit `inline JointConsts<6> hp_sub_<suffix>() {...}` (the locked 6R sub-chain
     POE frames hp_core needs for its FK-verify + lm_refine)."""
-    out = [f"inline JointConsts<6> hp_sub{suffix}() {{", "  JointConsts<6> c;"]
-    for i, j in enumerate(joints):
-        jt = "Revolute" if j.joint_type == "revolute" else "Prismatic"
-        out.append(f"  c.axis[{i}] = {_vec3(np.asarray(j.axis))};")
-        out.append(f"  c.t_left[{i}] = {_mat4(np.asarray(j.T_left))};")
-        out.append(f"  c.t_right[{i}] = {_mat4(np.asarray(j.T_right))};")
-        out.append(f"  c.type[{i}] = JointType::{jt};")
-    out += ["  return c;", "}"]
-    return out
+    return [
+        f"inline JointConsts<6> hp_sub{suffix}() {{",
+        "  JointConsts<6> c;",
+        *_render_joint_consts(jd),
+        "  return c;",
+        "}",
+    ]
 
 
 def _render_srs_consts(s: dict[str, Any]) -> list[str]:
@@ -545,7 +557,7 @@ def _render_jointlock_hp(
         sub = _lock_joint(kb, lock, float(q_lock))
         body += ["", f"// --- lock sample {i} (q_lock = {_f(q_lock)}) ---"]
         body += _render_hp_consts(_hp_bake(sub), f"_{i}")
-        body += _render_joint_consts6(list(sub.joints), f"_{i}")
+        body += _render_joint_consts6(_joint_data(sub, ""), f"_{i}")
     body += [
         "",
         "inline std::array<HpConsts, 16> jl_hp() {",
@@ -562,19 +574,6 @@ def _render_jointlock_hp(
         "}",
     ]
     return ('#include "ssik_cpp/solvers/jointlock_seven_r.hpp"', body)
-
-
-def _consts_kinbody(arm_solver: str, kb: KinBody) -> KinBody:
-    """The KinBody whose frames get baked into consts(). Spherical bakes the
-    CANONICAL wrist gauge (the runtime canonicalize, moved to build time -- so the
-    self-contained artifact has zero runtime preprocessing). Limits stay from the
-    original (physical) kb; canonicalization is FK-identical + limit-preserving."""
-    if arm_solver == "ikgeo.spherical_two_parallel":
-        from ssik._kinbody import canonicalize_spherical_wrist
-        from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
-
-        return canonicalize_spherical_wrist(kb, DEFAULT_TOLERANCE_POLICY)
-    return kb
 
 
 def _f(x: float) -> str:
@@ -700,17 +699,12 @@ def emit(arm: str, out_dir: Path, n_parity: int = 200, seed: int = 0) -> None:
         "inline JointConsts<DOF> consts() {",
         "  JointConsts<DOF> c;",
     ]
-    # Spherical bakes the CANONICAL wrist gauge; three_parallel bakes kb as-is.
-    consts_joints = _consts_kinbody(solver, kb).joints
-    for i, j in enumerate(consts_joints):
-        jt = "Revolute" if j.joint_type == "revolute" else "Prismatic"
-        lines.append(f"  c.axis[{i}] = {_vec3(np.asarray(j.axis))};")
-        lines.append(f"  c.t_left[{i}] = {_mat4(np.asarray(j.T_left))};")
-        lines.append(f"  c.t_right[{i}] = {_mat4(np.asarray(j.T_right))};")
-        lines.append(f"  c.type[{i}] = JointType::{jt};")
-    lines += ["  return c;", "}"]
+    # Spherical bakes the CANONICAL wrist gauge (the runtime canonicalize, moved
+    # to build time); every other family bakes kb as-is. Limits stay kb's own.
+    jd = _joint_data(kb, solver)
+    lines += [*_render_joint_consts(jd), "  return c;", "}"]
     if rendered_solve:
-        lines += ["", *_render_limits(joints), "", *rendered_solve[1], "", *_render_batch()]
+        lines += ["", *_render_limits(jd), "", *rendered_solve[1], "", *_render_batch()]
     lines += ["", f"}}  // namespace ssik::{ns}", ""]
     art = out_dir / f"{arm}.hpp"
     art.write_text("\n".join(lines))

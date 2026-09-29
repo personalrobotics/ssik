@@ -13,15 +13,24 @@ directly with no Python in the loop::
 Eigen stays the consumer's responsibility: the package ``find_dependency``s
 ``Eigen3``, and ssik's own builds use the release pinned in
 ``scripts/fetch_eigen.py`` (3.4.0). The per-arm generated headers
-(``cpp/gen/<arm>_ik.hpp``) are not in the wheel; emit one with
-``scripts/cpp_emit.py`` from a source checkout.
+(``cpp/gen/<arm>_ik.hpp``) are not in the wheel. Build the solver inputs at
+runtime with :func:`joint_data`, or emit a header with ``scripts/cpp_emit.py``
+from a source checkout.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["get_cmake_dir", "get_include"]
+import numpy as np
+from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from ssik.manipulator import Manipulator
+
+__all__ = ["JointData", "get_cmake_dir", "get_include", "joint_data"]
 
 _HERE = Path(__file__).resolve().parent
 _PROBE = Path("ssik_cpp") / "fk.hpp"
@@ -73,4 +82,79 @@ def get_cmake_dir() -> str:
         f"no ssik_cpp CMake package in this ssik install ({cmake_dir}). It ships in "
         f"ssik wheels only. From a source checkout, use get_include() or "
         f"`cmake --install` of cpp/ (see cpp/README.md)."
+    )
+
+
+@dataclass(frozen=True)
+class JointData:
+    """The arrays ``ssik::JointConsts<N>`` and ``ssik::JointLimits<N>`` hold.
+
+    Row ``i`` describes joint ``i`` from the base. Forward kinematics is
+    ``T = prod_i t_left[i] @ Joint(axis[i], q[i]) @ t_right[i]``, where
+    ``Joint`` rotates about ``axis`` (revolute) or translates along it
+    (prismatic); ``ssik::fk`` in ``ssik_cpp/fk.hpp`` evaluates exactly that.
+
+    - ``axis`` (N, 3), ``t_left`` (N, 4, 4), ``t_right`` (N, 4, 4): the
+      ``JointConsts`` fields of the same names.
+    - ``joint_type`` (N,): ``JointConsts::type``, as the ``ssik::JointType``
+      value: 0 ``Revolute``, 1 ``Prismatic``.
+    - ``lo``, ``hi`` (N,), ``present`` (N,) bool: the ``JointLimits`` fields.
+      A joint without limits has ``present`` false and ``lo = hi = 0``.
+    - ``solver``: the solver family these frames are prepared for
+      (:attr:`ssik.Manipulator.solver_name`). ``ikgeo.three_parallel`` data
+      goes to ``three_parallel_artifact_solve``.
+    """
+
+    solver: str
+    axis: NDArray[np.float64]
+    t_left: NDArray[np.float64]
+    t_right: NDArray[np.float64]
+    joint_type: NDArray[np.int32]
+    lo: NDArray[np.float64]
+    hi: NDArray[np.float64]
+    present: NDArray[np.bool_]
+
+    @property
+    def dof(self) -> int:
+        """Number of joints, the ``N`` of ``JointConsts<N>``."""
+        return len(self.joint_type)
+
+
+def joint_data(arm: Manipulator) -> JointData:
+    """The joint data to build ``JointConsts<N>`` / ``JointLimits<N>`` from, for ``arm``.
+
+    These are the values the native backend passes to the C++ solvers and the
+    values ``scripts/cpp_emit.py`` bakes into ``cpp/gen/<arm>_ik.hpp``. For
+    ``ikgeo.spherical_two_parallel`` the frames are in the canonical wrist
+    gauge that solver requires (forward kinematics is unchanged); other
+    families use the arm's own frames. Limits are always the arm's own.
+
+    >>> import ssik
+    >>> d = ssik.cpp.joint_data(ssik.Manipulator.from_prebuilt("ur5"))
+    >>> d.solver, d.dof, d.t_left.shape
+    ('ikgeo.three_parallel', 6, (6, 4, 4))
+    """
+    return _joint_data(arm.kinbody, arm.solver_name)
+
+
+def _joint_data(kb: Any, solver: str) -> JointData:
+    """:func:`joint_data` for a KinBody, prepared for ``solver`` (any other
+    name, for example ``""``, takes the KinBody's own frames)."""
+    geom = kb
+    if solver == "ikgeo.spherical_two_parallel":
+        from ssik._kinbody import canonicalize_spherical_wrist
+        from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+        geom = canonicalize_spherical_wrist(kb, DEFAULT_TOLERANCE_POLICY)
+    gj = geom.joints
+    lj = kb.joints  # limits from the arm's own (physical) joints
+    return JointData(
+        solver=solver,
+        axis=np.array([j.axis for j in gj], dtype=np.float64).reshape(-1, 3),
+        t_left=np.array([j.T_left for j in gj], dtype=np.float64).reshape(-1, 4, 4),
+        t_right=np.array([j.T_right for j in gj], dtype=np.float64).reshape(-1, 4, 4),
+        joint_type=np.array([0 if j.joint_type == "revolute" else 1 for j in gj], np.int32),
+        lo=np.array([j.limits[0] if j.limits else 0.0 for j in lj], dtype=np.float64),
+        hi=np.array([j.limits[1] if j.limits else 0.0 for j in lj], dtype=np.float64),
+        present=np.array([bool(j.limits) for j in lj], dtype=np.bool_),
     )

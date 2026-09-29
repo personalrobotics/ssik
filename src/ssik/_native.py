@@ -143,27 +143,22 @@ def _consts(solver_name: str, kb: Any) -> tuple[Any, ...]:
     cached = _consts_cache.get(kb)
     if cached is not None:
         return cached  # type: ignore[no-any-return]
-    # Per-family geometry preprocessing: spherical_two_parallel needs the wrist
-    # gauge canonicalized (the artifact bakes it at build time; the raw _KB lacks
-    # it -- 15/18 arms). Canonicalization is FK-identical, so the returned q are
-    # physical joint values and the joint limits are unchanged. Done here in
-    # Python (cached per-arm), so no preprocessing is ported to C++.
-    geom = kb
-    if solver_name == "ikgeo.spherical_two_parallel":
-        from ssik._kinbody import canonicalize_spherical_wrist
-        from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+    # The public ssik.cpp.joint_data arrays, which also feed cpp_emit's headers.
+    # spherical_two_parallel gets the wrist gauge canonicalized there (the raw
+    # _KB lacks it -- 15/18 arms); canonicalization is FK-identical, so the
+    # returned q are physical joint values and the joint limits are unchanged.
+    # Done in Python (cached per-arm), so no preprocessing is ported to C++.
+    from ssik.cpp import _joint_data
 
-        geom = canonicalize_spherical_wrist(kb, DEFAULT_TOLERANCE_POLICY)
-    gj = geom.joints
-    lj = kb.joints  # limits from the original (physical) joints
+    d = _joint_data(kb, solver_name)
     marshalled = (
-        np.array([j.axis for j in gj], dtype=np.float64),
-        np.array([j.T_left for j in gj], dtype=np.float64),
-        np.array([j.T_right for j in gj], dtype=np.float64),
-        np.array([0 if j.joint_type == "revolute" else 1 for j in gj], dtype=np.int32),
-        np.array([j.limits[0] if j.limits else 0.0 for j in lj], dtype=np.float64),
-        np.array([j.limits[1] if j.limits else 0.0 for j in lj], dtype=np.float64),
-        np.array([1 if j.limits else 0 for j in lj], dtype=np.int32),
+        d.axis,
+        d.t_left,
+        d.t_right,
+        d.joint_type,
+        d.lo,
+        d.hi,
+        d.present.astype(np.int32),
     )
     _consts_cache.put(kb, marshalled)
     return marshalled
