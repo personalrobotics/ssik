@@ -23,10 +23,10 @@ Platforms
     A pose on a boundary can resolve differently on Linux and macOS, so a
     cell is known per platform: ``KNOWN_*`` maps each known arm to the
     platforms where its cell fails (``ALL`` for both), and the strict xfail
-    applies only there. The round-off classes (``ROUNDOFF_CLASSES``: D, the
-    rescue, and F, exact-limit ties) differ even between CI runners of one
-    platform, so their known cells are non-strict until #622 and #624 make
-    them reproducible; a D or F gap on an arm not listed still fails.
+    applies only there. The round-off class (``ROUNDOFF_CLASSES``: F,
+    exact-limit ties) differs even between CI runners of one platform, so its
+    known cells are non-strict until #624 makes them reproducible; an F gap on
+    an arm not listed still fails.
 
 Reproduce a failure: the message names the pose id (``<stratum>/<index>``);
 ``tests._native_parity.poses(arm, "full")`` returns its ``q``, and
@@ -57,45 +57,6 @@ pytestmark = pytest.mark.skipif(
 ALL = ("darwin", "linux")
 
 KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
-    "C": {
-        "rizon10_ik": ALL,
-        "rizon4_ik": ALL,
-    },
-    "D": {
-        "big_yam_ik": ALL,
-        "fanuc_m710ic_ik": ALL,
-        "gen3_lite_ik": ALL,
-        "gp8_ik": ALL,
-        "hh020_ik": ALL,
-        "irb120_ik": ALL,
-        "irb1600_ik": ALL,
-        "irb6700_ik": ALL,
-        "j2s7s300_ik": ALL,
-        "kr210_r2700_ik": ALL,
-        "kr6_r900_ik": ALL,
-        "lrmate200id_ik": ALL,
-        "nova5_ik": ALL,
-        "piper_ik": ALL,
-        "r2000ic210l_ik": ALL,
-        "rs007n_ik": ALL,
-        "rv4fr_ik": ALL,
-        "rx160_ik": ALL,
-        "standardbots_core_ik": ALL,
-        "standardbots_spark_ik": ALL,
-        "standardbots_thor_ik": ALL,
-        "ur15_ik": ALL,
-        "ur16e_ik": ALL,
-        "ur5_ik": ALL,
-        "ur7e_ik": ALL,
-        "viperx300s_ik": ALL,
-        "vs060_ik": ALL,
-        "widowx250s_ik": ALL,
-        "xmatecr7_ik": ALL,
-        "xmatesr3_ik": ALL,
-        "yam_ik": ALL,
-        "yumi_right_ik": ALL,
-        "z1_ik": ALL,
-    },
     "E": {
         "cr5_ik": ALL,
         "fanuc_crx10ial_ik": ("darwin",),
@@ -157,6 +118,7 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
         "standardbots_thor_ik": ALL,
         "viperx300s_ik": ALL,
         "vs060_ik": ALL,
+        "widowx250s_ik": ALL,
         "xarm6_ik": ALL,
         "xmatecr7_ik": ALL,
         "xmatesr3_ik": ALL,
@@ -175,16 +137,6 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
 }
 
 KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
-    "D": {
-        "big_yam_ik": ALL,
-        "gen3_ik": ALL,
-        "gen3_lite_ik": ALL,
-        "j2s7s300_ik": ALL,
-        "jaco2_ik": ALL,
-        "piper_ik": ALL,
-        "xmatecr7_ik": ALL,
-        "yam_ik": ALL,
-    },
     "F": {
         "big_yam_ik": ALL,
         "fanuc_crx10ia_ik": ALL,
@@ -192,6 +144,7 @@ KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
         "fanuc_crx30ia_ik": ALL,
         "fanuc_crx3ia_ik": ALL,
         "fanuc_crx5ia_ik": ALL,
+        "gen3_lite_ik": ALL,
         "gp8_ik": ALL,
         "hh020_ik": ALL,
         "irb120_ik": ALL,

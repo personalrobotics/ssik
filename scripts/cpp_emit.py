@@ -1022,10 +1022,10 @@ _MATCH_TOL = {6: 1e-3, 7: 1e-2}
 _KNOWN_INCOMPLETE: dict[str, tuple[dict[str, int], str]] = {
     # The monic-companion eigensolve loses real roots at degenerate lock samples.
     "kassow_kr810_ik": ({"darwin": 1, "linux": 3}, "#544 (HP jointlock eigensolve)"),
-    # These golden poses' solutions come from Python's T-perturbation rescue
-    # (the analytic set is empty), which native runs with its own RNG and polish.
-    "yumi_left_ik": ({"linux": 2}, "#622 (rescue differs between backends)"),
-    "yumi_right_ik": ({"darwin": 1, "linux": 2}, "#622 (rescue differs between backends)"),
+    # Python's in-limits resolver misses a narrow feasible swivel arc that
+    # native's finds, so these golden poses hold Python's rescue samples of the
+    # arc, while native returns its own analytic samples and never rescues.
+    "yumi_left_ik": ({"linux": 2}, "#462 (srs_polished in-limits swivel arc)"),
 }
 
 

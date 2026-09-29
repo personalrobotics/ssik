@@ -111,12 +111,13 @@ CLASSES = {
 NEW = "new"
 
 # Classes whose failing poses are decided by round-off, and so differ between
-# machines, not only between Linux and macOS: an exact-limit tie (F, #624),
-# and a rescue from a singular pose (D, #622). Observed: the same commit's
-# CI runners disagree on which of these cells fail. Their known cells are
-# non-strict xfails until those issues make the outcome reproducible; every
-# other class is strict.
-ROUNDOFF_CLASSES = frozenset({"D", "F"})
+# machines, not only between Linux and macOS: an exact-limit tie (F, #624).
+# Observed: the same commit's CI runners disagree on which of these cells fail.
+# Their known cells are non-strict xfails until that issue makes the outcome
+# reproducible; every other class is strict. The rescue (D) left this set when
+# both backends came to share one deterministic definition (#622); a rescued
+# solution that lands exactly on a limit is an F tie (``_Pose.across_limit``).
+ROUNDOFF_CLASSES = frozenset({"F"})
 
 # a. FK closure every returned solution must meet: the default policy's
 # acceptance gate, documented in README ("How to read fk_residual"). Some
@@ -516,6 +517,17 @@ class _Pose:
         self.rep.oracle_poses.add(self.pid)
         return adjudicate(self.arm, self.pid).verdict(q, other_raw) is not None
 
+    def across_limit(self, want: Q, other: str) -> bool:
+        """Whether every solution of ``want`` is in the ``other`` backend's raw
+        set (rescue included) just outside a joint limit: the two backends
+        rescued the same configurations, and only the limit filter split them."""
+        other_raw = self.sets[("raw", other, True)]
+        for q in want:
+            hits = [o for o in other_raw if not unmatched(q[None], o[None], self.tol)]
+            if not any(_limit_excess(o, self.lo, self.hi, self.has) > 0.0 for o in hits):
+                return False
+        return True
+
     def check(self, mode: str) -> None:
         pid, rep = self.pid, self.rep
         nat, py = self.sets[(mode, "native", True)], self.sets[(mode, "python", True)]
@@ -552,6 +564,9 @@ class _Pose:
                 cls = self.lacks(want_a[0], mode, other)
                 if cls is None:
                     continue
+            elif mode == "limits" and self.across_limit(want, other):
+                # Both rescues found it, at a joint limit: an exact-limit tie.
+                cls = "F"
             elif other == "native":  # every Python solution came from its rescue
                 cls = "C" if self.fam == "jointlock.rr" else "D"
             else:

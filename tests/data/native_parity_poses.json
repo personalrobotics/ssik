@@ -5,10 +5,6 @@
    "fast_pins": {
     "darwin": [
      "near_limit/3",
-     "near_limit/9",
-     "near_limit/18",
-     "near_limit/24",
-     "near_limit/31",
      "near_singular/8",
      "near_singular/26",
      "near_singular/32",
@@ -16,14 +12,7 @@
      "near_singular/41"
     ],
     "linux": [
-     "near_limit/3",
-     "near_limit/12",
-     "near_limit/18",
-     "near_limit/24",
-     "near_limit/33",
-     "near_singular/2",
-     "near_singular/8",
-     "near_singular/34",
+     "near_singular/21",
      "near_singular/41"
     ]
    },
@@ -79,15 +68,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
-     "reverse:D",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
-     "reverse:D",
      "reverse:F"
     ]
    }
@@ -734,12 +719,8 @@
   },
   "fanuc_m710ic_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/0"
-    ],
-    "linux": [
-     "near_singular/0"
-    ]
+    "darwin": [],
+    "linux": []
    },
    "near_singular": [
     [0.26179166666666687, 2.202127372623376, 0.14393673787767858, 2.4516253870782236, 0.0, -0.9742507774773413],
@@ -792,12 +773,8 @@
     [-0.7360709959869135, 1.2918905936360734, 4.886896113521594, -4.853034668350862, -6.491289983407131e-05, 4.503937219686412]
    ],
    "cells": {
-    "darwin": [
-     "forward:D"
-    ],
-    "linux": [
-     "forward:D"
-    ]
+    "darwin": [],
+    "linux": []
    }
   },
   "fr3_ik": {
@@ -931,12 +908,10 @@
   "gen3_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/6",
-     "near_singular/33"
+     "near_limit/6"
     ],
     "linux": [
-     "near_limit/6",
-     "near_singular/33"
+     "near_limit/6"
     ]
    },
    "near_singular": [
@@ -991,22 +966,19 @@
    ],
    "cells": {
     "darwin": [
-     "forward:I",
-     "reverse:D"
+     "forward:I"
     ],
     "linux": [
-     "forward:I",
-     "reverse:D"
+     "forward:I"
     ]
    }
   },
   "gen3_lite_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_limit/3",
+    "darwin": [],
+    "linux": [
      "near_limit/12"
-    ],
-    "linux": []
+    ]
    },
    "near_singular": [
     [1.07539781957408, -1.0615404138419178, -2.4658333333333333, 0.0, -0.7276643858240991, -0.4063964608853599],
@@ -1059,11 +1031,10 @@
     [-2.570702656082455, 2.490358879027314, -1.3449383122553078, -2.5899938974323207, 2.204005685360148, -0.957450317520513]
    ],
    "cells": {
-    "darwin": [
-     "forward:D",
-     "reverse:D"
-    ],
-    "linux": []
+    "darwin": [],
+    "linux": [
+     "reverse:F"
+    ]
    }
   },
   "gen72_ik": {
@@ -1133,17 +1104,13 @@
      "near_limit/15",
      "near_limit/33",
      "near_limit/45",
-     "near_singular/1",
-     "near_singular/6",
-     "near_singular/13"
+     "at_pi/23"
     ],
     "linux": [
      "near_limit/6",
      "near_limit/15",
      "near_limit/33",
-     "near_limit/45",
-     "near_singular/1",
-     "near_singular/30"
+     "near_limit/45"
     ]
    },
    "near_singular": [
@@ -1198,12 +1165,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ]
@@ -1287,26 +1252,20 @@
      "near_limit/0",
      "near_limit/3",
      "near_limit/12",
-     "near_limit/18",
      "near_limit/24",
      "near_singular/3",
      "near_singular/9",
-     "near_singular/14",
-     "near_singular/15",
-     "near_singular/22"
+     "near_singular/15"
     ],
     "linux": [
      "near_limit/0",
      "near_limit/3",
      "near_limit/6",
      "near_limit/12",
-     "near_limit/18",
      "near_limit/24",
      "near_singular/3",
      "near_singular/9",
-     "near_singular/14",
-     "near_singular/15",
-     "near_singular/22"
+     "near_singular/15"
     ]
    },
    "near_singular": [
@@ -1361,13 +1320,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F",
      "reverse:J"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F",
      "reverse:J"
@@ -1514,10 +1471,7 @@
      "near_limit/15",
      "near_limit/27",
      "near_limit/30",
-     "near_singular/1",
-     "near_singular/18",
-     "near_singular/22",
-     "near_singular/30"
+     "near_singular/1"
     ],
     "linux": [
      "near_limit/0",
@@ -1526,10 +1480,7 @@
      "near_limit/15",
      "near_limit/18",
      "near_limit/30",
-     "near_limit/39",
-     "near_singular/1",
-     "near_singular/18",
-     "near_singular/22"
+     "near_singular/1"
     ]
    },
    "near_singular": [
@@ -1584,13 +1535,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
@@ -1604,13 +1553,10 @@
      "near_limit/12",
      "near_limit/15",
      "near_limit/18",
-     "near_limit/24",
-     "near_singular/1",
-     "near_singular/24"
+     "near_limit/24"
     ],
     "linux": [
      "near_limit/15",
-     "near_singular/16",
      "at_pi/14"
     ]
    },
@@ -1666,12 +1612,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F"
     ]
    }
@@ -1681,12 +1625,9 @@
     "darwin": [
      "near_limit/0",
      "near_limit/3",
-     "near_limit/9",
      "near_limit/24",
      "near_limit/33",
      "near_limit/45",
-     "near_singular/6",
-     "near_singular/8",
      "at_pi/0"
     ],
     "linux": [
@@ -1694,9 +1635,6 @@
      "near_limit/21",
      "near_limit/24",
      "near_limit/33",
-     "near_singular/6",
-     "near_singular/8",
-     "near_singular/12",
      "near_singular/13",
      "near_singular/25",
      "at_pi/0",
@@ -1755,12 +1693,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
@@ -1846,22 +1782,10 @@
   "j2s7s300_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/41",
-     "near_singular/3",
-     "near_singular/16",
-     "near_singular/25",
-     "near_singular/41",
-     "near_singular/43",
-     "at_pi/19"
+     "near_limit/41"
     ],
     "linux": [
-     "near_limit/41",
-     "near_singular/3",
-     "near_singular/7",
-     "near_singular/16",
-     "near_singular/28",
-     "near_singular/37",
-     "near_singular/42"
+     "near_limit/41"
     ]
    },
    "near_singular": [
@@ -1916,14 +1840,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
-     "forward:I",
-     "reverse:D"
+     "forward:I"
     ],
     "linux": [
-     "forward:D",
-     "forward:I",
-     "reverse:D"
+     "forward:I"
     ]
    }
   },
@@ -1932,21 +1852,19 @@
     "darwin": [
      "near_limit/3",
      "near_limit/9",
-     "near_limit/15",
      "near_limit/18",
      "near_limit/21",
-     "near_limit/34",
+     "near_limit/30",
      "near_limit/39",
      "near_singular/30"
     ],
     "linux": [
      "near_limit/3",
      "near_limit/6",
+     "near_limit/15",
      "near_limit/18",
      "near_limit/21",
-     "near_limit/24",
      "near_limit/27",
-     "near_limit/42",
      "near_singular/30"
     ]
    },
@@ -2003,13 +1921,11 @@
    "cells": {
     "darwin": [
      "forward:F",
-     "reverse:D",
      "reverse:F",
      "reverse:J"
     ],
     "linux": [
      "forward:F",
-     "reverse:D",
      "reverse:F",
      "reverse:J"
     ]
@@ -2091,22 +2007,16 @@
    "fast_pins": {
     "darwin": [
      "near_limit/9",
-     "near_limit/12",
      "near_limit/18",
      "near_limit/33",
      "near_limit/39",
-     "near_singular/0",
-     "near_singular/2",
      "near_singular/3",
      "near_singular/27"
     ],
     "linux": [
-     "near_limit/12",
      "near_limit/33",
      "near_limit/39",
-     "near_singular/2",
      "near_singular/3",
-     "near_singular/6",
      "near_singular/27"
     ]
    },
@@ -2162,13 +2072,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F",
      "reverse:J"
     ],
     "linux": [
-     "forward:D",
      "reverse:F",
      "reverse:J"
     ]
@@ -2179,18 +2087,12 @@
     "darwin": [
      "near_limit/15",
      "near_limit/24",
-     "near_singular/0",
-     "near_singular/2",
-     "near_singular/6",
      "at_pi/1",
      "at_pi/5"
     ],
     "linux": [
      "near_limit/6",
      "near_limit/36",
-     "near_singular/0",
-     "near_singular/2",
-     "near_singular/34",
      "at_pi/1",
      "at_pi/3"
     ]
@@ -2247,12 +2149,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ]
@@ -2263,23 +2163,17 @@
     "darwin": [
      "near_limit/6",
      "near_limit/9",
-     "near_limit/12",
      "near_limit/21",
      "near_limit/24",
-     "near_limit/27",
      "near_limit/33",
-     "near_limit/42",
      "near_limit/45"
     ],
     "linux": [
      "near_limit/6",
      "near_limit/9",
-     "near_limit/12",
      "near_limit/21",
      "near_limit/24",
-     "near_limit/27",
      "near_limit/33",
-     "near_limit/42",
      "near_limit/45"
     ]
    },
@@ -2335,12 +2229,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ]
@@ -2420,6 +2312,9 @@
     [-5.821281347143362, -5.235884813936084, -0.09778180923882905, 4.6714018404117486, 3.141514107297723, -1.5209219928585196]
    ],
    "cells": {
+    "ci": [
+     "reverse:F"
+    ],
     "darwin": [
      "forward:E",
      "forward:F",
@@ -2430,9 +2325,6 @@
      "forward:E",
      "forward:F",
      "reverse:J"
-    ],
-    "ci": [
-     "reverse:F"
     ]
    }
   },
@@ -2505,6 +2397,9 @@
     [-3.7697733616789466, -3.2109180623051508, -1.763309082090187, 0.00014638182775172958, 8.918497946217774e-05, -0.2739187777768901]
    ],
    "cells": {
+    "ci": [
+     "reverse:F"
+    ],
     "darwin": [
      "forward:E",
      "forward:F",
@@ -2515,9 +2410,6 @@
      "forward:E",
      "forward:F",
      "reverse:J"
-    ],
-    "ci": [
-     "reverse:F"
     ]
    }
   },
@@ -2527,9 +2419,6 @@
      "near_limit/0",
      "near_limit/6",
      "near_limit/27",
-     "near_singular/7",
-     "near_singular/24",
-     "near_singular/40",
      "at_pi/8",
      "at_pi/17"
     ],
@@ -2537,13 +2426,10 @@
      "near_limit/0",
      "near_limit/6",
      "near_limit/9",
-     "near_singular/7",
-     "near_singular/24",
-     "near_singular/40",
+     "at_pi/2",
      "at_pi/4",
      "at_pi/5",
-     "at_pi/8",
-     "at_pi/17"
+     "at_pi/8"
     ]
    },
    "near_singular": [
@@ -2598,12 +2484,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:J"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:J"
@@ -2760,22 +2644,20 @@
      "near_limit/0",
      "near_limit/9",
      "near_limit/21",
-     "near_limit/42",
      "near_singular/2",
      "near_singular/15",
      "near_singular/18"
     ],
     "linux": [
      "near_limit/0",
-     "near_limit/4",
-     "near_limit/10",
+     "near_limit/9",
      "near_limit/33",
-     "near_limit/39",
+     "near_limit/36",
      "near_limit/45",
      "near_singular/0",
      "near_singular/2",
      "near_singular/4",
-     "near_singular/27"
+     "near_singular/14"
     ]
    },
    "near_singular": [
@@ -2830,18 +2712,13 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "reverse:F",
      "reverse:J"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F",
      "reverse:J"
-    ],
-    "ci": [
-     "reverse:D"
     ]
    }
   },
@@ -3063,11 +2940,8 @@
   "r2000ic210l_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/6",
-     "near_limit/9",
      "near_limit/15",
      "near_limit/36",
-     "near_limit/39",
      "near_singular/1",
      "at_pi/7"
     ],
@@ -3078,8 +2952,6 @@
      "near_limit/36",
      "near_limit/39",
      "near_singular/1",
-     "near_singular/42",
-     "at_pi/5",
      "at_pi/7"
     ]
    },
@@ -3135,12 +3007,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:E",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
@@ -3149,11 +3019,9 @@
   },
   "rizon10_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/24"
-    ],
+    "darwin": [],
     "linux": [
-     "near_singular/24"
+     "near_limit/12"
     ]
    },
    "near_singular": [
@@ -3207,25 +3075,19 @@
     [1.7500313827506127, 2.085123604279504, 2.6160796756407723, 0.0001447096751616541, -2.7997677157062375, 3.6351245016126437, 0.037449785141981044]
    ],
    "cells": {
-    "darwin": [
-     "forward:C"
-    ],
-    "linux": [
-     "forward:C"
-    ],
     "ci": [
+     "forward:F"
+    ],
+    "darwin": [],
+    "linux": [
      "forward:F"
     ]
    }
   },
   "rizon4_ik": {
    "fast_pins": {
-    "darwin": [
-     "tight_selfmotion/6"
-    ],
-    "linux": [
-     "tight_selfmotion/6"
-    ]
+    "darwin": [],
+    "linux": []
    },
    "near_singular": [
     [-1.4451223593330766, 1.266859283456938, -0.5090499999999998, 0.01599166666666685, 0.9139777921410396, -1.0516876141251148, -0.6572569288373554],
@@ -3278,19 +3140,16 @@
     [0.720031257547262, 1.2812171056865622, 1.9255951843587047, -0.18118384336870708, 0.7723344049023428, 4.625019189809727, 2.6708440259297754]
    ],
    "cells": {
-    "darwin": [
-     "forward:C"
-    ],
-    "linux": [
-     "forward:C"
-    ]
+    "darwin": [],
+    "linux": []
    }
   },
   "rm75_ik": {
    "fast_pins": {
     "darwin": [
      "near_limit/2",
-     "near_limit/3"
+     "near_limit/3",
+     "near_singular/41"
     ],
     "linux": [
      "near_limit/2",
@@ -3362,14 +3221,12 @@
      "near_limit/0",
      "near_limit/6",
      "near_limit/18",
-     "near_limit/24",
-     "near_limit/39"
+     "near_limit/24"
     ],
     "linux": [
      "near_limit/0",
      "near_limit/6",
      "near_limit/18",
-     "near_singular/10",
      "near_singular/43"
     ]
    },
@@ -3425,12 +3282,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "reverse:F"
     ]
@@ -3442,20 +3297,14 @@
      "near_limit/3",
      "near_limit/9",
      "near_limit/27",
-     "near_singular/18",
-     "near_singular/19",
-     "near_singular/37",
-     "near_singular/42"
+     "near_singular/19"
     ],
     "linux": [
      "near_limit/3",
      "near_limit/9",
      "near_limit/18",
      "near_limit/27",
-     "near_singular/0",
-     "near_singular/18",
-     "near_singular/19",
-     "near_singular/37"
+     "near_singular/19"
     ]
    },
    "near_singular": [
@@ -3510,13 +3359,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
@@ -3528,19 +3375,14 @@
     "darwin": [
      "near_limit/3",
      "near_limit/15",
-     "near_limit/18",
      "near_limit/21",
-     "near_limit/30",
      "near_limit/36",
      "near_singular/0"
     ],
     "linux": [
      "near_limit/3",
      "near_limit/6",
-     "near_limit/18",
-     "near_limit/21",
-     "near_limit/30",
-     "near_limit/36"
+     "near_limit/21"
     ]
    },
    "near_singular": [
@@ -3595,12 +3437,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ]
@@ -3614,7 +3454,6 @@
      "near_limit/18",
      "near_limit/27",
      "near_limit/36",
-     "near_limit/42",
      "near_singular/31",
      "at_pi/6"
     ],
@@ -3623,7 +3462,6 @@
      "near_limit/13",
      "near_limit/27",
      "near_limit/36",
-     "near_limit/42",
      "near_singular/31",
      "at_pi/6"
     ]
@@ -3680,13 +3518,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
@@ -3697,9 +3533,6 @@
    "fast_pins": {
     "darwin": [
      "near_limit/0",
-     "near_limit/3",
-     "near_limit/9",
-     "near_limit/13",
      "near_limit/21",
      "near_limit/30",
      "near_limit/39",
@@ -3709,15 +3542,12 @@
     ],
     "linux": [
      "near_limit/0",
-     "near_limit/3",
-     "near_limit/9",
      "near_limit/13",
-     "near_limit/21",
      "near_limit/24",
      "near_limit/36",
+     "near_limit/39",
      "near_limit/40",
-     "near_singular/7",
-     "at_pi/11"
+     "near_singular/7"
     ]
    },
    "near_singular": [
@@ -3772,13 +3602,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
@@ -3788,7 +3616,6 @@
   "standardbots_thor_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/22",
      "near_limit/25",
      "near_limit/27",
      "near_limit/34",
@@ -3798,12 +3625,10 @@
     ],
     "linux": [
      "near_limit/22",
-     "near_limit/24",
      "near_limit/25",
      "near_limit/27",
-     "near_limit/34",
-     "at_pi/14",
-     "at_pi/15"
+     "near_singular/31",
+     "at_pi/14"
     ]
    },
    "near_singular": [
@@ -3858,13 +3683,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:E",
      "forward:F",
      "reverse:F"
@@ -3993,12 +3816,8 @@
   },
   "ur15_ik": {
    "fast_pins": {
-    "darwin": [
-     "at_pi/2"
-    ],
-    "linux": [
-     "at_pi/2"
-    ]
+    "darwin": [],
+    "linux": []
    },
    "near_singular": [
     [5.200686565128338, -0.6247781271664412, -3.141592653589793, 5.132914760323189, 1.0471975511965974, -3.7772797922112296],
@@ -4051,27 +3870,16 @@
     [-2.6313440718592975, -5.376044583071095, -3.1415316336711405, 2.3858832566647283, -3.141547988180517, -5.618497756012742]
    ],
    "cells": {
-    "darwin": [
-     "forward:D"
-    ],
-    "linux": [
-     "forward:D"
-    ]
+    "darwin": [],
+    "linux": []
    }
   },
   "ur16e_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_limit/16",
-     "near_singular/13",
-     "at_pi/16"
-    ],
+    "darwin": [],
     "linux": [
-     "near_limit/16",
      "near_limit/20",
-     "near_limit/38",
-     "near_singular/13",
-     "at_pi/16"
+     "near_limit/38"
     ]
    },
    "near_singular": [
@@ -4125,11 +3933,8 @@
     [-3.14165854800483, -5.510962107428547, 0.8690108043410001, 2.0874895103918405, -3.141675944200715, -3.8873163390537173]
    ],
    "cells": {
-    "darwin": [
-     "forward:D"
-    ],
+    "darwin": [],
     "linux": [
-     "forward:D",
      "forward:E",
      "reverse:J"
     ]
@@ -4388,15 +4193,12 @@
     "darwin": [
      "near_limit/4",
      "near_limit/10",
-     "near_limit/25",
-     "near_singular/14"
+     "near_limit/25"
     ],
     "linux": [
      "near_limit/4",
      "near_limit/10",
-     "near_singular/1",
-     "near_singular/14",
-     "near_singular/32"
+     "near_singular/1"
     ]
    },
    "near_singular": [
@@ -4451,11 +4253,9 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:E"
     ],
     "linux": [
-     "forward:D",
      "forward:E"
     ]
    }
@@ -4522,16 +4322,8 @@
   },
   "ur7e_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/7",
-     "near_singular/28",
-     "at_pi/15"
-    ],
-    "linux": [
-     "near_singular/7",
-     "near_singular/28",
-     "at_pi/15"
-    ]
+    "darwin": [],
+    "linux": []
    },
    "near_singular": [
     [-0.5235987755982991, -3.1673816053946835, 1.9771199158276667, -6.12507234609606, 6.283185307179586, -4.145064305654982],
@@ -4584,30 +4376,22 @@
     [1.8011848024272525, 2.5208325326770122, -2.447343019417429, 2.617941048421304, 3.141675553327756, 4.605990716553775]
    ],
    "cells": {
-    "darwin": [
-     "forward:D"
-    ],
-    "linux": [
-     "forward:D"
-    ]
+    "darwin": [],
+    "linux": []
    }
   },
   "viperx300s_ik": {
    "fast_pins": {
     "darwin": [
      "near_limit/3",
-     "near_limit/6",
      "near_limit/27",
-     "near_limit/45",
-     "near_singular/18"
+     "near_limit/45"
     ],
     "linux": [
      "near_limit/3",
-     "near_limit/6",
      "near_limit/18",
      "near_limit/21",
-     "near_limit/27",
-     "near_singular/18"
+     "near_limit/27"
     ]
    },
    "near_singular": [
@@ -4662,12 +4446,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ]
@@ -4679,8 +4461,7 @@
      "near_limit/9",
      "near_limit/21",
      "near_limit/27",
-     "near_limit/36",
-     "near_singular/26"
+     "near_limit/36"
     ],
     "linux": [
      "near_limit/0",
@@ -4688,7 +4469,6 @@
      "near_limit/27",
      "near_limit/33",
      "near_limit/39",
-     "near_singular/26",
      "near_singular/37"
     ]
    },
@@ -4744,12 +4524,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ]
@@ -4760,14 +4538,11 @@
     "darwin": [
      "near_limit/6",
      "near_limit/9",
-     "near_limit/18",
-     "near_limit/27",
-     "near_limit/36"
+     "near_limit/18"
     ],
     "linux": [
      "near_limit/9",
-     "near_limit/18",
-     "near_limit/39"
+     "near_limit/18"
     ]
    },
    "near_singular": [
@@ -4822,11 +4597,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
+     "forward:F",
      "reverse:F"
     ]
    }
@@ -4984,20 +4758,18 @@
      "near_limit/0",
      "near_limit/3",
      "near_limit/9",
-     "near_limit/21",
      "near_limit/33",
      "near_limit/36",
      "near_limit/42",
      "near_singular/42"
     ],
     "linux": [
-     "near_limit/0",
      "near_limit/3",
-     "near_limit/9",
-     "near_limit/21",
+     "near_limit/12",
+     "near_limit/15",
+     "near_limit/18",
      "near_limit/27",
-     "near_limit/45",
-     "near_singular/4",
+     "near_limit/36",
      "near_singular/42"
     ]
    },
@@ -5053,14 +4825,12 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F",
      "reverse:J"
     ],
     "linux": [
      "forward:F",
-     "reverse:D",
      "reverse:F",
      "reverse:J"
     ]
@@ -5133,8 +4903,7 @@
      "near_limit/25",
      "near_limit/30",
      "near_singular/7",
-     "near_singular/8",
-     "near_singular/24"
+     "near_singular/8"
     ],
     "linux": [
      "near_limit/0",
@@ -5197,7 +4966,6 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
@@ -5211,25 +4979,16 @@
    "fast_pins": {
     "darwin": [
      "near_limit/16",
-     "near_limit/22",
-     "near_limit/27",
-     "near_limit/42",
-     "near_singular/12",
-     "near_singular/17",
-     "near_singular/26"
+     "near_limit/39",
+     "near_limit/42"
     ],
     "linux": [
      "near_limit/6",
-     "near_limit/15",
-     "near_limit/22",
-     "near_limit/30",
      "near_limit/36",
+     "near_limit/39",
      "near_limit/42",
-     "near_singular/2",
-     "near_singular/12",
      "near_singular/16",
-     "near_singular/17",
-     "near_singular/26"
+     "near_singular/20"
     ]
    },
    "near_singular": [
@@ -5284,14 +5043,11 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
-     "reverse:D"
+     "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
-     "reverse:D",
      "reverse:F"
     ]
    }
@@ -5367,9 +5123,7 @@
   "yumi_right_ik": {
    "fast_pins": {
     "darwin": [],
-    "linux": [
-     "near_singular/22"
-    ]
+    "linux": []
    },
    "near_singular": [
     [-0.11241787457254139, -1.5768553750687404, -0.9802932632033332, -1.2675453692574998, 0.822050574362316, -0.8426628386728118, 1.0997714856941168],
@@ -5423,9 +5177,7 @@
    ],
    "cells": {
     "darwin": [],
-    "linux": [
-     "forward:D"
-    ]
+    "linux": []
    }
   },
   "z1_ik": {
@@ -5434,23 +5186,17 @@
      "near_limit/0",
      "near_limit/3",
      "near_limit/15",
-     "near_limit/18",
      "near_limit/21",
      "near_limit/39",
-     "near_limit/42",
-     "near_singular/16",
-     "near_singular/43"
+     "near_limit/42"
     ],
     "linux": [
      "near_limit/0",
      "near_limit/3",
      "near_limit/15",
      "near_limit/18",
-     "near_limit/21",
      "near_limit/39",
-     "near_limit/42",
-     "near_singular/16",
-     "near_singular/43"
+     "near_limit/42"
     ]
    },
    "near_singular": [
@@ -5505,12 +5251,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ],
     "linux": [
-     "forward:D",
      "forward:F",
      "reverse:F"
     ]
