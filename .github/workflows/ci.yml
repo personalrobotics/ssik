@@ -385,6 +385,28 @@ jobs:
           .wheelenv/bin/python -c "from ssik import _ssik_native as n; print(n.eigen_version)" \
             > "eigen-version-${{ matrix.os }}.txt"
 
+      - name: C++ consumer of the installed wheel's headers
+        # #641: a standalone CMake project finds ssik::ssik_cpp through
+        # ssik.get_cmake_dir() (the wheel's headers + CMake package, against the
+        # pinned Eigen), builds UR5's joint data from ssik.cpp.joint_data into a
+        # three_parallel_artifact_solve call, and must return the solution sets
+        # Python's solve() returns.
+        run: |
+          .wheelenv/bin/python cpp/examples/wheel_consumer/check.py --out wheel-consumer \
+            --eigen-prefix "$(python3 scripts/fetch_eigen.py --cmake-prefix)" \
+            --eigen-version "$(python3 scripts/fetch_eigen.py --version)"
+
+      - name: Upload the wheel consumer's input, solutions and report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: wheel-consumer-${{ matrix.os }}
+          path: |
+            wheel-consumer/*.txt
+            wheel-consumer/report.json
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Upload the Eigen version this wheel compiled against
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:

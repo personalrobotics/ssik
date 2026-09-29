@@ -206,6 +206,9 @@ test-command = [
     # Vendor subpackages are in the wheel + the catalog works + the hierarchical
     # import path resolves (#421); the flat aliases above cover backward-compat.
     'python -c "import ssik; assert len(ssik.list_arms()) >= 36, \"catalog empty\"; from ssik.prebuilt.universal_robots import ur5_ik; import numpy as np; assert ur5_ik.solve(ur5_ik.fk(np.zeros(6))), \"hierarchical ur5 import/solve failed\""',
+    # The C++ headers + CMake package ship in every wheel, Windows included (#641),
+    # and ssik.get_include / get_cmake_dir find them inside the installed package.
+    'python -c "import ssik, pathlib; pkg = pathlib.Path(ssik.__file__).resolve().parent; inc = pathlib.Path(ssik.get_include()); cm = pathlib.Path(ssik.get_cmake_dir()); assert inc.is_relative_to(pkg) and (inc / \"ssik_cpp\" / \"solvers\" / \"three_parallel.hpp\").is_file(), inc; assert cm.is_relative_to(pkg) and all((cm / f).is_file() for f in (\"ssik_cppConfig.cmake\", \"ssik_cppConfigVersion.cmake\", \"ssik_cppTargets.cmake\")), cm"',
     "ssik --help",
 ]
 
