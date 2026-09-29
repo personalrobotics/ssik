@@ -557,9 +557,18 @@ def _snap(x: float) -> float:
 # exact pi has two (both ends of the range), so the backends' seeded choices
 # would still differ; the value is set to exactly pi instead. That moves the
 # tool by at most 1e-6 x reach, well inside the subproblem_numerical (1e-5) FK
-# gate (the moved solution's fk_residual is re-measured, #645), and every
-# shipped joint of this kind is on a 6R arm, whose isolated solutions land in
-# the band only at a genuine exact-pi pose.
+# gate, and the moved solution's fk_residual is re-measured (#645).
+#
+# The move is not confined to exact-pi poses. An accurate value can sit in the
+# band too: the wrist-flipped branch of a regular Puma 560 pose whose wrist is
+# 3e-7 from 0 is snapped by 3e-7, which costs 4e-7 in FK. The band stays this
+# wide anyway, because a fold needs it: re-measured after the general_6r polish
+# (#637, which does not reach these closed-form arms), an exact-pi elbow still
+# comes back up to 9e-8 from pi (UR7e; 4e-8 on Thor; 40 poses per arm, Python
+# path), and a snap held to _CUT_SNAP breaks the UR3e exact-fold parity above.
+# Every other joint of this kind comes back within 1e-11 of an exact pi away
+# from a singularity (sigma_min(J) >= 1e-4), so a per-joint band, wide only
+# where pi is a fold, would stop the regular moves.
 #
 # Continuous joints need only the snap: their parity is compared on the circle,
 # where values either side of the cut are already the same configuration.

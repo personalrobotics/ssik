@@ -143,7 +143,9 @@ where a folded elbow meets the cut, the angle is a double root and the solvers
 determine it only to a few `1e-7` rad. The derivation is at
 `ssik.postprocess._CUT_BAND`. A snap moves the configuration, so the returned
 `fk_residual` is measured again at the snapped value (see
-[Joint limits](#joint-limits)).
+[Joint limits](#joint-limits)). The band applies to every angle in it, not only
+to an exact-`pi` pose: an accurate angle within `1e-6` rad of `pi` on such a
+joint is moved too, and its `fk_residual` shows the move.
 
 ### Joint limits
 
