@@ -11,6 +11,8 @@ Writes two files next to the gate (tests/test_native_parity.py):
     full-tier witness poses per cell. The fast (PR) tier runs the union of
     every platform's pins, so on each platform it fails the same cells as
     the full tier.
+  - ``pinned``: in-limits configurations at which a backend once returned
+    [], each with its issue, added by hand and never rewritten here.
 - ``tests/data/native_parity_oracle.json``: the chart-free branch oracle's
   verdict at every 6R pose where it was consulted. The gate looks a pose up
   here and runs the oracle live only for a pose this file lacks, so a missing
@@ -128,7 +130,10 @@ def main() -> None:
     with Pool(args.jobs) as pool:
         if args.new_poses:
             for arm, qs in pool.imap_unordered(_near_singular, arms):
+                pinned = pose_data["arms"].get(arm, {}).get("pinned")
                 pose_data["arms"][arm] = {"near_singular": qs, "cells": {}, "fast_pins": {}}
+                if pinned:
+                    pose_data["arms"][arm]["pinned"] = pinned
                 print(f"[poses] {arm}: {len(qs)} near-singular", flush=True)
             _write(npar.POSES_FILE, pose_data)
             npar._pose_data.cache_clear()

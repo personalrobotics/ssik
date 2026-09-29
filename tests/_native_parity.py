@@ -20,6 +20,8 @@ Poses
     - ``at_pi``: joints whose range reaches +-pi placed at +-pi or 1e-9 inside.
     - ``tight_selfmotion`` (7R only): three or four joints 0.05 % to 5 % of
       their range from a limit, which squeezes the in-limit self-motion.
+    - ``pinned``: in-limits configurations at which a backend once returned
+      [] (committed in ``POSES_FILE``, each with its issue), run in both tiers.
 
     The other strata are drawn from ``numpy.random.default_rng`` seeded with
     ``SEED`` and the arm and stratum names, so they reproduce exactly.
@@ -42,7 +44,14 @@ the solve, tested in ``tests/test_winding_enumeration.py``):
     d. 7R coverage: the same, except at a kinematic singularity
        (``SEVEN_R_SINGULAR``), where the backends sample a larger continuum
        at their own points and only emptiness is asserted;
-    e. the reverse direction of b and c (Python covers native), for 6R.
+    e. the reverse direction of b and c (Python covers native), for 6R
+       (f. is the policy test in tests/test_native_parity.py);
+    g. reachability, at ``pinned`` poses only: the default solve is never
+       empty on either backend. Every pose comes from an in-limits
+       configuration, so an in-limits solution exists at each; this is
+       asserted only where an emptiness was fixed, because elsewhere a
+       solution exactly at a limit can still land beyond the round-off band
+       on both backends (F, #632), which b and e do not see.
 
 Solutions match within ``MATCH_TOL`` (L-infinity, on the circle). Every
 violation is attributed to one class of ``CLASSES`` by ``_Pose.lacks``, from
@@ -93,8 +102,24 @@ SEED = 626
 # committed witness poses of every known gap on every platform (``fast_pins``
 # in POSES_FILE), so on each platform both tiers fail the same (arm, class)
 # cells.
-FULL = {"uniform": 200, "near_limit": 48, "near_singular": 48, "at_pi": 24, "tight_selfmotion": 32}
-FAST = {"uniform": 6, "near_limit": 6, "near_singular": 4, "at_pi": 3, "tight_selfmotion": 3}
+# ``pinned`` is every committed pin, in both tiers.
+_ALL = 1_000_000
+FULL = {
+    "uniform": 200,
+    "near_limit": 48,
+    "near_singular": 48,
+    "at_pi": 24,
+    "tight_selfmotion": 32,
+    "pinned": _ALL,
+}
+FAST = {
+    "uniform": 6,
+    "near_limit": 6,
+    "near_singular": 4,
+    "at_pi": 3,
+    "tight_selfmotion": 3,
+    "pinned": _ALL,
+}
 TIERS = {"full": FULL, "fast": FAST}
 
 LIMIT_OFFSETS = (0.0, 1e-9, 1e-6)
@@ -338,7 +363,9 @@ def _pose_data() -> dict[str, Any]:
 def _full_poses(arm: str) -> dict[str, list[Q]]:
     kb = module(arm)._KB
     out = {s: gen(arm, kb, FULL[s]) for s, gen in _GENERATED.items()}
-    out["near_singular"] = [np.array(q) for q in _pose_data()["arms"][arm]["near_singular"]]
+    rec = _pose_data()["arms"][arm]
+    out["near_singular"] = [np.array(q) for q in rec["near_singular"]]
+    out["pinned"] = [np.array(p["q"]) for p in rec.get("pinned", [])]
     return out
 
 
@@ -451,7 +478,7 @@ def adjudicate(arm: str, pid: str) -> Adjudication:
 @dataclass(frozen=True)
 class Gap:
     cls: str  # a CLASSES key, or NEW
-    check: str  # soundness | emptiness | coverage | reverse
+    check: str  # soundness | emptiness | coverage | reverse | reachability
     mode: str  # limits | raw
     pose: str
     detail: str
@@ -609,6 +636,14 @@ class _Pose:
                                 f"at {x.tolist()}",
                             )
                         )
+
+        # g. reachability at a pinned pose
+        if mode == "limits" and pid.startswith("pinned/"):
+            for got, who, out in ((nat, "native", rep.forward), (py, "Python", rep.reverse)):
+                if not len(got):
+                    out.append(
+                        Gap(NEW, "reachability", mode, pid, f"{who} [] at an in-limits pose")
+                    )
 
         # b. emptiness, and e. its reverse
         for got, want, want_a, other, out in (

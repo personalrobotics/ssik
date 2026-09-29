@@ -2421,7 +2421,13 @@
      "reverse:F",
      "reverse:J"
     ]
-   }
+   },
+   "pinned": [
+    {
+     "issue": 646,
+     "q": [-2.3785873919285248, 1.7912596863653287, 0.0, 0.6008304627412366, 8.127217409783666e-06, -1.5707963267948966]
+    }
+   ]
   },
   "puma560_ik": {
    "fast_pins": {
@@ -2806,8 +2812,7 @@
    "fast_pins": {
     "darwin": [
      "near_limit/2",
-     "near_limit/3",
-     "near_singular/41"
+     "near_limit/3"
     ],
     "linux": [
      "near_limit/2",
