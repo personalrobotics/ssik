@@ -706,7 +706,9 @@ def solve(
     # "no in-limits solution exists", so it must not depend on the
     # seed-tolerance / max_solutions filters (a seed filter emptying a
     # non-empty in-limits set is a user preference, not a missing solution).
-    _in_limits = _ps_finalize(solutions, _KB, respect_limits=respect_limits)
+    _in_limits = _ps_finalize(
+        solutions, _KB, respect_limits=respect_limits, T_target=T
+    )
     # Rescue on LIMIT-empty (#524): fire when nothing survives the limit
     # filter (not just when the analytical count was zero), so a pose
     # whose only analytical candidates were out-of-limits still gets
@@ -725,12 +727,14 @@ def solve(
                     jacobian_fn=_spatial_jacobian,
                 ),
                 _KB,
+                T_target=T,
                 respect_limits=respect_limits,
             )
     # Seed tolerance / ranking / truncate over the in-limits set.
     return _ps_finalize(
         _in_limits,
         _KB,
+        T_target=T,
         respect_limits=False,
         q_seed=q_seed,
         seed_metric=seed_metric,

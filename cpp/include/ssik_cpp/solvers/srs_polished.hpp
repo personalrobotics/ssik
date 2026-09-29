@@ -112,7 +112,7 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
   if (p.has_seed && p.max_solutions == 1) {
     const auto tracked = seeded_track<7>(c, p.q_seed, T);
     if (tracked) {
-      const auto fast = finalize_solutions<7>({*tracked}, c, lim, p);
+      const auto fast = finalize_solutions<7>({*tracked}, c, lim, T, p);
       if (!fast.empty()) return fast;
     }
   }
@@ -145,7 +145,7 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
   p_limits.respect_limits = p.respect_limits;
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
-  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits, [&]() {
+  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits, [&]() {
     return srs_polished_detail::polish(
         c, srs_swivel::resolve_in_limits(c, s, T, limits, kSrsPolishedKeepAll), T,
         kSrsPolishedMaxIters, &limits);
@@ -153,7 +153,7 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
 
   // Rescue gate: nothing in-limits at a reachable target -> singular pose.
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, p_limits);
+    in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, T, p_limits);
   }
 
   ArtifactParams<7> p_seed = p;
@@ -161,7 +161,7 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
   // The single lifting stage (#562): this is the call that yields the returned
   // set. Skipped when the caller wanted the raw geometric set.
   p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
-  return finalize_solutions<7>(std::move(in_limits), c, lim, p_seed);
+  return finalize_solutions<7>(std::move(in_limits), c, lim, T, p_seed);
 }
 
 }  // namespace ssik

@@ -201,6 +201,30 @@ inline std::optional<double> onto_limits(double v, double lo, double hi) {
   return v;
 }
 
+// Whether new_v is anything other than old_v shifted by a whole number of turns
+// (#645). A 2pi shift is the same configuration; a snap or a clamp is not. Exact
+// comparison against the same old_v + 2pi*k expression the pipeline computes a
+// shift with, so a plain shift is never a move. (postprocess._is_move)
+inline bool is_move(double old_v, double new_v) {
+  constexpr double kTwoPi = 2.0 * M_PI;
+  return new_v != old_v + kTwoPi * std::round((new_v - old_v) / kTwoPi);
+}
+
+// What a finalize pass re-measures a moved solution against (#645): a snap onto
+// pi or a clamp onto a limit moves the configuration after the solver measured
+// fk_residual, so the residual is re-measured at the returned q, with the
+// solvers' own metric (Frobenius norm of fk(q) - T on the POE chain). One FK per
+// moved solution. Default-constructed (no target) it keeps the solver's value.
+// (postprocess._placed)
+template <int N>
+struct Remeasure {
+  const JointConsts<N>* consts = nullptr;
+  const Pose* target = nullptr;
+  void operator()(Solution<N>& s, bool moved) const {
+    if (moved && target != nullptr) s.fk_residual = (fk<N>(*consts, s.q) - *target).norm();
+  }
+};
+
 // Every q + 2pi*k inside [lo, hi], ascending. The k range comes from the limits
 // (so a boundary value like 0 under [-2pi, 2pi] yields {-2pi, 0, 2pi}), then
 // each candidate goes through the limit band, so round-off cannot emit an
@@ -248,7 +272,8 @@ inline double pi_class_offset(double q) {
 template <int N>
 std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> sols,
                                                       const JointConsts<N>& consts,
-                                                      const JointLimits<N>& lim) {
+                                                      const JointLimits<N>& lim,
+                                                      const Remeasure<N>& remeasure = {}) {
   constexpr double kTwoPi = 2.0 * M_PI;
   std::array<bool, N> active{};
   std::array<bool, N> continuous{};
@@ -275,17 +300,28 @@ std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> s
   }
   if (!any) return sols;
   for (auto& sol : sols) {
+    bool moved = false;
     for (int i = 0; i < N; ++i) {
       if (!active[i]) continue;
       const double qi = sol.q[i];
       if (continuous[i]) {
         if (-M_PI + kCutSnap < qi && qi < M_PI - kCutSnap) continue;
-        sol.q[i] = pi_class_offset(qi) <= kCutSnap ? M_PI : finalize_detail::wrap_to_pi(qi);
+        if (pi_class_offset(qi) <= kCutSnap) {
+          sol.q[i] = M_PI;
+          moved = moved || is_move(qi, M_PI);
+        } else {
+          sol.q[i] = finalize_detail::wrap_to_pi(qi);
+        }
       } else if (pi_class_offset(qi) <= kCutBand) {
-        sol.q[i] =
-            on_limit[i] ? pi_rep[i] : qi + kTwoPi * std::round((pi_rep[i] - qi) / kTwoPi);
+        if (on_limit[i]) {
+          sol.q[i] = pi_rep[i];
+          moved = moved || is_move(qi, pi_rep[i]);
+        } else {
+          sol.q[i] = qi + kTwoPi * std::round((pi_rep[i] - qi) / kTwoPi);
+        }
       }
     }
+    remeasure(sol, moved);
   }
   return sols;
 }
@@ -312,7 +348,8 @@ long long count_windings(const std::vector<Solution<N>>& sols,
 // caller keeps a prefix (unseeded truncation). (postprocess.expand_windings)
 template <int N>
 std::vector<Solution<N>> expand_windings(const std::vector<Solution<N>>& sols,
-                                         const std::vector<WindingJoint>& wind, int limit = -1) {
+                                         const std::vector<WindingJoint>& wind, int limit = -1,
+                                         const Remeasure<N>& remeasure = {}) {
   if (wind.empty()) return sols;
   const int m = static_cast<int>(wind.size());
   std::vector<Solution<N>> out;
@@ -323,7 +360,12 @@ std::vector<Solution<N>> expand_windings(const std::vector<Solution<N>>& sols,
     std::vector<int> pos(m, 0);
     while (true) {
       Solution<N> s = sol;
-      for (int t = 0; t < m; ++t) s.q[wind[t].idx] = opts[t][pos[t]];
+      bool moved = false;
+      for (int t = 0; t < m; ++t) {
+        s.q[wind[t].idx] = opts[t][pos[t]];
+        moved = moved || is_move(sol.q[wind[t].idx], opts[t][pos[t]]);
+      }
+      remeasure(s, moved);
       out.push_back(s);
       if (limit >= 0 && static_cast<int>(out.size()) >= limit) return out;
       int t = m - 1;  // odometer, last axis fastest (matches itertools.product)
@@ -341,23 +383,28 @@ std::vector<Solution<N>> expand_windings(const std::vector<Solution<N>>& sols,
 template <int N>
 std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
                                         const JointConsts<N>& consts,
-                                        const JointLimits<N>& lim) {
+                                        const JointLimits<N>& lim,
+                                        const Remeasure<N>& remeasure = {}) {
   static constexpr int kWrapOrder[5] = {0, 1, -1, 2, -2};
   std::vector<Solution<N>> out;
   out.reserve(sols.size());
   for (const auto& sol : sols) {
     Solution<N> s = sol;  // copy; q gets adjusted in place
+    bool moved = false;
     for (int i = 0; i < N; ++i) {
       if (!lim.present[i] || consts.type[i] != JointType::Revolute) continue;
       const double lo = lim.lo[i], hi = lim.hi[i];
       const double qi = sol.q[i];
       for (int k : kWrapOrder) {
-        if (const auto v = onto_limits(qi + 2.0 * M_PI * k, lo, hi)) {
+        const double cand = qi + 2.0 * M_PI * k;
+        if (const auto v = onto_limits(cand, lo, hi)) {
           s.q[i] = *v;
+          moved = moved || *v != cand;
           break;
         }
       }
     }
+    remeasure(s, moved);
     out.push_back(s);
   }
   return out;
@@ -368,11 +415,13 @@ std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
 // wrapping. (postprocess.respect_limits)
 template <int N>
 std::vector<Solution<N>> apply_respect_limits(const std::vector<Solution<N>>& sols,
-                                              const JointLimits<N>& lim) {
+                                              const JointLimits<N>& lim,
+                                              const Remeasure<N>& remeasure = {}) {
   std::vector<Solution<N>> out;
   for (const auto& sol : sols) {
     Solution<N> s = sol;
     bool within = true;
+    bool moved = false;  // any change here is a clamp
     for (int i = 0; i < N; ++i) {
       if (!lim.present[i]) continue;
       const auto v = onto_limits(sol.q[i], lim.lo[i], lim.hi[i]);
@@ -380,9 +429,12 @@ std::vector<Solution<N>> apply_respect_limits(const std::vector<Solution<N>>& so
         within = false;
         break;
       }
+      moved = moved || *v != sol.q[i];
       s.q[i] = *v;
     }
-    if (within) out.push_back(s);
+    if (!within) continue;
+    remeasure(s, moved);
+    out.push_back(s);
   }
   return out;
 }
@@ -449,9 +501,11 @@ template <int N>
 std::vector<Solution<N>> rewrap_to_seed(std::vector<Solution<N>> sols,
                                         const JointConsts<N>& consts, const JointLimits<N>& lim,
                                         const std::array<double, N>& seed,
-                                        bool continuous_only = false) {
+                                        bool continuous_only = false,
+                                        const Remeasure<N>& remeasure = {}) {
   constexpr double kTwoPi = 2.0 * M_PI;
   for (auto& sol : sols) {
+    bool moved = false;
     for (int i = 0; i < N; ++i) {
       if (consts.type[i] != JointType::Revolute) continue;
       const double qi = sol.q[i], si = seed[i];
@@ -471,7 +525,9 @@ std::vector<Solution<N>> rewrap_to_seed(std::vector<Solution<N>> sols,
         }
       }
       sol.q[i] = best;
+      moved = moved || is_move(qi, best);
     }
+    remeasure(sol, moved);
   }
   return sols;
 }
@@ -491,14 +547,15 @@ template <int N>
 std::vector<Solution<N>> windings_topk(const std::vector<Solution<N>>& sols,
                                        const JointConsts<N>& consts, const JointLimits<N>& lim,
                                        const std::array<double, N>& seed, SeedMetric metric,
-                                       int k) {
+                                       int k, const Remeasure<N>& remeasure = {}) {
   if (k <= 1) {
     // The tracking idiom. Choosing each joint's seed-nearest representative
     // minimizes every per-joint deviation at once, so it minimizes both the
     // aggregate and the leximax refinement: the branch's best winding is
     // exactly its seed-rewrap, and no lattice search is needed.
-    auto best = nearest_to_seed<N>(rewrap_to_seed<N>(sols, consts, lim, seed), consts, lim, seed,
-                                   metric);
+    auto best = nearest_to_seed<N>(
+        rewrap_to_seed<N>(sols, consts, lim, seed, /*continuous_only=*/false, remeasure), consts,
+        lim, seed, metric);
     if (static_cast<int>(best.size()) > k) best.resize(std::max(k, 0));
     return best;
   }
@@ -556,7 +613,13 @@ std::vector<Solution<N>> windings_topk(const std::vector<Solution<N>>& sols,
         have_boundary = true;
       }
       Solution<N> s = sol;
-      for (int t = 0; t < m; ++t) s.q[wind[t].idx] = ladders[t][top.second[t]].second;
+      bool moved = false;
+      for (int t = 0; t < m; ++t) {
+        const double v = ladders[t][top.second[t]].second;
+        s.q[wind[t].idx] = v;
+        moved = moved || is_move(sol.q[wind[t].idx], v);
+      }
+      remeasure(s, moved);
       picked.push_back(s);
       for (int t = 0; t < m; ++t) {
         std::vector<int> nxt = top.second;
@@ -575,6 +638,11 @@ std::vector<Solution<N>> windings_topk(const std::vector<Solution<N>>& sols,
 // The finalize_solutions pipeline: limits -> seed(tolerance then rank) ->
 // truncate, in that fixed order. (postprocess.py:255-301)
 //
+// T is the IK target: a solution this pipeline moves (a snap onto pi or a clamp
+// onto a limit, not a 2pi shift) has its fk_residual re-measured against it at
+// the returned q (#645), so the residual always describes the configuration
+// returned.
+//
 // in_limits_fallback (optional): a zero-arg callable invoked ONLY when
 // respect_limits empties the set (redundant-7R exact resolver, #359). Its
 // solutions are already in-limits, so they skip the wrap/drop pass and flow
@@ -582,20 +650,21 @@ std::vector<Solution<N>> windings_topk(const std::vector<Solution<N>>& sols,
 template <int N>
 std::vector<Solution<N>> finalize_solutions(
     std::vector<Solution<N>> sols, const JointConsts<N>& consts, const JointLimits<N>& lim,
-    const ArtifactParams<N>& p,
+    const Pose& T, const ArtifactParams<N>& p,
     const std::function<std::vector<Solution<N>>()>& in_limits_fallback = nullptr) {
+  const Remeasure<N> rm{&consts, &T};
   // One representative per angle before anything else looks at the values
   // (#596): the solvers choose a side of the +-pi cut ad hoc.
-  sols = canonicalize_representatives<N>(std::move(sols), consts, lim);
+  sols = canonicalize_representatives<N>(std::move(sols), consts, lim, rm);
   if (p.respect_limits) {
-    sols = wrap_to_limits<N>(sols, consts, lim);
+    sols = wrap_to_limits<N>(sols, consts, lim, rm);
     if (!p.wrap_only) {
-      sols = apply_respect_limits<N>(sols, lim);
+      sols = apply_respect_limits<N>(sols, lim, rm);
       // The resolvers accept a candidate within kLimitBand of a limit
       // (kPolishLimitSlack, kShLimitSlack); put it on the limit, as the pass
       // above would.
       if (sols.empty() && in_limits_fallback)
-        sols = wrap_to_limits<N>(in_limits_fallback(), consts, lim);
+        sols = wrap_to_limits<N>(in_limits_fallback(), consts, lim, rm);
     }
   }
 
@@ -610,7 +679,7 @@ std::vector<Solution<N>> finalize_solutions(
   if (!p.has_seed) {
     // Unseeded output keeps expansion order, so a cap is a prefix and the
     // discarded representatives need never be built.
-    if (expanding) sols = expand_windings<N>(sols, wind, p.max_solutions);
+    if (expanding) sols = expand_windings<N>(sols, wind, p.max_solutions, rm);
   } else {
     // #562 step 1: a seeded solve returns the representative nearest the seed
     // rather than the principal value, so it never commands a gratuitous 2pi
@@ -618,13 +687,13 @@ std::vector<Solution<N>> finalize_solutions(
     // itself (collapsing them here would destroy the set), leaving only the
     // continuous joints, whose lift family is infinite.
     sols = rewrap_to_seed<N>(std::move(sols), consts, lim, p.q_seed,
-                             /*continuous_only=*/expanding);
+                             /*continuous_only=*/expanding, rm);
     if (expanding) {
       if (!p.has_seed_tolerance && p.max_solutions >= 0) {
         // Ranked truncation: take the globally nearest max_solutions directly.
-        sols = windings_topk<N>(sols, consts, lim, p.q_seed, p.seed_metric, p.max_solutions);
+        sols = windings_topk<N>(sols, consts, lim, p.q_seed, p.seed_metric, p.max_solutions, rm);
       } else {
-        sols = expand_windings<N>(sols, wind);
+        sols = expand_windings<N>(sols, wind, -1, rm);
       }
     }
     if (p.has_seed_tolerance)

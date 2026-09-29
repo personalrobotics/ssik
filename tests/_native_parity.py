@@ -32,6 +32,8 @@ the solve, tested in ``tests/test_winding_enumeration.py``):
     a. soundness: every native solution closes FK within the default policy's
        ``subproblem_numerical`` (the documented closure contract), and in the
        default mode lies within the joint limits widened by ``LIMIT_SLACK``;
+       every solution of either backend reports the ``fk_residual`` of the
+       ``q`` it returns, within ``RESIDUAL_TOL`` (#645);
     b. emptiness: the default solve is never empty on native while it is not
        on Python;
     c. 6R coverage: the analytic solve (``allow_rescue=False``) on native
@@ -149,6 +151,11 @@ RUNNER_DEPENDENT_CELLS = frozenset(
 # solvers gate tighter internally, but the +-pi representative snap (#601)
 # runs after that gate and may move a joint by up to 1e-6.
 FK_TOL = DEFAULT_TOLERANCE_POLICY.subproblem_numerical
+
+# a. How far a reported fk_residual may differ from ||FK(q) - T||_F at the
+# returned q: round-off (measured within 5e-15), not the up-to-1e-6 moves of the
+# +-pi snap and the limit clamp, after which the residual is re-measured (#645).
+RESIDUAL_TOL = 1e-12
 
 # a. How far outside a joint limit a default-mode solution may lie: not at
 # all. A value within round-off of a limit is reported as exactly the limit
@@ -460,12 +467,14 @@ class Report:
     oracle_poses: set[str] = field(default_factory=set)  # poses the oracle judged
 
 
-def _solve(m: Any, t: Q, *, limits: bool, native: bool, rescue: bool) -> Q:
+def _solve(m: Any, t: Q, *, limits: bool, native: bool, rescue: bool) -> tuple[Q, Q]:
+    """The solutions' joint vectors and their reported ``fk_residual``s."""
     sols = m.solve(
         t, respect_limits=limits, native=native, allow_rescue=rescue, enumerate_windings=False
     )
     dof = len(m._KB.joints)
-    return np.array([np.asarray(s.q, dtype=np.float64) for s in sols]).reshape(-1, dof)
+    qs = np.array([np.asarray(s.q, dtype=np.float64) for s in sols]).reshape(-1, dof)
+    return qs, np.array([s.fk_residual for s in sols], dtype=np.float64)
 
 
 class _Pose:
@@ -481,8 +490,8 @@ class _Pose:
         self.lo, self.hi, self.has = ranges(self.kb)
         self.t = np.asarray(self.m.fk(q), dtype=np.float64)
         self.floor = same_root_floor(self.t)
-        # (mode, backend, rescue) -> solutions
-        self.sets = {
+        # (mode, backend, rescue) -> solutions, and their reported residuals
+        solved = {
             (mode, backend, rescue): _solve(
                 self.m, self.t, limits=mode == "limits", native=backend == "native", rescue=rescue
             )
@@ -490,6 +499,8 @@ class _Pose:
             for backend in ("native", "python")
             for rescue in (True, False)
         }
+        self.sets = {key: qs for key, (qs, _) in solved.items()}
+        self.residuals = {key: res for key, (_, res) in solved.items()}
         # d. see SEVEN_R_SINGULAR
         self.coverage_defined = self.dof == 6 or sigma_min(self.kb, q) >= SEVEN_R_SINGULAR
 
@@ -580,6 +591,24 @@ class _Pose:
                         if self.fam == "seven_r.srs_polished"
                         else Gap(NEW, "soundness", mode, pid, f"{ex:.1e} rad outside: {x.tolist()}")
                     )
+
+        # a. the reported residual is the returned configuration's (#645)
+        for backend, out in (("native", rep.forward), ("python", rep.reverse)):
+            for rescue in (True, False):
+                key = (mode, backend, rescue)
+                for x, reported in zip(self.sets[key], self.residuals[key], strict=True):
+                    actual = self.fk_err(x)
+                    if abs(reported - actual) > RESIDUAL_TOL:
+                        out.append(
+                            Gap(
+                                NEW,
+                                "soundness",
+                                mode,
+                                pid,
+                                f"{backend} fk_residual {reported:.1e}, actual {actual:.1e} "
+                                f"at {x.tolist()}",
+                            )
+                        )
 
         # b. emptiness, and e. its reverse
         for got, want, want_a, other, out in (

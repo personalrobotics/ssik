@@ -50,7 +50,7 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
     if (tracked) {
       // Same postprocess as the full path, but no in-limits fallback: a tracked
       // seed that fails limits/tolerance falls through to the analytical solve.
-      const auto fast = finalize_solutions<7>({*tracked}, c, lim, p);
+      const auto fast = finalize_solutions<7>({*tracked}, c, lim, T, p);
       if (!fast.empty()) return fast;
     }
   }
@@ -73,7 +73,7 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
   p_limits.respect_limits = p.respect_limits;
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
-  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits, [&]() {
+  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits, [&]() {
     return srs_swivel::resolve_in_limits(c, s, T, limits, kSrsFkThreshold);
   });
 
@@ -82,7 +82,7 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
   //    singularity where the closed-form degenerates), not an unreachable target
   //    -- recover via the T-perturbation rescue, then re-apply the limit filter.
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, p_limits);
+    in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, T, p_limits);
   }
 
   // 5. Seed tolerance / ranking / truncate over the in-limits set.
@@ -91,7 +91,7 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
   // The single lifting stage (#562): this is the call that yields the returned
   // set. Skipped when the caller wanted the raw geometric set.
   p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
-  return finalize_solutions<7>(std::move(in_limits), c, lim, p_seed);
+  return finalize_solutions<7>(std::move(in_limits), c, lim, T, p_seed);
 }
 
 }  // namespace ssik

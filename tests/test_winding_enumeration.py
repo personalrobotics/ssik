@@ -460,6 +460,61 @@ def test_both_backends_keep_a_configuration_exactly_at_a_limit(arm: str) -> None
         assert all(s.q[j] == q[j] for s in posed), f"{backend}: {[s.q[j] for s in posed]}"
 
 
+# Poses where finalize moves a value after the solver measured fk_residual
+# (#645): the +-pi snap onto a limit (#601), the limit clamp (#635), and a
+# winding representative clamped onto a limit. Puma 560: joint 0 1e-7 inside
+# its limit, a few ulps inside pi, is snapped onto the limit, which moves the
+# tool by 1.6e-7 while the solver's residual said 8e-16. UR5e: joints 0 and 5
+# 5e-10 off 0, whose -2*pi / +2*pi lifts land within the band of a limit.
+_MOVED_POSES = {
+    "unimation.puma560_ik": [
+        [
+            3.14159255358979,
+            1.018871849146357,
+            -2.375096920883292,
+            2.370593504371684,
+            -1.7105133287808816,
+            3.14159265358879,
+        ]
+    ],
+    "universal_robots.ur5e_ik": [[5e-10, -0.7, 0.9, -0.4, 0.8, -5e-10]],
+    "universal_robots.ur3e_ik": _CUT_POSES["universal_robots.ur3e_ik"],
+    "kinova.jaco2_ik": _CUT_POSES["kinova.jaco2_ik"],
+    **{arm: [q] for arm, (q, _) in _LIMIT_POSES.items()},
+}
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize("arm", sorted(_MOVED_POSES))
+def test_fk_residual_describes_the_returned_configuration(arm: str) -> None:
+    """Every returned ``fk_residual`` is ``||FK(q) - T||_F`` at the ``q``
+    returned, on both backends and in every mode, including after a snap or a
+    clamp moved ``q`` off the value the solver measured (#645). Measured
+    agreement is within 5e-15; 1e-12 is round-off, far below the 1e-7 the
+    stale residual missed by."""
+    m = _module(arm)
+    for pose in _MOVED_POSES[arm]:
+        q = np.array(pose)
+        T = m.fk(q)
+        modes: list[dict[str, object]] = [
+            {},
+            {"respect_limits": "wrap"},
+            {"respect_limits": False},
+            {"q_seed": q, "max_solutions": 1},
+            {"q_seed": q, "max_solutions": 12},
+        ]
+        for kw in modes:
+            for native in (True, False):
+                sols = m.solve(T, native=native, **kw)
+                assert sols, f"{arm}: no solution, native={native}, {kw}"
+                for s in sols:
+                    actual = float(np.linalg.norm(m.fk(s.q) - T))
+                    assert abs(s.fk_residual - actual) <= 1e-12, (
+                        f"{arm} native={native} {kw}: reported {s.fk_residual:.1e}, "
+                        f"actual {actual:.1e} at {s.q.tolist()}"
+                    )
+
+
 @pytest.mark.skipif(not native_available(), reason="native extension not built")
 @pytest.mark.parametrize("arm", ["universal_robots.ur5e_ik", "standard_bots.thor_ik"])
 def test_native_lifts_are_sound(arm: str) -> None:

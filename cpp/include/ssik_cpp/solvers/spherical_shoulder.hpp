@@ -570,7 +570,7 @@ inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
   if (p.has_seed && p.max_solutions == 1) {
     const auto tracked = seeded_track<7>(c, p.q_seed, T);
     if (tracked) {
-      const auto fast = finalize_solutions<7>({*tracked}, c, lim, p);
+      const auto fast = finalize_solutions<7>({*tracked}, c, lim, T, p);
       if (!fast.empty()) return fast;
     }
   }
@@ -594,19 +594,19 @@ inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
   // Limit pass + #359 in-limits fallback (#615): the coarse sweep can miss a
   // thin in-limits q6 arc, so an empty limit-filtered set is resolved exactly
   // before the rescue gate below sees it.
-  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits, [&]() {
+  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits, [&]() {
     return polished ? spherical_shoulder_polished_resolve_in_limits(c, sh, T, limits)
                     : spherical_shoulder_resolve_in_limits(c, sh, T, limits);
   });
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, p_limits);
+    in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, T, p_limits);
   }
   ArtifactParams<7> p_seed = p;
   p_seed.respect_limits = false;
   // The single lifting stage (#562): this is the call that yields the returned
   // set. Skipped when the caller wanted the raw geometric set.
   p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
-  return finalize_solutions<7>(std::move(in_limits), c, lim, p_seed);
+  return finalize_solutions<7>(std::move(in_limits), c, lim, T, p_seed);
 }
 
 }  // namespace ssik

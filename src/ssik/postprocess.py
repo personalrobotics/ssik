@@ -54,7 +54,6 @@ import heapq
 import itertools
 import math
 from collections.abc import Callable
-from dataclasses import replace
 from typing import Literal
 
 import numpy as np
@@ -62,6 +61,7 @@ from numpy.typing import NDArray
 
 from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
+from ssik.kinematics.poe_fk import poe_forward_kinematics
 
 __all__ = [
     "count_windings",
@@ -104,7 +104,8 @@ __all__ = [
 # and the 7R in-limits resolvers' acceptance slack (seven_r._polish and
 # seven_r.spherical_shoulder, which take this constant), so every "within
 # round-off" in the pipeline means the same thing.
-# A clamp moves the tool by at most 1e-9 x reach per joint. Through _reps it
+# A clamp moves the tool by at most 1e-9 x reach per joint, and the moved
+# solution's fk_residual is re-measured (_placed, #645). Through _reps it
 # also decides which representatives of pi a limit admits, so a limit written
 # a few ulps inside pi (Puma 560's +-3.14159265358979) sits on the cut for
 # _canonicalize_representatives, like an exact [-pi, pi].
@@ -124,7 +125,40 @@ def _onto_limits(v: float, lo: float, hi: float) -> float | None:
     return v
 
 
-def respect_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
+_TWO_PI = 2.0 * np.pi
+
+
+def _is_move(old: float, new: float) -> bool:
+    """Whether ``new`` is anything other than ``old`` shifted by a whole number
+    of turns (#645). A ``2*pi`` shift is the same configuration; a snap or a
+    clamp is not. Exact comparison against the same ``old + 2*pi*k`` expression
+    the pipeline computes a shift with, so a plain shift is never a move and any
+    snap or clamp that changed a bit is."""
+    return new != old + _TWO_PI * round((new - old) / _TWO_PI)
+
+
+def _placed(
+    sol: Solution,
+    q_new: NDArray[np.float64],
+    moved: bool,
+    kb: KinBody,
+    T_target: NDArray[np.float64] | None,
+) -> Solution:
+    """``sol`` at ``q_new``. When a snap or a clamp ``moved`` it and the target
+    is known, ``fk_residual`` is re-measured at ``q_new`` (#645): it must
+    describe the configuration returned, not the one the solver measured. The
+    solvers' metric, ``||FK(q) - T_target||_F`` on the user's chain."""
+    res = sol.fk_residual
+    if moved and T_target is not None:
+        res = float(np.linalg.norm(poe_forward_kinematics(kb, q_new) - T_target))
+    # Constructed directly: dataclasses.replace costs microseconds, and a UR
+    # solve places 256 winding lifts.
+    return Solution(q_new, res, sol.refinement_used)
+
+
+def respect_limits(
+    sols: list[Solution], kb: KinBody, *, T_target: NDArray[np.float64] | None = None
+) -> list[Solution]:
     """Drop solutions where any joint's q value is outside its reachable range.
 
     Joints with ``limits=None`` are unconstrained (continuous joints, or
@@ -139,6 +173,9 @@ def respect_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
         ``solve()``).
     :param kb: the same :class:`KinBody` used for the IK call. Joint limits
         come from ``kb.joints[i].limits``.
+    :param T_target: the IK target. When given, a solution the clamp moved has
+        its ``fk_residual`` re-measured at the returned ``q``; without it the
+        solver's residual is kept.
     :returns: filtered solutions; preserves input order. Every returned value
         lies within its limits exactly.
     """
@@ -163,11 +200,14 @@ def respect_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
                     q_new = np.asarray(sol.q, dtype=np.float64).copy()
                 q_new[i] = v
         if within:
-            kept.append(sol if q_new is None else replace(sol, q=q_new))
+            # Any change here is a clamp: a move.
+            kept.append(sol if q_new is None else _placed(sol, q_new, True, kb, T_target))
     return kept
 
 
-def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
+def wrap_to_limits(
+    sols: list[Solution], kb: KinBody, *, T_target: NDArray[np.float64] | None = None
+) -> list[Solution]:
     """Try wrapping each joint's q value by ``±2*pi`` integer multiples to
     bring it into the joint's reachable range.
 
@@ -190,6 +230,9 @@ def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
 
     :param sols: candidate solutions.
     :param kb: the same :class:`KinBody` used for the IK call.
+    :param T_target: the IK target. When given, a solution the limit band
+        moved has its ``fk_residual`` re-measured at the returned ``q``; a
+        ``2*pi`` wrap alone keeps it.
     :returns: solutions with each q-vector adjusted joint-wise; preserves
         input order; returns ``Solution`` instances with the wrapped q
         and other fields unchanged.
@@ -200,6 +243,7 @@ def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
         if len(sol.q) != n_joints:
             raise ValueError(f"solution q-length {len(sol.q)} doesn't match kb DOF {n_joints}")
         q_new = np.asarray(sol.q, dtype=np.float64).copy()
+        moved = False
         for i, joint in enumerate(kb.joints):
             if joint.limits is None or joint.joint_type != "revolute":
                 continue
@@ -207,11 +251,13 @@ def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
             q_i = float(q_new[i])
             # Smallest |k| first; a fit within round-off of a limit lands on it.
             for k in (0, 1, -1, 2, -2):
-                v = _onto_limits(q_i + 2.0 * np.pi * k, lo, hi)
+                cand = q_i + 2.0 * np.pi * k
+                v = _onto_limits(cand, lo, hi)
                 if v is not None:
                     q_new[i] = v
+                    moved = moved or v != cand
                     break
-        out.append(replace(sol, q=q_new))
+        out.append(_placed(sol, q_new, moved, kb, T_target))
     return out
 
 
@@ -219,8 +265,6 @@ def _wrap_to_pi(angle: float) -> float:
     """Wrap a single angle to the canonical ``[-pi, pi]`` representative."""
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
-
-_TWO_PI = 2.0 * np.pi
 
 # (aggregate, per-joint deviations sorted descending): the part of the seeded
 # ordering that rises monotonically with every per-joint deviation, so it can
@@ -307,7 +351,11 @@ def count_windings(sols: list[Solution], kb: KinBody) -> int:
 
 
 def expand_windings(
-    sols: list[Solution], kb: KinBody, *, limit: int | None = None
+    sols: list[Solution],
+    kb: KinBody,
+    *,
+    limit: int | None = None,
+    T_target: NDArray[np.float64] | None = None,
 ) -> list[Solution]:
     """Expand each solution into every in-limit winding representative (#562).
 
@@ -324,6 +372,8 @@ def expand_windings(
     :param limit: stop once this many configurations exist. Only sound when the
         caller keeps a *prefix* of the expansion (i.e. unseeded truncation);
         a ranked truncation must not pass it.
+    :param T_target: the IK target. When given, a representative the limit
+        band moved onto a limit has its ``fk_residual`` re-measured.
     """
     wind = winding_joints(kb)
     if not wind:
@@ -333,12 +383,22 @@ def expand_windings(
     for sol in sols:
         q = np.asarray(sol.q, dtype=np.float64)
         opts = [_reps(float(q[i]), lo, hi) for i, lo, hi in wind]
+        # Per winding joint, the representatives the limit band moved (#645):
+        # nearly always none, and then no lift needs checking.
+        moves = [
+            {v for v in reps if _is_move(float(q[i]), v)}
+            for (i, _, _), reps in zip(wind, opts, strict=True)
+        ]
+        any_move = any(moves)
         res, ref = sol.fk_residual, sol.refinement_used
         for combo in itertools.product(*opts):
             q_new = q.copy()
             for t, v in enumerate(combo):
                 q_new[idxs[t]] = v
-            out.append(Solution(q_new, res, ref))
+            if any_move and any(v in moves[t] for t, v in enumerate(combo)):
+                out.append(_placed(sol, q_new, True, kb, T_target))
+            else:
+                out.append(Solution(q_new, res, ref))
             if limit is not None and len(out) >= limit:
                 return out
     return out
@@ -350,6 +410,7 @@ def rewrap_to_seed(
     q_seed: NDArray[np.float64],
     *,
     continuous_only: bool = False,
+    T_target: NDArray[np.float64] | None = None,
 ) -> list[Solution]:
     """Rewrap each revolute joint to the ``q_i + 2*pi*k`` representative nearest
     the seed, staying within the joint's finite limits (#562, step 1).
@@ -387,11 +448,15 @@ def rewrap_to_seed(
         seed-nearest one would destroy the very set being returned. Continuous
         joints are never enumerated (infinite family), so they still need the
         nearest-turn choice.
+    :param T_target: the IK target. When given, a solution whose chosen
+        representative the limit band moved onto a limit has its
+        ``fk_residual`` re-measured.
     """
     seed = np.asarray(q_seed, dtype=np.float64)
     out: list[Solution] = []
     for sol in sols:
         q_new = np.asarray(sol.q, dtype=np.float64).copy()
+        moved = False
         for i, joint in enumerate(kb.joints):
             if joint.joint_type != "revolute":
                 continue
@@ -408,8 +473,9 @@ def rewrap_to_seed(
             if continuous_only:  # enumeration emits this joint's representatives
                 continue
             cands = _reps(q_i, lo, hi)
-            q_new[i] = min(cands, key=lambda c: (abs(c - s_i), c))
-        out.append(replace(sol, q=q_new))
+            q_new[i] = v = min(cands, key=lambda c: (abs(c - s_i), c))
+            moved = moved or _is_move(q_i, v)
+        out.append(_placed(sol, q_new, moved, kb, T_target))
     return out
 
 
@@ -491,8 +557,9 @@ def _snap(x: float) -> float:
 # exact pi has two (both ends of the range), so the backends' seeded choices
 # would still differ; the value is set to exactly pi instead. That moves the
 # tool by at most 1e-6 x reach, well inside the subproblem_numerical (1e-5) FK
-# gate, and every shipped joint of this kind is on a 6R arm, whose isolated
-# solutions land in the band only at a genuine exact-pi pose.
+# gate (the moved solution's fk_residual is re-measured, #645), and every
+# shipped joint of this kind is on a 6R arm, whose isolated solutions land in
+# the band only at a genuine exact-pi pose.
 #
 # Continuous joints need only the snap: their parity is compared on the circle,
 # where values either side of the cut are already the same configuration.
@@ -505,7 +572,9 @@ def _pi_class_offset(q_i: float) -> float:
     return abs(abs(_wrap_to_pi(q_i)) - math.pi)
 
 
-def _canonicalize_representatives(sols: list[Solution], kb: KinBody) -> list[Solution]:
+def _canonicalize_representatives(
+    sols: list[Solution], kb: KinBody, T_target: NDArray[np.float64] | None = None
+) -> list[Solution]:
     """Pick one deterministic coordinate for every angle that has a choice (#596).
 
     - **continuous** revolute joints (``limits is None``) are wrapped to
@@ -523,7 +592,8 @@ def _canonicalize_representatives(sols: list[Solution], kb: KinBody) -> list[Sol
     Values away from the cut keep their exact bits. A coordinate moves only by a
     multiple of ``2*pi``, except for the snaps onto ``pi`` (round-off for a
     continuous joint, the band for a limit on the cut), each bounded by its
-    tolerance.
+    tolerance. A snap that moves a value re-measures ``fk_residual`` when
+    ``T_target`` is given (#645).
     Idempotent, so the repeated finalize passes of one solve agree.
     """
     # (joint index, in-limit representative of pi nearest +pi or None for a
@@ -546,21 +616,30 @@ def _canonicalize_representatives(sols: list[Solution], kb: KinBody) -> list[Sol
     out: list[Solution] = []
     for sol in sols:
         q_new: NDArray[np.float64] | None = None
+        moved = False
         for i, pi_rep, on_limit in targets:
             q_i = float(sol.q[i])
             if pi_rep is None:
                 if -math.pi + _CUT_SNAP < q_i < math.pi - _CUT_SNAP:
                     continue
-                w = math.pi if _pi_class_offset(q_i) <= _CUT_SNAP else _wrap_to_pi(q_i)
+                if _pi_class_offset(q_i) <= _CUT_SNAP:
+                    w = math.pi
+                    moved = moved or _is_move(q_i, w)
+                else:
+                    w = _wrap_to_pi(q_i)
             elif _pi_class_offset(q_i) <= _CUT_BAND:
-                w = pi_rep if on_limit else q_i + _TWO_PI * round((pi_rep - q_i) / _TWO_PI)
+                if on_limit:
+                    w = pi_rep
+                    moved = moved or _is_move(q_i, w)
+                else:
+                    w = q_i + _TWO_PI * round((pi_rep - q_i) / _TWO_PI)
             else:
                 continue
             if w != q_i:
                 if q_new is None:
                     q_new = np.asarray(sol.q, dtype=np.float64).copy()
                 q_new[i] = w
-        out.append(sol if q_new is None else replace(sol, q=q_new))
+        out.append(sol if q_new is None else _placed(sol, q_new, moved, kb, T_target))
     return out
 
 
@@ -672,6 +751,7 @@ def _windings_topk(
     q_seed: NDArray[np.float64],
     metric: str,
     k: int,
+    T_target: NDArray[np.float64] | None = None,
 ) -> list[Solution]:
     """The globally nearest ``k`` winding representatives, without materializing
     the complete expansion (#562).
@@ -698,7 +778,7 @@ def _windings_topk(
         # minimises every per-joint deviation at once, so it minimises both the
         # aggregate and the leximax refinement: the branch's best winding is
         # exactly its seed-rewrap, and no lattice search is needed.
-        best = rewrap_to_seed(sols, kb, seed)
+        best = rewrap_to_seed(sols, kb, seed, T_target=T_target)
         return nearest_to_seed(best, seed, metric=metric, kb=kb)[:k]
 
     wind = winding_joints(kb)
@@ -749,9 +829,11 @@ def _windings_topk(
             if taken == k:
                 boundary = popped
             q_new = q.copy()
+            moved = False
             for t, r in enumerate(ranks):
-                q_new[idxs[t]] = ladders[t][r][1]
-            picked.append(Solution(q_new, sol.fk_residual, sol.refinement_used))
+                q_new[idxs[t]] = v = ladders[t][r][1]
+                moved = moved or _is_move(float(q[idxs[t]]), v)
+            picked.append(_placed(sol, q_new, moved, kb, T_target))
             for t in range(m):
                 nxt = (*ranks[:t], ranks[t] + 1, *ranks[t + 1 :])
                 if nxt[t] < len(ladders[t]) and nxt not in seen:
@@ -797,6 +879,7 @@ def finalize_solutions(
     in_limits_fallback: Callable[[], list[Solution]] | None = None,
     counts: dict[str, int] | None = None,
     enumerate_windings: bool = False,
+    T_target: NDArray[np.float64] | None = None,
 ) -> list[Solution]:
     """The shared IK post-processing pipeline: limits -> seed -> truncate.
 
@@ -843,28 +926,36 @@ def finalize_solutions(
         real IK branches from their lifts. ``winding_representatives`` is the
         size of the complete in-limit set even when truncation or top-k pruning
         means it was never built.
+    :param T_target: the IK target. Every ``solve()`` passes it, so that a
+        solution this pipeline moves -- a snap onto ``pi`` or a clamp onto a
+        limit, not a ``2*pi`` shift -- has its ``fk_residual`` re-measured at the
+        returned ``q`` (#645): ``||FK(q) - T_target||_F`` on ``kb``'s chain, the
+        solvers' own metric. One FK per moved solution; an unmoved solution keeps
+        the solver's value. ``None`` keeps the solver's residuals throughout.
     :returns: the post-processed solution list.
     """
     # One representative per angle before anything else looks at the values
     # (#596): the solvers choose a side of the +-pi cut ad hoc, so without this
     # the two backends disagree by 2*pi on the same configuration, and on a
     # [-pi, pi] joint even the seeded ranking diverges.
-    sols = _canonicalize_representatives(sols, kb)
+    if T_target is not None:
+        T_target = np.asarray(T_target, dtype=np.float64)
+    sols = _canonicalize_representatives(sols, kb, T_target)
     if respect_limits == "wrap":
-        sols = wrap_to_limits(sols, kb)
+        sols = wrap_to_limits(sols, kb, T_target=T_target)
         if counts is not None:
             counts["dropped_by_limits"] = 0
     elif respect_limits:
-        sols = wrap_to_limits(sols, kb)
+        sols = wrap_to_limits(sols, kb, T_target=T_target)
         pre_limit = len(sols)
-        sols = _apply_limits(sols, kb)
+        sols = _apply_limits(sols, kb, T_target=T_target)
         if counts is not None:
             counts["dropped_by_limits"] = pre_limit - len(sols)
         if not sols and in_limits_fallback is not None:
             # The resolvers accept a candidate within _LIMIT_BAND of a limit
             # (seven_r._polish, spherical_shoulder); put it on the limit, as the
             # pass above would.
-            sols = wrap_to_limits(in_limits_fallback(), kb)
+            sols = wrap_to_limits(in_limits_fallback(), kb, T_target=T_target)
 
     # Whether this call is the one that lifts is the caller's decision (see the
     # parameter docs), not something inferred from respect_limits: an artifact
@@ -882,21 +973,21 @@ def finalize_solutions(
         if expanding:
             # Unseeded output keeps expansion order, so a cap is a prefix and the
             # discarded representatives need never be built.
-            sols = expand_windings(sols, kb, limit=max_solutions)
+            sols = expand_windings(sols, kb, limit=max_solutions, T_target=T_target)
     else:
         # #562 step 1: a seeded solve returns the representative nearest the seed
         # rather than the principal value, so it never commands a gratuitous 2*pi
         # turn. Under enumeration the finite joints are covered by the expansion
         # itself (collapsing them here would destroy the set), leaving only the
         # continuous joints, whose lift family is infinite.
-        sols = rewrap_to_seed(sols, kb, q_seed, continuous_only=expanding)
+        sols = rewrap_to_seed(sols, kb, q_seed, continuous_only=expanding, T_target=T_target)
         if expanding:
             if seed_tolerance is None and max_solutions is not None:
                 # Ranked truncation: take the globally nearest max_solutions
                 # directly. Equivalent to expanding, ranking and truncating.
-                sols = _windings_topk(sols, kb, q_seed, seed_metric, max_solutions)
+                sols = _windings_topk(sols, kb, q_seed, seed_metric, max_solutions, T_target)
             else:
-                sols = expand_windings(sols, kb)
+                sols = expand_windings(sols, kb, T_target=T_target)
         if seed_tolerance is not None:
             sols = within_seed_tolerance(sols, q_seed, seed_tolerance, kb=kb)
             available = len(sols)

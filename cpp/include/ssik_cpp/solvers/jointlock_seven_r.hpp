@@ -128,19 +128,19 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
   p_limits.respect_limits = p.respect_limits;
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
-  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);
+  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits);
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
     // Re-dedup in the Linf metric of the sweep, as the HP path does.
     in_limits = finalize_solutions<7>(
         jointlock_detail::dedup7(rescue_via_T_perturbation<7>(core, c, T), kGeneral6rDedupAtol),
-        c, lim, p_limits);
+        c, lim, T, p_limits);
   }
   ArtifactParams<7> p_seed = p;
   p_seed.respect_limits = false;
   // The single lifting stage (#562): this is the call that yields the returned
   // set. Skipped when the caller wanted the raw geometric set.
   p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
-  return finalize_solutions<7>(std::move(in_limits), c, lim, p_seed);
+  return finalize_solutions<7>(std::move(in_limits), c, lim, T, p_seed);
 }
 
 // Full artifact-contract solve for an HP-covered jointlock.seven_r arm (kassow,
@@ -196,7 +196,7 @@ std::vector<Solution<7>> jointlock_hp_artifact_solve(
   p_limits.respect_limits = p.respect_limits;
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
-  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);
+  std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits);
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
     // The shared rescue definition (#622), so its default parameters. It dedups in
     // L2 wrap-distance; re-dedup in the Linf max-joint metric the sweep (dedup7)
@@ -205,14 +205,14 @@ std::vector<Solution<7>> jointlock_hp_artifact_solve(
     // of surfacing as a duplicate.
     in_limits = finalize_solutions<7>(
         jointlock_detail::dedup7(rescue_via_T_perturbation<7>(core, c, T), kGeneral6rDedupAtol),
-        c, lim, p_limits);
+        c, lim, T, p_limits);
   }
   ArtifactParams<7> p_seed = p;
   p_seed.respect_limits = false;
   // The single lifting stage (#562): this is the call that yields the returned
   // set. Skipped when the caller wanted the raw geometric set.
   p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
-  return finalize_solutions<7>(std::move(in_limits), c, lim, p_seed);
+  return finalize_solutions<7>(std::move(in_limits), c, lim, T, p_seed);
 }
 
 }  // namespace ssik

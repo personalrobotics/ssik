@@ -153,16 +153,16 @@ inline std::vector<Solution<6>> three_parallel_artifact_solve(const JointConsts<
   p_limits.respect_limits = p.respect_limits;
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
-  std::vector<Solution<6>> in_limits = finalize_solutions<6>(core(T), c, lim, p_limits);
+  std::vector<Solution<6>> in_limits = finalize_solutions<6>(core(T), c, lim, T, p_limits);
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    in_limits = finalize_solutions<6>(rescue_via_T_perturbation<6>(core, c, T), c, lim, p_limits);
+    in_limits = finalize_solutions<6>(rescue_via_T_perturbation<6>(core, c, T), c, lim, T, p_limits);
   }
   ArtifactParams<6> p_seed = p;
   p_seed.respect_limits = false;
   // The single lifting stage (#562): this is the call that yields the returned
   // set. Skipped when the caller wanted the raw geometric set.
   p_seed.enumerate_windings = p.enumerate_windings && p.respect_limits;
-  return finalize_solutions<6>(std::move(in_limits), c, lim, p_seed);
+  return finalize_solutions<6>(std::move(in_limits), c, lim, T, p_seed);
 }
 
 }  // namespace ssik

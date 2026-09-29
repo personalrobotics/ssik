@@ -36,9 +36,11 @@ class Solution:
     """A single analytical IK solution.
 
     :param q: joint-angle vector. Length matches the chain's DOF.
-    :param fk_residual: ``||FK(q) - T_target||_F`` at the moment the solver
-        returned the candidate. The caller can compare against any target
-        tolerance; the solver's own ``fk_atol`` was a *filter*, not a
+    :param fk_residual: ``||FK(q) - T_target||_F`` at the returned ``q``. The
+        solver measures it; when post-processing snaps a value onto ``pi`` or
+        clamps it onto a joint limit, it is measured again at the moved value
+        (``docs/api.md#joint-limits``). The caller can compare against any
+        target tolerance; the solver's own ``fk_atol`` was a *filter*, not a
         contract on the value reported here.
     :param refinement_used: ``"none"`` if the solution passed the solver's
         acceptance gate on its own (``general_6r`` then polishes it to machine

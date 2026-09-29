@@ -853,7 +853,9 @@ def _render_specialised_solve_orchestrator(
             # "no in-limits solution exists", so it must not depend on the
             # seed-tolerance / max_solutions filters (a seed filter emptying a
             # non-empty in-limits set is a user preference, not a missing solution).
-            _in_limits = _ps_finalize(solutions, _KB, respect_limits=respect_limits)
+            _in_limits = _ps_finalize(
+                solutions, _KB, respect_limits=respect_limits, T_target=T
+            )
             # Rescue on LIMIT-empty (#524): fire when nothing survives the limit
             # filter (not just when the analytical count was zero), so a pose
             # whose only analytical candidates were out-of-limits still gets
@@ -872,12 +874,14 @@ def _render_specialised_solve_orchestrator(
                             jacobian_fn=_spatial_jacobian,
                         ),
                         _KB,
+                        T_target=T,
                         respect_limits=respect_limits,
                     )
             # Seed tolerance / ranking / truncate over the in-limits set.
             return _ps_finalize(
                 _in_limits,
                 _KB,
+                T_target=T,
                 respect_limits=False,
                 q_seed=q_seed,
                 seed_metric=seed_metric,
@@ -1353,6 +1357,7 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
                     solutions = _ps_finalize(
                         solutions,
                         _KB,
+                        T_target=T,
                         respect_limits=respect_limits,
                         q_seed=q_seed,
                         seed_metric=seed_metric,
@@ -1369,6 +1374,7 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
             return _ps_finalize(
                 solutions,
                 _KB,
+                T_target=T,
                 respect_limits=False,
                 q_seed=q_seed,
                 seed_metric=seed_metric,
@@ -1703,6 +1709,7 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
                     _fast = _ps_finalize(
                         [_tracked],
                         _KB,
+                        T_target=T_target,
                         respect_limits=respect_limits,
                         q_seed=q_seed,
                         seed_metric=seed_metric,
@@ -1730,6 +1737,7 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
             _in_limits = _ps_finalize(
                 sols,
                 _KB,
+                T_target=T_target,
                 respect_limits=respect_limits,
                 in_limits_fallback=lambda: _resolve_in_limits(_KB, T_target, policy=policy),
             )
@@ -1758,12 +1766,14 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
                             jacobian_fn=lambda _q: _kinbody_jacobian(_KB, _q),
                         ),
                         _KB,
+                        T_target=T_target,
                         respect_limits=respect_limits,
                     )
             # Seed tolerance / ranking / truncate over the in-limits set.
             return _ps_finalize(
                 _in_limits,
                 _KB,
+                T_target=T_target,
                 respect_limits=False,
                 q_seed=q_seed,
                 seed_metric=seed_metric,

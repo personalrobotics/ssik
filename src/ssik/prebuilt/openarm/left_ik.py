@@ -257,6 +257,7 @@ def solve(
             _fast = _ps_finalize(
                 [_tracked],
                 _KB,
+                T_target=T_target,
                 respect_limits=respect_limits,
                 q_seed=q_seed,
                 seed_metric=seed_metric,
@@ -284,6 +285,7 @@ def solve(
     _in_limits = _ps_finalize(
         sols,
         _KB,
+        T_target=T_target,
         respect_limits=respect_limits,
         in_limits_fallback=lambda: _resolve_in_limits(_KB, T_target, policy=policy),
     )
@@ -312,12 +314,14 @@ def solve(
                     jacobian_fn=lambda _q: _kinbody_jacobian(_KB, _q),
                 ),
                 _KB,
+                T_target=T_target,
                 respect_limits=respect_limits,
             )
     # Seed tolerance / ranking / truncate over the in-limits set.
     return _ps_finalize(
         _in_limits,
         _KB,
+        T_target=T_target,
         respect_limits=False,
         q_seed=q_seed,
         seed_metric=seed_metric,

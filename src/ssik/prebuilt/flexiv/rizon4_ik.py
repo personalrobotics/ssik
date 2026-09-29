@@ -1024,6 +1024,7 @@ def solve(
             solutions = _ps_finalize(
                 solutions,
                 _KB,
+                T_target=T,
                 respect_limits=respect_limits,
                 q_seed=q_seed,
                 seed_metric=seed_metric,
@@ -1040,6 +1041,7 @@ def solve(
     return _ps_finalize(
         solutions,
         _KB,
+        T_target=T,
         respect_limits=False,
         q_seed=q_seed,
         seed_metric=seed_metric,

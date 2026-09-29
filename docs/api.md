@@ -141,7 +141,9 @@ The only other movements are the `1e-9` snap and the snap onto a limit at
 `+pi`, which is at most `1e-6` rad. The finite-joint band is that wide because
 where a folded elbow meets the cut, the angle is a double root and the solvers
 determine it only to a few `1e-7` rad. The derivation is at
-`ssik.postprocess._CUT_BAND`.
+`ssik.postprocess._CUT_BAND`. A snap moves the configuration, so the returned
+`fk_residual` is measured again at the snapped value (see
+[Joint limits](#joint-limits)).
 
 ### Joint limits
 
@@ -166,9 +168,13 @@ further from the limit than the band. Such a configuration at an exact limit
 can then still be kept by one backend and dropped by the other. The
 derivation is at `ssik.postprocess._LIMIT_BAND`.
 
-`Solution.fk_residual` is measured by the solver before this step, as it is
-before the angle-representative snaps above. It does not include the clamp,
-which moves the tool by at most `1e-9` rad times the reach per clamped joint.
+`Solution.fk_residual` always describes the returned `q`. The solver measures
+it, and when this clamp or an [angle-representative](#angle-representatives)
+snap moves a value, it is measured again at the moved value, on both backends:
+`||FK(q) - T_target||_F` on the arm's chain, the solvers' own metric. A `2*pi`
+shift (a winding representative, a seed rewrap) is the same configuration and
+keeps the solver's value. The re-measurement costs one FK per moved solution,
+and solutions nothing moved pay nothing.
 
 ### Winding representatives
 

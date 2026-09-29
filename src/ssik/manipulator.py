@@ -870,6 +870,7 @@ class Manipulator:
             # but only when the caller wanted limits honoured at all.
             enumerate_windings=enumerate_windings and bool(respect_limits),
             counts=counts,
+            T_target=T,
         )
         dropped_by_limits = counts["dropped_by_limits"]
         dropped_by_max_solutions = counts["dropped_by_max_solutions"]
