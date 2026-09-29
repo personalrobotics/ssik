@@ -8,14 +8,23 @@ name: Slow suite
 # Actions tab, or `gh workflow run slow.yml --ref <branch>`, before merging a
 # change that the slow suite covers.
 #
-# One job: pytest takes 12-14 min on a 4-vCPU runner, and ~11-13 min of that
-# is the Rizon 4 composer test alone, which bounds the wall-clock however the
-# suite is sharded.
+# Two jobs. `slow`: pytest takes 12-14 min on a 4-vCPU runner, and ~11-13 min
+# of that is the Rizon 4 composer test alone, which bounds the wall-clock
+# however the suite is sharded. `native_parity`: the full tier of the
+# native-parity gate (tests/test_native_parity.py, #626), on its own runner so
+# it adds no wall-clock to `slow`.
 
 on:
   schedule:
     - cron: "17 8 * * *"  # daily, 08:17 UTC
   workflow_dispatch:
+    inputs:
+      regen:
+        description: >-
+          Instead of running the native-parity gate, regenerate its Linux data
+          (scripts/regen_native_parity.py) and upload it as native-parity-data
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -27,6 +36,7 @@ permissions:
 jobs:
   slow:
     name: Linux py3.12 slow suite
+    if: ${{ !inputs.regen }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -67,4 +77,49 @@ jobs:
         run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
 
       - name: pytest -m slow (parallel)
-        run: uv run pytest -q -n 4 --dist worksteal -m slow --durations=25
+        # The native-parity gate runs in its own job below.
+        run: >-
+          uv run pytest -q -n 4 --dist worksteal -m slow --durations=25
+          --ignore=tests/test_native_parity.py
+
+  native_parity:
+    name: Linux py3.12 native-parity gate (full tier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs the history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --dev --python 3.12
+
+      - name: Build native extension into the package (pybind11)
+        run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
+
+      - name: pytest -m slow tests/test_native_parity.py (parallel)
+        if: ${{ !inputs.regen }}
+        # loadgroup keeps each arm's cells on one worker, so an arm's poses are
+        # solved once (its cells share a per-process cache), not once per worker.
+        run: >-
+          uv run pytest -q -n 4 --dist loadgroup -m slow tests/test_native_parity.py
+          --durations=10
+
+      - name: Regenerate the gate's Linux cells, witnesses and oracle verdicts
+        if: ${{ inputs.regen }}
+        run: uv run python scripts/regen_native_parity.py -j 4
+
+      - name: Upload the regenerated data
+        if: ${{ inputs.regen }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: native-parity-data
+          path: tests/data/native_parity_*.json
+          if-no-files-found: error
+          retention-days: 7
