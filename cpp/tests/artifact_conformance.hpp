@@ -32,16 +32,19 @@ bool wrap_close(const std::array<double, DOF>& a, const std::array<double, DOF>&
 // wrong for families whose gate is looser (RR / general_6r at 1e-5, where force-
 // refined near-double-root solutions settle ~1e-6). The emitter passes it.
 //
-// max_incomplete: per-arm allowance for poses where C++ MISSES an oracle solution.
-// Default 0 (strict: C++ must cover the whole oracle). Set >0 ONLY for a solver
-// with a documented, bounded completeness gap vs the Python oracle -- e.g. kassow
-// (HP jointlock), whose monic-companion eigensolve recovers fewer roots than
-// LAPACK dggev at the degenerate lock samples (axes aligned at multiples of pi/2);
-// tracked in #544. Duplicate C++ branches are ALWAYS a hard failure (never
-// allowed), independent of this knob.
+// match_tol: the L-infinity radius (every joint wrapped) within which a C++
+// solution covers an oracle one; the emitter passes 1e-3 for 6R and 1e-2 for
+// 7R, whose solutions sample a one-dimensional self-motion (#550).
+//
+// known_incomplete / known_gap: a native completeness gap tied to its issue
+// (the emitter's _KNOWN_INCOMPLETE). Default 0: C++ must cover the whole
+// oracle. With an entry, at most known_incomplete poses may miss, and a run
+// that misses on none fails too: the gap is closed, so its entry must go.
+// Duplicate C++ branches are ALWAYS a hard failure, independent of this knob.
 template <int DOF, typename Cases, typename SolveFn>
 int run(const char* name, const JointConsts<DOF>& c, const Cases& cases, SolveFn solve_fn,
-        double fk_ceiling = 1e-7, int max_incomplete = 0) {
+        double fk_ceiling = 1e-7, double match_tol = 1e-3, int known_incomplete = 0,
+        const char* known_gap = "") {
   double worst_fk = 0.0;
   int incomplete = 0;  // poses where C++ dropped an oracle solution
   int dup = 0;         // poses with a duplicate C++ branch (always fatal)
@@ -65,7 +68,7 @@ int run(const char* name, const JointConsts<DOF>& c, const Cases& cases, SolveFn
     for (const auto& e : tc.solutions) {
       bool found = false;
       for (const auto& s : sols)
-        if (wrap_close<DOF>(e, s.q, 1e-3)) { found = true; break; }
+        if (wrap_close<DOF>(e, s.q, match_tol)) { found = true; break; }
       if (!found) miss = true;  // C++ dropped a solution the oracle found
     }
     // A duplicate is two returned solutions that are the same root (#600).
@@ -91,10 +94,15 @@ int run(const char* name, const JointConsts<DOF>& c, const Cases& cases, SolveFn
     }
   }
   std::printf(
-      "%s self-contained artifact: %zu poses, worst FK = %.3e, incomplete = %d (allow %d), dup = %d, "
-      "extensions = %d\n",
-      name, cases.size(), worst_fk, incomplete, max_incomplete, dup, extensions);
-  if (worst_fk <= fk_ceiling && incomplete <= max_incomplete && dup == 0) {
+      "%s self-contained artifact: %zu poses, worst FK = %.3e, incomplete = %d (known %d%s%s), "
+      "dup = %d, extensions = %d\n",
+      name, cases.size(), worst_fk, incomplete, known_incomplete, known_incomplete ? ": " : "",
+      known_gap, dup, extensions);
+  const bool stale = known_incomplete > 0 && incomplete == 0;
+  if (stale)
+    std::printf("  no pose misses any more: %s is closed, delete its _KNOWN_INCOMPLETE entry\n",
+                known_gap);
+  if (worst_fk <= fk_ceiling && incomplete <= known_incomplete && !stale && dup == 0) {
     std::printf("PASS\n");
     return 0;
   }

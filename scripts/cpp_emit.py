@@ -32,9 +32,11 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import importlib
+import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any, cast
@@ -788,10 +790,13 @@ def _emit_solve_parity(
     # baking them in would multiply every golden (x32 on a UR) and push
     # nearly every pose past the near-continuum cap below, shrinking the gate
     # to a handful of poses. The C++ gate calls solve() the same way.
+    # native=False: the golden is the Python oracle. solve() defaults to the
+    # native backend, so where the extension is built the golden would
+    # otherwise record the backend under test.
     solve = (
-        (lambda t: mod.solve(t, allow_rescue=False, enumerate_windings=False))
+        (lambda t: mod.solve(t, allow_rescue=False, enumerate_windings=False, native=False))
         if no_rescue
-        else (lambda t: mod.solve(t, enumerate_windings=False))
+        else (lambda t: mod.solve(t, enumerate_windings=False, native=False))
     )
     rng = np.random.default_rng(seed)
     out: list[str] = [
@@ -992,44 +997,40 @@ def _arm_fk_ceiling(arm: str) -> float:
     return float(eval(spec.fk_atol_expr, {"__builtins__": {}}, ns))
 
 
-# Per-arm artifact-gate allowance for poses where the native solve misses an
-# oracle solution (default 0 = must cover the whole oracle). Set >0 ONLY for a
-# documented, bounded completeness gap. kassow (HP jointlock): its monic-companion
-# eigensolve recovers fewer roots than LAPACK dggev at the degenerate lock samples
-# (axes aligned at multiples of pi/2). Every native solution is still sound
-# (FK-closes) and the gap is a handful of the 120 golden poses; tracked in #544.
-_ARM_MAX_INCOMPLETE = {
-    "kassow_kr810_ik": 4,
-    # srs_polished (#550): the exact SRS core forced through the canonical path
-    # (reach-slack) returns cm-off seeds an LM batch-polish corrects; on a
-    # redundant 7R the LM basin selection is numerically sensitive (Eigen vs numpy
-    # normal-equation solve over 30 iters on the flat manifold), so a couple of
-    # oracle solutions per arm land ~1e-3 from the nearest native one -- sound,
-    # bounded jitter. gen3/j2s7s300/rm75 are near-exact; the yumi arms have tight
-    # joint limits that route many poses through the dense in-limits resolver,
-    # which native under-samples vs Python's 180-pt grid (the extreme near-
-    # continuum poses, oracle > 130, are already dropped from the golden). All
-    # native solutions FK-close to 1e-12; see #550.
-    "gen3_ik": 5,
-    "j2s7s300_ik": 5,
-    "rm75_ik": 5,
-    "yumi_left_ik": 12,
-    "yumi_right_ik": 12,
-    # spherical_shoulder (#551): the q6 redundancy is sampled over an SP3-margin
-    # reachability bracket (90-pt grid); at a pose whose bracket edge falls near a
-    # grid point, native and numpy place the interval a step apart and sample
-    # different (both exact, FK 1e-13) q6 on the continuum. franka is bracket-
-    # stable (0); fr3 has a few edge poses; the polished xarm7/gen72 over-sample
-    # (large sound extensions) but cover the oracle. Small margin for robustness.
-    "franka_panda_ik": 6,
-    "fr3_ik": 6,
-    "xarm7_ik": 6,
-    "gen72_ik": 6,
+# The radius within which a native solution covers a golden one (L-infinity,
+# every joint wrapped). 6R: 1e-3. 7R: a solution samples a one-dimensional
+# self-motion, and the polished families place their samples ~1e-3 apart
+# between backends (the LM polish lands in slightly different spots on a flat
+# manifold, #550), while distinct samples are 2*pi/16 apart. The same radii as
+# tests/_native_parity.MATCH_TOL.
+_MATCH_TOL = {6: 1e-3, 7: 1e-2}
+
+# Known native gaps the gate expects, each tied to its issue: arm -> (per
+# platform, the number of golden poses on which native misses a golden
+# solution; the issue). The goldens are regenerated on the platform that builds
+# the gate, and a boundary pose (a rescue at a singular pose) resolves
+# differently on Linux and macOS, so the count is per platform. The gate fails
+# when an arm misses on more poses, and also when an arm with an entry misses
+# on none, so the PR that closes the gap must delete the entry. The same gaps
+# are strict xfails in tests/test_native_parity.py, which attributes them.
+# Every other arm must cover its whole golden.
+_KNOWN_INCOMPLETE: dict[str, tuple[dict[str, int], str]] = {
+    # Native has no in-limits resolver: where the limit-filtered sweep is
+    # empty, Python resolves the in-limits arc and native falls to the rescue.
+    "fr3_ik": ({"darwin": 5, "linux": 5}, "#615 (spherical-shoulder in-limits resolver)"),
+    # The monic-companion eigensolve loses real roots at degenerate lock samples.
+    "kassow_kr810_ik": ({"darwin": 1, "linux": 3}, "#544 (HP jointlock eigensolve)"),
+    # These golden poses' solutions come from Python's T-perturbation rescue
+    # (the analytic set is empty), which native runs with its own RNG and polish.
+    "yumi_left_ik": ({"linux": 2}, "#622 (rescue differs between backends)"),
+    "yumi_right_ik": ({"darwin": 1, "linux": 2}, "#622 (rescue differs between backends)"),
 }
 
 
-def _arm_max_incomplete(arm: str) -> int:
-    return _ARM_MAX_INCOMPLETE.get(arm, 0)
+def _known_incomplete(arm: str) -> tuple[int, str]:
+    counts, gap = _KNOWN_INCOMPLETE.get(arm, ({}, ""))
+    n = counts.get(sys.platform, 0)
+    return n, gap if n else ""
 
 
 def emit_artifact_gate(gen_dir: Path) -> None:
@@ -1053,14 +1054,15 @@ def emit_artifact_gate(gen_dir: Path) -> None:
     lines += ["", "namespace ssik::artifact_test {", "", "inline int run_all() {", "  int rc = 0;"]
     for a in arms:
         ceil = _f(_arm_fk_ceiling(a))
-        allow = _arm_max_incomplete(a)
+        dof = load_manifest()[a].dof
+        allow, gap = _known_incomplete(a)
         lines.append(
             f'  rc |= run<{a}::DOF>("{a}", {a}::consts(), {a}::solve_parity_cases(),\n'
             f"                     [](const Pose& T) {{\n"
             f"                       ArtifactParams<{a}::DOF> p;\n"
             f"                       p.enumerate_windings = false;\n"
             f"                       return {a}::solve(T, p);\n"
-            f"                     }}, {ceil}, {allow});"
+            f"                     }}, {ceil}, {_f(_MATCH_TOL[dof])}, {allow}, {json.dumps(gap)});"
         )
     lines += ["  return rc;", "}", "", "}  // namespace ssik::artifact_test", ""]
     (gen_dir / "artifact_gate.hpp").write_text("\n".join(lines))
