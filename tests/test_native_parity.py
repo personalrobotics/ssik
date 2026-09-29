@@ -85,13 +85,10 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
         "fanuc_crx20ial_ik": ALL,
         "fanuc_crx30ia_ik": ALL,
         "fanuc_crx3ia_ik": ALL,
-        "fanuc_crx5ia_ik": ALL,
         "openarm_left_ik": ALL,
         "openarm_right_ik": ALL,
         "piper_ik": ALL,
-        "rizon10_ik": ALL,
         "rx160_ik": ALL,
-        "xarm6_ik": ALL,
         "yam_ik": ALL,
     },
     "G": {
@@ -107,20 +104,16 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
 
 KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
     "F": {
-        "big_yam_ik": ALL,
-        "fanuc_crx10ia_ik": ALL,
         "fanuc_crx20ial_ik": ALL,
         "fanuc_crx30ia_ik": ALL,
         "fanuc_crx3ia_ik": ALL,
         "fanuc_crx5ia_ik": ALL,
-        "jaco2_ik": ALL,
         "m0609_ik": ALL,
         "m1013_ik": ALL,
         "piper_ik": ALL,
         "standardbots_thor_ik": ALL,
         "xarm6_ik": ALL,
         "xmatecr7_ik": ALL,
-        "xmatesr3_ik": ALL,
     },
     "J": {
         "fanuc_crx10ia_ik": ALL,

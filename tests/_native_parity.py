@@ -119,10 +119,13 @@ NEW = "new"
 # left this set when both backends came to share one deterministic definition
 # (#622); a rescued solution that lands exactly on a limit is an F case
 # (``_Pose.across_limit``). F stays after #624 made a limit inclusive up to
-# round-off: what is left of it is mostly general_6r's angle error at an exact
-# limit (up to 1e-5, from an ill-conditioned eigen-solve), and the side of the
-# limit it lands on follows the machine's LAPACK kernels. PR CI's Intel and AMD
-# runners pass four F cells that the nightly runner and macOS fail.
+# round-off and #636 polished accepted general_6r solutions to machine
+# precision. What is left is an exact-limit angle at a singular pose
+# (sigma_min < 1e-4, a multiple root accurate to ~sqrt(round-off), where the
+# polish declines), a Python-path general_6r solution that only the
+# near-miss refinement recovered (accurate to its 1e-5 gate; see class J), and
+# the OpenArm SRS elbow sign. The side of the limit these land on follows the
+# machine's LAPACK kernels, and the cells differ between Linux and macOS.
 ROUNDOFF_CLASSES = frozenset({"F"})
 
 # a. FK closure every returned solution must meet: the default policy's
