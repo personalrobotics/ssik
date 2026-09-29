@@ -245,17 +245,19 @@ class Chain:
         """``(FK (N, 4, 4), spatial Jacobian (N, 6, dof))`` for ``q`` of shape ``(N, dof)``."""
         n = q.shape[0]
         links = self._links(q)
-        jac = np.empty((n, 6, self.dof))
+        # Joint frames first, then every column in one vectorised pass.
+        frames = np.empty((n, self.dof, 4, 4))
         acc = np.broadcast_to(_EYE4, (n, 4, 4))
         for i in range(self.dof):
-            p = acc if self._left_is_eye else acc @ self.left[i]
-            z = p[:, :3, :3] @ self.axes[i]
-            o = p[:, :3, 3]
-            jac[:, 0, i] = o[:, 1] * z[:, 2] - o[:, 2] * z[:, 1]
-            jac[:, 1, i] = o[:, 2] * z[:, 0] - o[:, 0] * z[:, 2]
-            jac[:, 2, i] = o[:, 0] * z[:, 1] - o[:, 1] * z[:, 0]
-            jac[:, 3:, i] = z
+            frames[:, i] = acc if self._left_is_eye else acc @ self.left[i]
             acc = acc @ links[:, i]
+        z = (frames[:, :, :3, :3] @ self.axes[:, :, None])[..., 0]
+        o = frames[:, :, :3, 3]
+        jac = np.empty((n, 6, self.dof))
+        jac[:, 0] = o[..., 1] * z[..., 2] - o[..., 2] * z[..., 1]
+        jac[:, 1] = o[..., 2] * z[..., 0] - o[..., 0] * z[..., 2]
+        jac[:, 2] = o[..., 0] * z[..., 1] - o[..., 1] * z[..., 0]
+        jac[:, 3:] = np.swapaxes(z, 1, 2)
         return np.array(acc), jac
 
 
