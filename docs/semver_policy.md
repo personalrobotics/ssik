@@ -13,7 +13,7 @@ ssik follows [SemVer 2.0](https://semver.org/spec/v2.0.0.html): `MAJOR.MINOR.PAT
 - **Wheel manifest**: support for cp311 / cp312 / cp313 × Linux x86_64 / macOS arm64 / macOS x86_64 / Windows x86_64
 - **C++ headers for native consumers** (see below): `ssik.get_include()`, `ssik.get_cmake_dir()`, `ssik.cpp.joint_data()` / `ssik.cpp.JointData`, and a named part of the shipped `ssik_cpp` headers
 
-### C++ surface (since 6.2.0)
+### C++ surface (since 7.0.0)
 
 Every wheel ships the `ssik_cpp` headers. Semver covers only this part of them:
 
