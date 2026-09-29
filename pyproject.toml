@@ -142,6 +142,10 @@ include = [
     "hatch_build.py",
     # hatch_build loads it to fetch the pinned Eigen for the native ext (#606).
     "scripts/fetch_eigen.py",
+    # The header-only C++ solvers + the CMake package template: a wheel built
+    # from the sdist ships them like every other wheel (#641).
+    "cpp/include/ssik_cpp",
+    "cpp/cmake",
     "LICENSE",
     "README.md",
     "pyproject.toml",

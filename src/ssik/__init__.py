@@ -12,6 +12,8 @@ Public surface (v1.0):
   ``refinement_used``).
 - :class:`TolerancePolicy` / :data:`DEFAULT_TOLERANCE_POLICY` --
   knobs for FK closure thresholds (rarely needed).
+- :func:`get_include` / :func:`get_cmake_dir` -- where the wheel's
+  header-only C++ solvers and their CMake package are (:mod:`ssik.cpp`).
 
 Quickstart::
 
@@ -46,6 +48,7 @@ from ssik._version import __version__
 from ssik.core.diagnostic import Diagnostic
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik.cpp import get_cmake_dir, get_include  # the shipped C++ headers (#641)
 from ssik.manipulator import Manipulator
 from ssik.prebuilt import list_arms  # catalog of shipped arms; imports no artifact (#421)
 
@@ -61,5 +64,7 @@ __all__ = [
     "Solution",
     "TolerancePolicy",
     "__version__",
+    "get_cmake_dir",
+    "get_include",
     "list_arms",
 ]

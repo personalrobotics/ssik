@@ -14,9 +14,11 @@ LM-polish budgets. Add new files here as their Cython annotations land.
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 import sysconfig
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +52,74 @@ CYTHON_TARGETS: tuple[str, ...] = (
 NATIVE_EXT_MODULE = "_ssik_native"
 NATIVE_EXT_SOURCE = "cpp/bindings/three_parallel_py.cpp"
 NATIVE_SUPPORTED_PLATFORMS = ("linux", "darwin")
+
+
+# The header-only C++ solvers for native consumers (#641): every wheel ships
+# cpp/include/ssik_cpp as ssik/cpp/include/ssik_cpp, with a relocatable CMake
+# package in ssik/cpp/cmake (found by ssik.get_include / ssik.get_cmake_dir).
+# Headers are platform-independent, so Windows wheels carry them too.
+CPP_HEADERS = "cpp/include/ssik_cpp"
+CPP_CMAKE = "cpp/cmake"
+WHEEL_CPP_DIR = "ssik/cpp"
+
+# Stands in for CMake's @PACKAGE_INIT@ in the shared config template: the wheel's
+# config is rendered here, without CMake, and needs only this macro from it.
+_PACKAGE_INIT = """\
+# Rendered for the ssik wheel by hatch_build.py (@PACKAGE_INIT@ equivalent).
+macro(check_required_components _NAME)
+  foreach(comp ${${_NAME}_FIND_COMPONENTS})
+    if(NOT ${_NAME}_${comp}_FOUND)
+      if(${_NAME}_FIND_REQUIRED_${comp})
+        set(${_NAME}_FOUND FALSE)
+      endif()
+    endif()
+  endforeach()
+endmacro()
+"""
+
+# SameMajorVersion, as CMake's write_basic_package_version_file writes it:
+# compatible with a request for any version up to this one within its major.
+_CONFIG_VERSION = """\
+# ssik_cpp package version: the ssik release (rendered by hatch_build.py).
+set(PACKAGE_VERSION "{version}")
+if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)
+  set(PACKAGE_VERSION_COMPATIBLE FALSE)
+else()
+  if(PACKAGE_FIND_VERSION_MAJOR STREQUAL "{major}")
+    set(PACKAGE_VERSION_COMPATIBLE TRUE)
+  else()
+    set(PACKAGE_VERSION_COMPATIBLE FALSE)
+  endif()
+  if(PACKAGE_FIND_VERSION STREQUAL PACKAGE_VERSION)
+    set(PACKAGE_VERSION_EXACT TRUE)
+  endif()
+endif()
+"""
+
+
+def _cmake_version(version: str) -> str:
+    """The numeric release of a PEP 440 version, as CMake reads versions
+    (``6.2.0`` from ``6.2.0``, ``6.2.0rc1`` or ``6.1.1.dev11+g7cf11a9``)."""
+    m = re.match(r"\d+(\.\d+){0,2}", version)
+    if m is None:
+        raise RuntimeError(f"cannot derive a CMake version from {version!r}")
+    return m.group(0)
+
+
+def _render_cmake_package(root: Path, version: str, out: Path) -> None:
+    """Write the wheel's ssik_cpp CMake package into ``out``: the config rendered
+    from the template ``cmake --install`` also uses, its targets file and a
+    version file for ``version``."""
+    template = (root / CPP_CMAKE / "ssik_cppConfig.cmake.in").read_text()
+    if "@PACKAGE_INIT@" not in template:
+        raise RuntimeError(f"{CPP_CMAKE}/ssik_cppConfig.cmake.in lost its @PACKAGE_INIT@")
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "ssik_cppConfig.cmake").write_text(template.replace("@PACKAGE_INIT@", _PACKAGE_INIT))
+    shutil.copyfile(root / CPP_CMAKE / "ssik_cppWheelTargets.cmake", out / "ssik_cppTargets.cmake")
+    cmake_version = _cmake_version(version)
+    (out / "ssik_cppConfigVersion.cmake").write_text(
+        _CONFIG_VERSION.format(version=cmake_version, major=cmake_version.split(".")[0])
+    )
 
 
 def _native_supported() -> bool:
@@ -223,6 +293,21 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 )
             force_include[str(native_so)] = f"ssik/_ssik_native{so_suffix}"
 
+        # Ship the C++ headers + CMake package (#641). An editable install imports
+        # src/ssik, so ssik.get_include() resolves the checkout's cpp/include and
+        # copies in site-packages would never be read; skip them there.
+        if version != "editable":
+            headers = root / CPP_HEADERS
+            if not (headers / "fk.hpp").is_file():
+                raise RuntimeError(
+                    f"CythonBuildHook: {headers} is missing; every wheel ships the ssik_cpp "
+                    f"headers (the sdist includes them)."
+                )
+            force_include[str(headers)] = f"{WHEEL_CPP_DIR}/include/ssik_cpp"
+            self._cmake_tmp = Path(tempfile.mkdtemp(prefix="ssik-cmake-"))
+            _render_cmake_package(root, self.metadata.version, self._cmake_tmp)
+            force_include[str(self._cmake_tmp)] = f"{WHEEL_CPP_DIR}/cmake"
+
         # Mark wheel as platform-specific so the .so files (which are arch +
         # python-version + OS specific) only get installed on matching hosts.
         build_data["pure_python"] = False
@@ -233,3 +318,8 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
         build_dir = root / "build"
         if build_dir.exists():
             shutil.rmtree(build_dir, ignore_errors=True)
+
+    def finalize(self, version: str, build_data: dict[str, Any], artifact_path: str) -> None:
+        cmake_tmp = getattr(self, "_cmake_tmp", None)
+        if cmake_tmp is not None:
+            shutil.rmtree(cmake_tmp, ignore_errors=True)
