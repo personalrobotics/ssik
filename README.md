@@ -755,6 +755,8 @@ find_package(ssik_cpp REQUIRED)
 target_link_libraries(my_app PRIVATE ssik::ssik_cpp)   # every <arm>_ik.hpp on the include path
 ```
 
+The pip wheel carries the `ssik_cpp` solver headers and this CMake package too: pass `-DCMAKE_PREFIX_PATH="$(python -c 'import ssik; print(ssik.get_cmake_dir())')"`, and build the solver input at runtime with `ssik.cpp.joint_data(arm)` ([`cpp/README.md`](cpp/README.md#use-it-from-the-python-wheel)).
+
 Full guide (install/`find_package`, the bare-`c++` path, the `Solution`/`ArtifactParams` types, `solve_batch`, generating any arm): **[`cpp/README.md`](cpp/README.md)**. Runnable examples: [`cpp/examples/solve_arm.cpp`](cpp/examples/solve_arm.cpp) and the standalone downstream project [`cpp/examples/consumer/`](cpp/examples/consumer/) (built in CI). A MoveIt `KinematicsBase` plugin generator is tracked in [#493](https://github.com/personalrobotics/ssik/issues/493).
 
 Out of scope: collision filtering (use FCL or similar at the application layer) and continuous-trajectory smoothness (typically a separate planner concern).

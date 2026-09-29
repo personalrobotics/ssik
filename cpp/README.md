@@ -78,6 +78,53 @@ c++ -std=c++20 -I<install>/include -I<eigen-include> my_app.cpp
 `examples/consumer/` is a standalone downstream project that consumes the
 **installed** package via `find_package` (the "C++ consumer" CI smoke builds it).
 
+## Use it from the Python wheel
+
+Every ssik wheel (Linux, macOS and Windows) also carries the `ssik_cpp/`
+headers and a relocatable CMake package, so a project that already depends on
+the `ssik` Python package, such as a scikit-build-core extension, can call the
+family solvers with no source checkout:
+
+```bash
+cmake -S . -B build \
+  -DCMAKE_PREFIX_PATH="$(python -c 'import ssik; print(ssik.get_cmake_dir())')"
+```
+
+```cmake
+find_package(ssik_cpp 6 CONFIG REQUIRED)   # the ssik release; any 6.x >= the request
+target_link_libraries(my_ext PRIVATE ssik::ssik_cpp)
+```
+
+It is the same `ssik::ssik_cpp` target as the `cmake --install` route, with the
+same Eigen and thread dependencies. `ssik.get_include()` is the include
+directory, for builds without CMake. Eigen is still yours to provide: the
+package `find_dependency()`s `Eigen3` at any version, and ssik tests against
+**3.4.0**, the release pinned in `scripts/fetch_eigen.py` (`--cmake-prefix`
+prints a prefix for it).
+
+The wheel ships the `ssik_cpp/` primitives and solvers, not the generated
+`<arm>_ik.hpp` artifacts. Build the solver input at runtime from the Python
+arm instead:
+
+```python
+d = ssik.cpp.joint_data(ssik.Manipulator.from_prebuilt("ur5e"))
+d.solver      # "ikgeo.three_parallel" -> three_parallel_artifact_solve
+d.axis, d.t_left, d.t_right, d.joint_type   # JointConsts<6>
+d.lo, d.hi, d.present                        # JointLimits<6>
+```
+
+```cpp
+#include "ssik_cpp/solvers/three_parallel.hpp"
+auto sols = ssik::three_parallel_artifact_solve(consts, limits, T, ssik::ArtifactParams<6>{});
+```
+
+`examples/wheel_consumer/` is a complete version, run against the installed
+wheel in CI ("Native wheel build"). For a generated artifact, emit it from a
+checkout (`python scripts/cpp_emit.py <arm>_ik`) or use the `cmake --install`
+route above. Which C++ names semver covers is in `docs/semver_policy.md`. In an
+editable install `get_include()` returns the checkout's `cpp/include`, and
+`get_cmake_dir()` raises: the CMake package is built into wheels only.
+
 ## Self-motion charts (redundant 7R)
 
 `ssik_cpp/chart.hpp` exposes the self-motion manifold of a 7R pose as charts, the

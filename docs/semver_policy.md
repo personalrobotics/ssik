@@ -11,6 +11,17 @@ ssik follows [SemVer 2.0](https://semver.org/spec/v2.0.0.html): `MAJOR.MINOR.PAT
 - **Prebuilt artifacts** (`ssik.prebuilt.*`): their `solve(T, **kwargs)` signature, the four module constants `BASE_LINK / EE_LINK / DOF / T_HOME`, and the per-module `__all__`
 - **CLI**: `ssik build / classify / add-arm` argument shapes
 - **Wheel manifest**: support for cp311 / cp312 / cp313 × Linux x86_64 / macOS arm64 / macOS x86_64 / Windows x86_64
+- **C++ headers for native consumers** (see below): `ssik.get_include()`, `ssik.get_cmake_dir()`, `ssik.cpp.joint_data()` / `ssik.cpp.JointData`, and a named part of the shipped `ssik_cpp` headers
+
+### C++ surface (since 6.2.0)
+
+Every wheel ships the `ssik_cpp` headers. Semver covers only this part of them:
+
+- **Package**: the CMake package `ssik_cpp` (from `ssik.get_cmake_dir()` or `cmake --install` of `cpp/`), its target `ssik::ssik_cpp`, and the include path `ssik_cpp/solvers/three_parallel.hpp`.
+- **Entry point**: `ssik::three_parallel_artifact_solve(const JointConsts<6>&, const JointLimits<6>&, const Pose&, const ArtifactParams<6>&)`, for the UR family (`ikgeo.three_parallel`). With the arrays of `ssik.cpp.joint_data()` it returns the set Python's `solve()` returns with the same options, under the rules above.
+- **Types it takes and returns**, in namespace `ssik`: `Pose`, `JointConsts<N>`, `JointType`, `JointLimits<N>`, `ArtifactParams<N>`, `SeedMetric`, `Solution<N>`, `Refinement`. Their names, field names, field types and meaning, enumerator values, and the `ArtifactParams` defaults are covered. Adding a field with a default is MINOR.
+
+Not covered: the other families' `*_artifact_solve` functions (each is added here once a consumer has verified it the same way), the defaulted trailing `Tolerances` argument (pass none), every `detail` and `*_detail` namespace, every other function, type and header in `ssik_cpp/`, the generated `cpp/gen/<arm>_ik.hpp` artifacts, and binary compatibility (the headers are compiled into your code, so rebuild when ssik changes). Eigen is the consumer's; ssik tests against the release pinned in `scripts/fetch_eigen.py` (3.4.0).
 
 ### Not public (no semver guarantee)
 

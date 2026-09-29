@@ -199,6 +199,24 @@ the two counts separately.
       show_root_heading: false
       show_root_full_path: false
 
+## C++ headers: `ssik.cpp`
+
+Every wheel ships the header-only C++ solvers (`ssik_cpp/`) and a CMake package
+for them. `ssik.get_include()` and `ssik.get_cmake_dir()` locate them, and
+`ssik.cpp.joint_data(arm)` returns the arrays a C++ caller builds
+`ssik::JointConsts<N>` and `ssik::JointLimits<N>` from. The consumer guide is
+[`cpp/README.md`](https://github.com/personalrobotics/ssik/blob/main/cpp/README.md#use-it-from-the-python-wheel);
+the C++ names covered by semver are listed in the [semver policy](semver_policy.md).
+
+::: ssik.cpp
+    options:
+      show_root_heading: false
+      members:
+        - get_include
+        - get_cmake_dir
+        - joint_data
+        - JointData
+
 ## CLI: `ssik build`
 
 ```bash
