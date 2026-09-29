@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 
 from ssik.prebuilt._manifest import load_manifest
 from tests._hypothesis_strategies import non_singular_q6r, non_singular_q7r
@@ -206,6 +206,9 @@ def test_prebuilt_7r_random_q_roundtrip(
     [a[0] for a in PREBUILT_ARMS_7R if a[0] not in ("iiwa14_ik", "gen3_ik")],
 )
 @given(q_star=non_singular_q7r())
+# #617: on rizon4 this pose's self-motion reaches the lock joint only between two
+# lock samples, so the sweep is empty and only the rescue recovers it.
+@example(q_star=np.array([0.0, 1.0, -2.0, 0.375, -2.0, 1.0, 0.0]))
 @settings(
     max_examples=100,  # tighter than the default-policy sweep; LM polish adds latency
     deadline=None,

@@ -152,10 +152,9 @@ def test_bulletproof_solve_auto_recovers_ridge(
     T = mod.fk(q_star)
 
     # native=False: this asserts the #319 Python bulletproof-rescue contract at a
-    # pinned ridge, including the refinement_used=="lm" tag. Native RR-jointlock
-    # recovers the ridge through its lock-sweep rather than the LM T-perturbation
-    # rescue (tagged differently), so the "lm" invariant is Python-path-specific;
-    # native ridge coverage is gated by the relative-completeness model (#554).
+    # pinned ridge, including the refinement_used=="lm" tag. Native runs the same
+    # rescue (#622, and on RR jointlock since #617) and is held to Python by
+    # tests/test_native_parity.py.
     sols = mod.solve(T, respect_limits=False, native=False)
 
     assert len(sols) >= n_expected_min, (

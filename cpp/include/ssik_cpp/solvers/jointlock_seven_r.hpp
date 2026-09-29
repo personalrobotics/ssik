@@ -12,10 +12,9 @@
 // 6R sub-chain whose DH bridge + inner-solver constants are emitted like any 6R
 // arm. The runtime is a thin sweep: solve each sample's sub-chain for T, pad the
 // 6-vec with the locked angle, re-verify against the 7R target, dedup, finalize.
-// The RR path takes NO rescue (an RR-covered arm is only emitted when its sweep
-// provably covers the oracle, so rescue would only mask a gap, #535); the HP path
-// KEEPS the empty-gated rescue for the between-sample poses Python also rescues
-// (see jointlock_hp_artifact_solve).
+// Both paths take the empty-gated T-perturbation rescue, as Python does: the
+// fixed sample schedule can straddle a narrow self-motion arc, so some reachable
+// poses have no solution at any sample (#617 on rizon4 / rizon10; kassow too).
 #pragma once
 
 #include <array>
@@ -106,14 +105,19 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
     return jointlock_detail::dedup7(all, kGeneral6rDedupAtol);
   };
 
-  // NO rescue (#535): jointlock is a tier-1 SAMPLING solver -- its completeness
-  // model is "the 16 sampled lock slices", and the emitter only ships an arm
-  // whose RR-only sweep provably covers the full oracle (direct-completeness
-  // check). The T-perturbation rescue finds OFF-sample solutions, which both blur
-  // that model and (as seen on kassow) silently MASK a genuinely-incomplete sweep
-  // by doing the HP kernel's job. Omitting it means any incompleteness fails
-  // loudly at the gate instead of being hidden. HP-needing arms (kassow) are
-  // deferred to the Study-quaternion kernel, not rescued into looking complete.
+  // Empty-gated rescue, as in Python's jointlock artifact and the HP path below.
+  // #535 left it out on the grounds that an RR-covered arm's 16-sample sweep
+  // provably covers the oracle (the emitter's onboarding probe,
+  // scripts/cpp_emit.py _jointlock_rr_complete). That holds for the probe's
+  // random poses, not for every pose: a pose whose self-motion reaches the lock
+  // joint only over an arc narrower than the sample spacing lies between two
+  // samples, so the sweep is empty on both backends (#617: rizon4 reaches it
+  // only over [-2.046, -1.965] between samples 0.38 rad apart; ~5e-5 of random
+  // poses on rizon4 / rizon10). The rescue's perturbed sweep hits a sample and
+  // the polish pulls the lock joint back off-grid, which is how Python recovers
+  // them. The rescue fires only on an empty sweep, so it cannot hide a sweep
+  // that drops some branches while returning others; the parity gate
+  // (tests/test_native_parity.py) still sees those.
   ArtifactParams<7> p_limits;
   // Intermediate pass: never lift here, or the lifts would be produced
   // twice (see ArtifactParams::enumerate_windings).
@@ -122,6 +126,12 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);
+  if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
+    // Re-dedup in the Linf metric of the sweep, as the HP path does.
+    in_limits = finalize_solutions<7>(
+        jointlock_detail::dedup7(rescue_via_T_perturbation<7>(core, c, T), kGeneral6rDedupAtol),
+        c, lim, p_limits);
+  }
   ArtifactParams<7> p_seed = p;
   p_seed.respect_limits = false;
   // The single lifting stage (#562): this is the call that yields the returned
@@ -138,9 +148,8 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
 // JointConsts<6> (hp_core needs the POE FK for its FK-verify + lm_refine, unlike
 // the RR path which runs refinement-off).
 //
-// Unlike the RR jointlock, this path KEEPS the T-perturbation rescue (empty-gated,
-// as in hp_artifact_solve / general_6r_artifact_solve). The RR arms omit rescue
-// because their fixed 16-sample sweep provably covers the oracle; kassow has poses
+// Like the RR jointlock, this path takes the T-perturbation rescue (empty-gated,
+// as in hp_artifact_solve / general_6r_artifact_solve): kassow has poses
 // reachable only at a lock value BETWEEN samples (the redundant manifold is
 // sampled, not continuous), which no fixed-sample sweep can hit. Python's shipping
 // solve rescues exactly these (rescue jitters T, the sweep hits a nearby sample,
