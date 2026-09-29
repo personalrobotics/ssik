@@ -59,10 +59,20 @@ of :func:`ssik.refinement.lm_refine_batch`: at most ``refinement_max_iters``
 steps ``dq = clip((J^T J + 1e-9 I)^-1 J^T log(T_target FK(q)^-1), +-0.5)``,
 stopping as soon as the Frobenius residual drops below 1e-12, aborting a
 trajectory whose residual exceeds 5x its best after 4 iterations, and
-accepting the end point when its residual is at most ``fk_atol``. (#622
-chose this polish over the adaptive single-candidate ``lm_refine`` on
-recovery: the adaptive one's stall guard and undamped 6R step drop
-candidates at singular poses, e.g. ur16e returned [] there.) Accepted
+accepting the end point when its residual is at most ``fk_atol``. A candidate
+that polish does not accept is polished again from its perturbed solution, the
+same way except with the damping scaled by the residual,
+``1e-9 * clip(||log(T_target FK(q)^-1)||_2, 1e-5, 1)``
+(``residual_scaled_damping``), and is accepted by the same rule. (#622 chose
+this polish over the adaptive single-candidate ``lm_refine`` on recovery: the
+adaptive one's stall guard and undamped 6R step drop candidates at singular
+poses, e.g. ur16e returned [] there. #646 added the second polish: the fixed
+damping shortens the step along a Jacobian direction with ``sigma < ~3e-5``,
+so near a singular solution it stalls above ``fk_atol``; a piper pose at a
+wrist singularity, sigma_min 3e-6, came back [] although its own in-limits
+configuration was an exact solution. The scaled damping alone instead loses
+exactly singular 7R solutions that the fixed damping reaches, so the second
+polish only adds to the first.) Accepted
 solutions are deduplicated in perturbation order, then candidate order, by
 the L2 wrap-to-pi distance ``dedup_atol``; the first one seen is kept.
 """
@@ -258,6 +268,21 @@ def rescue_via_T_perturbation(
             divergence_factor=_DIVERGENCE_FACTOR,
             divergence_min_iters=_DIVERGENCE_MIN_ITERS,
         )
+        # Second polish, from the seed, for the candidates the first did not
+        # accept (the module docstring; #646).
+        retry = ~(fk_resids <= fk_atol)
+        if retry.any():
+            q_polished[retry], fk_resids[retry], _ = lm_refine_batch(
+                q_seeds[retry],
+                fk_fn,
+                jac,
+                T_target,
+                fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
+                max_iters=refinement_max_iters,
+                divergence_factor=_DIVERGENCE_FACTOR,
+                divergence_min_iters=_DIVERGENCE_MIN_ITERS,
+                residual_scaled_damping=True,
+            )
 
         for q_ref, fk_resid in zip(q_polished, fk_resids, strict=True):
             if fk_resid > fk_atol:

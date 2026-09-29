@@ -712,6 +712,7 @@ def lm_refine_batch(
         [NDArray[np.float64]], tuple[NDArray[np.float64], NDArray[np.float64]]
     ]
     | None = None,
+    residual_scaled_damping: bool = False,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.intp]]:
     """Batched Newton polish for ``N`` seeds against a single target T.
 
@@ -737,6 +738,16 @@ def lm_refine_batch(
         :func:`lm_refine`. Default 2.0 matches the seven_r.srs_polished
         tuning from #203.
     :param divergence_min_iters: armed-after iter count.
+    :param residual_scaled_damping: scale the Tikhonov damping with the
+        residual, ``lambda = 1e-9 * clip(||r||, 1e-5, 1)`` for the SE(3) log
+        residual ``r``, instead of the fixed ``1e-9``. The fixed value shortens
+        the step along a Jacobian direction with ``sigma^2`` well below it
+        (``sigma < ~3e-5``) to ``sigma^2 / (sigma^2 + 1e-9)`` of Newton's, so
+        near a singular solution the iteration crawls and stalls (#646); the
+        scaled damping (Levenberg-Marquardt with ``lambda ~ ||r||``) approaches
+        Newton's step as the residual vanishes. The ``1e-5`` floor keeps it
+        above the round-off of ``J^T J``. At an exactly singular solution the
+        fixed damping is the steadier of the two, so neither dominates.
 
     :returns: ``(q_polished, fk_residuals, iters_used)`` where
         ``fk_residuals[i] < fk_atol`` indicates candidate ``i`` converged;
@@ -818,7 +829,11 @@ def lm_refine_batch(
         jtj = np.einsum("nji,njk->nik", jac_step, jac_step)  # (N_step, dof, dof)
         # Tikhonov damping: small fixed value handles near-singular Jacobians
         # without per-iter conditioning probes.
-        jtj_damped = jtj + 1e-9 * eye_dof
+        if residual_scaled_damping:
+            lam = 1e-9 * np.clip(np.linalg.norm(twist, axis=1), 1e-5, 1.0)
+            jtj_damped = jtj + lam[:, None, None] * eye_dof
+        else:
+            jtj_damped = jtj + 1e-9 * eye_dof
         jtr = np.einsum("nji,nj->ni", jac_step, twist)  # (N_step, dof)
         # numpy.linalg.solve with batched LHS (N, dof, dof) and RHS as
         # (N, dof, 1) returns (N, dof, 1); squeeze back to (N, dof).

@@ -16,7 +16,8 @@
 // correctly rounded IEEE operations, so bit-identical in both languages and on
 // every platform; no PRNG) and the same polish (lm_refine_batch's fixed-damping
 // Newton with its 5.0 / 4 divergence guard, aiming for 1e-12 and accepting the
-// end point at fk_atol). Native and Python therefore recover the same set at a
+// end point at fk_atol, then the residual-scaled-damping retry of a candidate it
+// does not accept). Native and Python therefore recover the same set at a
 // singular pose, up to float round-off in the polish. A change on one side must
 // be mirrored on the other.
 #pragma once
@@ -90,22 +91,25 @@ inline std::array<double, 6> perturbation_direction(int i) {
 
 // The polish: ssik.refinement.lm_refine_batch for one candidate, with the
 // arguments rescue.py passes (target `tight`, 5.0 / 4 divergence guard). Step
-// dq = clip((J^T J + 1e-9 I)^-1 J^T log(T_target FK(q)^-1), +-0.5), the normal
-// equations solved by partial-pivot LU as numpy.linalg.solve does: at a
-// singular pose J^T J is nearly singular and the step's null-space part, which
-// decides the candidate's fate, depends on the factorization (with LDLT, twice
-// as many parity-gate poses had a rescue empty on one backend only). Returns
-// (q, residual) when the Frobenius
-// residual drops below `tight`, or when all max_iters steps ran and the end
-// point is within `accept`; nullopt when the divergence guard fired or the end
-// point misses `accept`. No stall guard: lm_refine_batch has none.
+// dq = clip((J^T J + lambda I)^-1 J^T r, +-0.5) with r = log(T_target FK(q)^-1)
+// and lambda = 1e-9, or 1e-9 * clip(|r|, 1e-5, 1) when `scaled_damping`
+// (lm_refine_batch's residual_scaled_damping). The normal equations are solved
+// by partial-pivot LU as numpy.linalg.solve does: at a singular pose J^T J is
+// nearly singular and the step's null-space part, which decides the candidate's
+// fate, depends on the factorization (with LDLT, twice as many parity-gate
+// poses had a rescue empty on one backend only). Returns (q, residual) when the
+// Frobenius residual drops below `tight`, or when all max_iters steps ran and
+// the end point is within `accept`; nullopt when the divergence guard fired or
+// the end point misses `accept`. No stall guard: lm_refine_batch has none.
 template <int N>
 std::optional<std::pair<std::array<double, N>, double>> polish(const JointConsts<N>& c,
                                                                const std::array<double, N>& seed,
                                                                const Pose& t_target, double tight,
-                                                               double accept, int max_iters) {
+                                                               double accept, int max_iters,
+                                                               bool scaled_damping) {
   constexpr double kStepClip = 0.5;
   constexpr double kDamping = 1e-9;
+  constexpr double kDampingResidualFloor = 1e-5;
   constexpr double kDivergenceFactor = 5.0;
   constexpr int kDivergenceMinIters = 4;
   std::array<double, N> q = seed;
@@ -120,8 +124,10 @@ std::optional<std::pair<std::array<double, N>, double>> polish(const JointConsts
       return std::nullopt;
     const Eigen::Matrix<double, 6, 1> res = se3_log_residual(t_target * t_q.inverse());
     const Eigen::Matrix<double, 6, N> js = spatial_jacobian<N>(c, q);
+    const double lambda =
+        scaled_damping ? kDamping * std::clamp(res.norm(), kDampingResidualFloor, 1.0) : kDamping;
     const Eigen::Matrix<double, N, N> jtj =
-        js.transpose() * js + kDamping * Eigen::Matrix<double, N, N>::Identity();
+        js.transpose() * js + lambda * Eigen::Matrix<double, N, N>::Identity();
     const Eigen::Matrix<double, N, 1> dq = jtj.partialPivLu().solve(js.transpose() * res);
     for (int i = 0; i < N; ++i) q[i] += std::max(-kStepClip, std::min(kStepClip, dq[i]));
   }
@@ -185,9 +191,15 @@ std::vector<Solution<N>> rescue_via_T_perturbation(SolveFn&& solve_fn, const Joi
   parallel_for(static_cast<std::size_t>(n), [&](std::size_t idx) {
     for (const auto& sol : solve_fn(T_perts[idx])) {
       // Polish back to the ORIGINAL T_target: aim for machine precision and
-      // accept the end point at fk_atol (a genuine ridge stalls in between).
-      const auto r =
-          rescue_detail::polish<N>(c, sol.q, T_target, tight, p.fk_atol, p.refinement_max_iters);
+      // accept the end point at fk_atol (a genuine ridge stalls in between). A
+      // candidate the fixed-damping polish does not accept is polished again
+      // from its seed with residual-scaled damping, which does not stall near
+      // a singular solution (#646; rescue.py's module docstring).
+      auto r = rescue_detail::polish<N>(c, sol.q, T_target, tight, p.fk_atol,
+                                        p.refinement_max_iters, /*scaled_damping=*/false);
+      if (!r)
+        r = rescue_detail::polish<N>(c, sol.q, T_target, tight, p.fk_atol, p.refinement_max_iters,
+                                     /*scaled_damping=*/true);
       if (!r) continue;
       per[idx].push_back(Solution<N>{r->first, r->second, Refinement::Rescue});
     }

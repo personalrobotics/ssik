@@ -231,6 +231,68 @@ def test_rescue_idempotent_when_direct_solve_succeeds() -> None:
         )
 
 
+# #646: piper at a wrist singularity (q5 = 8e-6, sigma_min(J) = 3e-6) with q3
+# exactly at its upper limit 0. The configuration itself is an exact in-limits
+# solution, but the analytic set holds it only ~2e-6 across the limit, so the
+# rescue fires, and its fixed-damping polish stalled above fk_atol on every
+# candidate near it: native returned [] even when seeded with it. Also pinned in
+# the native-parity gate (tests/data/native_parity_poses.json, piper_ik
+# "pinned").
+PIPER_646 = np.array(
+    [
+        -2.3785873919285248,
+        1.7912596863653287,
+        0.0,
+        0.6008304627412366,
+        8.127217409783666e-06,
+        -1.5707963267948966,
+    ]
+)
+
+
+def _wrap_linf(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.max(np.abs((a - b + np.pi) % (2.0 * np.pi) - np.pi)))
+
+
+@pytest.mark.parametrize("native", [True, False], ids=["native", "python"])
+def test_seeded_solve_at_near_singular_limit_pose_646(native: bool) -> None:
+    """Seeded with an exact in-limits configuration, the default solve returns
+    an in-limits solution that closes FK, on both backends."""
+    from ssik import DEFAULT_TOLERANCE_POLICY
+    from ssik.prebuilt.agilex import piper_ik
+
+    t = piper_ik.fk(PIPER_646)
+    sols = piper_ik.solve(t, q_seed=PIPER_646, max_solutions=1, native=native)
+    assert len(sols) == 1, f"seeded solve returned {len(sols)} solutions at a reachable pose"
+    q = sols[0].q
+    for j, (x, joint) in enumerate(zip(q, piper_ik._KB.joints, strict=True)):
+        assert joint.limits is not None
+        lo, hi = joint.limits
+        assert lo <= x <= hi, f"q{j + 1} = {x!r} outside [{lo}, {hi}]"
+    fk_err = float(np.linalg.norm(piper_ik.fk(q) - t))
+    assert fk_err <= DEFAULT_TOLERANCE_POLICY.subproblem_numerical, f"FK error {fk_err:.1e}"
+
+
+def test_rescue_recovers_near_singular_configuration_646() -> None:
+    """The shared rescue recovers the pose's own configuration to machine
+    precision: the Python definition directly, and the native port through the
+    default solve (the native analytic set has nothing in limits here)."""
+    from ssik.prebuilt.agilex import piper_ik
+
+    t = piper_ik.fk(PIPER_646)
+    rescued = rescue_via_T_perturbation(
+        piper_ik.fk,
+        lambda tp, **kw: piper_ik.solve(tp, allow_rescue=False, **kw),
+        t,
+        jacobian_fn=piper_ik._spatial_jacobian,
+    )
+    native = piper_ik.solve(t, native=True)
+    for name, sols in (("Python rescue", rescued), ("native solve", native)):
+        near = [s for s in sols if _wrap_linf(s.q, PIPER_646) < 1e-6]
+        assert near, f"{name}: no solution within 1e-6 of the configuration ({len(sols)} returned)"
+        assert near[0].fk_residual < 1e-12, f"{name}: residual {near[0].fk_residual:.1e}"
+
+
 def test_rescue_polishes_well_conditioned_to_machine_precision_384() -> None:
     """#384 regression: a rescue whose perturbation lands off-ridge is
     well-conditioned and must be polished to machine precision, not merely to
