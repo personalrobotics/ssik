@@ -1,35 +1,38 @@
-// Family-agnostic T-perturbation rescue (#319), ported from
+// Family-agnostic T-perturbation rescue (#319): the native port of
 // ssik.refinement.rescue.rescue_via_T_perturbation. Recovers IK at reachable
 // but rank-deficient poses (kinematic singularities) where the closed-form
-// analytical extraction returns nothing: perturb T_target by small random SE(3)
+// analytical extraction returns nothing: perturb T_target by small SE(3)
 // increments (off the rank-deficient ridge), re-solve the analytical core at
 // each perturbed pose, then Newton-polish every candidate back to the original
 // T_target. Returns the unique FK-closing solutions.
 //
 // Like the Python original this is SOLVER-AGNOSTIC: the analytical core is a
-// callable, so one implementation serves every family (three_parallel /
-// spherical / SRS now; RR / HP when they gain native cores). Each
+// callable, so one implementation serves every family. Each
 // <family>_artifact_solve wires it in by passing its own core.
 //
-// RNG note: this uses a portable std PRNG, NOT numpy's PCG64, so at a singular
-// pose (where the solution set is an ill-posed continuum sampled via the
-// perturbations) the recovered SET differs from Python's -- both are sound
-// (every solution FK-closes), which is the only meaningful contract there
-// (#56). On the non-singular poses that dominate, rescue never fires, so the
-// artifact stays bit-for-bit with Python.
+// ONE DEFINITION (#622): this implements exactly the algorithm that the module
+// docstring of src/ssik/refinement/rescue.py ("The definition") owns -- the
+// same deterministic perturbation sequence (an R_6 Kronecker sequence built from
+// correctly rounded IEEE operations, so bit-identical in both languages and on
+// every platform; no PRNG) and the same polish (lm_refine_batch's fixed-damping
+// Newton with its 5.0 / 4 divergence guard, aiming for 1e-12 and accepting the
+// end point at fk_atol). Native and Python therefore recover the same set at a
+// singular pose, up to float round-off in the polish. A change on one side must
+// be mirrored on the other.
 #pragma once
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdint>
-#include <random>
+#include <limits>
+#include <optional>
+#include <utility>
 #include <vector>
 
 #include <Eigen/Dense>
 
 #include "ssik_cpp/fk.hpp"
-#include "ssik_cpp/newton.hpp"  // lm_refine
+#include "ssik_cpp/newton.hpp"  // se3_log_residual, spatial_jacobian
 #include "ssik_cpp/parallel.hpp"
 #include "ssik_cpp/rotation.hpp"
 
@@ -48,6 +51,9 @@ double reach_radius(const JointConsts<N>& c) {
   return r;
 }
 
+// The rescue's parameters: rescue_via_T_perturbation's keyword defaults, which
+// every Python call site uses. A call site that changes one leaves the shared
+// definition (#622).
 struct RescueParams {
   int n_perturbations = 16;
   double perturbation_scale_m = 5e-3;
@@ -60,10 +66,69 @@ struct RescueParams {
   // finalize does not re-dedup (#534). Two solutions the solver considers the same
   // (< 1e-3 wrap-to-pi) must not both survive the rescue.
   double dedup_atol = 1e-3;
-  std::uint64_t seed = 20260608;
 };
 
 namespace rescue_detail {
+
+// frac(phi^-(k+1)), k = 0..5, for the real root phi of x^7 = x + 1: the R_6
+// Kronecker sequence's increments. Mirrors rescue.py's _KRONECKER_ALPHA.
+inline constexpr std::array<double, 6> kKroneckerAlpha = {
+    0.8986537126286993, 0.8075784952213448, 0.7257334129697598,
+    0.6521830259439717, 0.5860866975779695, 0.5266889867007359};
+inline constexpr double kSqrt3 = 1.7320508075688772;
+
+// Perturbation i's unscaled SE(3) direction u_i, translation first:
+// sqrt(3) * (2 * frac((i + 1) * alpha_k) - 1). rescue.py's perturbation_direction.
+inline std::array<double, 6> perturbation_direction(int i) {
+  std::array<double, 6> u{};
+  for (int k = 0; k < 6; ++k) {
+    const double x = static_cast<double>(i + 1) * kKroneckerAlpha[k];
+    u[k] = kSqrt3 * (2.0 * (x - std::floor(x)) - 1.0);
+  }
+  return u;
+}
+
+// The polish: ssik.refinement.lm_refine_batch for one candidate, with the
+// arguments rescue.py passes (target `tight`, 5.0 / 4 divergence guard). Step
+// dq = clip((J^T J + 1e-9 I)^-1 J^T log(T_target FK(q)^-1), +-0.5), the normal
+// equations solved by partial-pivot LU as numpy.linalg.solve does: at a
+// singular pose J^T J is nearly singular and the step's null-space part, which
+// decides the candidate's fate, depends on the factorization (with LDLT, twice
+// as many parity-gate poses had a rescue empty on one backend only). Returns
+// (q, residual) when the Frobenius
+// residual drops below `tight`, or when all max_iters steps ran and the end
+// point is within `accept`; nullopt when the divergence guard fired or the end
+// point misses `accept`. No stall guard: lm_refine_batch has none.
+template <int N>
+std::optional<std::pair<std::array<double, N>, double>> polish(const JointConsts<N>& c,
+                                                               const std::array<double, N>& seed,
+                                                               const Pose& t_target, double tight,
+                                                               double accept, int max_iters) {
+  constexpr double kStepClip = 0.5;
+  constexpr double kDamping = 1e-9;
+  constexpr double kDivergenceFactor = 5.0;
+  constexpr int kDivergenceMinIters = 4;
+  std::array<double, N> q = seed;
+  double r_best = std::numeric_limits<double>::infinity();
+  for (int it = 0; it < max_iters; ++it) {
+    const Pose t_q = fk<N>(c, q);
+    const double fro = (t_q - t_target).norm();
+    if (fro < tight) return std::make_pair(q, fro);
+    if (fro < r_best)
+      r_best = fro;
+    else if (it >= kDivergenceMinIters && fro > kDivergenceFactor * r_best)
+      return std::nullopt;
+    const Eigen::Matrix<double, 6, 1> res = se3_log_residual(t_target * t_q.inverse());
+    const Eigen::Matrix<double, 6, N> js = spatial_jacobian<N>(c, q);
+    const Eigen::Matrix<double, N, N> jtj =
+        js.transpose() * js + kDamping * Eigen::Matrix<double, N, N>::Identity();
+    const Eigen::Matrix<double, N, 1> dq = jtj.partialPivLu().solve(js.transpose() * res);
+    for (int i = 0; i < N; ++i) q[i] += std::max(-kStepClip, std::min(kStepClip, dq[i]));
+  }
+  const double final_fro = (fk<N>(c, q) - t_target).norm();
+  if (final_fro > accept) return std::nullopt;
+  return std::make_pair(q, final_fro);
+}
 
 // ||wrap_to_pi(a - b)||_2, the dedup metric.
 template <int N>
@@ -90,24 +155,24 @@ std::vector<Solution<N>> rescue_via_T_perturbation(SolveFn&& solve_fn, const Joi
   const double tight = std::min(1e-12, p.fk_atol);
   const int n = p.n_perturbations;
 
-  // Phase 1 (serial, cheap): draw the perturbed poses. Kept serial so the shared
-  // PRNG is consumed in the exact same order regardless of thread scheduling --
-  // the recovered set stays bit-identical to the single-threaded rescue.
-  std::mt19937_64 rng(p.seed);
-  std::normal_distribution<double> normal(0.0, 1.0);
+  // Phase 1 (serial, cheap): the perturbed poses, in the operation order of
+  // rescue.py's _perturbation, so the two agree to the last bit up to libm's
+  // sin/cos.
   std::vector<Pose> T_perts(n);
   for (int i = 0; i < n; ++i) {
     const double mult = p.scale_multipliers[i % p.scale_multipliers.size()];
-    // Draw dx (translation) then w (so3), matching the Python draw order.
-    Eigen::Vector3d dx, w;
-    for (int k = 0; k < 3; ++k) dx[k] = normal(rng) * p.perturbation_scale_m * mult;
-    for (int k = 0; k < 3; ++k) w[k] = normal(rng) * p.perturbation_scale_rad * mult;
-    const double angle = w.norm();
-    Eigen::Matrix3d R_delta = Eigen::Matrix3d::Identity();
-    if (angle > 0.0) R_delta = rotation_matrix(w / angle, angle);
+    const std::array<double, 6> u = rescue_detail::perturbation_direction(i);
+    const double w0 = u[3] * p.perturbation_scale_rad * mult;
+    const double w1 = u[4] * p.perturbation_scale_rad * mult;
+    const double w2 = u[5] * p.perturbation_scale_rad * mult;
+    const double angle = std::sqrt(w0 * w0 + w1 * w1 + w2 * w2);
     Pose dT = Pose::Identity();
-    dT.block<3, 3>(0, 0) = R_delta;
-    dT.block<3, 1>(0, 3) = dx;
+    if (angle > 0.0)
+      dT.block<3, 3>(0, 0) =
+          rotation_matrix(Eigen::Vector3d(w0 / angle, w1 / angle, w2 / angle), angle);
+    dT(0, 3) = u[0] * p.perturbation_scale_m * mult;
+    dT(1, 3) = u[1] * p.perturbation_scale_m * mult;
+    dT(2, 3) = u[2] * p.perturbation_scale_m * mult;
     T_perts[i] = T_target * dT;
   }
 
@@ -119,11 +184,11 @@ std::vector<Solution<N>> rescue_via_T_perturbation(SolveFn&& solve_fn, const Joi
   std::vector<std::vector<Solution<N>>> per(n);
   parallel_for(static_cast<std::size_t>(n), [&](std::size_t idx) {
     for (const auto& sol : solve_fn(T_perts[idx])) {
-      // Polish back to the ORIGINAL T_target: tight (machine precision) then a
-      // loose retry for candidates that only reach fk_atol on a genuine ridge.
-      auto r = lm_refine<N>(c, sol.q, T_target, tight, p.refinement_max_iters);
-      if (!r) r = lm_refine<N>(c, sol.q, T_target, p.fk_atol, p.refinement_max_iters);
-      if (!r || r->second > p.fk_atol) continue;
+      // Polish back to the ORIGINAL T_target: aim for machine precision and
+      // accept the end point at fk_atol (a genuine ridge stalls in between).
+      const auto r =
+          rescue_detail::polish<N>(c, sol.q, T_target, tight, p.fk_atol, p.refinement_max_iters);
+      if (!r) continue;
       per[idx].push_back(Solution<N>{r->first, r->second, Refinement::Rescue});
     }
   });

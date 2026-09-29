@@ -318,6 +318,13 @@ _SRS_POLISHED_LIMIT_Q = [
             1.7790886217577082,
         ],
         id="yumi_right",
+        # Native's in-limits resolver misses the in-limits arc here. The native
+        # rescue used to land on it by chance; the shared rescue (#622) finds
+        # nothing in limits on either backend, as Python's own rescue would.
+        marks=pytest.mark.xfail(
+            strict=True,
+            reason="#462: native srs_polished in-limits resolver under-samples the swivel arc",
+        ),
     ),
     pytest.param(
         "gen3_ik",

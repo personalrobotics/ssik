@@ -119,9 +119,9 @@ def test_unreachable_returns_empty_is_ls(target_name: str, three_parallel_backen
     assert is_ls, f"{target_name}: expected is_ls=True for unreachable target"
 
 
-# Rescue is dormant only for the COMPLETE geometric families (three_parallel,
-# spherical_two_parallel): their analytical path covers every reachable pose, so
-# allow_rescue changes nothing. The RR / HP / redundant-7R families in
+# Rescue is dormant on generic poses only for the COMPLETE geometric families
+# (three_parallel, spherical_two_parallel): their analytical path covers every
+# generic reachable pose, so allow_rescue changes nothing. The RR / HP / redundant-7R families in
 # _NATIVE_SOLVERS use rescue as a load-bearing completeness backstop (it fires by
 # design on the measure-zero ridges), so this dormancy invariant does not apply to
 # them -- restrict to the geometric families.
@@ -133,13 +133,11 @@ _FAMILY_ARMS = [a.name for a in load_manifest().values() if a.solver in _GEOMETR
 def test_rescue_is_dormant_across_family(arm_name: str) -> None:
     """The T-perturbation rescue never fires for the native geometric families.
 
-    This is the assumption that lets the native artifact layer (#503/#510) omit
-    the full ``rescue_via_T_perturbation`` port: the analytical path is complete
-    for these geometric families (three_parallel, spherical_two_parallel), so
-    ``allow_rescue`` changes nothing on reachable poses. If a future geometry or
-    tolerance change makes rescue start firing here, this goes red -- the signal
-    that the C++ artifact layer now needs the rescue port (deferred to the RR/HP
-    families where rescue is load-bearing).
+    The analytical path is complete for these geometric families
+    (three_parallel, spherical_two_parallel) on generic reachable poses, so
+    ``allow_rescue`` changes nothing there. It is not dormant everywhere: at a
+    singular pose the analytic set can be empty and both backends rescue it
+    (#622, gated by tests/test_native_parity.py).
     """
     mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
     kb = mod._KB
@@ -153,6 +151,6 @@ def test_rescue_is_dormant_across_family(arm_name: str) -> None:
         with_rescue = mod.solve(t, allow_rescue=True, respect_limits=False)
         without_rescue = mod.solve(t, allow_rescue=False, respect_limits=False)
         assert len(with_rescue) == len(without_rescue), (
-            f"{arm_name}: rescue fired at a reachable pose -- the C++ artifact "
-            f"layer's rescue omission (#503) is no longer valid"
+            f"{arm_name}: rescue fired at a generic reachable pose -- the analytic "
+            f"path lost a solution there"
         )

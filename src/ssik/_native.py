@@ -1061,8 +1061,8 @@ def try_native_srs_solve(
     finalize (limits -> seed -> truncate), and the #359 in-limits fallback -- so
     the Python postprocess (which dominated the per-call time) is skipped.
 
-    The T-perturbation rescue is omitted (proven dormant for SRS + guarded), same
-    as the 6R native path. Parity with the Python solve is validated across the
+    The empty-gated T-perturbation rescue runs in C++, the same definition as
+    Python's (#622). Parity with the Python solve is validated across the
     full contract in tests/test_srs_artifact_cpp.py + test_srs_general_cpp.py.
     """
     if solver_name not in ("seven_r.srs", "seven_r.srs_polished"):

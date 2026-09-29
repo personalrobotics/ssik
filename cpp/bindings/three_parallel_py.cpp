@@ -252,16 +252,14 @@ py::tuple native_artifact_solve_py(
   for (int r = 0; r < 4; ++r)
     for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
 
-  // Core solve (force-refined, as the artifact always polishes), family-selected;
-  // rescue is dormant for these geometric families (guarded on the Python side).
-  std::vector<ssik::Solution<6>> core;
-  if (family == "ikgeo.spherical_two_parallel") {
-    core = ssik::spherical_two_parallel_solve(c, T, {}, /*allow_refinement=*/true,
-                                              refinement_max_iters);
-  } else {
-    core = ssik::three_parallel_solve(c, T, {}, /*allow_refinement=*/true, refinement_max_iters);
-  }
-  const std::vector<ssik::Solution<6>> sols = ssik::finalize_solutions<6>(core, c, lim, p);
+  // The full artifact solve, family-selected: core (force-refined, as the
+  // artifact always polishes) -> empty-gated rescue -> finalize. The rescue is
+  // not dormant here: at a singular pose (a UR wrist or shoulder singularity)
+  // the analytic set can be empty while Python's solve() rescues it (#622).
+  const std::vector<ssik::Solution<6>> sols =
+      family == "ikgeo.spherical_two_parallel"
+          ? ssik::spherical_two_parallel_artifact_solve(c, lim, T, p)
+          : ssik::three_parallel_artifact_solve(c, lim, T, p);
 
   const int n = static_cast<int>(sols.size());
   py::array_t<double> qs({n, 6});

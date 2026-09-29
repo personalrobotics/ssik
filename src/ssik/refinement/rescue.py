@@ -8,50 +8,132 @@ fail FK closure; the genuine analytical solutions exist arbitrarily
 close in q-space but are not algebraically reachable from the direct
 RR path at the exact ridge point.
 
-This module provides a small, opt-in rescue layer: perturb the
-target pose by a small SE(3) increment, re-solve at the perturbed
-pose (which sits off-ridge in the well-conditioned regime), then
-Newton-refine each candidate back to the original ``T_target`` via
-``lm_refine``. Empirically recovers 4-17 unique sols on the
-falsifying examples of #298 (CRX), #304 (Rizon 4), and #280 (Kassow)
-with FK closure at the 1e-10 to 1e-12 range.
+This module provides a small rescue layer: perturb the target pose by a
+small SE(3) increment, re-solve at the perturbed pose (which sits off-ridge
+in the well-conditioned regime), then Newton-polish each candidate back to
+the original ``T_target``. Empirically recovers 4-17 unique sols on the
+falsifying examples of #298 (CRX), #304 (Rizon 4), and #280 (Kassow) with
+FK closure at the 1e-10 to 1e-12 range.
 
 Design intent:
 
-- **Opt-in.** Callers explicitly invoke ``rescue_via_T_perturbation``
-  when the direct ``solve()`` returns an empty list. The default
-  solver path stays purely analytical -- ssik's first-class promise
-  is "analytical IK", not "numerical IK". The rescue is a deliberate
-  user-controlled fallback for the measure-zero ridge cases.
-- **Deterministic.** Uses a fixed RNG seed by default so test
-  fingerprints stay stable across runs.
-- **Cheap when fired.** ~8 perturbations x normal solve cost; well
+- **Empty-gated.** ``solve()`` calls it only when the analytical path
+  returns no (in-limits) solution; ``allow_rescue=False`` is the
+  guaranteed-analytical escape.
+- **One definition, two backends (#622).** The native backend
+  (``cpp/include/ssik_cpp/rescue.hpp``) implements this exact algorithm:
+  the same perturbation sequence and the same polish, so both backends
+  recover the same set (up to float round-off in the polish) and rescue
+  output is reproducible on every platform. See "The definition" below;
+  a change here must be mirrored there.
+- **Cheap when fired.** 16 perturbations x normal solve cost; well
   under 1 ms additional latency on tier-0 / SRS arms, ~50-100 ms on
   HP-class jointlock 7R arms.
-- **FK-closure gated.** Only returns candidates that LM-refine back
-  to the original ``T_target`` within ``fk_atol``. No tolerance
-  loosening, no papering over.
+- **FK-closure gated.** Only returns candidates that polish back to the
+  original ``T_target`` within ``fk_atol``. No tolerance loosening, no
+  papering over.
+
+The definition
+--------------
+
+Perturbation ``i`` (``i = 0 .. n_perturbations - 1``) uses the direction
+``u_i`` in R^6, the ``(i + 1)``-th point of the R_6 Kronecker (generalised
+golden ratio) low-discrepancy sequence mapped to a zero-mean box of unit
+per-axis variance::
+
+    u_i[k] = sqrt(3) * (2 * frac((i + 1) * ALPHA[k]) - 1),  frac(x) = x - floor(x)
+
+with ``ALPHA[k] = frac(phi^-(k + 1))`` for the real root ``phi`` of
+``x^7 = x + 1`` (``_KRONECKER_ALPHA``, tabulated as double literals). Every
+step is a correctly rounded IEEE operation, so the directions are
+bit-identical in both languages and on every platform; no pseudo-random
+generator is involved (#622: the two backends used PCG64 and mt19937_64,
+and libstdc++ / libc++ even disagree on ``std::normal_distribution``). With
+``m = scale_multipliers[i % len]``, ``dx = u_i[:3] * perturbation_scale_m * m``
+and ``w = u_i[3:] * perturbation_scale_rad * m`` give
+``T_pert = T_target @ [Rot(w / |w|, |w|), dx]``.
+
+Each perturbed pose is re-solved with ``respect_limits=False``, and every
+candidate is polished back to ``T_target`` by the fixed-damping batch Newton
+of :func:`ssik.refinement.lm_refine_batch`: at most ``refinement_max_iters``
+steps ``dq = clip((J^T J + 1e-9 I)^-1 J^T log(T_target FK(q)^-1), +-0.5)``,
+stopping as soon as the Frobenius residual drops below 1e-12, aborting a
+trajectory whose residual exceeds 5x its best after 4 iterations, and
+accepting the end point when its residual is at most ``fk_atol``. (#622
+chose this polish over the adaptive single-candidate ``lm_refine`` on
+recovery: the adaptive one's stall guard and undamped 6R step drop
+candidates at singular poses, e.g. ur16e returned [] there.) Accepted
+solutions are deduplicated in perturbation order, then candidate order, by
+the L2 wrap-to-pi distance ``dedup_atol``; the first one seen is kept.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+import math
+from collections.abc import Callable
 
 import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
-from ssik.refinement import lm_refine, lm_refine_batch
+from ssik.refinement import lm_refine_batch, numerical_jacobian
+from ssik.subproblems._rotation import rotation_matrix
 
 # Tight polish target tried before the loose acceptability gate. A rescue whose
 # perturbation landed off-ridge (the common case) is well-conditioned and
 # converges to machine precision in a step or two; aiming for it there means we
 # return the *exact* solution rather than one that merely cleared ``fk_atol``
-# (the #384 gen3 case: lm_refine stopped at ~6e-9 the instant it dipped under
+# (the #384 gen3 case: the polish stopped at ~6e-9 the instant it dipped under
 # the 1e-8 gate, leaving the machine precision it would reach one iteration
 # later unused). Genuinely rank-deficient ridge poses (#319) stall above this
-# and fall back to the loose polish, so ridge recovery is unchanged.
+# and are accepted at ``fk_atol`` instead, so ridge recovery is unchanged.
 _TIGHT_POLISH_FK_ATOL = 1e-12
+
+# The polish's divergence guard (see the module docstring). Looser than
+# lm_refine_batch's default 2.0 / 2 (tuned for srs_polished, #203): that
+# tighter guard aborts rescuable perturbed candidates whose trajectory dips
+# before converging (piper lost 3 of 6 on a ridge pose, #405).
+_DIVERGENCE_FACTOR = 5.0
+_DIVERGENCE_MIN_ITERS = 4
+
+# frac(phi^-(k+1)), k = 0..5, for the real root phi of x^7 = x + 1: the R_6
+# Kronecker sequence's increments. Mirrored in cpp/include/ssik_cpp/rescue.hpp.
+_KRONECKER_ALPHA = (
+    0.8986537126286993,
+    0.8075784952213448,
+    0.7257334129697598,
+    0.6521830259439717,
+    0.5860866975779695,
+    0.5266889867007359,
+)
+_SQRT3 = 1.7320508075688772
+
+
+def perturbation_direction(i: int) -> tuple[float, ...]:
+    """``u_i`` of the module docstring: the rescue's ``i``-th unscaled SE(3)
+    perturbation, translation components first. Deterministic and
+    platform-independent (no RNG)."""
+    out = []
+    for a in _KRONECKER_ALPHA:
+        x = (i + 1) * a
+        out.append(_SQRT3 * (2.0 * (x - math.floor(x)) - 1.0))
+    return tuple(out)
+
+
+def _perturbation(i: int, scale_m: float, scale_rad: float, mult: float) -> NDArray[np.float64]:
+    """The 4x4 increment ``dT`` of perturbation ``i``; ``T_pert = T_target @ dT``.
+    Operation order matches the native port so the two agree to the last bit
+    (up to libm's sin/cos)."""
+    u = perturbation_direction(i)
+    dT = np.eye(4)
+    w0, w1, w2 = (u[3] * scale_rad * mult, u[4] * scale_rad * mult, u[5] * scale_rad * mult)
+    angle = math.sqrt(w0 * w0 + w1 * w1 + w2 * w2)
+    if angle > 0.0:
+        dT[:3, :3] = rotation_matrix(np.array([w0 / angle, w1 / angle, w2 / angle]), angle)
+    dT[0, 3] = u[0] * scale_m * mult
+    dT[1, 3] = u[1] * scale_m * mult
+    dT[2, 3] = u[2] * scale_m * mult
+    return dT
 
 
 def rescue_via_T_perturbation(
@@ -66,15 +148,14 @@ def rescue_via_T_perturbation(
     fk_atol: float = 1e-8,
     refinement_max_iters: int = 20,
     dedup_atol: float = 1e-3,
-    seed: int = 20260608,
     jacobian_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]] | None = None,
 ) -> list[Solution]:
-    """Recover IK solutions at q-space ridges via T-perturbation + LM polish.
+    """Recover IK solutions at q-space ridges via T-perturbation + Newton polish.
 
-    Perturbs ``T_target`` by random SE(3) increments, re-solves at each
-    perturbed pose (which sits off the rank-deficient ridge), then
-    Newton-refines each candidate back to the original ``T_target``.
-    Returns the unique FK-closing solutions.
+    Perturbs ``T_target`` by the deterministic SE(3) increments of the module
+    docstring, re-solves at each perturbed pose (which sits off the
+    rank-deficient ridge), then Newton-polishes each candidate back to the
+    original ``T_target``. Returns the unique FK-closing solutions.
 
     Intended call site::
 
@@ -91,25 +172,23 @@ def rescue_via_T_perturbation(
         ``respect_limits=False`` to maximize the candidate set.
     :param T_target: 4x4 SE(3) target pose. The pose the rescued
         solutions must close at.
-    :param n_perturbations: how many random T-perturbations to try.
-        Default 16 -- combined with the escalating ``scale_multipliers``
-        this gives robust cross-platform margin (measured default-seed
-        recovery: CRX 4 (structural), Kassow 24, Rizon 4 26).
-    :param perturbation_scale_m: base translation magnitude (each axis,
-        each trial), scaled by ``scale_multipliers``. Default 5 mm.
-    :param perturbation_scale_rad: base rotation magnitude (each axis,
-        each trial), scaled by ``scale_multipliers``. Default 5 mrad.
+    :param n_perturbations: how many T-perturbations to try. Default 16 --
+        combined with the escalating ``scale_multipliers`` this gives robust
+        cross-platform margin.
+    :param perturbation_scale_m: base translation magnitude (per axis, unit
+        variance over the sequence), scaled by ``scale_multipliers``.
+        Default 5 mm.
+    :param perturbation_scale_rad: base rotation magnitude (per axis, as
+        above), scaled by ``scale_multipliers``. Default 5 mrad.
     :param scale_multipliers: cycled per-perturbation multipliers applied
         to the base scales. Default ``(1, 2, 4, 10)`` -> 5/10/20/50 mm +
         mrad. The large multiples land firmly off the rank-deficient
         ridge, so recovery does not depend on BLAS-backend-sensitive
         near-ridge numerics.
-    :param fk_atol: SE(3) log-residual threshold for accepted
-        solutions (consumed by :func:`lm_refine` internally). Default
-        1e-8 -- empirically achieved by all rescued candidates on the
-        Group A reproducers, and ~2-3 orders of magnitude below
-        typical robot repeatability, so rescue solutions are
-        operationally indistinguishable from analytical ones.
+    :param fk_atol: Frobenius FK residual an accepted solution must meet.
+        Default 1e-8 -- ~2-3 orders of magnitude below typical robot
+        repeatability, so rescue solutions are operationally
+        indistinguishable from analytical ones.
     :param refinement_max_iters: cap on Newton iterations per
         candidate. Default 20 -- empirically converges in 3-8 iters
         on Group A reproducers.
@@ -120,11 +199,9 @@ def rescue_via_T_perturbation(
         ``(1e-4, 1e-3)`` -- pairs the solver already treats as one -- into the
         returned set. Deduping at the solver's own tolerance cannot drop a
         genuinely-distinct solution.
-    :param seed: RNG seed for the perturbation directions.
-        Deterministic by default so test fingerprints are stable.
     :param jacobian_fn: optional analytical spatial Jacobian for the
-        LM-refine step. When ``None``, ``lm_refine`` falls back to
-        central-difference Jacobian (~50x slower).
+        polish. When ``None``, a central-difference Jacobian is used
+        (~50x slower, same algorithm).
 
     :returns: list of :class:`Solution` whose FK closes at the
         original ``T_target`` within ``fk_atol``. Each carries
@@ -132,7 +209,14 @@ def rescue_via_T_perturbation(
         Empty list iff none of the ``n_perturbations`` trials
         produced a solution that refined back to ``T_target``.
     """
-    rng = np.random.default_rng(seed)
+    jac: Callable[[NDArray[np.float64]], NDArray[np.float64]]
+    if jacobian_fn is not None:
+        jac = jacobian_fn
+    else:
+
+        def jac(q: NDArray[np.float64]) -> NDArray[np.float64]:
+            return numerical_jacobian(q, fk_fn)
+
     refined: list[Solution] = []
     refined_qs: list[NDArray[np.float64]] = []
 
@@ -146,30 +230,7 @@ def rescue_via_T_perturbation(
         # off-ridge in the well-conditioned regime and recover reliably on
         # any backend, so the schedule gives robust cross-platform margin.
         mult = scale_multipliers[i % len(scale_multipliers)] if scale_multipliers else 1.0
-        dx = rng.standard_normal(3) * perturbation_scale_m * mult
-        # Small-angle so3 perturbation: vector w in R^3 with magnitude
-        # |w| ~ perturbation_scale_rad becomes a rotation of angle |w|
-        # about axis w / |w|. Using Rodrigues' formula on the small
-        # vector keeps the perturbation well-conditioned at small
-        # scales without the cos/sin breakdown of an explicit
-        # axis-angle build.
-        w = rng.standard_normal(3) * perturbation_scale_rad * mult
-        angle = float(np.linalg.norm(w))
-        if angle > 0:
-            axis = w / angle
-            K = np.array(
-                [
-                    [0.0, -axis[2], axis[1]],
-                    [axis[2], 0.0, -axis[0]],
-                    [-axis[1], axis[0], 0.0],
-                ]
-            )
-            R_delta = np.eye(3) + np.sin(angle) * K + (1.0 - np.cos(angle)) * (K @ K)
-        else:
-            R_delta = np.eye(3)
-        dT = np.eye(4)
-        dT[:3, :3] = R_delta
-        dT[:3, 3] = dx
+        dT = _perturbation(i, perturbation_scale_m, perturbation_scale_rad, mult)
         T_pert = T_target @ dT
 
         try:
@@ -182,64 +243,23 @@ def rescue_via_T_perturbation(
         if not pert_sols:
             continue
 
-        # Polish every perturbed candidate back to the original T_target. Aim
-        # for machine precision (``_TIGHT_POLISH_FK_ATOL``) so a well-conditioned
-        # rescue returns its exact solution; candidates that only reach the loose
-        # ``fk_atol`` (a genuinely rank-deficient ridge, #319) still pass the gate
-        # below. Most perturbed candidates are swivel solutions to T_pert that do
-        # NOT converge back to a ridge T_target -- the batch refiner's divergence
-        # + stall guards abort those in a few iterations instead of the full
-        # per-candidate tight-then-loose double pass (the #319 rescue was O(16
-        # perturbations x ~90 candidates x 2 refines); on Gen3 that was ~1.1 s).
+        # Polish every perturbed candidate back to the original T_target (the
+        # module docstring's polish). Most perturbed candidates on a redundant
+        # arm are swivel solutions to T_pert that do NOT converge back to a
+        # ridge T_target; the divergence guard aborts those in a few iterations.
         q_seeds = np.array([sol.q for sol in pert_sols], dtype=np.float64)
-        polished: Iterable[tuple[NDArray[np.float64], float]]
-        if jacobian_fn is not None:
-            q_polished, fk_resids, _iters = lm_refine_batch(
-                q_seeds,
-                fk_fn,
-                jacobian_fn,
-                T_target,
-                fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
-                max_iters=refinement_max_iters,
-                # Match the loose divergence tolerance the per-candidate lm_refine
-                # rescue used (5.0 / 4). lm_refine_batch defaults to the tight
-                # 2.0 / 2 tuned for srs_polished (#203); that tighter guard aborts
-                # rescuable perturbed candidates whose trajectory dips before
-                # converging, dropping valid solutions (piper lost 3 of 6 on a
-                # ridge pose). Rescue seeds land off-ridge and genuinely converge,
-                # so the loose tolerance recovers the full set.
-                divergence_factor=5.0,
-                divergence_min_iters=4,
-            )
-            polished = zip(q_polished, fk_resids, strict=True)
-        else:
-            # No analytical Jacobian: per-candidate tight-then-loose refine
-            # (lm_refine returns None unless it reaches its fk_atol, so the loose
-            # retry is needed to keep candidates that stall just above tight).
-            results = []
-            for q in q_seeds:
-                r = lm_refine(
-                    q,
-                    fk_fn,
-                    T_target,
-                    fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
-                    max_iters=refinement_max_iters,
-                    jacobian_fn=None,
-                )
-                if r is None:
-                    r = lm_refine(
-                        q,
-                        fk_fn,
-                        T_target,
-                        fk_atol=fk_atol,
-                        max_iters=refinement_max_iters,
-                        jacobian_fn=None,
-                    )
-                if r is not None:
-                    results.append((r[0], r[1]))
-            polished = results
+        q_polished, fk_resids, _iters = lm_refine_batch(
+            q_seeds,
+            fk_fn,
+            jac,
+            T_target,
+            fk_atol=min(_TIGHT_POLISH_FK_ATOL, fk_atol),
+            max_iters=refinement_max_iters,
+            divergence_factor=_DIVERGENCE_FACTOR,
+            divergence_min_iters=_DIVERGENCE_MIN_ITERS,
+        )
 
-        for q_ref, fk_resid in polished:
+        for q_ref, fk_resid in zip(q_polished, fk_resids, strict=True):
             if fk_resid > fk_atol:
                 continue
 

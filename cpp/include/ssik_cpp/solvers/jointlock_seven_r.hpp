@@ -186,15 +186,13 @@ std::vector<Solution<7>> jointlock_hp_artifact_solve(
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, p_limits);
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    RescueParams rp;
-    rp.dedup_atol = kGeneral6rDedupAtol;
-    rp.refinement_max_iters = p.refinement_max_iters;
-    // rescue dedups in L2 wrap-distance; re-dedup in the Linf max-joint metric the
-    // sweep (dedup7) and the artifact gate use, so two rescue branches that are
-    // L2-apart but Linf-close (< kGeneral6rDedupAtol on every joint) collapse to
-    // one instead of surfacing as a duplicate.
+    // The shared rescue definition (#622), so its default parameters. It dedups in
+    // L2 wrap-distance; re-dedup in the Linf max-joint metric the sweep (dedup7)
+    // and the artifact gate use, so two rescue branches that are L2-apart but
+    // Linf-close (< kGeneral6rDedupAtol on every joint) collapse to one instead
+    // of surfacing as a duplicate.
     in_limits = finalize_solutions<7>(
-        jointlock_detail::dedup7(rescue_via_T_perturbation<7>(core, c, T, rp), kGeneral6rDedupAtol),
+        jointlock_detail::dedup7(rescue_via_T_perturbation<7>(core, c, T), kGeneral6rDedupAtol),
         c, lim, p_limits);
   }
   ArtifactParams<7> p_seed = p;
