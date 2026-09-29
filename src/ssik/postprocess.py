@@ -77,35 +77,90 @@ __all__ = [
 ]
 
 
+# A value within this band of a joint limit is *at* the limit (#624): it is
+# accepted and reported as exactly the limit, on either side of it. Without the
+# band the limit test decides on round-off: at a configuration exactly on a
+# limit (a robot parked at a hard stop) the two backends compute the angle an
+# ulp or two apart, one just inside and one just outside, and so return
+# different sets.
+#
+# The band clamps, which moves a configuration, so it is held to round-off,
+# like the +-pi snap (_CUT_SNAP): the error of a well-conditioned closed-form
+# angle. Measured at poses with one to three joints exactly at a limit (150 per
+# arm, every shipped 6R arm, both backends), the closed-form families
+# (spherical_two_parallel, three_parallel) land within 2.5e-13 of the limit
+# where sigma_min(J) >= 1e-2 and within 1.2e-10 where it is >= 1e-4; 1e-9
+# covers both. It cannot cover the rest, and is not widened to: near a
+# singularity an angle is a multiple root whose error is ~sqrt(round-off) (up
+# to 3e-4 measured), and general_6r's eigen-solve is accurate only to its FK
+# gate (angle errors to 1e-5 even at regular poses). A band that wide would move
+# ordinary configurations by 1e-5 rad; there an exact-limit tie stays one
+# (#632).
+#
+# 1e-9 is the seeded ranking's grid (_RANK_QUANTUM), the +-pi snap (_CUT_SNAP)
+# and the 7R in-limits resolvers' acceptance slack (seven_r._polish and
+# seven_r.spherical_shoulder, which take this constant), so every "within
+# round-off" in the pipeline means the same thing.
+# A clamp moves the tool by at most 1e-9 x reach per joint. Through _reps it
+# also decides which representatives of pi a limit admits, so a limit written
+# a few ulps inside pi (Puma 560's +-3.14159265358979) sits on the cut for
+# _canonicalize_representatives, like an exact [-pi, pi].
+_LIMIT_BAND = 1e-9  # C++ kLimitBand
+
+
+def _onto_limits(v: float, lo: float, hi: float) -> float | None:
+    """``v`` with the :data:`_LIMIT_BAND` clamp applied: the limit itself when
+    ``v`` is within the band of it (either side), ``v`` when strictly inside,
+    ``None`` when outside the limits by more than the band."""
+    if v < lo - _LIMIT_BAND or v > hi + _LIMIT_BAND:
+        return None
+    if v - lo <= _LIMIT_BAND:
+        return lo
+    if hi - v <= _LIMIT_BAND:
+        return hi
+    return v
+
+
 def respect_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
     """Drop solutions where any joint's q value is outside its reachable range.
 
     Joints with ``limits=None`` are unconstrained (continuous joints, or
     fixtures that don't supply limits) and never reject a solution. Joints
-    with ``limits=(lo, hi)`` reject any solution where ``q[i] < lo`` or
-    ``q[i] > hi`` strictly; values exactly on the boundary are accepted.
+    with ``limits=(lo, hi)`` reject any solution where ``q[i]`` is outside
+    ``[lo, hi]`` by more than round-off (``1e-9`` rad, see
+    ``docs/api.md#joint-limits``). A value within that band of a limit, on
+    either side, is at the limit: the solution is kept, with that joint set to
+    exactly the limit.
 
     :param sols: candidate solutions (e.g. output of an ssik solver's
         ``solve()``).
     :param kb: the same :class:`KinBody` used for the IK call. Joint limits
         come from ``kb.joints[i].limits``.
-    :returns: filtered solutions; preserves input order.
+    :returns: filtered solutions; preserves input order. Every returned value
+        lies within its limits exactly.
     """
     n_joints = len(kb.joints)
     kept: list[Solution] = []
     for sol in sols:
         if len(sol.q) != n_joints:
             raise ValueError(f"solution q-length {len(sol.q)} doesn't match kb DOF {n_joints}")
+        q_new: NDArray[np.float64] | None = None
         within = True
         for i, joint in enumerate(kb.joints):
             if joint.limits is None:
                 continue
             lo, hi = joint.limits
-            if sol.q[i] < lo or sol.q[i] > hi:
+            q_i = float(sol.q[i])
+            v = _onto_limits(q_i, lo, hi)
+            if v is None:
                 within = False
                 break
+            if v != q_i:
+                if q_new is None:
+                    q_new = np.asarray(sol.q, dtype=np.float64).copy()
+                q_new[i] = v
         if within:
-            kept.append(sol)
+            kept.append(sol if q_new is None else replace(sol, q=q_new))
     return kept
 
 
@@ -126,7 +181,9 @@ def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
     Search is over ``k ∈ {-2, -1, 0, +1, +2}`` integer multiples of ``2*pi``;
     that covers any joint whose limits span up to ±5*pi (more than enough for
     any commercial arm). The smallest-|k| wrap that lands in range wins,
-    biasing toward the original value.
+    biasing toward the original value. A wrap within round-off (``1e-9`` rad)
+    of a limit, on either side, lands exactly on the limit, as in
+    :func:`respect_limits`.
 
     :param sols: candidate solutions.
     :param kb: the same :class:`KinBody` used for the IK call.
@@ -145,19 +202,12 @@ def wrap_to_limits(sols: list[Solution], kb: KinBody) -> list[Solution]:
                 continue
             lo, hi = joint.limits
             q_i = float(q_new[i])
-            if lo <= q_i <= hi:
-                continue
-            # Try wraps with smallest |k| first.
-            best = q_i
-            best_in_range = False
-            for k in (1, -1, 2, -2):
-                candidate = q_i + 2.0 * np.pi * k
-                if lo <= candidate <= hi:
-                    best = candidate
-                    best_in_range = True
+            # Smallest |k| first; a fit within round-off of a limit lands on it.
+            for k in (0, 1, -1, 2, -2):
+                v = _onto_limits(q_i + 2.0 * np.pi * k, lo, hi)
+                if v is not None:
+                    q_new[i] = v
                     break
-            if best_in_range:
-                q_new[i] = best
         out.append(replace(sol, q=q_new))
     return out
 
@@ -212,16 +262,23 @@ def _reps(q_i: float, lo: float, hi: float) -> list[float]:
     """Every ``q_i + 2*pi*k`` inside ``[lo, hi]``, ascending.
 
     The ``k`` range comes from the limits (so a boundary value like ``0`` under
-    ``[-2*pi, 2*pi]`` yields ``{-2*pi, 0, 2*pi}``), then each candidate is
-    re-checked against the limits so floating-point error in the ceil/floor can
-    never emit an out-of-limit value.
+    ``[-2*pi, 2*pi]`` yields ``{-2*pi, 0, 2*pi}``), then each candidate goes
+    through the limit band (:func:`_onto_limits`), so floating-point error in
+    the ceil/floor can never emit an out-of-limit value, and a representative
+    within round-off of a limit is that limit. Without the band a value an ulp
+    either side of ``0`` would lift to ``{-2*pi, 0}`` on one backend and
+    ``{0, 2*pi}`` on the other.
     """
     # math.ceil/floor on plain floats, not np.ceil/np.floor: this runs once per
     # joint per solution on the seeded path, and the numpy scalar round trip
     # dominated it.
     k_lo = math.ceil((lo - q_i) / _TWO_PI) - 1
     k_hi = math.floor((hi - q_i) / _TWO_PI) + 1
-    reps = [v for k in range(k_lo, k_hi + 1) if lo <= (v := q_i + _TWO_PI * k) <= hi]
+    reps = []
+    for k in range(k_lo, k_hi + 1):
+        v = _onto_limits(q_i + _TWO_PI * k, lo, hi)
+        if v is not None:
+            reps.append(v)
     # A value with no in-limit representative keeps its own, so expansion can
     # only ever add configurations. Expansion runs after the limit filter, so
     # this is unreachable in the wired paths; it is here so that a mistake in
@@ -801,7 +858,10 @@ def finalize_solutions(
         if counts is not None:
             counts["dropped_by_limits"] = pre_limit - len(sols)
         if not sols and in_limits_fallback is not None:
-            sols = in_limits_fallback()
+            # The resolvers accept a candidate within _LIMIT_BAND of a limit
+            # (seven_r._polish, spherical_shoulder); put it on the limit, as the
+            # pass above would.
+            sols = wrap_to_limits(in_limits_fallback(), kb)
 
     # Whether this call is the one that lifts is the caller's decision (see the
     # parameter docs), not something inferred from respect_limits: an artifact

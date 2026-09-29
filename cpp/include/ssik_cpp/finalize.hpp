@@ -11,6 +11,7 @@
 #include <cmath>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <queue>
 #include <set>
 #include <utility>
@@ -184,18 +185,34 @@ std::vector<WindingJoint> winding_joints(const JointConsts<N>& consts, const Joi
   return out;
 }
 
+// A value within kLimitBand of a joint limit is at the limit (#624): accepted,
+// and reported as exactly the limit, on either side of it. Held to round-off
+// because it moves a configuration; the measurement behind 1e-9 is argued at
+// postprocess._LIMIT_BAND. Shared with the 7R in-limits resolvers' acceptance
+// slack (srs_polished_detail::kPolishLimitSlack, kShLimitSlack).
+inline constexpr double kLimitBand = 1e-9;
+
+// v with the band clamp applied: the limit when within kLimitBand of it, v when
+// strictly inside, nullopt when outside by more. (postprocess._onto_limits)
+inline std::optional<double> onto_limits(double v, double lo, double hi) {
+  if (v < lo - kLimitBand || v > hi + kLimitBand) return std::nullopt;
+  if (v - lo <= kLimitBand) return lo;
+  if (hi - v <= kLimitBand) return hi;
+  return v;
+}
+
 // Every q + 2pi*k inside [lo, hi], ascending. The k range comes from the limits
 // (so a boundary value like 0 under [-2pi, 2pi] yields {-2pi, 0, 2pi}), then
-// each candidate is re-checked so round-off cannot emit an out-of-limit value.
-// (postprocess._reps)
+// each candidate goes through the limit band, so round-off cannot emit an
+// out-of-limit value and a representative within kLimitBand of a limit is that
+// limit. (postprocess._reps)
 inline std::vector<double> winding_reps(double q, double lo, double hi) {
   constexpr double kTwoPi = 2.0 * M_PI;
   const int k_lo = static_cast<int>(std::ceil((lo - q) / kTwoPi)) - 1;
   const int k_hi = static_cast<int>(std::floor((hi - q) / kTwoPi)) + 1;
   std::vector<double> out;
   for (int k = k_lo; k <= k_hi; ++k) {
-    const double v = q + kTwoPi * k;
-    if (lo <= v && v <= hi) out.push_back(v);
+    if (const auto v = onto_limits(q + kTwoPi * k, lo, hi)) out.push_back(*v);
   }
   // A value with no in-limit representative keeps its own, so expansion can
   // only ever add configurations. Expansion runs after the limit filter, so
@@ -318,13 +335,14 @@ std::vector<Solution<N>> expand_windings(const std::vector<Solution<N>>& sols,
 }
 
 // wrap_to_limits: for each revolute joint with limits, try wraps k in
-// (1,-1,2,-2) to bring q_i into [lo,hi] inclusive; first hit wins. Prismatic /
-// no-limits / already-in-range joints untouched. (postprocess.py:101-151)
+// (0,1,-1,2,-2) to bring q_i into [lo,hi] up to kLimitBand; first hit wins, and
+// a hit within the band of a limit lands on it. Prismatic / no-limits joints
+// untouched. (postprocess.wrap_to_limits)
 template <int N>
 std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
                                         const JointConsts<N>& consts,
                                         const JointLimits<N>& lim) {
-  static constexpr int kWrapOrder[4] = {1, -1, 2, -2};
+  static constexpr int kWrapOrder[5] = {0, 1, -1, 2, -2};
   std::vector<Solution<N>> out;
   out.reserve(sols.size());
   for (const auto& sol : sols) {
@@ -333,11 +351,9 @@ std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
       if (!lim.present[i] || consts.type[i] != JointType::Revolute) continue;
       const double lo = lim.lo[i], hi = lim.hi[i];
       const double qi = sol.q[i];
-      if (lo <= qi && qi <= hi) continue;
       for (int k : kWrapOrder) {
-        const double cand = qi + 2.0 * M_PI * k;
-        if (lo <= cand && cand <= hi) {
-          s.q[i] = cand;
+        if (const auto v = onto_limits(qi + 2.0 * M_PI * k, lo, hi)) {
+          s.q[i] = *v;
           break;
         }
       }
@@ -347,22 +363,26 @@ std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
   return out;
 }
 
-// respect_limits: drop a solution if any limited joint has q_i < lo or q_i > hi
-// (strict -> boundary values accepted); no wrapping. (postprocess.py:69-98)
+// respect_limits: drop a solution if any limited joint lies outside [lo, hi] by
+// more than kLimitBand; a kept value within the band of a limit is set to it. No
+// wrapping. (postprocess.respect_limits)
 template <int N>
 std::vector<Solution<N>> apply_respect_limits(const std::vector<Solution<N>>& sols,
                                               const JointLimits<N>& lim) {
   std::vector<Solution<N>> out;
   for (const auto& sol : sols) {
+    Solution<N> s = sol;
     bool within = true;
     for (int i = 0; i < N; ++i) {
       if (!lim.present[i]) continue;
-      if (sol.q[i] < lim.lo[i] || sol.q[i] > lim.hi[i]) {
+      const auto v = onto_limits(sol.q[i], lim.lo[i], lim.hi[i]);
+      if (!v) {
         within = false;
         break;
       }
+      s.q[i] = *v;
     }
-    if (within) out.push_back(sol);
+    if (within) out.push_back(s);
   }
   return out;
 }
@@ -571,7 +591,11 @@ std::vector<Solution<N>> finalize_solutions(
     sols = wrap_to_limits<N>(sols, consts, lim);
     if (!p.wrap_only) {
       sols = apply_respect_limits<N>(sols, lim);
-      if (sols.empty() && in_limits_fallback) sols = in_limits_fallback();
+      // The resolvers accept a candidate within kLimitBand of a limit
+      // (kPolishLimitSlack, kShLimitSlack); put it on the limit, as the pass
+      // above would.
+      if (sols.empty() && in_limits_fallback)
+        sols = wrap_to_limits<N>(in_limits_fallback(), consts, lim);
     }
   }
 

@@ -26,6 +26,7 @@ from numpy.typing import NDArray
 
 from ssik.core.solution import Solution
 from ssik.kinematics.poe_fk import poe_forward_kinematics
+from ssik.postprocess import _LIMIT_BAND
 from ssik.refinement import (
     dedup_by_wrap_close,
     kinbody_fk_jacobian_batch,
@@ -38,7 +39,10 @@ if TYPE_CHECKING:  # pragma: no cover -- typing only
 
 __all__ = ["polish_candidates"]
 
-_LIMIT_SLACK = 1e-9  # shared by every caller's in-limits acceptance test
+# Shared by every caller's in-limits acceptance test. It is the finalize limit
+# band (#624), so a candidate accepted here at a limit is one finalize_solutions
+# then puts exactly on the limit.
+_LIMIT_SLACK = _LIMIT_BAND
 
 
 def _within_limits(q: NDArray[np.float64], limits: list[tuple[float, float]]) -> bool:

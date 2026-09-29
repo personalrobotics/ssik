@@ -428,6 +428,38 @@ def test_native_enumeration_matches_python(arm: str) -> None:
                     assert _same_config(kb, top[0].q, seed, tol), f"{arm}: nearest {top[0].q}"
 
 
+# Poses with one joint exactly at a limit (#624): (q, that joint). The backends
+# compute the angle an ulp or two apart, and a strict limit test dropped the
+# branch on whichever side landed outside: on macOS, native at the IRB 6700's
+# joint 2 upper limit, and Python at the GP8's joint 1 lower limit. The IRB
+# 6700's joint 5 spans [-2*pi, 2*pi], so its lifts are compared too.
+_LIMIT_POSES = {
+    "abb.irb6700_ik": ([1.9, -0.1, 1.2217304763960306, -4.9, 1.2, 0.5], 2),
+    "yaskawa.gp8_ik": ([-1.8, -1.1344640137963142, 2.2, -1.5, -0.1, 6.0], 1),
+}
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize("arm", sorted(_LIMIT_POSES))
+def test_both_backends_keep_a_configuration_exactly_at_a_limit(arm: str) -> None:
+    """A robot parked at a hard stop gets its configuration back on both
+    backends, on the limit exactly, with the same lifts."""
+    m = _module(arm)
+    kb = m._KB
+    q, j = np.array(_LIMIT_POSES[arm][0]), _LIMIT_POSES[arm][1]
+    assert q[j] in kb.joints[j].limits, "fixture no longer sits exactly on a limit"
+    T = m.fk(q)
+    nat, pyth = m.solve(T, native=True), m.solve(T, native=False)
+    assert _same_set(kb, nat, pyth, 1e-6), f"{arm}: {len(nat)} native vs {len(pyth)} python"
+    for backend, sols in (("native", nat), ("python", pyth)):
+        for s in sols:
+            for i, joint in enumerate(kb.joints):
+                assert joint.limits[0] <= s.q[i] <= joint.limits[1], f"{backend}: {s.q}"
+        posed = [s for s in sols if _same_config(kb, s.q, q, 1e-6)]
+        assert posed, f"{backend} lost the posed configuration"
+        assert all(s.q[j] == q[j] for s in posed), f"{backend}: {[s.q[j] for s in posed]}"
+
+
 @pytest.mark.skipif(not native_available(), reason="native extension not built")
 @pytest.mark.parametrize("arm", ["universal_robots.ur5e_ik", "standard_bots.thor_ik"])
 def test_native_lifts_are_sound(arm: str) -> None:

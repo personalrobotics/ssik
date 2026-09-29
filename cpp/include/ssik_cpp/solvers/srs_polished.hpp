@@ -41,8 +41,9 @@ inline constexpr int kSrsPolishedMaxIters = 30;          // polish_max_iters (cm
 
 namespace srs_polished_detail {
 
-// In-limits acceptance slack for polished candidates (_polish._LIMIT_SLACK).
-inline constexpr double kPolishLimitSlack = 1e-9;
+// In-limits acceptance slack for polished candidates (_polish._LIMIT_SLACK): the
+// finalize limit band, so an accepted candidate is one finalize puts on the limit.
+inline constexpr double kPolishLimitSlack = kLimitBand;
 
 // LM-polish every raw candidate against the true FK, keep residual <= atol, then
 // wrap-to-pi cluster-merge (mirrors _polish.polish_candidates, which uses

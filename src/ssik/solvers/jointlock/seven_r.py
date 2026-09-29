@@ -48,6 +48,7 @@ from ssik.kinematics.predicates import (
     three_consecutive_parallel,
 )
 from ssik.kinematics.reverse import map_reversed_q, reverse_kinematic_chain
+from ssik.postprocess import _onto_limits
 from ssik.refinement import dedup_by_wrap_close
 from ssik.solvers.husty_pfurner import general_6r as hp_general_6r
 from ssik.solvers.ikgeo import (
@@ -75,29 +76,30 @@ _TWO_PI = 2.0 * np.pi
 def _wrap_to_limits_inplace(q: NDArray[np.float64], kb: KinBody) -> NDArray[np.float64]:
     """Try ``q ± k*2π`` per revolute joint to bring it into URDF limits.
     Returns the (possibly modified) ``q``; mutates in place for speed.
-    Joints with ``limits=None`` or prismatic type are left alone.
+    Joints with ``limits=None`` or prismatic type are left alone. A value
+    within round-off of a limit lands on it, as in ``postprocess.wrap_to_limits``
+    (#624), so this pre-filter keeps what ``finalize_solutions`` keeps.
     """
     for i, j in enumerate(kb.joints):
         if j.limits is None or j.joint_type != "revolute":
             continue
         lo, hi = j.limits
         qi = float(q[i])
-        if lo <= qi <= hi:
-            continue
-        for k in (1, -1, 2, -2):
-            cand = qi + _TWO_PI * k
-            if lo <= cand <= hi:
-                q[i] = cand
+        for k in (0, 1, -1, 2, -2):
+            v = _onto_limits(qi + _TWO_PI * k, lo, hi)
+            if v is not None:
+                q[i] = v
                 break
     return q
 
 
 def _in_limits(q: NDArray[np.float64], kb: KinBody) -> bool:
-    """Check every joint's q against the KinBody's limits."""
+    """Check every joint's q against the KinBody's limits, up to the
+    round-off band of ``postprocess.respect_limits`` (#624)."""
     for i, j in enumerate(kb.joints):
         if j.limits is None:
             continue
-        if not (j.limits[0] <= float(q[i]) <= j.limits[1]):
+        if _onto_limits(float(q[i]), j.limits[0], j.limits[1]) is None:
             return False
     return True
 

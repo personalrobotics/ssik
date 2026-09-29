@@ -107,7 +107,8 @@ values:
   `+pi`. Either side of the cut is the same configuration of a continuous
   joint, so compare such joints on the circle.
 - A **finite** revolute joint whose limits admit more than one representative
-  of `pi` (exactly `[-pi, pi]`, or the UR family's `[-2*pi, 2*pi]`) reports an
+  of `pi` (`[-pi, pi]` to within the `1e-9` [limit band](#joint-limits), or
+  the UR family's `[-2*pi, 2*pi]`) reports an
   angle within `1e-6` rad of `pi` (modulo `2*pi`) on the `+pi` side: the
   in-limit representative nearest `+pi`, and exactly `+pi` when a limit sits
   there, so that both ends of a `[-pi, pi]` range stay available to a seed.
@@ -120,6 +121,32 @@ The only other movements are the `1e-9` snap and the snap onto a limit at
 where a folded elbow meets the cut, the angle is a double root and the solvers
 determine it only to a few `1e-7` rad. The derivation is at
 `ssik.postprocess._CUT_BAND`.
+
+### Joint limits
+
+A limit is inclusive up to round-off. With `respect_limits=True` or `"wrap"`,
+on either backend, an angle within `1e-9` rad of a joint limit is at the
+limit: the solution is kept and that joint is reported as exactly the limit,
+whichever side of it the solver's value fell. This applies to the limit pass,
+the redundant-7R in-limits resolvers, and every winding representative, so a
+branch at a limit has the same lifts on both backends. A configuration exactly
+at a hard stop is therefore returned on both backends, although the solvers
+compute its angle an ulp or two either side of the limit. Every returned
+angle lies within its limits exactly. `respect_limits=False` leaves the
+solver's values as they are.
+
+The band is round-off, not the solvers' worst-case angle error, because it
+moves a configuration. It covers the closed-form families at a regular or
+moderately conditioned pose, which land within `1.2e-10` rad of an exact
+limit. Near a singularity, where an angle is a multiple root, and on the
+`general_6r` family, whose angles are only as accurate as its `1e-5` FK gate,
+an angle can land further from the limit than the band. Such a configuration
+at an exact limit can then still be kept by one backend and dropped by the
+other. The derivation is at `ssik.postprocess._LIMIT_BAND`.
+
+`Solution.fk_residual` is measured by the solver before this step, as it is
+before the angle-representative snaps above. It does not include the clamp,
+which moves the tool by at most `1e-9` rad times the reach per clamped joint.
 
 ### Winding representatives
 
