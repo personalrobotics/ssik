@@ -33,6 +33,7 @@ Algorithmic specifics chosen here:
 
 from __future__ import annotations
 
+import math
 import pickle
 from collections.abc import Callable, Sequence
 from functools import lru_cache
@@ -1334,6 +1335,31 @@ def solve_x2_roots_mobius(
 # regardless of how close the roots are.
 _NULL_RANK_RTOL = float(np.sqrt(np.finfo(np.float64).eps))
 
+# Which roots get the multiplicity test at all (#642). A k-dimensional null
+# space (k >= 2) at x means algebraic multiplicity >= k, so the eigensolver
+# returns k roots there, each off by ~kappa * eps; and M(x) within sqrt(eps)
+# of such a space puts k roots within ~kappa * sqrt(eps) of x, where kappa is
+# the eigenvalue condition number. So a root with no other root within
+# _CLUSTER_RADIUS (chordal, |sin(dq/2)|) cannot need a split while kappa stays
+# below ~_CLUSTER_RADIUS / sqrt(eps), about 7e4. Near a kinematic singularity
+# kappa grows past that and the test also fires on isolated roots; there the
+# second singular value of M(x) is small at every root, so the isolated root
+# nearest to another one is probed, and if its s[-2] / s[0] is at most
+# _ILL_CONDITIONED_RTOL every root takes the test.
+#
+# Measured over 51,294 Python solves (129,782 splits) of the 18 general_6r
+# and the 2 RR-jointlock arms (the native parity gate's full tier, 1000
+# seeded uniform poses per arm, and a second, independently seeded set of
+# uniform, near-limit, at-pi and near-singular poses): a root the test marks
+# has its nearest neighbour at most 6.6e-4 away (first set) at poses with
+# sigma_min(J) >= 1e-4 (2e-14 on the #595 fixtures), and wherever an isolated
+# root is marked the probe's ratio is at most 157x sqrt(eps). Both rules
+# together reproduce the unfiltered split exactly on every one of those
+# solves, with one SVD per clustered root plus the probe instead of one per
+# root.
+_CLUSTER_RADIUS = 1e-3
+_ILL_CONDITIONED_RTOL = 1e4 * _NULL_RANK_RTOL
+
 # Monomial index pairs with v_12[hi] = x_lb0 * v_12[lo] (and likewise x_lb1);
 # see the v_12 layout in _back_substitute_inner.
 _SHIFT_LB0 = ((8, 7, 6, 5, 4, 3, 2, 1, 0), (5, 4, 3, 2, 1, 0, 11, 10, 9))
@@ -1421,7 +1447,9 @@ def split_repeated_roots(
     Multiplicity is read from M(x)'s singular values, not from how close the
     eigenvalues are: a defective double root has two equal eigenvalues and a
     one-dimensional null space, and needs no split. Roots with a
-    one-dimensional null space keep the eigensolver's vector untouched.
+    one-dimensional null space keep the eigensolver's vector untouched. The
+    singular values are computed only for roots with another root nearby,
+    unless the pencil is ill-conditioned (``_CLUSTER_RADIUS``).
 
     A root with a k-dimensional null space (k >= 2) is grouped with the other
     roots whose M(x) that same space is also null for, up to k of them: the
@@ -1437,9 +1465,43 @@ def split_repeated_roots(
     n = len(roots)
     if n < 2:
         return roots, eigvecs
-    stack = np.stack([_m_at(m_quad, m_lin, m_const, x) for x in roots])
-    sv = np.linalg.svd(stack, compute_uv=False)  # (n, 12), descending
-    ks = [int(np.count_nonzero(s <= _NULL_RANK_RTOL * s[0])) for s in sv]
+    # Only a root with another root nearby can have a multi-dimensional null
+    # space, unless the pencil is ill-conditioned (_CLUSTER_RADIUS); the others
+    # keep k = 1 without an SVD. The chordal distance of x = tan(q/2) values is
+    # |sin(a_i - a_j)| with a = atan(x) on a circle of circumference pi, so a
+    # root's nearest neighbour is one of its two cyclic neighbours in sorted
+    # order (|sin| is pi-periodic, so the wrap-around pair needs no shift).
+    order = sorted(range(n), key=lambda j: math.atan(roots[j]))
+    angles = [math.atan(roots[j]) for j in order]
+    gap = [math.inf] * n
+    for pos in range(n):
+        d = abs(math.sin(angles[pos] - angles[pos - 1]))
+        gap[order[pos]] = min(gap[order[pos]], d)
+        gap[order[pos - 1]] = min(gap[order[pos - 1]], d)
+    clustered = [j for j in range(n) if gap[j] <= _CLUSTER_RADIUS]
+    if len(clustered) < n:
+        # The isolated root nearest to another one tells whether the pencil
+        # is ill-conditioned; if it is, every root takes the full test.
+        probe = min((j for j in range(n) if gap[j] > _CLUSTER_RADIUS), key=gap.__getitem__)
+        s = np.linalg.svd(_m_at(m_quad, m_lin, m_const, roots[probe]), compute_uv=False)
+        if s[-2] <= _ILL_CONDITIONED_RTOL * s[0]:
+            clustered = list(range(n))
+    if not clustered:
+        return roots, eigvecs
+    xs = np.array([roots[j] for j in clustered], dtype=np.float64)
+    finite = np.isfinite(xs)
+    xf = np.where(finite, xs, 0.0)[:, None, None]
+    sub = m_quad * (xf * xf) + m_lin * xf + m_const
+    sub[~finite] = m_quad  # the root at infinity, read projectively (_m_at)
+    sub_sv = np.linalg.svd(sub, compute_uv=False)  # (m, 12), descending
+    sub_ks = np.count_nonzero(sub_sv <= _NULL_RANK_RTOL * sub_sv[:, :1], axis=1)
+    ks = [1] * n
+    stack: dict[int, NDArray[np.float64]] = {}
+    sv: dict[int, NDArray[np.float64]] = {}
+    for c, j in enumerate(clustered):
+        ks[j] = int(sub_ks[c])
+        stack[j] = sub[c]
+        sv[j] = sub_sv[c]
     if max(ks) < 2:
         return roots, eigvecs
 
