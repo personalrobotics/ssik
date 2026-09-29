@@ -343,7 +343,7 @@ inline std::vector<Solution<7>> spherical_shoulder_core(const JointConsts<7>& c,
 inline constexpr int kShTrackGrid = 180;         // _TRACK_GRID
 inline constexpr double kShTrackBreak = 0.4;     // _track_branches continuity break
 inline constexpr int kShTrackMinPoints = 4;      // _track_branches minimum curve length
-inline constexpr double kShLimitSlack = 1e-9;    // in-limits acceptance (_polish._LIMIT_SLACK)
+inline constexpr double kShLimitSlack = kLimitBand;  // in-limits acceptance (_polish._LIMIT_SLACK)
 inline constexpr int kShPolishMaxIters = 30;     // spherical_shoulder_polished._POLISH_MAX_ITERS
 
 using ShLimits = std::array<std::array<double, 2>, 7>;

@@ -47,6 +47,7 @@ from ssik.kinematics._scalar3 import _se3_inv
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import three_consecutive_intersecting
 from ssik.kinematics.reverse import map_reversed_q, reverse_kinematic_chain
+from ssik.postprocess import _onto_limits
 from ssik.solvers.jointlock.seven_r import _lock_joint
 from ssik.solvers.seven_r._feasible_param import feasible_arcs_bounded, merge, to_limits
 from ssik.subproblems import sp1, sp2, sp3, sp4
@@ -550,7 +551,8 @@ def _solutions_in_interval(
             q6c = 0.5 * (u + w)
             for q in _closed_branches(coef, t_rev, float(q6c), policy):
                 qw = np.array([to_limits(float(q[i]), *limits[i]) for i in range(7)])
-                in_lim = all(limits[i][0] - 1e-9 <= qw[i] <= limits[i][1] + 1e-9 for i in range(7))
+                # Within the finalize limit band (#624), which puts it on the limit.
+                in_lim = all(_onto_limits(float(qw[i]), *limits[i]) is not None for i in range(7))
                 if in_lim and float(np.linalg.norm(poe_forward_kinematics(kb, qw) - T)) <= fk_atol:
                     out.append(qw)
     return out
