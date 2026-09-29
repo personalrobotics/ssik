@@ -107,9 +107,9 @@ def main() -> int:
     args = ap.parse_args()
 
     here = Path(__file__).resolve().parent
-    repo = here.parents[2]
+    src = here.parents[2] / "src"
     pkg = Path(ssik.__file__).resolve().parent
-    if pkg.is_relative_to(repo):
+    if pkg.is_relative_to(src):
         sys.exit(f"ssik is imported from the source tree ({pkg}); install the wheel")
     include, cmake_dir = ssik.get_include(), ssik.get_cmake_dir()
     for p in (include, cmake_dir):
