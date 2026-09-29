@@ -73,7 +73,7 @@ CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes
 - **C++**: the native artifact drift guard and the conformance build, ctest and external-consumer smoke; plus the Python suite reused against the native backend.
 - **Wheels**: a native wheel build and smoke on Linux and macOS.
 
-Slow tests (`-m slow`) don't run on PRs; `.github/workflows/slow.yml` runs them nightly on Linux, and on demand (`gh workflow run slow.yml --ref <branch>`). Run the same checks locally before you push, so CI is a safety net rather than your test loop:
+Slow tests (`-m slow`) don't run on PRs; `.github/workflows/slow.yml` runs them nightly on Linux, and on demand (`gh workflow run slow.yml --ref <branch>`). The native-parity gate (`tests/test_native_parity.py`) runs a fast tier on PRs and its full tier nightly. Its known gaps are strict xfails, one per (arm, gap class): a PR that fixes a class must delete that class's arms from the gate's `KNOWN_*` tables. Boundary poses resolve differently on Linux and macOS, so the tables record the platforms each cell fails on. After changing a solver, refresh both platforms. On macOS, run `scripts/regen_native_parity.py`. For Linux, run `gh workflow run slow.yml --ref <branch> -f regen=true`, then commit the files from its `native-parity-data` artifact. The script prints the merged tables to paste. Run the same checks locally before you push, so CI is a safety net rather than your test loop:
 
 ```bash
 scripts/check.sh                        # ruff + format + mypy + pytest (~5 min)
