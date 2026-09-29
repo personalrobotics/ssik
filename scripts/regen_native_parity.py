@@ -27,9 +27,10 @@ KNOWN_* tables merge every platform recorded so far; paste them into the
 gate. A rerun on the same platform reproduces both files byte for byte.
 
 The round-off class (``ROUNDOFF_CLASSES``: exact-limit angles, #632) also
-flips between CI runners of one platform, so a cell of it
-that a CI run shows but the regeneration run did not is recorded by hand
-under the ``ci`` key of that arm's ``cells``, which no rerun overwrites.
+flips between CI runners of one platform, and so do the few strict-class
+cells in ``RUNNER_DEPENDENT_CELLS``, so such a cell that a CI run shows but
+the regeneration run did not is recorded by hand under the ``ci`` key of
+that arm's ``cells``, which no rerun overwrites.
 
     uv run python scripts/regen_native_parity.py            # this platform's cells
     uv run python scripts/regen_native_parity.py --arm ur5_ik --arm fr3_ik
@@ -159,8 +160,9 @@ def main() -> None:
 
 def _print_tables(pose_data: dict[str, Any]) -> None:
     """The KNOWN_* tables of tests/test_native_parity.py, merged over every
-    platform recorded in the poses file. A round-off class's cell is known
-    everywhere once any platform (or ``ci``) records it."""
+    platform recorded in the poses file. A round-off class's cell, or a
+    runner-dependent one, is known everywhere once any platform (or ``ci``)
+    records it."""
     platforms = ["darwin", "linux"]
     print("\nKNOWN_* tables:")
     for direction in ("forward", "reverse"):
@@ -176,7 +178,12 @@ def _print_tables(pose_data: dict[str, Any]) -> None:
             print(f"    {cls!r}: {{")
             for arm, where in sorted(table[cls].items()):
                 on = sorted(set(where) & set(platforms))
-                spec = "ALL" if cls in npar.ROUNDOFF_CLASSES or on == platforms else repr(tuple(on))
+                everywhere = (
+                    cls in npar.ROUNDOFF_CLASSES
+                    or (direction, cls, arm) in npar.RUNNER_DEPENDENT_CELLS
+                    or on == platforms
+                )
+                spec = "ALL" if everywhere else repr(tuple(on))
                 print(f"        {arm!r}: {spec},")
             print("    },")
         print("}")

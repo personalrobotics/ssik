@@ -123,10 +123,26 @@ NEW = "new"
 # precision. What is left is an exact-limit angle at a singular pose
 # (sigma_min < 1e-4, a multiple root accurate to ~sqrt(round-off), where the
 # polish declines), a Python-path general_6r solution that only the
-# near-miss refinement recovered (accurate to its 1e-5 gate; see class J), and
-# the OpenArm SRS elbow sign. The side of the limit these land on follows the
-# machine's LAPACK kernels, and the cells differ between Linux and macOS.
+# near-miss refinement recovered (accurate to its 1e-5 gate: a near-repeated
+# root the repeated-root split does not engage on, #640), and the OpenArm SRS
+# elbow sign. The side of the limit these land on follows the machine's LAPACK
+# kernels, and the cells differ between Linux and macOS.
 ROUNDOFF_CLASSES = frozenset({"F"})
+
+# Known cells of a strict class that also differ between CI runners of one
+# platform, as (direction, class, arm): non-strict like the round-off class,
+# until the named issue makes them reproducible. Record them under the ``ci``
+# key of the arm's ``cells`` (scripts/regen_native_parity.py).
+#   fanuc_crx10ialp near_singular/8: a 4-fold near-repeated root the split does
+#   not engage on, so Python recovers one branch only by the near-miss
+#   refinement, 2e-3 from native's; whether the two are the same root by the
+#   midpoint test follows the runner (#640).
+RUNNER_DEPENDENT_CELLS = frozenset(
+    {
+        ("forward", "E", "fanuc_crx10ialp_ik"),
+        ("reverse", "J", "fanuc_crx10ialp_ik"),
+    }
+)
 
 # a. FK closure every returned solution must meet: the default policy's
 # acceptance gate, documented in README ("How to read fk_residual"). Some
