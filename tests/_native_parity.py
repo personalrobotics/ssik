@@ -65,6 +65,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+from ssik.postprocess import _LIMIT_BAND
 from ssik.prebuilt import list_arms
 from ssik.prebuilt._manifest import load_manifest
 from ssik.refinement import is_same_root, kinbody_jacobian, same_root_floor
@@ -103,7 +104,7 @@ CLASSES = {
     "C": (617, "native RR jointlock has no empty-gated rescue"),
     "D": (622, "the T-perturbation rescue differs between backends"),
     "E": (623, "a native core drops a branch near a singularity"),
-    "F": (624, "exact-limit filtering keeps a branch on one backend and drops it on the other"),
+    "F": (632, "an exact-limit angle lands beyond the round-off limit band on one backend"),
     "G": (544, "native HP jointlock eigensolve loses roots"),
     "I": (462, "native srs_polished in-limits resolver under-samples the feasible swivel arc"),
     "J": (630, "the Python path drops a branch the native core returns"),
@@ -111,12 +112,17 @@ CLASSES = {
 NEW = "new"
 
 # Classes whose failing poses are decided by round-off, and so differ between
-# machines, not only between Linux and macOS: an exact-limit tie (F, #624).
-# Observed: the same commit's CI runners disagree on which of these cells fail.
-# Their known cells are non-strict xfails until that issue makes the outcome
-# reproducible; every other class is strict. The rescue (D) left this set when
-# both backends came to share one deterministic definition (#622); a rescued
-# solution that lands exactly on a limit is an F tie (``_Pose.across_limit``).
+# machines, not only between Linux and macOS: an exact-limit angle beyond the
+# limit band (F, #632). Observed: the same commit's CI runners disagree on which
+# of these cells fail. Their known cells are non-strict xfails until that issue
+# makes the outcome reproducible; every other class is strict. The rescue (D)
+# left this set when both backends came to share one deterministic definition
+# (#622); a rescued solution that lands exactly on a limit is an F case
+# (``_Pose.across_limit``). F stays after #624 made a limit inclusive up to
+# round-off: what is left of it is mostly general_6r's angle error at an exact
+# limit (up to 1e-5, from an ill-conditioned eigen-solve), and the side of the
+# limit it lands on follows the machine's LAPACK kernels. PR CI's Intel and AMD
+# runners pass four F cells that the nightly runner and macOS fail.
 ROUNDOFF_CLASSES = frozenset({"F"})
 
 # a. FK closure every returned solution must meet: the default policy's
@@ -125,8 +131,9 @@ ROUNDOFF_CLASSES = frozenset({"F"})
 # runs after that gate and may move a joint by up to 1e-6.
 FK_TOL = DEFAULT_TOLERANCE_POLICY.subproblem_numerical
 
-# a. How far outside a joint limit a default-mode solution may lie. Exact for
-# now; #624 introduces a documented slack and changes only this constant.
+# a. How far outside a joint limit a default-mode solution may lie: not at
+# all. A value within round-off of a limit is reported as exactly the limit
+# (#624, docs/api.md "Joint limits"), so every returned angle is in limits.
 LIMIT_SLACK = 0.0
 
 # Two solutions are the same configuration within this L-infinity distance,
@@ -477,8 +484,10 @@ class _Pose:
         other_raw = self.sets[("raw", other, False)]
         if mode == "limits":
             hits = [o for o in other_raw if not unmatched(q[None], o[None], self.tol)]
-            if any(_limit_excess(o, self.lo, self.hi, self.has) > 0.0 for o in hits):
-                return "F"  # the other backend has it, just across a limit
+            if any(_limit_excess(o, self.lo, self.hi, self.has) > _LIMIT_BAND for o in hits):
+                # The other backend has it just across a limit, beyond the band
+                # within which it would have put it on the limit (#624).
+                return "F"
             if unmatched(q[None], self.sets[("raw", own, False)], self.tol):
                 # Not in its own raw set: its in-limits resolver produced it.
                 if other == "native" and self.fam.startswith("seven_r.spherical_shoulder"):
@@ -524,7 +533,7 @@ class _Pose:
         other_raw = self.sets[("raw", other, True)]
         for q in want:
             hits = [o for o in other_raw if not unmatched(q[None], o[None], self.tol)]
-            if not any(_limit_excess(o, self.lo, self.hi, self.has) > 0.0 for o in hits):
+            if not any(_limit_excess(o, self.lo, self.hi, self.has) > _LIMIT_BAND for o in hits):
                 return False
         return True
 

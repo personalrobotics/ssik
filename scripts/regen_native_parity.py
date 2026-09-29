@@ -26,7 +26,7 @@ workflow dispatched with ``regen=true``
 KNOWN_* tables merge every platform recorded so far; paste them into the
 gate. A rerun on the same platform reproduces both files byte for byte.
 
-The round-off class (``ROUNDOFF_CLASSES``: exact-limit ties, #624) also
+The round-off class (``ROUNDOFF_CLASSES``: exact-limit angles, #632) also
 flips between CI runners of one platform, so a cell of it
 that a CI run shows but the regeneration run did not is recorded by hand
 under the ``ci`` key of that arm's ``cells``, which no rerun overwrites.
