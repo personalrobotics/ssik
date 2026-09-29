@@ -80,13 +80,22 @@ std::vector<Solution<7>> jointlock_artifact_solve(const JointConsts<7>& c,
     // default suffices. If a degenerate sub-chain ever needs the 6R polish, the
     // emitter bakes the 16 sub-chain JointConsts and this passes them.
     static const JointConsts<6> kNoRefineConsts{};
+    // The free joints' limits, which the sub-chain polish must not cross.
+    JointLimits<6> sub_lim;
+    for (int k = 0, j = 0; k < 7; ++k) {
+      if (k == jl.lock_idx) continue;
+      sub_lim.lo[j] = lim.lo[k];
+      sub_lim.hi[j] = lim.hi[k];
+      sub_lim.present[j] = lim.present[k];
+      ++j;
+    }
     std::array<std::vector<Solution<7>>, NSamples> per;
     parallel_for(NSamples, [&](std::size_t i) {
       // Accepted sub-chain candidates are polished on the DH chain, which needs
       // no POE consts (Python's solve_all_ik polishes the same chain).
       const auto sub = general_6r_core(kNoRefineConsts, rr[i], coeffs[i], tp, kGeneral6rFkAtol,
                                        kGeneral6rDedupAtol, /*allow_refinement=*/false, 15,
-                                       RrPolish::Dh);
+                                       RrPolish::Dh, sub_lim);
       for (const auto& s6 : sub) {
         Solution<7> s7;
         int j = 0;

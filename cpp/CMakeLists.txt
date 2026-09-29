@@ -108,6 +108,13 @@ add_executable(test_ur5_newton tests/test_ur5_newton.cpp)
 target_link_libraries(test_ur5_newton PRIVATE ssik_cpp)
 add_test(NAME ur5_newton COMMAND test_ur5_newton)
 
+# The general_6r polish keeps every in-limit winding (#644); mirrors
+# tests/test_polish_limits.py.
+add_executable(test_polish_limits tests/test_polish_limits.cpp)
+target_link_libraries(test_polish_limits PRIVATE ssik_cpp)
+target_include_directories(test_polish_limits PRIVATE gen)
+add_test(NAME polish_limits COMMAND test_polish_limits)
+
 # parallel_for primitive (#546): coverage, no-race, worker-count independence.
 add_executable(test_parallel tests/test_parallel.cpp)
 target_link_libraries(test_parallel PRIVATE ssik_cpp Threads::Threads)

@@ -31,7 +31,15 @@ floor ``f = same_root_floor(T)``::
         best = (q, r)
         if r <= f: break               # at round-off
     accept best iff best.r <= POLISH_TARGET and ||best.q - q0||_2 <= 2 eta
+                    and best.q keeps every in-limit winding of q0
     otherwise return (q0, r0) unchanged
+
+A winding of joint ``i`` is a value ``q_i + 2 pi k``; it is in limits when it
+lies within ``[lo_i - b, hi_i + b]``, ``b = 1e-9`` being the limit band of
+:func:`ssik.postprocess.respect_limits` (#624). ``best.q`` keeps ``q0``'s
+in-limit windings when, for every limited joint and every ``k``, the winding
+of ``q0_i`` in limits implies the winding of ``best.q_i`` is too. Joints
+without limits, and a chain built without them, impose nothing.
 
 The step is :func:`ssik.refinement.lm_refine_batch`'s (and the rescue's): the
 fixed-damping normal equations solved by partial-pivot LU.
@@ -49,15 +57,34 @@ left exactly as the solver produced it. So polish never moves a candidate by
 more than twice its own error estimate, never makes its residual worse, and
 runs before same-root deduplication, which then sees each branch at
 machine precision.
+
+Why the limit rule. The polish runs before the limit filter, which drops
+every winding more than the band past a limit. A candidate on a limit, or
+within the band of one, can be polished just past the band: by up to a few
+1e-7 rad near a singular pose, where the steps drift along the near-null
+direction, or by round-off when it sits at the band's edge (#644). The limit
+filter then drops that configuration or one of its windings. Polish exists to
+make an accepted candidate more accurate, never to change which limits it
+satisfies, so a polished point that loses an in-limit winding is rejected like
+any other and the accepted candidate is returned as the solver produced it.
+The rule only rejects: it never moves a candidate, so the branch-safety
+argument above is unchanged. A rejection costs nothing at a regular pose,
+where a root on a limit polishes to within round-off of it, inside the band;
+it leaves the candidate at the accuracy it was accepted with, only where the
+polished point would have crossed a limit. The rule depends only on the
+limits, not on the caller's ``respect_limits``, so the solver's candidate set
+is a function of the pose alone, as on the native backend.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik.postprocess import _LIMIT_BAND
 from ssik.refinement import _se3_log_residual_batch, same_root_floor
 
 __all__ = ["POLISH_MAX_ITERS", "POLISH_TARGET", "Chain", "polish_accepted"]
@@ -77,6 +104,8 @@ POLISH_MAX_ITERS = 4
 _DAMPING = 1e-9
 _STEP_CLIP = 0.5
 
+_TWO_PI = 2.0 * np.pi
+
 _EYE4 = np.eye(4, dtype=np.float64)
 
 
@@ -89,10 +118,19 @@ class Chain:
     :func:`ssik.refinement.kinbody_jacobian`, and the one the twist of
     :func:`ssik.refinement.se3_log_residual` is measured in, so the polish's
     Newton step converges quadratically.
+
+    ``limits`` are the joint limits in this chain's coordinates, one
+    ``(lo, hi)`` pair or ``None`` (no limits) per joint; the polish keeps
+    every in-limit winding of a candidate (module docstring). ``None`` for
+    the whole chain imposes no limits.
     """
 
     def __init__(
-        self, left: NDArray[np.float64], axes: NDArray[np.float64], right: NDArray[np.float64]
+        self,
+        left: NDArray[np.float64],
+        axes: NDArray[np.float64],
+        right: NDArray[np.float64],
+        limits: Sequence[tuple[float, float] | None] | None = None,
     ) -> None:
         self.left = np.asarray(left, dtype=np.float64)
         axes = np.asarray(axes, dtype=np.float64)
@@ -100,10 +138,22 @@ class Chain:
         self.right = np.asarray(right, dtype=np.float64)
         self.dof = self.axes.shape[0]
         self._left_is_eye = bool(np.all(self.left == _EYE4))
+        if limits is not None and len(limits) != self.dof:
+            raise ValueError(f"limits has {len(limits)} entries for a {self.dof}-joint chain")
+        # A joint without finite limits (continuous) has no winding to lose.
+        pairs = [
+            (i, lim)
+            for i, lim in enumerate(limits or ())
+            if lim is not None and np.isfinite(lim[0]) and np.isfinite(lim[1])
+        ]
+        self.limited = np.array([i for i, _ in pairs], dtype=np.intp)
+        self.lower = np.array([float(lim[0]) for _, lim in pairs], dtype=np.float64)
+        self.upper = np.array([float(lim[1]) for _, lim in pairs], dtype=np.float64)
 
     @classmethod
     def from_kinbody(cls, kb: Any) -> Chain:
-        """The POE chain of a revolute :class:`~ssik._kinbody.KinBody`."""
+        """The POE chain of a revolute :class:`~ssik._kinbody.KinBody`, with
+        its joint limits."""
         joints = kb.joints
         if any(j.joint_type != "revolute" for j in joints):
             raise ValueError("Chain is revolute-only")
@@ -111,11 +161,20 @@ class Chain:
             np.array([j.T_left for j in joints]),
             np.array([j.axis for j in joints]),
             np.array([j.T_right for j in joints]),
+            [j.limits for j in joints],
         )
 
     @classmethod
-    def from_dh(cls, dh: tuple[Any, Any, Any]) -> Chain:
-        """A standard distal DH chain ``(alpha, a, d)``: ``Rz(q) Tz(d) Tx(a) Rx(alpha)``."""
+    def from_dh(
+        cls,
+        dh: tuple[Any, Any, Any],
+        limits: Sequence[tuple[float, float] | None] | None = None,
+    ) -> Chain:
+        """A standard distal DH chain ``(alpha, a, d)``: ``Rz(q) Tz(d) Tx(a) Rx(alpha)``.
+
+        ``limits`` are in DH coordinates (a POE limit plus the joint's
+        ``theta_offset``).
+        """
         alpha, a, d = (np.asarray(x, dtype=np.float64) for x in dh)
         n = alpha.shape[0]
         right = np.broadcast_to(_EYE4, (n, 4, 4)).copy()
@@ -125,7 +184,31 @@ class Chain:
         right[:, 2, 1], right[:, 2, 2], right[:, 2, 3] = sa, ca, d
         axes = np.zeros((n, 3))
         axes[:, 2] = 1.0
-        return cls(np.broadcast_to(_EYE4, (n, 4, 4)).copy(), axes, right)
+        return cls(np.broadcast_to(_EYE4, (n, 4, 4)).copy(), axes, right, limits)
+
+    def keeps_limit_windings(
+        self, q0: NDArray[np.float64], q: NDArray[np.float64]
+    ) -> NDArray[np.bool_]:
+        """``(N,)``: whether each row of ``q`` has every in-limit winding that the
+        same row of ``q0`` has (module docstring)."""
+        keep = np.ones(q0.shape[0], dtype=bool)
+        if self.limited.size == 0:
+            return keep
+        x0 = q0[:, self.limited]
+        x1 = q[:, self.limited]
+        lo = self.lower - _LIMIT_BAND
+        hi = self.upper + _LIMIT_BAND
+        # Every k with q0 + 2 pi k in [lo, hi] lies in [k_lo, k_lo + span]; one
+        # extra k on each side absorbs the rounding of the division.
+        k_lo = np.ceil((lo - x0) / _TWO_PI) - 1.0
+        span = int(np.max(np.floor((hi - x0) / _TWO_PI) + 1.0 - k_lo))
+        for m in range(span + 1):
+            shift = _TWO_PI * (k_lo + m)
+            v0 = x0 + shift
+            v1 = x1 + shift
+            lost = (v0 >= lo) & (v0 <= hi) & ~((v1 >= lo) & (v1 <= hi))
+            keep &= ~np.any(lost, axis=1)
+        return keep
 
     def fk(self, q: NDArray[np.float64]) -> NDArray[np.float64]:
         """FK ``(N, 4, 4)`` for ``q`` of shape ``(N, dof)``."""
@@ -195,7 +278,8 @@ def polish_accepted(
 
     :param q0: ``(N, dof)`` candidates that already passed the acceptance gate.
     :param t_target: ``(4, 4)`` target pose, in the frame of ``chain``.
-    :param chain: the chain whose FK the candidates close.
+    :param chain: the chain whose FK the candidates close, with the joint
+        limits the polish must not cross.
     :returns: ``(q, residual, polished)``, shapes ``(N, dof)``, ``(N,)`` and
         ``(N,)``. Where ``polished`` is true the row is the polished candidate
         and its residual; elsewhere the acceptance rule rejected the polish and
@@ -244,4 +328,5 @@ def polish_accepted(
 
     ok = (best_r <= POLISH_TARGET) & (best_r < r0)
     ok &= np.linalg.norm(best_q - q0, axis=1) <= 2.0 * eta
+    ok &= chain.keeps_limit_windings(q0, best_q)
     return np.where(ok[:, None], best_q, q0), np.where(ok, best_r, r0), ok

@@ -586,16 +586,25 @@ enum class RrPolish : std::uint8_t { Off, Poe, Dh };
 // The RR analytical core: every in-frame algebraic solution for the POE target,
 // FK-filtered, polished (`polish`) and deduplicated. q is in the POE frame
 // (q_dh - theta_offset); fk_residual is the DH-frame Frobenius residual (== POE
-// residual under the rigid bridge), or the polished chain's. No limit/seed/
-// rescue logic -- that is the artifact layer.
+// residual under the rigid bridge), or the polished chain's. `lim` (POE frame)
+// only keeps the polish from crossing a limit (polish.hpp); no candidate is
+// dropped for its limits, and there is no seed/rescue logic -- that is the
+// artifact layer.
 template <class CoeffFn>
 std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts& rr,
                                          CoeffFn&& coeffs, const Pose& t_poe, double fk_atol,
                                          double dedup_atol, bool allow_refinement,
                                          int refinement_max_iters,
-                                         RrPolish polish = RrPolish::Off) {
+                                         RrPolish polish = RrPolish::Off,
+                                         const JointLimits<6>& lim = {}) {
   using namespace rr_detail;
   const Eigen::Matrix4d t_dh = rr.t_pre_inv * t_poe * rr.t_post_inv;
+  // The limits in DH coordinates (q_dh = q_poe + theta_offset), for the DH polish.
+  JointLimits<6> lim_dh = lim;
+  for (int i = 0; i < 6; ++i) {
+    lim_dh.lo[i] += rr.theta_offset[i];
+    lim_dh.hi[i] += rr.theta_offset[i];
+  }
 
   double t12[12];
   for (int r = 0; r < 3; ++r)
@@ -624,14 +633,14 @@ std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts
     if (accepted && polish == RrPolish::Dh)
       polish_accepted<6>([&](const std::array<double, 6>& x) { return dh_fk(rr, x); },
                          [&](const std::array<double, 6>& x) { return dh_spatial_jacobian(rr, x); },
-                         t_dh, q_dh, fk_err);
+                         t_dh, lim_dh, q_dh, fk_err);
     std::array<double, 6> q_poe;
     for (int i = 0; i < 6; ++i) q_poe[i] = q_dh[i] - rr.theta_offset[i];
     if (accepted) {
       if (polish == RrPolish::Poe)
         polish_accepted<6>([&](const std::array<double, 6>& x) { return fk<6>(c, x); },
                            [&](const std::array<double, 6>& x) { return spatial_jacobian<6>(c, x); },
-                           t_poe, q_poe, fk_err);
+                           t_poe, lim, q_poe, fk_err);
       cands.push_back(Solution<6>{q_poe, fk_err, Refinement::None});
     } else if (allow_refinement && fk_err < 0.1) {
       // Refine only near-misses (fk < 0.1): a candidate already >0.1 off is an
@@ -665,7 +674,7 @@ std::vector<Solution<6>> general_6r_artifact_solve(const JointConsts<6>& c, cons
   const auto core = [&](const Pose& tp) {
     auto sols = general_6r_core(c, rr, coeffs, tp, kGeneral6rFkAtol, kGeneral6rDedupAtol,
                                /*allow_refinement=*/true, p.refinement_max_iters,
-                               RrPolish::Poe);
+                               RrPolish::Poe, lim);
     // POE-FK re-verify (#533): general_6r_core filters the DH-frame residual, but
     // the rigid poe_to_dh bridge is slightly inconsistent at degenerate geometry
     // (DH-FK closes, POE-FK does not). Re-verify against the actual POE target,

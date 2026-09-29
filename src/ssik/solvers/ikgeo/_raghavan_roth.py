@@ -34,7 +34,7 @@ Algorithmic specifics chosen here:
 from __future__ import annotations
 
 import pickle
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import lru_cache
 from typing import Literal, cast, overload
 
@@ -1942,6 +1942,7 @@ def solve_all_ik(
     refinement_max_iters: int = 15,
     solver_name: str = "ikgeo._raghavan_roth",
     max_solutions: int | None = None,
+    limits: Sequence[tuple[float, float] | None] | None = None,
 ) -> tuple[list[Solution], bool]:
     """Run the full Raghavan-Roth pipeline and return all valid IK solutions.
 
@@ -1960,7 +1961,8 @@ def solve_all_ik(
          the drop decision; the resulting :class:`Solution` records
          ``refinement_used="lm"``.
       8. Polish every candidate that met ``fk_atol`` on its own to machine
-         precision on its own branch (:func:`ssik.refinement.polish.polish_accepted`).
+         precision on its own branch (:func:`ssik.refinement.polish.polish_accepted`),
+         unless that would lose one of its in-limit windings (``limits``).
       9. Merge candidates that are the same root (:func:`dedup_same_root`).
 
     :param dh: Tuple ``(alpha, a, d)`` of length-6 numpy arrays.
@@ -1983,6 +1985,10 @@ def solve_all_ik(
     :param max_solutions: optional early-exit cap (#198). When set, stop
         back-substituting roots once the post-dedup count reaches the cap.
         Default ``None`` enumerates all up-to-16 algebraic branches.
+    :param limits: the joint limits in DH coordinates (a POE limit plus the
+        joint's ``theta_offset``), one ``(lo, hi)`` or ``None`` per joint, that
+        the polish of accepted candidates must not cross. No solution is
+        dropped for its limits here. ``None`` imposes none.
     :returns: ``(solutions, is_ls)`` where solutions is a list of
         :class:`~ssik.core.solution.Solution` and ``is_ls`` is True iff no
         candidate survived FK validation.
@@ -2022,7 +2028,7 @@ def solve_all_ik(
     # Candidates that passed the gate on their own are polished to machine
     # precision on their own branch before any same-root dedup sees them
     # (ssik.refinement.polish), in one batch; refined near-misses are not.
-    polish_chain = Chain.from_dh(dh)
+    polish_chain = Chain.from_dh(dh, limits)
     unpolished: list[int] = []
 
     def polish_pending() -> None:

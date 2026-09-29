@@ -34,10 +34,12 @@ Jacobian's smallest singular value. So, on both backends and by default, every
 accepted candidate gets a few Newton steps on the true FK before duplicates are
 merged. The polished point replaces the candidate only if its residual drops to
 `1e-12` and it stays within twice the first Newton step of the candidate, the
-region where Newton's method provably converges to the candidate's own root.
-Otherwise the candidate is returned exactly as the solver produced it, which
-happens near a singularity. Polish never changes which candidates are accepted,
-and never moves one to another branch. `refinement_used` stays `"none"`. The
+region where Newton's method provably converges to the candidate's own root,
+and it keeps every value (or `2*pi` winding) that the candidate had within the
+[joint-limit band](#joint-limits). Otherwise the candidate is returned exactly
+as the solver produced it, which happens near a singularity or where polishing
+would cross a limit. Polish never changes which candidates are accepted, never
+takes one out of its limits, and never moves one to another branch. `refinement_used` stays `"none"`. The
 definition is in `ssik.refinement.polish`.
 
 This is not `allow_refinement`. That option (off by default) tries to rescue a

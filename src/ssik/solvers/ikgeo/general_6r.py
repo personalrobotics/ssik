@@ -109,6 +109,12 @@ def solve(
         refinement_max_iters=refinement_max_iters,
         solver_name=_SOLVER_NAME,
         max_solutions=max_solutions,
+        # The polish must not cross a limit (ssik.refinement.polish); in DH
+        # coordinates, q_dh = q + theta_offset.
+        limits=[
+            None if j.limits is None else (j.limits[0] + off, j.limits[1] + off)
+            for j, off in zip(kb.joints, dh.theta_offset.tolist(), strict=True)
+        ],
     )
 
     # The bridge ``T_pre @ FK_DH(theta) @ T_post = FK_POE(q)`` uses SE(3)-
