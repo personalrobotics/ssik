@@ -274,9 +274,11 @@ def test_seeded_solve_at_near_singular_limit_pose_646(native: bool) -> None:
 
 
 def test_rescue_recovers_near_singular_configuration_646() -> None:
-    """The shared rescue recovers the pose's own configuration to machine
-    precision: the Python definition directly, and the native port through the
-    default solve (the native analytic set has nothing in limits here)."""
+    """The shared rescue (its Python definition; rescue.hpp is the same
+    algorithm) recovers the pose's own configuration to machine precision.
+    Whether a backend's solve() reaches its rescue here depends on the
+    platform's analytic set, so the solve-level contract is the seeded test
+    above and the native-parity gate's pin."""
     from ssik.prebuilt.agilex import piper_ik
 
     t = piper_ik.fk(PIPER_646)
@@ -286,11 +288,9 @@ def test_rescue_recovers_near_singular_configuration_646() -> None:
         t,
         jacobian_fn=piper_ik._spatial_jacobian,
     )
-    native = piper_ik.solve(t, native=True)
-    for name, sols in (("Python rescue", rescued), ("native solve", native)):
-        near = [s for s in sols if _wrap_linf(s.q, PIPER_646) < 1e-6]
-        assert near, f"{name}: no solution within 1e-6 of the configuration ({len(sols)} returned)"
-        assert near[0].fk_residual < 1e-12, f"{name}: residual {near[0].fk_residual:.1e}"
+    near = [s for s in rescued if _wrap_linf(s.q, PIPER_646) < 1e-6]
+    assert near, f"no rescued solution within 1e-6 of the configuration ({len(rescued)} returned)"
+    assert near[0].fk_residual < 1e-12, f"residual {near[0].fk_residual:.1e}"
 
 
 def test_rescue_polishes_well_conditioned_to_machine_precision_384() -> None:
