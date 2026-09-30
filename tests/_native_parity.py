@@ -131,7 +131,7 @@ CLASSES = {
     "C": (617, "native RR jointlock has no empty-gated rescue"),
     "D": (622, "the T-perturbation rescue differs between backends"),
     "E": (623, "a native core drops a branch near a singularity"),
-    "F": (632, "an exact-limit angle lands beyond the round-off limit band on one backend"),
+    "F": (632, "an exact-limit angle lands beyond its error band on one backend"),
     "G": (544, "native HP jointlock eigensolve loses roots"),
     "I": (462, "native srs_polished in-limits resolver under-samples the feasible swivel arc"),
     "J": (630, "the Python path drops a branch the native core returns"),
@@ -146,14 +146,16 @@ NEW = "new"
 # left this set when both backends came to share one deterministic definition
 # (#622); a rescued solution that lands exactly on a limit is an F case
 # (``_Pose.across_limit``). F stays after #624 made a limit inclusive up to
-# round-off and #636 polished accepted general_6r solutions to machine
-# precision. What is left is an exact-limit angle at a singular pose
-# (sigma_min < 1e-4, a multiple root accurate to ~sqrt(round-off), where the
-# polish declines), a Python-path general_6r solution that only the
-# near-miss refinement recovered (accurate to its 1e-5 gate: a near-repeated
-# root the repeated-root split does not engage on, #640), and the OpenArm SRS
-# elbow sign. The side of the limit these land on follows the machine's LAPACK
-# kernels, and the cells differ between Linux and macOS.
+# round-off, #636 polished accepted general_6r solutions to machine precision,
+# and #651 widened the band to each solution's own error estimate, capped at
+# 1e-6 (postprocess._BAND_GAIN). That admits an exact-limit angle at a singular
+# pose, a multiple root known to ~sqrt(round-off). What is left is a solution
+# whose error exceeds the cap: a Python-path general_6r solution accurate only
+# to its 1e-5 gate (a near-miss refinement, or a singular root the polish
+# declines; #640), which lands 1e-6 to 6e-4 past the limit while the other
+# backend's copy is within its band, and the OpenArm SRS elbow sign. The side
+# of the limit these land on follows the machine's LAPACK kernels, and the
+# cells differ between Linux and macOS.
 ROUNDOFF_CLASSES = frozenset({"F"})
 
 # Known cells of a strict class that also differ between CI runners of one

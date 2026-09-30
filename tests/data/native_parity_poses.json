@@ -132,12 +132,10 @@
   "fanuc_crx10ia_ik": {
    "fast_pins": {
     "darwin": [
-     "near_singular/16",
-     "near_singular/20"
+     "near_singular/16"
     ],
     "linux": [
-     "near_singular/16",
-     "near_singular/20"
+     "near_singular/16"
     ]
    },
    "near_singular": [
@@ -192,11 +190,9 @@
    ],
    "cells": {
     "darwin": [
-     "forward:F",
      "reverse:J"
     ],
     "linux": [
-     "forward:F",
      "reverse:J"
     ]
    }
@@ -268,7 +264,9 @@
   "fanuc_crx10ialp_ik": {
    "fast_pins": {
     "darwin": [],
-    "linux": []
+    "linux": [
+     "near_singular/8"
+    ]
    },
    "near_singular": [
     [1.860723866996686, 0.0, 1.5707963267948966, 3.0661469155987806, 1.3447204601250342, -2.6925818979347893],
@@ -326,21 +324,25 @@
      "reverse:J"
     ],
     "darwin": [],
-    "linux": []
+    "linux": [
+     "forward:E",
+     "reverse:J"
+    ]
    }
   },
   "fanuc_crx20ial_ik": {
    "fast_pins": {
     "darwin": [
      "uniform/65",
+     "near_limit/4",
      "near_limit/25",
-     "near_singular/25"
+     "near_singular/32"
     ],
     "linux": [
+     "uniform/43",
      "uniform/65",
-     "near_limit/4",
-     "near_singular/0",
-     "near_singular/25"
+     "near_limit/25",
+     "near_singular/34"
     ]
    },
    "near_singular": [
@@ -400,7 +402,6 @@
     ],
     "linux": [
      "forward:F",
-     "reverse:F",
      "reverse:J"
     ]
    }
@@ -408,12 +409,10 @@
   "fanuc_crx30ia_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/24",
-     "near_singular/19"
+     "near_limit/3"
     ],
     "linux": [
-     "near_singular/8",
-     "near_singular/19",
+     "near_limit/3",
      "near_singular/41",
      "at_pi/8"
     ]
@@ -470,12 +469,11 @@
    ],
    "cells": {
     "darwin": [
-     "reverse:F"
+     "forward:F"
     ],
     "linux": [
      "forward:E",
      "forward:F",
-     "reverse:F",
      "reverse:J"
     ]
    }
@@ -483,18 +481,10 @@
   "fanuc_crx3ia_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/7",
-     "near_singular/4",
-     "near_singular/16",
-     "near_singular/24",
      "at_pi/0"
     ],
     "linux": [
-     "near_limit/30",
-     "near_limit/41",
-     "near_singular/16",
-     "near_singular/25",
-     "near_singular/27",
+     "near_limit/7",
      "at_pi/0"
     ]
    },
@@ -550,25 +540,18 @@
    ],
    "cells": {
     "darwin": [
-     "forward:E",
-     "forward:F",
-     "reverse:F"
+     "forward:E"
     ],
     "linux": [
      "forward:F",
-     "reverse:F",
      "reverse:J"
     ]
    }
   },
   "fanuc_crx5ia_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/3"
-    ],
-    "linux": [
-     "near_singular/3"
-    ]
+    "darwin": [],
+    "linux": []
    },
    "near_singular": [
     [-0.8472969194816158, 3.0083780307940926, 1.5707963267948963, 1.0000244895538137, -3.139847324337799, 3.0448449047575488],
@@ -621,12 +604,8 @@
     [-1.6072330226415943, -2.994370664876903, 1.570635144736308, -1.370487794836373, -3.139847324337799, -3.456564334856692]
    ],
    "cells": {
-    "darwin": [
-     "reverse:F"
-    ],
-    "linux": [
-     "reverse:F"
-    ]
+    "darwin": [],
+    "linux": []
    }
   },
   "fanuc_m710ic_ik": {
@@ -1974,7 +1953,6 @@
     "darwin": [
      "near_limit/6",
      "near_limit/16",
-     "near_limit/21",
      "near_limit/30",
      "near_singular/6",
      "near_singular/8",
@@ -1982,11 +1960,11 @@
     ],
     "linux": [
      "near_limit/6",
-     "near_limit/16",
      "near_singular/6",
+     "near_singular/16",
+     "near_singular/21",
      "near_singular/25",
-     "near_singular/32",
-     "near_singular/33"
+     "near_singular/32"
     ]
    },
    "near_singular": [
@@ -2045,7 +2023,6 @@
     ],
     "darwin": [
      "forward:E",
-     "reverse:F",
      "reverse:J"
     ],
     "linux": [
@@ -2057,11 +2034,12 @@
   "m1013_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/0",
      "near_singular/5",
      "near_singular/22"
     ],
     "linux": [
+     "uniform/198",
+     "near_limit/13",
      "near_singular/5",
      "near_singular/22"
     ]
@@ -2122,7 +2100,6 @@
     ],
     "darwin": [
      "forward:E",
-     "reverse:F",
      "reverse:J"
     ],
     "linux": [
@@ -2138,10 +2115,10 @@
      "at_pi/17"
     ],
     "linux": [
+     "at_pi/2",
      "at_pi/4",
      "at_pi/5",
-     "at_pi/8",
-     "at_pi/17"
+     "at_pi/8"
     ]
    },
    "near_singular": [
@@ -2348,17 +2325,15 @@
    "fast_pins": {
     "darwin": [
      "near_singular/15",
+     "near_singular/25",
      "near_singular/27",
      "near_singular/28",
      "near_singular/43"
     ],
     "linux": [
-     "near_singular/15",
-     "near_singular/21",
-     "near_singular/27",
-     "near_singular/39",
-     "near_singular/40",
-     "near_singular/42"
+     "near_singular/8",
+     "near_singular/14",
+     "near_singular/15"
     ]
    },
    "near_singular": [
@@ -2417,8 +2392,6 @@
      "reverse:J"
     ],
     "linux": [
-     "forward:F",
-     "reverse:F",
      "reverse:J"
     ]
    },
@@ -3012,10 +2985,7 @@
   },
   "rx160_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/0",
-     "near_singular/20"
-    ],
+    "darwin": [],
     "linux": []
    },
    "near_singular": [
@@ -3069,9 +3039,7 @@
     [-2.559980737804295, 1.264936411439801, 4.7724033343345154e-05, -1.8733321991377134, 1.7232048879645825, -3.523916682093949]
    ],
    "cells": {
-    "darwin": [
-     "forward:F"
-    ],
+    "darwin": [],
     "linux": []
    }
   },
@@ -3222,16 +3190,14 @@
   "standardbots_thor_ik": {
    "fast_pins": {
     "darwin": [
-     "near_limit/25",
      "near_limit/34",
      "near_singular/25",
      "at_pi/14"
     ],
     "linux": [
      "near_limit/22",
-     "near_limit/25",
-     "at_pi/14",
-     "at_pi/15"
+     "near_singular/31",
+     "at_pi/14"
     ]
    },
    "near_singular": [
@@ -3286,12 +3252,10 @@
    ],
    "cells": {
     "darwin": [
-     "forward:E",
-     "reverse:F"
+     "forward:E"
     ],
     "linux": [
-     "forward:E",
-     "reverse:F"
+     "forward:E"
     ]
    }
   },
@@ -4288,9 +4252,7 @@
   "xmatecr7_ik": {
    "fast_pins": {
     "darwin": [],
-    "linux": [
-     "near_singular/36"
-    ]
+    "linux": []
    },
    "near_singular": [
     [1.0181, -1.4188758894965108, -2.0091879576090848, 1.0869896459908157, -2.799775, -1.4662002855545815],
@@ -4344,9 +4306,7 @@
    ],
    "cells": {
     "darwin": [],
-    "linux": [
-     "reverse:F"
-    ]
+    "linux": []
    }
   },
   "xmatepro7_ik": {
@@ -4471,9 +4431,7 @@
   },
   "yam_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_limit/16"
-    ],
+    "darwin": [],
     "linux": []
    },
    "near_singular": [
@@ -4527,9 +4485,7 @@
     [2.0341532403403972, 1.5207740366308902, 0.5035391442957995, -0.4795310317040297, -1.5708, 1.9919527262591767]
    ],
    "cells": {
-    "darwin": [
-     "forward:F"
-    ],
+    "darwin": [],
     "linux": []
    }
   },
