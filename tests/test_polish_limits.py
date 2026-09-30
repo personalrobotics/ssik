@@ -32,10 +32,20 @@ from ssik.refinement.polish import POLISH_TARGET, Chain, polish_accepted
 
 _KB = crx20ial_ik._KB
 _J = 2  # joint 3: limits +-3 pi / 2
-_LO = _KB.joints[_J].limits[0]
+# Every joint of the arm is limited.
+_LIMITS = [lim for lim in (j.limits for j in _KB.joints) if lim is not None]
+assert len(_LIMITS) == len(_KB.joints)
+_LO = _LIMITS[_J][0]
 # A regular configuration (sigma_min(J) = 0.034) with joint 3 on its lower limit.
 _Q_ON_LIMIT = np.array(
-    [1.5310050577906944, 2.169188913994496, _LO, -1.363346478405587, 2.7887203364781827, 3.6332152303383065]
+    [
+        1.5310050577906944,
+        2.169188913994496,
+        _LO,
+        -1.363346478405587,
+        2.7887203364781827,
+        3.6332152303383065,
+    ]
 )
 
 
@@ -72,8 +82,7 @@ def test_polish_keeps_every_in_limit_winding(
 
     q, r, ok = polish_accepted(q0[None], t_target, Chain.from_kinbody(_KB))
 
-    for i, joint in enumerate(_KB.joints):
-        lo, hi = joint.limits
+    for i, (lo, hi) in enumerate(_LIMITS):
         assert _in_band_windings(q0[i], lo, hi) <= _in_band_windings(q[0, i], lo, hi), i
     assert bool(ok[0]) is polished
     if polished:
