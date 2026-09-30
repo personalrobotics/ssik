@@ -109,6 +109,8 @@ scripts/release-precheck.sh             # ~2 min: wheel build + fresh-venv smoke
 
 This catches packaging-class bugs (missing runtime deps, broken Cython compile, broken prebuilt imports) that the dev-tree `pytest` misses because dev deps pull everything transitively. Local-green here ≈ rc-tag green on CI.
 
+Cut a release as `vX.Y.Zrc1` first (it publishes to TestPyPI only), then tag the final `vX.Y.Z` on a commit that carries **no other `v*` tag**. With an rc tag and the final tag on the same commit, the version the release build derives from git may be the rc's; the publish job then refuses to upload (built version != tag) and nothing is released. If the final release has no code change since the last rc, land any commit on `main` first (a docs change is enough) and tag that.
+
 ## Benchmarks
 
 ```bash
