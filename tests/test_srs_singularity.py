@@ -27,6 +27,7 @@ import importlib
 import numpy as np
 import pytest
 
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
 from tests._cpp_backend import cpp_available
@@ -63,11 +64,18 @@ def _singular_q(kb, rng: np.random.Generator, eps: float) -> np.ndarray:
     return q
 
 
+# FK closure: the default acceptance gate (README "How to read fk_residual").
+# At an exact singularity a rescued configuration can lie up to its error band
+# (at most 1e-6 rad) past a limit; it is clamped onto the limit, which moves the
+# tool by up to 1e-6 x reach (docs/api.md "Error band", #651).
+_FK_GATE = DEFAULT_TOLERANCE_POLICY.subproblem_numerical
+
+
 def _assert_sound(arm: str, kb, T: np.ndarray, sols, lims) -> None:
     for s in sols:
         q = np.asarray(s.q)
         resid = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
-        assert resid < 1e-6, f"{arm}: unsound solution, FK residual {resid:.2e}"
+        assert resid < _FK_GATE, f"{arm}: unsound solution, FK residual {resid:.2e}"
         assert all(lims[i][0] - 1e-9 <= q[i] <= lims[i][1] + 1e-9 for i in range(len(q))), (
             f"{arm}: solution out of limits: {q.tolist()}"
         )

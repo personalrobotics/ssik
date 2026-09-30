@@ -35,14 +35,11 @@ import numpy as np
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 
-from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
 from ssik.prebuilt._manifest import load_manifest
 from tests._hypothesis_strategies import non_singular_q6r, non_singular_q7r
 
 if TYPE_CHECKING:
     from types import ModuleType
-
-    from ssik.core.solution import Solution
 
 _MANIFEST = load_manifest()
 
@@ -71,40 +68,6 @@ def _load(module_name: str) -> ModuleType:
     return importlib.import_module(f"ssik.prebuilt.{module_name}")
 
 
-# The +-pi snap (docs/api.md "Angle representatives") moves an angle within
-# 1e-6 rad of pi onto a [-pi, pi] limit, in every respect_limits mode, and the
-# returned fk_residual measures that move (#645). A regular configuration can
-# land in that band -- the wrist-flipped branch of a pose whose wrist is within
-# 1e-6 of 0 -- so a solution reported at exactly that limit is held to the
-# policy's FK gate, which the snap stays inside, rather than to the solver's
-# own precision.
-_SNAP_BAND = 1e-6
-
-
-def _snapped_to_pi_limit(mod: ModuleType, q: np.ndarray) -> bool:
-    for (lo, hi), v in zip((lim or (None, None) for lim in mod._JOINT_LIMITS), q, strict=True):
-        if lo is None:
-            continue
-        if (v == hi and abs(hi - np.pi) <= _SNAP_BAND) or (
-            v == lo and abs(lo + np.pi) <= _SNAP_BAND
-        ):
-            return True
-    return False
-
-
-def _max_unexplained_fk(mod: ModuleType, sols: list[Solution], fk_ceiling: float) -> float:
-    """The largest residual measured against the ceiling: every solution's,
-    except that a snapped one only counts beyond the policy's FK gate."""
-    gate = DEFAULT_TOLERANCE_POLICY.subproblem_numerical
-    worst = 0.0
-    for s in sols:
-        r = s.fk_residual
-        if _snapped_to_pi_limit(mod, np.asarray(s.q)) and r < max(gate, fk_ceiling):
-            continue
-        worst = max(worst, r)
-    return worst
-
-
 def _maybe_xfail(arm_name: str) -> None:
     """xfail if the manifest declares a known coverage gap.
 
@@ -127,6 +90,15 @@ def _maybe_xfail(arm_name: str) -> None:
     ids=[a[0] for a in PREBUILT_ARMS_6R],
 )
 @given(q_star=non_singular_q6r())
+# Regular poses where one joint is a hair from 0, so a wrist- or shoulder-flipped
+# branch lands that close to pi on a [-pi, pi] joint. A fixed +-pi band snapped
+# those accurate values onto pi and broke the arm's ceiling (Puma 560 by 4e-7,
+# RS007N 1.4e-8, and Puma 560 / IRB 1600 by ~1e-10 under a 1e-9 band); the
+# error band leaves them alone (#651).
+@example(q_star=np.array([0.0, 1.0, 1.0, 1.0, 1.0, 3e-7]))
+@example(q_star=np.array([1e-8, 1.0, 1.0, 1.0, 1.0, 0.0]))
+@example(q_star=np.array([0.0, 1.0, 1.0, 1.0, 1.0, 8.04415646637129e-11]))
+@example(q_star=np.array([8.71689571190157e-11, 1.0, 1.0, 1.0, 1.0, 0.0]))
 @settings(
     max_examples=500,
     # Deterministic across CI runs: a bulletproof FK-closure *gate*, not
@@ -164,7 +136,7 @@ def test_prebuilt_6r_random_q_roundtrip(
     # narrower URDF limits (Franka's joint 2 is +-1.76 rad, etc.).
     sols = mod.solve(T_target, respect_limits=False)
     assert sols, f"{arm_name}: reachable non-singular pose returned no IK"
-    max_fk = _max_unexplained_fk(mod, sols, fk_ceiling)
+    max_fk = max(s.fk_residual for s in sols)
     assert max_fk < fk_ceiling, (
         f"{arm_name}: max FK residual {max_fk:.2e} > {fk_ceiling:.0e} ceiling at "
         f"q*={q_star.tolist()}"
@@ -214,7 +186,7 @@ def test_prebuilt_7r_random_q_roundtrip(
     # narrower URDF limits (Franka's joint 2 is +-1.76 rad, etc.).
     sols = mod.solve(T_target, respect_limits=False)
     assert sols, f"{arm_name}: reachable non-singular pose returned no IK"
-    max_fk = _max_unexplained_fk(mod, sols, fk_ceiling)
+    max_fk = max(s.fk_residual for s in sols)
     assert max_fk < fk_ceiling, (
         f"{arm_name}: max FK residual {max_fk:.2e} > {fk_ceiling:.0e} ceiling at "
         f"q*={q_star.tolist()}"

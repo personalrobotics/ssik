@@ -19,6 +19,7 @@
 
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/ik_types.hpp"
+#include "ssik_cpp/newton.hpp"  // spatial_jacobian
 
 namespace ssik {
 
@@ -186,19 +187,46 @@ std::vector<WindingJoint> winding_joints(const JointConsts<N>& consts, const Joi
 }
 
 // A value within kLimitBand of a joint limit is at the limit (#624): accepted,
-// and reported as exactly the limit, on either side of it. Held to round-off
-// because it moves a configuration; the measurement behind 1e-9 is argued at
-// postprocess._LIMIT_BAND. Shared with the 7R in-limits resolvers' acceptance
-// slack (srs_polished_detail::kPolishLimitSlack, kShLimitSlack).
+// and reported as exactly the limit, on either side of it. The floor of the
+// error band below, held to round-off because it moves a configuration; the
+// measurement behind 1e-9 is argued at postprocess._LIMIT_BAND. Shared with the
+// 7R in-limits resolvers' acceptance slack
+// (srs_polished_detail::kPolishLimitSlack, kShLimitSlack).
 inline constexpr double kLimitBand = 1e-9;
 
-// v with the band clamp applied: the limit when within kLimitBand of it, v when
-// strictly inside, nullopt when outside by more. (postprocess._onto_limits)
-inline std::optional<double> onto_limits(double v, double lo, double hi) {
-  if (v < lo - kLimitBand || v > hi + kLimitBand) return std::nullopt;
+// The error band (#651; postprocess._BAND_GAIN / _BAND_CAP, where the constants
+// are argued in full). A value is at a joint limit, or at the +-pi cut, when it
+// lies within its solution's own angular error of it, estimated as
+//   band = min(kBandCap, kBandGain * r / sigma_min),
+// r = ||fk(q) - T||_F and sigma_min the smallest singular value of the spatial
+// Jacobian at q, which bounds the first-order error of every joint: below
+// round-off for an accurate solution, wider at a fold or a singularity. The limit
+// test uses max(kLimitBand, band), the cut test max(kCutFloor, band). The gain
+// covers the measured ratio of actual error to r / sigma_min (at most 8.7); the
+// cap is subproblem_numerical / 10, the largest move a clamp or snap may make.
+inline constexpr double kBandCap = 1e-6;
+inline constexpr double kBandGain = 10.0;
+
+// v with the limit band applied: nullopt when v lies outside the limits by more
+// than max(kLimitBand, band()) (the floor alone in the plain overload), else the
+// limit when v is outside it or within the kLimitBand round-off of it (#624),
+// else v. A value inside its limits moves by round-off at most, one outside by
+// at most its band. band() is the solution's capped error estimate, called only
+// for a value outside a limit by more than the floor and at most the cap, the
+// one range where it can change the answer. (postprocess._onto_limits)
+template <class Band>
+std::optional<double> onto_limits(double v, double lo, double hi, const Band& band) {
+  double b = kLimitBand;
+  const double out = std::max(lo - v, v - hi);
+  if (kLimitBand < out && out <= kBandCap) b = std::max(kLimitBand, band());
+  if (v < lo - b || v > hi + b) return std::nullopt;
   if (v - lo <= kLimitBand) return lo;
   if (hi - v <= kLimitBand) return hi;
   return v;
+}
+
+inline std::optional<double> onto_limits(double v, double lo, double hi) {
+  return onto_limits(v, lo, hi, [] { return 0.0; });
 }
 
 // Whether new_v is anything other than old_v shifted by a whole number of turns
@@ -210,12 +238,13 @@ inline bool is_move(double old_v, double new_v) {
   return new_v != old_v + kTwoPi * std::round((new_v - old_v) / kTwoPi);
 }
 
-// What a finalize pass re-measures a moved solution against (#645): a snap onto
-// pi or a clamp onto a limit moves the configuration after the solver measured
-// fk_residual, so the residual is re-measured at the returned q, with the
-// solvers' own metric (Frobenius norm of fk(q) - T on the POE chain). One FK per
-// moved solution. Default-constructed (no target) it keeps the solver's value.
-// (postprocess._placed)
+// What a finalize pass measures a solution against. A snap onto pi or a clamp
+// onto a limit moves the configuration after the solver measured fk_residual,
+// so the residual is re-measured at the returned q (#645), with the solvers' own
+// metric (Frobenius norm of fk(q) - T on the POE chain): one FK per moved
+// solution (postprocess._placed). And the limit and cut bands are the
+// solution's error band (#651, postprocess._error_band). Default-constructed
+// (no target) it keeps the solver's value and the bands are the floor.
 template <int N>
 struct Remeasure {
   const JointConsts<N>* consts = nullptr;
@@ -223,20 +252,49 @@ struct Remeasure {
   void operator()(Solution<N>& s, bool moved) const {
     if (moved && target != nullptr) s.fk_residual = (fk<N>(*consts, s.q) - *target).norm();
   }
+  // The capped angular error estimate min(kBandCap, kBandGain * r / sigma_min)
+  // at q; each test adds its own floor. 0 without a target (the floors alone).
+  double error_band(const std::array<double, N>& q) const {
+    if (target == nullptr) return 0.0;
+    const double r = (fk<N>(*consts, q) - *target).norm();
+    const Eigen::JacobiSVD<Eigen::Matrix<double, 6, N>> svd(spatial_jacobian<N>(*consts, q));
+    const auto& sv = svd.singularValues();  // descending
+    const double s = sv(sv.size() - 1);
+    if (s <= 0.0) return kBandCap;  // exactly singular: nothing bounds the error
+    return std::min(kBandCap, kBandGain * r / s);
+  }
+};
+
+// One solution's error band, evaluated on first use: most solutions never need
+// it. Measured at the solution as it entered the current pass. (postprocess._Band)
+template <int N>
+class LazyBand {
+ public:
+  LazyBand(const Remeasure<N>& rm, const std::array<double, N>& q) : rm_(rm), q_(q) {}
+  double operator()() const {
+    if (!value_) value_ = rm_.error_band(q_);
+    return *value_;
+  }
+
+ private:
+  const Remeasure<N>& rm_;
+  std::array<double, N> q_;
+  mutable std::optional<double> value_;
 };
 
 // Every q + 2pi*k inside [lo, hi], ascending. The k range comes from the limits
 // (so a boundary value like 0 under [-2pi, 2pi] yields {-2pi, 0, 2pi}), then
-// each candidate goes through the limit band, so round-off cannot emit an
-// out-of-limit value and a representative within kLimitBand of a limit is that
-// limit. (postprocess._reps)
-inline std::vector<double> winding_reps(double q, double lo, double hi) {
+// each candidate goes through the limit band (the solution's `band`, the floor
+// by default), so round-off cannot emit an out-of-limit value and a
+// representative within the band of a limit is that limit. (postprocess._reps)
+template <class Band>
+std::vector<double> winding_reps(double q, double lo, double hi, const Band& band) {
   constexpr double kTwoPi = 2.0 * M_PI;
   const int k_lo = static_cast<int>(std::ceil((lo - q) / kTwoPi)) - 1;
   const int k_hi = static_cast<int>(std::floor((hi - q) / kTwoPi)) + 1;
   std::vector<double> out;
   for (int k = k_lo; k <= k_hi; ++k) {
-    if (const auto v = onto_limits(q + kTwoPi * k, lo, hi)) out.push_back(*v);
+    if (const auto v = onto_limits(q + kTwoPi * k, lo, hi, band)) out.push_back(*v);
   }
   // A value with no in-limit representative keeps its own, so expansion can
   // only ever add configurations. Expansion runs after the limit filter, so
@@ -246,29 +304,47 @@ inline std::vector<double> winding_reps(double q, double lo, double hi) {
   return out;
 }
 
+inline std::vector<double> winding_reps(double q, double lo, double hi) {
+  return winding_reps(q, lo, hi, [] { return 0.0; });
+}
+
 // Which coordinate an angle at the +-pi cut gets (#596); postprocess._CUT_SNAP
-// and _CUT_BAND, where both values are argued in full. kCutSnap moves a value
-// onto exactly pi, so it is held to round-off (the rank grid). kCutBand only
-// chooses between representatives 2pi apart, so it is as wide as the angle
-// uncertainty at the cut (a folded elbow is a double root, ~sqrt(2 x round-off),
-// measured up to 3.6e-7): subproblem_numerical / 10. It moves a value only on a
-// joint whose limit sits on the cut, onto exactly pi.
+// and the cut comment there, where the tolerances are argued in full. kCutSnap
+// moves a continuous joint's value onto exactly pi, so it is held to round-off
+// (the rank grid). A finite joint's value is at the cut when within its
+// solution's error band of the pi class (#651): round-off for an accurate
+// solution, wider at a folded elbow, a double root known to ~sqrt(2 x
+// round-off). It moves a value only on a joint whose limit sits on the cut,
+// onto exactly pi.
 inline constexpr double kCutSnap = finalize_detail::kRankQuantum;
-inline constexpr double kCutBand = 1e-6;
+// The floor of a finite joint's cut band: a few dozen ulps of pi, so a residual
+// that rounds to zero still admits the backends' ulp-level spread.
+// (postprocess._CUT_FLOOR)
+inline constexpr double kCutFloor = 1e-14;
 
 // Distance from q to the nearest odd multiple of pi. (postprocess._pi_class_offset)
 inline double pi_class_offset(double q) {
   return std::abs(std::abs(finalize_detail::wrap_to_pi(q)) - M_PI);
 }
 
+// Whether a finite joint's value `offset` from the pi class is at the cut:
+// within max(kCutFloor, band()) of it, band() evaluated only between the floor
+// and the cap. (postprocess._at_cut)
+template <class Band>
+bool at_cut(double offset, const Band& band) {
+  if (offset <= kCutFloor) return true;
+  if (offset > kBandCap) return false;
+  return offset <= band();
+}
+
 // One deterministic coordinate for every angle that has a choice (#596).
 // Continuous revolute joints wrap to (-pi, pi], a value within kCutSnap of the
 // cut becoming exactly +pi. A finite revolute joint whose limits admit two or
-// more representatives of pi, with a value within kCutBand of the pi class,
-// takes the 2pi shift nearest the in-limit representative closest to +pi, or
-// exactly that representative when a limit sits on it. Everything else,
-// including every value away from the cut, keeps its exact bits. Idempotent.
-// (postprocess._canonicalize_representatives)
+// more representatives of pi, with a value at the cut (at_cut), takes the 2pi
+// shift nearest the in-limit representative closest to +pi; a shift that lands
+// beyond a limit sitting on that representative (by at most the band) is set
+// to the limit. Everything else, including every value away from the cut, keeps
+// its exact bits. Idempotent. (postprocess._canonicalize_representatives)
 template <int N>
 std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> sols,
                                                       const JointConsts<N>& consts,
@@ -278,7 +354,6 @@ std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> s
   std::array<bool, N> active{};
   std::array<bool, N> continuous{};
   std::array<double, N> pi_rep{};
-  std::array<bool, N> on_limit{};
   bool any = false;
   for (int i = 0; i < N; ++i) {
     if (consts.type[i] != JointType::Revolute) continue;
@@ -295,12 +370,11 @@ std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> s
       if (std::abs(v - M_PI) < std::abs(best - M_PI)) best = v;
     active[i] = any = true;
     pi_rep[i] = best;
-    on_limit[i] =
-        std::abs(best - lim.lo[i]) <= kCutBand || std::abs(best - lim.hi[i]) <= kCutBand;
   }
   if (!any) return sols;
   for (auto& sol : sols) {
     bool moved = false;
+    const LazyBand<N> band(remeasure, sol.q);
     for (int i = 0; i < N; ++i) {
       if (!active[i]) continue;
       const double qi = sol.q[i];
@@ -312,13 +386,15 @@ std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> s
         } else {
           sol.q[i] = finalize_detail::wrap_to_pi(qi);
         }
-      } else if (pi_class_offset(qi) <= kCutBand) {
-        if (on_limit[i]) {
-          sol.q[i] = pi_rep[i];
-          moved = moved || is_move(qi, pi_rep[i]);
-        } else {
-          sol.q[i] = qi + kTwoPi * std::round((pi_rep[i] - qi) / kTwoPi);
+      } else if (at_cut(pi_class_offset(qi), band)) {
+        double w = qi + kTwoPi * std::round((pi_rep[i] - qi) / kTwoPi);
+        // Only where a limit sits on the representative can the shift land
+        // beyond one, and then by at most the band: the value is at that limit.
+        if (w > lim.hi[i] || w < lim.lo[i]) {
+          w = w > lim.hi[i] ? lim.hi[i] : lim.lo[i];
+          moved = moved || is_move(qi, w);
         }
+        sol.q[i] = w;
       }
     }
     remeasure(sol, moved);
@@ -330,12 +406,15 @@ std::vector<Solution<N>> canonicalize_representatives(std::vector<Solution<N>> s
 // Keeps diagnostics truthful when a cap means the set is never materialized.
 template <int N>
 long long count_windings(const std::vector<Solution<N>>& sols,
-                         const std::vector<WindingJoint>& wind) {
+                         const std::vector<WindingJoint>& wind,
+                         const Remeasure<N>& remeasure = {}) {
   if (wind.empty()) return static_cast<long long>(sols.size());
   long long total = 0;
   for (const auto& sol : sols) {
     long long n = 1;
-    for (const auto& w : wind) n *= static_cast<long long>(winding_reps(sol.q[w.idx], w.lo, w.hi).size());
+    const LazyBand<N> band(remeasure, sol.q);
+    for (const auto& w : wind)
+      n *= static_cast<long long>(winding_reps(sol.q[w.idx], w.lo, w.hi, band).size());
     total += n;
   }
   return total;
@@ -356,7 +435,8 @@ std::vector<Solution<N>> expand_windings(const std::vector<Solution<N>>& sols,
   for (const auto& sol : sols) {
     std::vector<std::vector<double>> opts;
     opts.reserve(m);
-    for (const auto& w : wind) opts.push_back(winding_reps(sol.q[w.idx], w.lo, w.hi));
+    const LazyBand<N> band(remeasure, sol.q);
+    for (const auto& w : wind) opts.push_back(winding_reps(sol.q[w.idx], w.lo, w.hi, band));
     std::vector<int> pos(m, 0);
     while (true) {
       Solution<N> s = sol;
@@ -377,9 +457,9 @@ std::vector<Solution<N>> expand_windings(const std::vector<Solution<N>>& sols,
 }
 
 // wrap_to_limits: for each revolute joint with limits, try wraps k in
-// (0,1,-1,2,-2) to bring q_i into [lo,hi] up to kLimitBand; first hit wins, and
-// a hit within the band of a limit lands on it. Prismatic / no-limits joints
-// untouched. (postprocess.wrap_to_limits)
+// (0,1,-1,2,-2) to bring q_i into [lo,hi] up to the solution's limit band; first
+// hit wins, and a hit within the band of a limit lands on it. Prismatic /
+// no-limits joints untouched. (postprocess.wrap_to_limits)
 template <int N>
 std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
                                         const JointConsts<N>& consts,
@@ -391,13 +471,14 @@ std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
   for (const auto& sol : sols) {
     Solution<N> s = sol;  // copy; q gets adjusted in place
     bool moved = false;
+    const LazyBand<N> band(remeasure, sol.q);
     for (int i = 0; i < N; ++i) {
       if (!lim.present[i] || consts.type[i] != JointType::Revolute) continue;
       const double lo = lim.lo[i], hi = lim.hi[i];
       const double qi = sol.q[i];
       for (int k : kWrapOrder) {
         const double cand = qi + 2.0 * M_PI * k;
-        if (const auto v = onto_limits(cand, lo, hi)) {
+        if (const auto v = onto_limits(cand, lo, hi, band)) {
           s.q[i] = *v;
           moved = moved || *v != cand;
           break;
@@ -411,8 +492,8 @@ std::vector<Solution<N>> wrap_to_limits(const std::vector<Solution<N>>& sols,
 }
 
 // respect_limits: drop a solution if any limited joint lies outside [lo, hi] by
-// more than kLimitBand; a kept value within the band of a limit is set to it. No
-// wrapping. (postprocess.respect_limits)
+// more than the solution's limit band; a kept value within the band of a limit
+// is set to it. No wrapping. (postprocess.respect_limits)
 template <int N>
 std::vector<Solution<N>> apply_respect_limits(const std::vector<Solution<N>>& sols,
                                               const JointLimits<N>& lim,
@@ -422,9 +503,10 @@ std::vector<Solution<N>> apply_respect_limits(const std::vector<Solution<N>>& so
     Solution<N> s = sol;
     bool within = true;
     bool moved = false;  // any change here is a clamp
+    const LazyBand<N> band(remeasure, sol.q);
     for (int i = 0; i < N; ++i) {
       if (!lim.present[i]) continue;
-      const auto v = onto_limits(sol.q[i], lim.lo[i], lim.hi[i]);
+      const auto v = onto_limits(sol.q[i], lim.lo[i], lim.hi[i], band);
       if (!v) {
         within = false;
         break;
@@ -506,6 +588,7 @@ std::vector<Solution<N>> rewrap_to_seed(std::vector<Solution<N>> sols,
   constexpr double kTwoPi = 2.0 * M_PI;
   for (auto& sol : sols) {
     bool moved = false;
+    const LazyBand<N> band(remeasure, sol.q);
     for (int i = 0; i < N; ++i) {
       if (consts.type[i] != JointType::Revolute) continue;
       const double qi = sol.q[i], si = seed[i];
@@ -517,7 +600,7 @@ std::vector<Solution<N>> rewrap_to_seed(std::vector<Solution<N>> sols,
       // Same candidate set expansion uses, so the two agree exactly.
       double best = qi;
       double best_d = std::numeric_limits<double>::infinity();
-      for (double cand : winding_reps(qi, lim.lo[i], lim.hi[i])) {
+      for (double cand : winding_reps(qi, lim.lo[i], lim.hi[i], band)) {
         const double d = std::abs(cand - si);
         if (d < best_d || (d == best_d && cand < best)) {  // nearest, tie -> smaller value
           best = cand;
@@ -571,8 +654,9 @@ std::vector<Solution<N>> windings_topk(const std::vector<Solution<N>>& sols,
     // seed, so rank 0 is the nearest and each step out costs more. Ties resolve
     // to the smaller value, matching Python's sort of (distance, value) pairs.
     std::vector<std::vector<std::pair<double, double>>> ladders(m);
+    const LazyBand<N> band(remeasure, sol.q);
     for (int t = 0; t < m; ++t) {
-      for (double v : winding_reps(sol.q[wind[t].idx], wind[t].lo, wind[t].hi))
+      for (double v : winding_reps(sol.q[wind[t].idx], wind[t].lo, wind[t].hi, band))
         ladders[t].emplace_back(std::abs(v - seed[wind[t].idx]), v);
       std::sort(ladders[t].begin(), ladders[t].end());
     }

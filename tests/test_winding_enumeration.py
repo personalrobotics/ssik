@@ -460,11 +460,79 @@ def test_both_backends_keep_a_configuration_exactly_at_a_limit(arm: str) -> None
         assert all(s.q[j] == q[j] for s in posed), f"{backend}: {[s.q[j] for s in posed]}"
 
 
+# A robot on a hard stop at a singular pose (#644, #651). There the stopped
+# joint's angle, or its 2*pi winding, comes back up to 3.4e-8 past the limit
+# (CRX-10iA/L joint 3 at 3*pi/2; M1013 joint 5 at -6.2832, 1.3e-9 past natively
+# and 3.4e-7 on the Python path; LR Mate 200iD joint 6 at -2*pi, 1.4e-7 on the
+# Python path). A 1e-9 limit band dropped that representative, so a seeded
+# solve from the pose itself jumped 0.5 to 3.1 rad to another branch. The
+# error band admits it: each solution's residual over sigma_min(J) is far above
+# its excess. Near the seed means within 1e-2 rad, measured the way the joint
+# moves: the Python general_6r returns the M1013's singular wrist 5.9e-3 along
+# its self-motion, and every jump is above 0.5 rad. The LR Mate's native solve
+# is not covered: it returns the singular wrist 4.6e-5 along its self-motion,
+# whose stopped winding only a joint-4/joint-6 move could bring back, not a clamp
+# within the band's 1e-6 cap (#653).
+_SEEDED_STOP_POSES = {
+    "fanuc.crx10ial_ik": [
+        -1.801567173644998,
+        1.7038174425710855,
+        4.71238898038469,
+        3.141592653589793,
+        -1.4102216675475625e-07,
+        -3.0790730786619864,
+    ],
+    "doosan.m1013_ik": [
+        -3.0664705586372203,
+        -1.9835944312584264,
+        2.792499999,
+        -2.1020781467683953,
+        -6.2832,
+        -5.507848354162302,
+    ],
+    "fanuc.lrmate200id_ik": [
+        -2.4020582823598255,
+        -0.9509135376337363,
+        -0.16809049447981295,
+        1.648855504254191e-05,
+        -6.3703693057169856e-09,
+        -6.283185307179586,
+    ],
+}
+
+
+@pytest.mark.skipif(not native_available(), reason="native extension not built")
+@pytest.mark.parametrize(
+    ("arm", "native"),
+    [
+        ("fanuc.crx10ial_ik", True),
+        ("fanuc.crx10ial_ik", False),
+        ("doosan.m1013_ik", True),
+        ("doosan.m1013_ik", False),
+        ("fanuc.lrmate200id_ik", False),
+    ],
+)
+def test_seeded_solve_at_a_singular_stop_keeps_the_near_seed_branch(arm: str, native: bool) -> None:
+    m = _module(arm)
+    kb = m._KB
+    q = np.array(_SEEDED_STOP_POSES[arm])
+    T = m.fk(q)
+    (top,) = m.solve(T, q_seed=q, max_solutions=1, native=native)
+    d = np.abs(top.q - q)
+    circ = np.abs((d + np.pi) % TWO_PI - np.pi)
+    dist = float(np.max(np.where(_continuous(kb), circ, d)))
+    assert dist < 1e-2, f"{arm} native={native}: jumped {dist:.2e} rad to {top.q.tolist()}"
+    for i, joint in enumerate(kb.joints):
+        assert joint.limits[0] <= top.q[i] <= joint.limits[1], f"{arm}: {top.q}"
+
+
 # Poses where finalize moves a value after the solver measured fk_residual
 # (#645): the +-pi snap onto a limit (#601), the limit clamp (#635), and a
 # winding representative clamped onto a limit. Puma 560: joint 0 1e-7 inside
-# its limit, a few ulps inside pi, is snapped onto the limit, which moves the
-# tool by 1.6e-7 while the solver's residual said 8e-16. UR5e: joints 0 and 5
+# its limit, a few ulps inside pi, was snapped onto the limit by a fixed 1e-6
+# cut band, which moved the tool by 1.6e-7 while the solver's residual said
+# 8e-16; the error band (#651) now leaves that accurate value alone, and the
+# limit pass clamps joint 5, 1e-12 inside its limit. UR5e: joints 0 and 5
 # 5e-10 off 0, whose -2*pi / +2*pi lifts land within the band of a limit.
 _MOVED_POSES = {
     "unimation.puma560_ik": [

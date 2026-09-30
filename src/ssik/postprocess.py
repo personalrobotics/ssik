@@ -62,6 +62,7 @@ from numpy.typing import NDArray
 from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 from ssik.kinematics.poe_fk import poe_forward_kinematics
+from ssik.refinement import kinbody_jacobian
 
 __all__ = [
     "count_windings",
@@ -84,27 +85,25 @@ __all__ = [
 # ulp or two apart, one just inside and one just outside, and so return
 # different sets.
 #
-# The band clamps, which moves a configuration, so it is held to round-off,
-# like the +-pi snap (_CUT_SNAP): the error of a well-conditioned closed-form
-# angle. Measured at poses with one to three joints exactly at a limit (150 per
-# arm, every shipped 6R arm, both backends), the closed-form families
-# (spherical_two_parallel, three_parallel) land within 2.5e-13 of the limit
-# where sigma_min(J) >= 1e-2 and within 1.2e-10 where it is >= 1e-4; 1e-9
-# covers both. general_6r's eigen-solve alone is accurate only to its FK gate
-# (angle errors to 1e-5 even at regular poses), but its accepted solutions are
-# polished to machine precision (ssik.refinement.polish, #636), after which it
-# lands within 1.3e-12 where sigma_min >= 1e-2 and 9.3e-11 where it is >= 1e-4
-# (a near-miss rescued by allow_refinement / force_refine is not polished).
-# The band cannot cover singular poses, and is not widened to: there an angle is
-# a multiple root whose error is ~sqrt(round-off) (up to 1e-3 measured). A band
-# that wide would move ordinary configurations; there an exact-limit tie stays
-# one (#632).
+# This is the floor of the band: every solution gets at least this much, and an
+# accurate one gets no more (the error band below widens it only for a solution
+# whose own error is larger, #651). The band clamps, which moves a
+# configuration, so the floor is round-off, like the +-pi snap (_CUT_SNAP): the
+# error of a well-conditioned closed-form angle. Measured at poses with one to
+# three joints exactly at a limit (150 per arm, every shipped 6R arm, both
+# backends), the closed-form families (spherical_two_parallel, three_parallel)
+# land within 2.5e-13 of the limit where sigma_min(J) >= 1e-2 and within
+# 1.2e-10 where it is >= 1e-4; 1e-9 covers both. general_6r's eigen-solve alone
+# is accurate only to its FK gate (angle errors to 1e-5 even at regular poses),
+# but its accepted solutions are polished to machine precision
+# (ssik.refinement.polish, #636), after which it lands within 1.3e-12 where
+# sigma_min >= 1e-2 and 9.3e-11 where it is >= 1e-4.
 #
 # 1e-9 is the seeded ranking's grid (_RANK_QUANTUM), the +-pi snap (_CUT_SNAP)
 # and the 7R in-limits resolvers' acceptance slack (seven_r._polish and
 # seven_r.spherical_shoulder, which take this constant), so every "within
 # round-off" in the pipeline means the same thing.
-# A clamp moves the tool by at most 1e-9 x reach per joint, and the moved
+# A clamp moves the tool by at most the band x reach per joint, and the moved
 # solution's fk_residual is re-measured (_placed, #645). Through _reps it
 # also decides which representatives of pi a limit admits, so a limit written
 # a few ulps inside pi (Puma 560's +-3.14159265358979) sits on the cut for
@@ -112,17 +111,123 @@ __all__ = [
 _LIMIT_BAND = 1e-9  # C++ kLimitBand
 
 
-def _onto_limits(v: float, lo: float, hi: float) -> float | None:
-    """``v`` with the :data:`_LIMIT_BAND` clamp applied: the limit itself when
-    ``v`` is within the band of it (either side), ``v`` when strictly inside,
-    ``None`` when outside the limits by more than the band."""
-    if v < lo - _LIMIT_BAND or v > hi + _LIMIT_BAND:
-        return None
+# The error band (#651). Whether a value is *at* a joint limit, or at the +-pi
+# cut, is decided against that solution's own angular error. Its estimate is
+#
+#     band = min(_BAND_CAP, _BAND_GAIN * r / sigma_min)
+#
+# where r = ||FK(q) - T_target||_F is the solution's residual (the solvers'
+# metric, re-measured here on kb's chain) and sigma_min is the smallest singular
+# value of the spatial Jacobian at q (ssik.refinement.kinbody_jacobian). To first
+# order an error dq leaves a residual twist J dq, whose norm is at most r (the
+# Frobenius norm of a rotation error is sqrt(2) times its angle), so
+# ||dq|| <= r / sigma_min bounds every joint's error. A value outside a limit by
+# at most max(_LIMIT_BAND, band) is at the limit and is set to it (_onto_limits;
+# a value inside moves only within the _LIMIT_BAND round-off), and a finite
+# joint's value is at the cut when within max(_CUT_FLOOR, band) of it (see
+# _CUT_SNAP). So only a value that would otherwise be dropped or lie outside its
+# limits moves, and by at most its own error. One fixed band cannot serve both
+# kinds of solution this separates:
+#
+# - An accurate solution at a regular pose has r ~ 1e-15 and sigma_min >= 1e-2,
+#   so its band is far below round-off, and a value 3e-7 from pi stays where the
+#   solver put it. A fixed 1e-6 cut band moved such values: the wrist-flipped
+#   branch of a Puma 560 pose whose wrist is 3e-7 from 0 lost 4e-7 in FK, and
+#   RS007N's shoulder-flipped branch 1.4e-8 (#649's fuzz examples).
+# - At a fold or a singularity an angle is a multiple root, known only to about
+#   sqrt(round-off), and sigma_min is tiny, so the band widens. There a value at
+#   an exact limit comes back 1e-9 to 3e-7 on either side of it (a CRX-10iA/L
+#   elbow winding 3.4e-8 past its stop, an M1013 wrist winding 1.3e-9 past), and
+#   the fixed 1e-9 limit band made seeded solves jump branches (#644, #632).
+#
+# _BAND_GAIN: the first-order bound understates the error near a multiple root,
+# where the linearisation is poor (from a double root's neighbourhood a Newton
+# step goes only half way). Measured against the actual error of the returned
+# solution nearest a known root (the release pose set: 40 uniform, 20 near-limit
+# and 20 near-singular poses per 6R arm, both backends, 7,199 solutions), the
+# error is at most 8.7 x r / sigma_min, and at most 2.1 x for errors below 1e-9
+# (down to 1e-16: the estimate tracks round-off too); 10 covers both. An accurate
+# solution's r / sigma_min is below 1e-13 at the Puma 560 / RS007N poses above,
+# so the gain costs it nothing.
+#
+# _BAND_CAP bounds the move a clamp or a snap may make: 1e-6 =
+# DEFAULT_TOLERANCE_POLICY.subproblem_numerical / 10, so a moved solution stays
+# well inside the FK gate (it moves the tool by at most 1e-6 x reach), three
+# orders below subproblem_dedup (1e-3), so it cannot confuse distinct branches,
+# and above the measured fold uncertainty at the cut (3.6e-7, UR elbows). A
+# value beyond the cap is not moved, however uncertain: the only in-limit copy
+# of such a configuration is a different point of a singular family (an LR Mate
+# 200iD wrist 4.6e-5 along its self-motion), which a single-joint clamp cannot
+# reach without breaking FK.
+#
+# The band is computed only for a solution with a value between the floor and
+# _BAND_CAP from a limit or the cut, where it can change the decision, which a
+# uniform pose almost never has, so the default path pays nothing. Without a
+# target (standalone use of the filters) only the floors apply. C++: kBandCap,
+# kBandGain, Remeasure::error_band.
+_BAND_CAP = 1e-6  # DEFAULT_TOLERANCE_POLICY.subproblem_numerical / 10
+_BAND_GAIN = 10.0
+
+
+def _error_band(kb: KinBody, q: NDArray[np.float64], T_target: NDArray[np.float64]) -> float:
+    """The angular error estimate of the solution at ``q``, capped:
+    ``min(_BAND_CAP, _BAND_GAIN * r / sigma_min)`` (see :data:`_BAND_GAIN`).
+    Each test adds its own floor."""
+    r = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T_target))
+    s = float(np.linalg.svd(kinbody_jacobian(kb, q), compute_uv=False)[-1])
+    if s <= 0.0:  # exactly singular: nothing bounds the error
+        return _BAND_CAP
+    return min(_BAND_CAP, _BAND_GAIN * r / s)
+
+
+class _Band:
+    """One solution's error band, evaluated on first use: most solutions never
+    need it. Measured at the solution as it entered the current pass."""
+
+    __slots__ = ("_kb", "_q", "_target", "_value")
+
+    def __init__(self, kb: KinBody, q: NDArray[np.float64], T_target: NDArray[np.float64]):
+        self._kb = kb
+        self._q = q
+        self._target = T_target
+        self._value: float | None = None
+
+    def __call__(self) -> float:
+        if self._value is None:
+            self._value = _error_band(self._kb, np.asarray(self._q, dtype=np.float64), self._target)
+        return self._value
+
+
+def _band_of(sol: Solution, kb: KinBody, T_target: NDArray[np.float64] | None) -> _Band | None:
+    return None if T_target is None else _Band(kb, sol.q, T_target)
+
+
+def _onto_limits(v: float, lo: float, hi: float, band: _Band | None = None) -> float | None:
+    """``v`` with the limit band applied: ``None`` when ``v`` lies outside the
+    limits by more than ``max(_LIMIT_BAND, band())`` (#651; the floor alone
+    without ``band``), else the limit itself when ``v`` is outside it or within
+    the :data:`_LIMIT_BAND` round-off of it (#624), else ``v``. So a value
+    inside its limits moves by round-off at most, however large its error, and
+    one outside moves by at most its band. ``band`` is evaluated only for a
+    value outside a limit by more than the floor and at most the cap, the one
+    range where it can change the answer."""
+    if v < lo:
+        return lo if _within_band(lo - v, band) else None
+    if v > hi:
+        return hi if _within_band(v - hi, band) else None
     if v - lo <= _LIMIT_BAND:
         return lo
     if hi - v <= _LIMIT_BAND:
         return hi
     return v
+
+
+def _within_band(out: float, band: _Band | None) -> bool:
+    """Whether a value ``out`` past a limit is within ``max(_LIMIT_BAND,
+    band())`` of it."""
+    if out <= _LIMIT_BAND:
+        return True
+    return band is not None and out <= _BAND_CAP and out <= band()
 
 
 _TWO_PI = 2.0 * np.pi
@@ -164,8 +269,9 @@ def respect_limits(
     Joints with ``limits=None`` are unconstrained (continuous joints, or
     fixtures that don't supply limits) and never reject a solution. Joints
     with ``limits=(lo, hi)`` reject any solution where ``q[i]`` is outside
-    ``[lo, hi]`` by more than round-off (``1e-9`` rad, see
-    ``docs/api.md#joint-limits``). A value within that band of a limit, on
+    ``[lo, hi]`` by more than the limit band: round-off (``1e-9`` rad), widened
+    to the solution's own angular error estimate when ``T_target`` is given
+    (see ``docs/api.md#joint-limits``). A value within that band of a limit, on
     either side, is at the limit: the solution is kept, with that joint set to
     exactly the limit.
 
@@ -173,9 +279,10 @@ def respect_limits(
         ``solve()``).
     :param kb: the same :class:`KinBody` used for the IK call. Joint limits
         come from ``kb.joints[i].limits``.
-    :param T_target: the IK target. When given, a solution the clamp moved has
-        its ``fk_residual`` re-measured at the returned ``q``; without it the
-        solver's residual is kept.
+    :param T_target: the IK target. When given, the band is the solution's
+        error band (#651), and a solution the clamp moved has its
+        ``fk_residual`` re-measured at the returned ``q``; without it the band
+        is round-off and the solver's residual is kept.
     :returns: filtered solutions; preserves input order. Every returned value
         lies within its limits exactly.
     """
@@ -186,12 +293,13 @@ def respect_limits(
             raise ValueError(f"solution q-length {len(sol.q)} doesn't match kb DOF {n_joints}")
         q_new: NDArray[np.float64] | None = None
         within = True
+        band = _band_of(sol, kb, T_target)
         for i, joint in enumerate(kb.joints):
             if joint.limits is None:
                 continue
             lo, hi = joint.limits
             q_i = float(sol.q[i])
-            v = _onto_limits(q_i, lo, hi)
+            v = _onto_limits(q_i, lo, hi, band)
             if v is None:
                 within = False
                 break
@@ -224,15 +332,15 @@ def wrap_to_limits(
     Search is over ``k ∈ {-2, -1, 0, +1, +2}`` integer multiples of ``2*pi``;
     that covers any joint whose limits span up to ±5*pi (more than enough for
     any commercial arm). The smallest-|k| wrap that lands in range wins,
-    biasing toward the original value. A wrap within round-off (``1e-9`` rad)
-    of a limit, on either side, lands exactly on the limit, as in
-    :func:`respect_limits`.
+    biasing toward the original value. A wrap within the limit band of a limit,
+    on either side, lands exactly on the limit, as in :func:`respect_limits`.
 
     :param sols: candidate solutions.
     :param kb: the same :class:`KinBody` used for the IK call.
-    :param T_target: the IK target. When given, a solution the limit band
-        moved has its ``fk_residual`` re-measured at the returned ``q``; a
-        ``2*pi`` wrap alone keeps it.
+    :param T_target: the IK target. When given, the band is the solution's
+        error band (#651), and a solution the band moved has its
+        ``fk_residual`` re-measured at the returned ``q``; a ``2*pi`` wrap
+        alone keeps it.
     :returns: solutions with each q-vector adjusted joint-wise; preserves
         input order; returns ``Solution`` instances with the wrapped q
         and other fields unchanged.
@@ -244,15 +352,16 @@ def wrap_to_limits(
             raise ValueError(f"solution q-length {len(sol.q)} doesn't match kb DOF {n_joints}")
         q_new = np.asarray(sol.q, dtype=np.float64).copy()
         moved = False
+        band = _band_of(sol, kb, T_target)
         for i, joint in enumerate(kb.joints):
             if joint.limits is None or joint.joint_type != "revolute":
                 continue
             lo, hi = joint.limits
             q_i = float(q_new[i])
-            # Smallest |k| first; a fit within round-off of a limit lands on it.
+            # Smallest |k| first; a fit within the band of a limit lands on it.
             for k in (0, 1, -1, 2, -2):
                 cand = q_i + 2.0 * np.pi * k
-                v = _onto_limits(cand, lo, hi)
+                v = _onto_limits(cand, lo, hi, band)
                 if v is not None:
                     q_new[i] = v
                     moved = moved or v != cand
@@ -305,16 +414,16 @@ def winding_joints(kb: KinBody) -> list[tuple[int, float, float]]:
     return out
 
 
-def _reps(q_i: float, lo: float, hi: float) -> list[float]:
+def _reps(q_i: float, lo: float, hi: float, band: _Band | None = None) -> list[float]:
     """Every ``q_i + 2*pi*k`` inside ``[lo, hi]``, ascending.
 
     The ``k`` range comes from the limits (so a boundary value like ``0`` under
     ``[-2*pi, 2*pi]`` yields ``{-2*pi, 0, 2*pi}``), then each candidate goes
-    through the limit band (:func:`_onto_limits`), so floating-point error in
-    the ceil/floor can never emit an out-of-limit value, and a representative
-    within round-off of a limit is that limit. Without the band a value an ulp
-    either side of ``0`` would lift to ``{-2*pi, 0}`` on one backend and
-    ``{0, 2*pi}`` on the other.
+    through the limit band (:func:`_onto_limits`, with the solution's ``band``),
+    so floating-point error in the ceil/floor can never emit an out-of-limit
+    value, and a representative within the band of a limit is that limit.
+    Without the band a value an ulp either side of ``0`` would lift to
+    ``{-2*pi, 0}`` on one backend and ``{0, 2*pi}`` on the other.
     """
     # math.ceil/floor on plain floats, not np.ceil/np.floor: this runs once per
     # joint per solution on the seeded path, and the numpy scalar round trip
@@ -323,7 +432,7 @@ def _reps(q_i: float, lo: float, hi: float) -> list[float]:
     k_hi = math.floor((hi - q_i) / _TWO_PI) + 1
     reps = []
     for k in range(k_lo, k_hi + 1):
-        v = _onto_limits(q_i + _TWO_PI * k, lo, hi)
+        v = _onto_limits(q_i + _TWO_PI * k, lo, hi, band)
         if v is not None:
             reps.append(v)
     # A value with no in-limit representative keeps its own, so expansion can
@@ -333,10 +442,13 @@ def _reps(q_i: float, lo: float, hi: float) -> list[float]:
     return reps or [q_i]
 
 
-def count_windings(sols: list[Solution], kb: KinBody) -> int:
+def count_windings(
+    sols: list[Solution], kb: KinBody, *, T_target: NDArray[np.float64] | None = None
+) -> int:
     """How many configurations :func:`expand_windings` would produce, without
     building them. Used for diagnostics so a truncated or pruned solve can still
-    report the true size of the complete in-limit set.
+    report the true size of the complete in-limit set. Pass the same
+    ``T_target`` as to :func:`expand_windings`: it sets the limit band.
     """
     wind = winding_joints(kb)
     if not wind:
@@ -344,8 +456,9 @@ def count_windings(sols: list[Solution], kb: KinBody) -> int:
     total = 0
     for sol in sols:
         n = 1
+        band = _band_of(sol, kb, T_target)
         for i, lo, hi in wind:
-            n *= len(_reps(float(sol.q[i]), lo, hi))
+            n *= len(_reps(float(sol.q[i]), lo, hi, band))
         total += n
     return total
 
@@ -372,8 +485,9 @@ def expand_windings(
     :param limit: stop once this many configurations exist. Only sound when the
         caller keeps a *prefix* of the expansion (i.e. unseeded truncation);
         a ranked truncation must not pass it.
-    :param T_target: the IK target. When given, a representative the limit
-        band moved onto a limit has its ``fk_residual`` re-measured.
+    :param T_target: the IK target. When given, the limit band is the
+        solution's error band (#651), and a representative the band moved onto
+        a limit has its ``fk_residual`` re-measured.
     """
     wind = winding_joints(kb)
     if not wind:
@@ -382,7 +496,8 @@ def expand_windings(
     out: list[Solution] = []
     for sol in sols:
         q = np.asarray(sol.q, dtype=np.float64)
-        opts = [_reps(float(q[i]), lo, hi) for i, lo, hi in wind]
+        band = _band_of(sol, kb, T_target)
+        opts = [_reps(float(q[i]), lo, hi, band) for i, lo, hi in wind]
         # Per winding joint, the representatives the limit band moved (#645):
         # nearly always none, and then no lift needs checking.
         moves = [
@@ -448,15 +563,17 @@ def rewrap_to_seed(
         seed-nearest one would destroy the very set being returned. Continuous
         joints are never enumerated (infinite family), so they still need the
         nearest-turn choice.
-    :param T_target: the IK target. When given, a solution whose chosen
-        representative the limit band moved onto a limit has its
-        ``fk_residual`` re-measured.
+    :param T_target: the IK target. When given, the limit band is the
+        solution's error band (#651), and a solution whose chosen
+        representative the band moved onto a limit has its ``fk_residual``
+        re-measured.
     """
     seed = np.asarray(q_seed, dtype=np.float64)
     out: list[Solution] = []
     for sol in sols:
         q_new = np.asarray(sol.q, dtype=np.float64).copy()
         moved = False
+        band = _band_of(sol, kb, T_target)
         for i, joint in enumerate(kb.joints):
             if joint.joint_type != "revolute":
                 continue
@@ -472,7 +589,7 @@ def rewrap_to_seed(
                 continue
             if continuous_only:  # enumeration emits this joint's representatives
                 continue
-            cands = _reps(q_i, lo, hi)
+            cands = _reps(q_i, lo, hi, band)
             q_new[i] = v = min(cands, key=lambda c: (abs(c - s_i), c))
             moved = moved or _is_move(q_i, v)
         out.append(_placed(sol, q_new, moved, kb, T_target))
@@ -534,51 +651,68 @@ def _snap(x: float) -> float:
 # theta_offset moves the cut), so at an exact pi the two backends can return a
 # value just either side of it. They differ in what they are allowed to cost.
 #
-# _CUT_SNAP moves a value onto exactly pi, which moves the configuration, so it
-# is held to round-off: the spread between the backends' computations of one
-# well-conditioned angle (<= 1e-12 measured at exact-pi poses). It is the grid
-# the seeded ranking already uses to make equal things compare equal across
-# backends, and a snap this size moves the tool by at most 1e-9 x reach. A
-# wider snap is not free: a redundant arm samples its self-motion manifold
-# densely enough that accurate values land within 1e-6 of pi on ordinary poses
-# (xArm 7 joint 7, a few per pose), and snapping those broke FK by ~1e-6.
+# _CUT_SNAP moves a continuous joint's value onto exactly pi, which moves the
+# configuration, so it is held to round-off: the spread between the backends'
+# computations of one well-conditioned angle (<= 1e-12 measured at exact-pi
+# poses). It is the grid the seeded ranking already uses to make equal things
+# compare equal across backends, and a snap this size moves the tool by at most
+# 1e-9 x reach. A wider fixed snap is not free: a redundant arm samples its
+# self-motion manifold densely enough that accurate values land within 1e-6 of
+# pi on ordinary poses (xArm 7 joint 7, a few per pose), and snapping those
+# broke FK by ~1e-6. Continuous joints need only this snap: their parity is
+# compared on the circle, where values either side of the cut are already the
+# same configuration.
 #
-# _CUT_BAND only chooses between representatives 2*pi apart, which costs
-# nothing, so it can be as wide as the solvers' angle uncertainty at the cut.
-# That is round-off except where the cut coincides with a boundary singularity:
-# an elbow folded back on itself (UR joint 2 at pi) is a double root of its
-# subproblem, so round-off r in its cosine becomes an angle error of sqrt(2 r),
-# about 4e-7 for r ~ 1e-13. Measured over 150 exact-fold poses per UR arm: up to
-# 3.6e-7, with 1-2% of poses beyond 1e-7. The band is 1e-6 =
-# subproblem_numerical / 10: above that uncertainty, three orders below
-# subproblem_dedup (1e-3), so it cannot confuse distinct branches. The one case
-# where it moves a value is a joint whose limit sits on the cut (exactly
-# [-pi, pi]). There a value just inside +pi has one in-limit representative and
-# exact pi has two (both ends of the range), so the backends' seeded choices
-# would still differ; the value is set to exactly pi instead. That moves the
-# tool by at most 1e-6 x reach, well inside the subproblem_numerical (1e-5) FK
-# gate, and the moved solution's fk_residual is re-measured (#645).
+# A finite joint whose limits admit two or more representatives of pi takes the
+# error band (_BAND_GAIN, #651): its value is at the cut when within
+# max(_CUT_FLOOR, band) of the pi class. The band is wide only where pi is a
+# fold or a singularity: an elbow folded back on itself (UR joint 3 at pi) is a
+# double root of its subproblem, so round-off r in its cosine becomes an angle
+# error of sqrt(2 r), measured up to 3.6e-7 over 150 exact-fold poses per UR
+# arm, and still up to 9e-8 on the Python path after the general_6r polish
+# (UR7e; 4e-8 on Thor). The band covers those (a fold's sigma_min is tiny), and
+# the UR3e exact-fold parity depends on it. Every other such joint comes back
+# within 1e-11 of an exact pi away from a singularity (sigma_min(J) >= 1e-4),
+# which the band covers too: it bounds the measured error down to round-off.
 #
-# The move is not confined to exact-pi poses. An accurate value can sit in the
-# band too: the wrist-flipped branch of a regular Puma 560 pose whose wrist is
-# 3e-7 from 0 is snapped by 3e-7, which costs 4e-7 in FK. The band stays this
-# wide anyway, because a fold needs it: re-measured after the general_6r polish
-# (#637, which does not reach these closed-form arms), an exact-pi elbow still
-# comes back up to 9e-8 from pi (UR7e; 4e-8 on Thor; 40 poses per arm, Python
-# path), and a snap held to _CUT_SNAP breaks the UR3e exact-fold parity above.
-# Every other joint of this kind comes back within 1e-11 of an exact pi away
-# from a singularity (sigma_min(J) >= 1e-4), so a per-joint band, wide only
-# where pi is a fold, would stop the regular moves.
+# _CUT_FLOOR only guards a residual that rounds to zero, where the band would be
+# zero while the backends can still differ by an ulp of pi (4.4e-16): 1e-14 is a
+# few dozen ulps. It is not the limit floor (1e-9, _LIMIT_BAND), because the cut
+# snap runs in every respect_limits mode, including the raw set, and there a
+# 1e-9 snap of an accurate value costs up to 1e-9 x reach in FK: more than the
+# tightest arm's precision (Puma 560, 1e-12; the uniform fuzz found values 8e-11
+# from pi). With limits respected, a value within 1e-9 of a limit on the cut is
+# clamped onto it by the limit pass anyway.
 #
-# Continuous joints need only the snap: their parity is compared on the circle,
-# where values either side of the cut are already the same configuration.
+# Where no limit sits on pi (UR's [-2*pi, 2*pi]), the choice is between
+# representatives 2*pi apart, which costs nothing. Where one does (exactly
+# [-pi, pi]), the shift to the +pi side can land just beyond the limit (a value
+# just above -pi), by at most the band; it is then set to the limit, which moves
+# the tool by at most the band x reach, and the moved solution's fk_residual is
+# re-measured (#645). A value the shift leaves inside keeps its bits: a fixed
+# band set every value within 1e-6 of pi onto it, which moved accurate values
+# (and, once the band follows the error, would move an uncertain in-limit value
+# by up to 1e-6 for no gain). The seeded choice still sees both ends of the
+# range: _reps admits the far end's representative, which lies outside the
+# limit by less than the band, as that limit.
 _CUT_SNAP = _RANK_QUANTUM  # C++ kCutSnap
-_CUT_BAND = 1e-6  # DEFAULT_TOLERANCE_POLICY.subproblem_numerical / 10; C++ kCutBand
+_CUT_FLOOR = 1e-14  # C++ kCutFloor
 
 
 def _pi_class_offset(q_i: float) -> float:
     """Distance from ``q_i`` to the nearest odd multiple of ``pi``."""
     return abs(abs(_wrap_to_pi(q_i)) - math.pi)
+
+
+def _at_cut(offset: float, band: _Band | None) -> bool:
+    """Whether a finite joint's value ``offset`` from the pi class is at the cut:
+    within ``max(_CUT_FLOOR, band())`` of it, or the floor alone without
+    ``band``. ``band`` is evaluated only between the floor and the cap."""
+    if offset <= _CUT_FLOOR:
+        return True
+    if band is None or offset > _BAND_CAP:
+        return False
+    return offset <= band()
 
 
 def _canonicalize_representatives(
@@ -591,42 +725,42 @@ def _canonicalize_representatives(
       exactly ``+pi``;
     - a **finite** revolute joint whose limits admit two or more
       representatives of ``pi`` (for example exactly ``[-pi, pi]``, or UR's
-      ``[-2*pi, 2*pi]``) takes, when its value is within :data:`_CUT_BAND` of
-      the ``pi`` class, the ``2*pi`` shift nearest the in-limit representative
-      closest to ``+pi`` -- or exactly that representative when a limit sits on
-      it. Every other finite value is left alone for :func:`wrap_to_limits` and
-      winding enumeration, as before;
+      ``[-2*pi, 2*pi]``) takes, when its value is at the cut (within
+      ``max(_CUT_FLOOR, band)`` of the ``pi`` class, :func:`_at_cut`), the
+      ``2*pi`` shift nearest the in-limit representative closest to ``+pi``;
+      if that shift lies beyond a limit sitting on the representative, it is
+      set to the limit. Every other finite value is left alone for
+      :func:`wrap_to_limits` and winding enumeration, as before;
     - prismatic joints are untouched.
 
     Values away from the cut keep their exact bits. A coordinate moves only by a
-    multiple of ``2*pi``, except for the snaps onto ``pi`` (round-off for a
-    continuous joint, the band for a limit on the cut), each bounded by its
-    tolerance. A snap that moves a value re-measures ``fk_residual`` when
-    ``T_target`` is given (#645).
+    multiple of ``2*pi``, except for the snap onto ``pi`` of a continuous joint
+    (round-off) and the clamp onto a limit at the cut (a value the shift took
+    beyond it, by at most its error band). A move re-measures ``fk_residual``
+    when ``T_target`` is given (#645).
     Idempotent, so the repeated finalize passes of one solve agree.
     """
     # (joint index, in-limit representative of pi nearest +pi or None for a
-    # continuous joint, whether a limit sits on that representative)
-    targets: list[tuple[int, float | None, bool]] = []
+    # continuous joint, the joint's limits)
+    targets: list[tuple[int, float | None, float, float]] = []
     for i, joint in enumerate(kb.joints):
         if joint.joint_type != "revolute":
             continue
         if joint.limits is None:
-            targets.append((i, None, False))
+            targets.append((i, None, -math.inf, math.inf))
             continue
         lo, hi = joint.limits
         reps = [v for v in _reps(math.pi, lo, hi) if lo <= v <= hi]
         if len(reps) >= 2:
-            rep = min(reps, key=lambda v: abs(v - math.pi))
-            on_limit = abs(rep - lo) <= _CUT_BAND or abs(rep - hi) <= _CUT_BAND
-            targets.append((i, rep, on_limit))
+            targets.append((i, min(reps, key=lambda v: abs(v - math.pi)), lo, hi))
     if not targets:
         return sols
     out: list[Solution] = []
     for sol in sols:
         q_new: NDArray[np.float64] | None = None
         moved = False
-        for i, pi_rep, on_limit in targets:
+        band = _band_of(sol, kb, T_target)
+        for i, pi_rep, lo, hi in targets:
             q_i = float(sol.q[i])
             if pi_rep is None:
                 if -math.pi + _CUT_SNAP < q_i < math.pi - _CUT_SNAP:
@@ -636,12 +770,14 @@ def _canonicalize_representatives(
                     moved = moved or _is_move(q_i, w)
                 else:
                     w = _wrap_to_pi(q_i)
-            elif _pi_class_offset(q_i) <= _CUT_BAND:
-                if on_limit:
-                    w = pi_rep
+            elif _at_cut(_pi_class_offset(q_i), band):
+                w = q_i + _TWO_PI * round((pi_rep - q_i) / _TWO_PI)
+                # Only where a limit sits on the representative can the shift
+                # land beyond one, and then by at most the band: the value is at
+                # that limit. A value the shift leaves inside keeps its bits.
+                if w > hi or w < lo:
+                    w = hi if w > hi else lo
                     moved = moved or _is_move(q_i, w)
-                else:
-                    w = q_i + _TWO_PI * round((pi_rep - q_i) / _TWO_PI)
             else:
                 continue
             if w != q_i:
@@ -799,10 +935,11 @@ def _windings_topk(
     for sol in sols:
         q = np.asarray(sol.q, dtype=np.float64)
         base = _seed_deltas(q, seed, circular)
+        band = _band_of(sol, kb, T_target)
         # Per winding joint: the in-limit representatives ordered by distance to
         # the seed, so rank 0 is the nearest and each step out costs more.
         ladders = [
-            sorted((abs(v - float(seed[i])), v) for v in _reps(float(q[i]), lo, hi))
+            sorted((abs(v - float(seed[i])), v) for v in _reps(float(q[i]), lo, hi, band))
             for i, lo, hi in wind
         ]
 
@@ -973,7 +1110,7 @@ def finalize_solutions(
     expanding = enumerate_windings and bool(winding_joints(kb))
     # The size of the complete set, computed arithmetically so it stays truthful
     # when a prefix cap or top-k pruning means the set is never materialized.
-    available = count_windings(sols, kb) if expanding else len(sols)
+    available = count_windings(sols, kb, T_target=T_target) if expanding else len(sols)
     if counts is not None:
         counts["geometric_branches"] = len(sols)
         counts["winding_representatives"] = available
