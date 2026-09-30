@@ -462,17 +462,20 @@ def test_both_backends_keep_a_configuration_exactly_at_a_limit(arm: str) -> None
 
 # A robot on a hard stop at a singular pose (#644, #651). There the stopped
 # joint's angle, or its 2*pi winding, comes back up to 3.4e-8 past the limit
-# (CRX-10iA/L joint 3 at 3*pi/2; M1013 joint 5 at -6.2832, 1.3e-9 past natively
-# and 3.4e-7 on the Python path; LR Mate 200iD joint 6 at -2*pi, 1.4e-7 on the
-# Python path). A 1e-9 limit band dropped that representative, so a seeded
-# solve from the pose itself jumped 0.5 to 3.1 rad to another branch. The
-# error band admits it: each solution's residual over sigma_min(J) is far above
-# its excess. Near the seed means within 1e-2 rad, measured the way the joint
-# moves: the Python general_6r returns the M1013's singular wrist 5.9e-3 along
-# its self-motion, and every jump is above 0.5 rad. The LR Mate's native solve
-# is not covered: it returns the singular wrist 4.6e-5 along its self-motion,
-# whose stopped winding only a joint-4/joint-6 move could bring back, not a clamp
-# within the band's 1e-6 cap (#653).
+# (CRX-10iA/L joint 3 at 3*pi/2; M1013 joint 5 at -6.2832, 1.3e-9 past
+# natively; LR Mate 200iD joint 6 at -2*pi, 1.4e-7 on the Python path). A 1e-9
+# limit band dropped that representative, so a seeded solve from the pose
+# itself jumped 0.5 to 3.1 rad to another branch. The error band admits it:
+# each solution's residual over sigma_min(J) is far above its excess. Near the
+# seed means within 1e-2 rad, measured the way the joint moves (the native
+# M1013 returns its singular wrist 2.1e-5 along its self-motion); every jump is
+# above 0.5 rad. Not covered, because the excess is beyond the band's 1e-6 cap:
+# - the LR Mate's native solve, which returns the singular wrist 4.6e-5 along
+#   its self-motion; only a joint-4/joint-6 move could bring its stopped
+#   winding back, not a clamp (#653);
+# - the M1013's Python solve, whose general_6r finds that wrist only to its
+#   1e-5 gate: the excess follows the platform's LAPACK (3.4e-7 on macOS, over
+#   the cap on Linux; #632, #640).
 _SEEDED_STOP_POSES = {
     "fanuc.crx10ial_ik": [
         -1.801567173644998,
@@ -508,7 +511,6 @@ _SEEDED_STOP_POSES = {
         ("fanuc.crx10ial_ik", True),
         ("fanuc.crx10ial_ik", False),
         ("doosan.m1013_ik", True),
-        ("doosan.m1013_ik", False),
         ("fanuc.lrmate200id_ik", False),
     ],
 )
