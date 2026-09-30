@@ -202,8 +202,9 @@ inline constexpr double kLimitBand = 1e-9;
 // Jacobian at q, which bounds the first-order error of every joint: below
 // round-off for an accurate solution, wider at a fold or a singularity. The limit
 // test uses max(kLimitBand, band), the cut test max(kCutFloor, band). The gain
-// covers the measured ratio of actual error to r / sigma_min (at most 8.7); the
-// cap is subproblem_numerical / 10, the largest move a clamp or snap may make.
+// covers the measured ratio of actual error to r / sigma_min (at most 5.9 for
+// errors up to the cap); the cap is subproblem_numerical / 10, the largest move
+// a clamp or snap may make.
 inline constexpr double kBandCap = 1e-6;
 inline constexpr double kBandGain = 10.0;
 

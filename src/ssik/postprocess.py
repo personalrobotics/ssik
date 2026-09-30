@@ -144,9 +144,11 @@ _LIMIT_BAND = 1e-9  # C++ kLimitBand
 # where the linearisation is poor (from a double root's neighbourhood a Newton
 # step goes only half way). Measured against the actual error of the returned
 # solution nearest a known root (the release pose set: 40 uniform, 20 near-limit
-# and 20 near-singular poses per 6R arm, both backends, 7,199 solutions), the
-# error is at most 8.7 x r / sigma_min, and at most 2.1 x for errors below 1e-9
-# (down to 1e-16: the estimate tracks round-off too); 10 covers both. An accurate
+# and 20 near-singular poses per 6R arm, both backends, about 7,200 solutions),
+# every error up to the cap is at most 5.9 x r / sigma_min, and at most 2.1 x
+# below 1e-9 (down to 1e-16: the estimate tracks round-off too); 10 covers both.
+# Larger ratios occur only for errors beyond the cap (up to 37 x, a point 1.2e-4
+# along a near-singular family), where the band is the cap anyway. An accurate
 # solution's r / sigma_min is below 1e-13 at the Puma 560 / RS007N poses above,
 # so the gain costs it nothing.
 #

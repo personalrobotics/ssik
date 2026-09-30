@@ -215,8 +215,8 @@ where `J` is the spatial Jacobian of the arm's chain at `q` and `sigma_min`
 its smallest singular value. To first order, an error `dq` leaves a residual
 of at least `sigma_min * ||dq||`, so the ratio bounds every joint's error.
 Across the release pose set (uniform, near-limit and near-singular poses of
-every 6R arm, both backends), the actual error of a returned solution was at
-most 8.7 times that ratio, and at most 2.1 times it for errors below `1e-9`.
+every 6R arm, both backends), every actual error up to the `1e-6` cap was at
+most 5.9 times that ratio, and at most 2.1 times it for errors below `1e-9`.
 The factor 10 covers both. An accurate solution at a regular pose has a
 residual near `1e-15` and a band far below round-off. A solution near a
 singularity has a small `sigma_min` and a wide band. The `1e-6` cap is a tenth
