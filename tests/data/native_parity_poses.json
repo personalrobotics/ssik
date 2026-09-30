@@ -2816,8 +2816,7 @@
     ],
     "linux": [
      "near_limit/2",
-     "near_limit/3",
-     "near_singular/41"
+     "near_limit/3"
     ]
    },
    "near_singular": [
