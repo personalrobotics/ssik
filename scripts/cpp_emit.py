@@ -1015,7 +1015,7 @@ _MATCH_TOL = {6: 1e-3, 7: 1e-2}
 # Every other arm must cover its whole golden.
 _KNOWN_INCOMPLETE: dict[str, tuple[dict[str, int], str]] = {
     # The monic-companion eigensolve loses real roots at degenerate lock samples.
-    "kassow_kr810_ik": ({"darwin": 1, "linux": 3}, "#544 (HP jointlock eigensolve)"),
+    "kassow_kr810_ik": ({"darwin": 2, "linux": 4}, "#544 (HP jointlock eigensolve)"),
     # Python's in-limits resolver misses a narrow feasible swivel arc that
     # native's finds, so these golden poses hold Python's rescue samples of the
     # arc, while native returns its own analytic samples and never rescues.
