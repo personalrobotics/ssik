@@ -201,6 +201,24 @@ A `2*pi` shift (a winding representative, a seed rewrap) is the same
 configuration and keeps the solver's value. The re-measurement costs one FK per
 moved solution, and solutions nothing moved pay nothing.
 
+On a redundant 7R arm the in-limit part of the self-motion can be a single
+point or a sliver, typically where two or more joints are at their limits at
+once. There every joint's margin touches zero without changing sign, so
+bracketing the sign changes finds no in-limits arc. When the in-limits
+resolver finds no arc on any branch, it looks for the point where the
+worst-case limit violation along each branch is smallest. On a closed-form
+chart (`seven_r.srs`, `seven_r.spherical_shoulder`) that point is the
+solution. On the polished families it is a starting point, from which the
+resolver walks along the arm's true self-motion curve to the minimum. The
+point counts as in limits when its worst violation is within its limit band.
+Such a point is clamped onto the limits and its `fk_residual` measured again,
+as above. Only a contact whose deepest margin is below `1e-4` rad is accepted
+this way. A deeper in-limits stretch with no arc around it is left to the
+rescue, as before. `Chart.in_limits()` returns such a point as a zero-width
+arc `(t, t)`. None of this runs unless the resolver's own search comes back
+empty. The `jointlock.seven_r` arms (Rizon 4 and 10, Kassow KR810) have no
+in-limits resolver, so this does not apply to them.
+
 ### Error band
 
 Whether a value is at a joint limit or at the `+-pi` cut is decided against

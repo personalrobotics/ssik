@@ -186,6 +186,22 @@ inline std::vector<Interval> elbow_arcs(const Eigen::Matrix<double, 3, 48>& coef
   return out;
 }
 
+// The in-limits points of a chart with no in-limits arc (#662): minima of the
+// worst-case violation along it within the point's own error band, appended as
+// zero-width arcs (t, t). Mirrors ssik.chart._contact_arcs.
+template <typename QScalar>
+void contact_arcs(QScalar&& q_scalar, const std::vector<double>& grid,
+                  const std::array<std::array<double, 2>, 7>& limits, bool periodic,
+                  const JointConsts<7>& c, const Pose& T, std::vector<Interval>& out) {
+  for (const auto& [t, v] : minimax::chart_minima(q_scalar, grid, limits, periodic)) {
+    if (v > kBandCap) break;  // no error band reaches further
+    const std::vector<double> qv = q_scalar(t);
+    std::array<double, 7> q;
+    std::copy(qv.begin(), qv.end(), q.begin());
+    if (minimax::within_band(c, q, T, limits)) out.push_back({t, t});
+  }
+}
+
 // Every chart at one pose for a spherical-shoulder + offset-wrist 7R arm. Chart
 // i = 8*k + slot lives on reachable arc k. Building costs microseconds (the arcs
 // are closed form); q(t) and locate(q) never need a domain; a slot's domain
@@ -193,6 +209,7 @@ inline std::vector<Interval> elbow_arcs(const Eigen::Matrix<double, 3, 48>& coef
 struct SphericalShoulderCharts {
   JointConsts<7> c;  // the chain itself (for the Jacobian tangent)
   Eigen::Matrix<double, 3, 48> coef;
+  Pose T;  // the pose (a limit contact's error band)
   Pose t_rev;
   Tolerances tol;
   std::vector<Interval> arcs;  // exact elbow arcs
@@ -205,6 +222,7 @@ struct SphericalShoulderCharts {
     SphericalShoulderCharts f;
     f.c = c;
     f.coef = coef;
+    f.T = T;
     f.t_rev = T.inverse();
     f.tol = tol;
     f.arcs = elbow_arcs(coef, f.t_rev);
@@ -347,6 +365,14 @@ struct SphericalShoulderCharts {
           feasible::feasible_arcs_bounded(q_scalar, {0, 1, 2, 3, 4, 5}, lim, grid), own);
       for (const auto& a : arcs) out.push_back({a.first, a.second});
     }
+    if (!out.empty()) return out;
+    // No arc: the chart's limit contacts, as zero-width arcs (#662).
+    for (const auto& iv : domain(chart)) {
+      std::vector<double> grid(kDomainGrid);
+      for (int i = 0; i < kDomainGrid; ++i) grid[i] = iv.lo + (iv.hi - iv.lo) * i / (kDomainGrid - 1);
+      contact_arcs(q_scalar, grid, limits, /*periodic=*/false, c, T, out);
+    }
+    std::sort(out.begin(), out.end(), [](const Interval& p, const Interval& q) { return p.lo < q.lo; });
     return out;
   }
 
@@ -437,8 +463,6 @@ struct SrsCharts {
   // the swivel and checked once; the other six joints give exact periodic arcs.
   std::vector<Interval> in_limits(int chart, const std::array<std::array<double, 2>, 7>& limits) const {
     const auto& br = branches[chart];
-    const double q3 = feasible::to_limits(br.q3, limits[3][0], limits[3][1]);
-    if (!(limits[3][0] <= q3 && q3 <= limits[3][1])) return {};
     std::vector<feasible::Arc> lim(7);
     for (int i = 0; i < 7; ++i) lim[i] = {limits[i][0], limits[i][1]};
     static const std::vector<double> grid = feasible::param_grid();
@@ -447,8 +471,14 @@ struct SrsCharts {
       return std::vector<double>(qv.begin(), qv.end());
     };
     std::vector<Interval> out;
-    for (const auto& a : feasible::feasible_arcs(q_scalar, {0, 1, 2, 4, 5, 6}, lim, grid))
-      out.push_back({a.first, a.second});
+    const double q3 = feasible::to_limits(br.q3, limits[3][0], limits[3][1]);
+    if (limits[3][0] <= q3 && q3 <= limits[3][1])
+      for (const auto& a : feasible::feasible_arcs(q_scalar, {0, 1, 2, 4, 5, 6}, lim, grid))
+        out.push_back({a.first, a.second});
+    if (out.empty()) {  // no arc: the chart's limit contacts, as zero-width arcs (#662)
+      contact_arcs(q_scalar, grid, limits, /*periodic=*/true, c, T, out);
+      std::sort(out.begin(), out.end(), [](const Interval& p, const Interval& q) { return p.lo < q.lo; });
+    }
     return out;
   }
 

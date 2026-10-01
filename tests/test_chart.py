@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 import ssik
+from ssik._native import native_available
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.chart import Chart, SelfMotionManifold, charts
 from ssik.kinematics.poe_fk import poe_forward_kinematics
@@ -440,6 +441,53 @@ def test_in_limits_arcs(name: str) -> None:
     # tighter custom limits shrink (or empty) the arcs, never grow them
     tight = np.column_stack([lims[:, 0] + 0.3, lims[:, 1] - 0.3])
     assert _total(chart.in_limits(tight)) <= _total(chart.in_limits()) + 1e-12
+
+
+# Configurations with two joints at (or 1e-9 / 1e-10 inside) their limits, from
+# the #648 targeted set, where the in-limit part of the arm's own chart is a
+# single point: the margins touch zero without changing sign (#652, class d1).
+_CONTACTS = {
+    "fr3": (
+        "ssik.prebuilt.franka.fr3_ik",
+        [-1.73597918575822, 1.4688543008993784, 0.7664413550526155, -2.7478,
+         -0.4482641384015757, 0.8521, -0.08030119898069749],
+    ),
+    "openarm_left": (
+        "ssik.prebuilt.openarm.left_ik",
+        [-2.7224209656461005, -3.2656443205047467, 0.2962941761959832, 1.4453659302433899,
+         -1.5707999999, -0.7854, -0.08321066203127969],
+    ),
+}  # fmt: skip
+
+
+@pytest.mark.parametrize("native", [False, True])
+@pytest.mark.parametrize("name", list(_CONTACTS))
+def test_in_limits_finds_a_single_point_contact(name: str, native: bool) -> None:
+    """Where the in-limit part of a chart is one point, ``in_limits()`` returns
+    it as a zero-width arc (#662) instead of nothing: the minimum of the worst
+    limit violation along the chart, here the arm's own configuration, with every
+    joint in range up to the round-off band. Both the C++ charts and the Python
+    reference."""
+    import importlib
+
+    if native and not native_available():
+        pytest.skip("ssik._ssik_native not built")
+    module_name, q_list = _CONTACTS[name]
+    m = importlib.import_module(module_name)
+    q = np.array(q_list)
+    lims = np.array([j.limits for j in m._KB.joints])
+    fam = charts(m._KB, m.fk(q), solver_name=m.SOLVER_NAME, native=native)
+    assert fam.native is native
+    located = fam.locate(q)
+    assert located is not None
+    chart, t = located
+    arcs = chart.in_limits()
+    assert len(arcs) == 1, arcs
+    ((lo, hi),) = arcs
+    assert lo == hi
+    assert abs(lo - t) < 1e-6
+    assert _in_range_mod_2pi(chart.q(lo), lims)
+    assert _wrap_dist(chart.q(lo), q) < 1e-6
 
 
 def _total(arcs) -> float:

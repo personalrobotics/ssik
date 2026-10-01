@@ -17,7 +17,9 @@ A :class:`Chart` is one continuous branch ``q(t)`` of the manifold at one pose:
   its derivative as a unit direction and a rate (request B2).
 - ``in_limits()`` is the domain under joint limits (request A3): sign-zeros of
   smooth per-joint margins, bracketed on a grid the shared resolver refines
-  until no joint steps or bends more than 0.02 rad, then bisected.
+  until no joint steps or bends more than 0.02 rad, then bisected. Where the
+  in-limit part is a single point (the margins touch zero without changing
+  sign) it is a zero-width arc ``(t, t)`` at the minimum of the worst violation.
 - ``domain`` is the set of ``t`` where the branch exists (reachable), exact to
   bisection tolerance. Joint limits are *not* applied here: the chart is the
   geometric object, limits are a filter the caller composes on top.
@@ -426,6 +428,14 @@ class Chart:
         Cached per limits. Empty when no point of the branch is in limits.
         One connected self-motion sheet can come back as several arcs: the
         pieces the limits leave of it, which is what a controller can hold.
+
+        Where the in-limit part is a single point or a sliver no grid point
+        lands in -- typically two joints at their limits at once, so every
+        margin touches zero without changing sign -- the branch has no
+        bracketed arc, and the point is returned as a zero-width arc
+        ``(t, t)``: a minimum of the worst-case limit violation along the
+        chart that lies in limits up to its own error band (#651) and no more
+        than 1e-4 rad deep (``seven_r._minimax``).
 
         Angles are compared modulo ``2*pi``, and a joint is in limits when
         *some* ``q_i + 2*pi*k`` is. ``q(t)`` itself returns one representative
@@ -1436,10 +1446,13 @@ def _q6_limit_arcs(
     eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
     domain: tuple[tuple[float, float], ...],
     limits: Limits,
+    kb: KinBody,
+    T: NDArray[np.float64],
 ) -> tuple[tuple[float, float], ...]:
     """In-limits arcs of a q6-chart: per domain interval, the exact feasible
     sub-intervals of joints 0..5 (``feasible_arcs_bounded``) intersected with
-    joint 6's own range (``t`` is q6)."""
+    joint 6's own range (``t`` is q6). With none, the chart's limit contacts
+    (:func:`_contact_arcs`)."""
     from ssik.solvers.seven_r._feasible_param import feasible_arcs_bounded, intersect
 
     lo6, hi6 = limits[6]
@@ -1458,22 +1471,34 @@ def _q6_limit_arcs(
             q_batch=eval_fn,
         )
         out += intersect(arcs, own)
-    return tuple(out)
+    if out:
+        return tuple(out)
+    return _contact_arcs(
+        eval_fn,
+        [np.linspace(lo, hi, _Q6_DOMAIN_GRID) for lo, hi in domain],
+        limits,
+        kb,
+        T,
+        periodic=False,
+    )
 
 
 def _swivel_limit_arcs(
-    eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]], limits: Limits
+    eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    limits: Limits,
+    kb: KinBody,
+    T: NDArray[np.float64],
 ) -> tuple[tuple[float, float], ...]:
     """In-limits arcs of a swivel chart: the elbow q3 is constant along the
-    swivel and is checked once; the other six joints give exact periodic arcs."""
+    swivel and is checked once; the other six joints give exact periodic arcs.
+    With none, the chart's limit contacts (:func:`_contact_arcs`)."""
     from ssik.solvers.seven_r._feasible_param import PARAM_GRID, feasible_arcs, to_limits
 
     q_grid = eval_fn(PARAM_GRID)
     q3 = to_limits(float(q_grid[0, 3]), *limits[3])  # the 2*pi-representative nearest the range
-    if not (limits[3][0] <= q3 <= limits[3][1]):
-        return ()
-    return tuple(
-        feasible_arcs(
+    arcs: list[tuple[float, float]] = []
+    if limits[3][0] <= q3 <= limits[3][1]:
+        arcs = feasible_arcs(
             lambda t: eval_fn(np.array([t]))[0],
             q_grid,
             (0, 1, 2, 4, 5, 6),
@@ -1481,7 +1506,38 @@ def _swivel_limit_arcs(
             PARAM_GRID,
             q_batch=eval_fn,
         )
-    )
+    if arcs:
+        return tuple(arcs)
+    return _contact_arcs(eval_fn, [PARAM_GRID], limits, kb, T, periodic=True)
+
+
+def _contact_arcs(
+    eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    grids: list[NDArray[np.float64]],
+    limits: Limits,
+    kb: KinBody,
+    T: NDArray[np.float64],
+    *,
+    periodic: bool,
+) -> tuple[tuple[float, float], ...]:
+    """The in-limits points of a chart that has no in-limits arc (#662): where
+    the in-limit part of the branch is a single point or a sliver below the
+    bisection tolerance, typically two joints at their limits at once, the
+    margins touch zero without changing sign and bracketing finds nothing. The
+    minima of the worst-case violation along the chart
+    (``seven_r._minimax.chart_minima``) within the point's own error band
+    (#651) come back as zero-width arcs ``(t, t)``."""
+    from ssik.postprocess import _BAND_CAP
+    from ssik.solvers.seven_r._minimax import chart_minima, within_band
+
+    out: list[tuple[float, float]] = []
+    for grid in grids:
+        for t, v in chart_minima(eval_fn, grid, limits, periodic=periodic):
+            if v > _BAND_CAP:  # no error band reaches further
+                break
+            if within_band(kb, eval_fn(np.array([t]))[0], T, limits):
+                out.append((float(t), float(t)))
+    return tuple(sorted(out))
 
 
 def _bake_cached(kb: KinBody) -> NDArray[np.float64]:
@@ -1659,7 +1715,7 @@ def _spherical_shoulder_family(
             domain_fn=lambda: arc_domains(k)[slot],
             deriv_fn=lambda ts: _jacobian_tangent(kb, ev, ts),
             fold_dir_fn=lambda qs: _null_tangent(kb, qs),
-            limit_arcs_fn=lambda lims: _q6_limit_arcs(ev, chart.domain, lims),
+            limit_arcs_fn=lambda lims: _q6_limit_arcs(ev, chart.domain, lims, kb, T),
             default_limits=limits,
         )
         return chart
@@ -1786,7 +1842,7 @@ def _srs_family(kb: KinBody, T: NDArray[np.float64], policy: TolerancePolicy) ->
             domain_fn=lambda: _FULL_CIRCLE,
             deriv_fn=lambda ts: _srs_tangent(br, ts),
             fold_dir_fn=lambda qs: _null_tangent(kb, qs),
-            limit_arcs_fn=lambda lims: _swivel_limit_arcs(_eval, lims),
+            limit_arcs_fn=lambda lims: _swivel_limit_arcs(_eval, lims, kb, T),
             default_limits=limits,
         )
 
