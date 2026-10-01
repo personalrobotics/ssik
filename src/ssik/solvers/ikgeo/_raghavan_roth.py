@@ -1645,7 +1645,10 @@ def _back_substitute_inner(
     # failure, which is exactly how the dropped joint and the right-bilinear
     # pair already recover pi below, via honest atan2 on (sin, cos).
     x0_ratio_candidates = [(5, 8), (2, 5), (11, 2), (4, 7), (10, 1), (3, 6), (9, 0)]
-    x1_ratio_candidates = [(7, 8), (6, 7), (1, 2), (4, 5), (10, 11)]
+    # Every pair one degree apart in x_lb1. With both left-bilinear joints at
+    # pi only entry 9 (x_lb0^3 x_lb1^2) carries signal, so (9, 10) is the one
+    # readable x_lb1 pair there.
+    x1_ratio_candidates = [(7, 8), (6, 7), (1, 2), (4, 5), (10, 11), (0, 1), (3, 4), (9, 10)]
 
     # Pick the pair carrying the most signal, not the largest denominator:
     # at the pole every admissible denominator is noise, and it is the

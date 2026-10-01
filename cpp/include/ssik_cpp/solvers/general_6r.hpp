@@ -463,7 +463,9 @@ inline bool back_substitute(double x_lin, const Vec12& v12, const PqCoeffs& pq, 
   // block drops to ~1e-16, so every ratio that divides by it divides noise.
   // Hence: select on the entry carrying signal, not on the denominator.
   static const int x0c[7][2] = {{5, 8}, {2, 5}, {11, 2}, {4, 7}, {10, 1}, {3, 6}, {9, 0}};
-  static const int x1c[5][2] = {{7, 8}, {6, 7}, {1, 2}, {4, 5}, {10, 11}};
+  // Every pair one degree apart in x_lb1: with both left-bilinear joints at pi
+  // only entry 9 (x_lb0^3 x_lb1^2) carries signal, and (9, 10) reads it.
+  static const int x1c[8][2] = {{7, 8}, {6, 7}, {1, 2}, {4, 5}, {10, 11}, {0, 1}, {3, 4}, {9, 10}};
 
   const double v_scale = v12.cwiseAbs().maxCoeff();
   if (!(v_scale > 0.0) || !std::isfinite(v_scale)) return false;
@@ -487,7 +489,7 @@ inline bool back_substitute(double x_lin, const Vec12& v12, const PqCoeffs& pq, 
   };
 
   double q_l0, q_l1;
-  if (!pick(x0c, 7, q_l0) || !pick(x1c, 5, q_l1)) return false;
+  if (!pick(x0c, 7, q_l0) || !pick(x1c, 8, q_l1)) return false;
 
   // atan(inf) is exactly pi/2, so a root at infinity gives q_lin = pi.
   const double q_lin = 2.0 * std::atan(x_lin);
