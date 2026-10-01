@@ -28,11 +28,11 @@ workflow dispatched with ``regen=true``
 KNOWN_* tables merge every platform recorded so far; paste them into the
 gate. A rerun on the same platform reproduces both files byte for byte.
 
-The round-off class (``ROUNDOFF_CLASSES``: exact-limit angles, #632) also
-flips between CI runners of one platform, and so do the few strict-class
-cells in ``RUNNER_DEPENDENT_CELLS``, so such a cell that a CI run shows but
-the regeneration run did not is recorded by hand under the ``ci`` key of
-that arm's ``cells``, which no rerun overwrites.
+A cell of a round-off class (``ROUNDOFF_CLASSES``, none at present) or one
+of the few strict-class cells in ``RUNNER_DEPENDENT_CELLS`` can flip between
+CI runners of one platform, so such a cell that a CI run shows but the
+regeneration run did not is recorded by hand under the ``ci`` key of that
+arm's ``cells``, which no rerun overwrites.
 
     uv run python scripts/regen_native_parity.py            # this platform's cells
     uv run python scripts/regen_native_parity.py --arm ur5_ik --arm fr3_ik

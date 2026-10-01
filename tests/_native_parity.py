@@ -140,37 +140,29 @@ CLASSES = {
 NEW = "new"
 
 # Classes whose failing poses are decided by round-off, and so differ between
-# machines, not only between Linux and macOS: an exact-limit angle beyond the
-# limit band (F, #632). Observed: the same commit's CI runners disagree on which
-# of these cells fail. Their known cells are non-strict xfails until that issue
-# makes the outcome reproducible; every other class is strict. The rescue (D)
-# left this set when both backends came to share one deterministic definition
-# (#622); a rescued solution that lands exactly on a limit is an F case
-# (``_Pose.across_limit``). F stays after #624 made a limit inclusive up to
-# round-off, #636 polished accepted general_6r solutions to machine precision,
-# and #651 widened the band to each solution's own error estimate, capped at
-# 1e-6 (postprocess._BAND_GAIN). That admits an exact-limit angle at a singular
-# pose, a multiple root known to ~sqrt(round-off). What is left is a solution
-# whose error exceeds the cap: a Python-path general_6r solution accurate only
-# to its 1e-5 gate (a near-miss refinement, or a singular root the polish
-# declines; #640), which lands 1e-6 to 6e-4 past the limit while the other
-# backend's copy is within its band, and the OpenArm SRS elbow sign. The side
-# of the limit these land on follows the machine's LAPACK kernels, and the
-# cells differ between Linux and macOS.
-ROUNDOFF_CLASSES = frozenset({"F"})
+# machines, not only between Linux and macOS: their known cells are non-strict
+# xfails; every other class is strict. None is left. The rescue (D) left this
+# set when both backends came to share one deterministic definition (#622).
+# F (an exact-limit angle beyond its error band, #632) left it with #640:
+# after #624, #636 and #651 what remained was a Python-path general_6r
+# solution accurate only to its 1e-5 gate (a near-miss refinement of an
+# inaccurate companion root), landing 1e-6 to 6e-4 past a limit on one runner
+# and not another. With QZ roots those solutions close exactly, and the F
+# cells left (crx20ial, crx3ia, the OpenArm SRS elbow sign) failed alike on
+# every Linux runner of the regeneration, two nightly runs and the PR shards.
+ROUNDOFF_CLASSES: frozenset[str] = frozenset()
 
 # Known cells of a strict class that also differ between CI runners of one
-# platform, as (direction, class, arm): non-strict like the round-off class,
+# platform, as (direction, class, arm): non-strict like a round-off class,
 # until the named issue makes them reproducible. Record them under the ``ci``
 # key of the arm's ``cells`` (scripts/regen_native_parity.py).
-#   fanuc_crx10ialp near_singular/8: a 4-fold near-repeated root the split does
-#   not engage on, so Python recovers one branch only by the near-miss
-#   refinement, 2e-3 from native's; whether the two are the same root by the
-#   midpoint test follows the runner (#640).
+#   hc10 near_singular/9: the RR pencil is singular for every x, so each
+#   backend samples the solution continuum at points set by the machine's
+#   kernels, and whether native's land within the match radius of Python's
+#   follows the runner (#662).
 RUNNER_DEPENDENT_CELLS = frozenset(
     {
-        ("forward", "E", "fanuc_crx10ialp_ik"),
-        ("reverse", "J", "fanuc_crx10ialp_ik"),
+        ("forward", "E", "hc10_ik"),
     }
 )
 

@@ -23,12 +23,11 @@ Platforms
     A pose on a boundary can resolve differently on Linux and macOS, so a
     cell is known per platform: ``KNOWN_*`` maps each known arm to the
     platforms where its cell fails (``ALL`` for both), and the strict xfail
-    applies only there. The round-off class (``ROUNDOFF_CLASSES``: F,
-    exact-limit angles beyond the limit band) differs even between CI runners
-    of one platform, so its known cells are non-strict until #632 makes them
-    reproducible; an F gap on an arm not listed still fails. The few cells of
-    a strict class that do the same (``RUNNER_DEPENDENT_CELLS``) are
-    non-strict too, each until its named issue is fixed.
+    applies only there. A class whose cells differ even between CI runners of
+    one platform (``ROUNDOFF_CLASSES``, none at present) has non-strict known
+    cells; a gap on an arm not listed still fails. The few cells of a strict
+    class that do the same (``RUNNER_DEPENDENT_CELLS``) are non-strict too,
+    each until its named issue is fixed.
 
 Reproduce a failure: the message names the pose id (``<stratum>/<index>``);
 ``tests._native_parity.poses(arm, "full")`` returns its ``q``, and
@@ -64,7 +63,6 @@ ALL = ("darwin", "linux")
 KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
     "E": {
         "cr5_ik": ALL,
-        "fanuc_crx10ialp_ik": ALL,
         "franka_panda_ik": ALL,
         "hc10_ik": ALL,
         "irb120_ik": ALL,
@@ -82,7 +80,7 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
         "ur5_ik": ALL,
     },
     "F": {
-        "fanuc_crx20ial_ik": ALL,
+        "fanuc_crx20ial_ik": ("linux",),
         "openarm_left_ik": ALL,
         "openarm_right_ik": ALL,
     },
@@ -99,12 +97,9 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
 
 KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
     "F": {
-        "fanuc_crx3ia_ik": ALL,
-        "m0609_ik": ALL,
-        "m1013_ik": ALL,
+        "fanuc_crx3ia_ik": ("linux",),
     },
     "J": {
-        "fanuc_crx10ialp_ik": ALL,
         "hc10_ik": ("darwin",),
         "hh020_ik": ALL,
         "kr210_r2700_ik": ALL,
