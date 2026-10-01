@@ -160,9 +160,26 @@ ROUNDOFF_CLASSES: frozenset[str] = frozenset()
 #   backend samples the solution continuum at points set by the machine's
 #   kernels, and whether native's land within the match radius of Python's
 #   follows the runner (#662).
+#   The UR cells: poses within |sin q5| ~ 1e-8 of a singular wrist, where q5 is
+#   a near-double root known to about sqrt(eps). A backend whose tangent rounds
+#   to an exact 0 or pi collapses atan2(sin q5 * a, sin q5 * b) and drops the
+#   branch the other keeps, and which backend that is follows the runner's
+#   kernels: two Linux runner types disagree on these cells (#662).
+#   fanuc_crx3ia forward F and piper reverse F: a general_6r solution at a
+#   limit lands past the band on the slow workflow's runner and inside it on
+#   the CI runners, with identical code (#632).
 RUNNER_DEPENDENT_CELLS = frozenset(
     {
         ("forward", "E", "hc10_ik"),
+        ("forward", "F", "fanuc_crx3ia_ik"),
+        ("reverse", "F", "piper_ik"),
+        ("forward", "E", "ur10e_ik"),
+        ("reverse", "J", "ur10e_ik"),
+        ("reverse", "J", "ur15_ik"),
+        ("forward", "E", "ur16e_ik"),
+        ("reverse", "J", "ur16e_ik"),
+        ("reverse", "J", "ur18_ik"),
+        ("forward", "E", "ur5e_ik"),
     }
 )
 
