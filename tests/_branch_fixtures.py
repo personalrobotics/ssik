@@ -120,8 +120,9 @@ FIXTURES: tuple[BranchFixture, ...] = (
             "succeeds, conditioning the pencil down to 34 and recovering the "
             "root as an ordinary finite x_tilde. The inverse map then deleted "
             "it, because mapping back to x_2 divides by a denominator that "
-            "vanishes exactly when the joint is at pi. Guards that the map "
-            "keeps the root and names it infinity rather than dropping it."
+            "vanishes exactly when the joint is at pi. The Mobius search is "
+            "gone (#658); QZ on the pencil returns this root as beta = 0. "
+            "Guards that the root is kept and named infinity, not dropped."
         ),
         dh_alpha=(PI / 2, PI / 2, PI / 2, PI / 2, PI / 2, 0.0),
         dh_a=(1 / 5, 1 / 4, 1 / 3, 1 / 6, 1 / 7, 1 / 8),
@@ -208,7 +209,7 @@ FIXTURES: tuple[BranchFixture, ...] = (
         description=(
             "q0 = pi is shared with the branch (-pi, -0.2269, -2.0328, -1.7930, "
             "1.7203, -0.3324): the double root is the point at infinity, where "
-            "native reads A's null space and Python the Mobius-mapped pencil's. "
+            "where both backends read A's null space (QZ's beta = 0 root). "
             "The #571 infinite-root handling alone keeps the root but still "
             "reads one mixed vector for two branches."
         ),

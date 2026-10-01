@@ -18,7 +18,7 @@ Specialisation strategy (#118):
        0.866 (cos 60-deg) and similar arm constants multiply T_target
        entries -- explicit ``sin`` / ``cos`` of the arm become visible.
      - Generic linear algebra (Q-rank elimination, Weierstrass, M(x)
-       pencil build, 24x24 eigvals + Mobius fallback, back-substitution,
+       pencil build, 24x24 eigvals with a QZ fallback, back-substitution,
        Newton refinement) stays imported from
        :mod:`ssik.solvers.ikgeo._raghavan_roth`. Those are arm-agnostic;
        Phase 4 Cython compiles them via numpy linalg bindings.
@@ -55,8 +55,7 @@ def render_constants_header() -> str:
         "    eliminate_q0_q1 as _ssik_eliminate_q0_q1,\n"
         "    weierstrass_eliminate_trig as _ssik_weierstrass,\n"
         "    build_m_matrix as _ssik_build_m_matrix,\n"
-        "    solve_x2_roots_mobius as _ssik_solve_x2_roots_mobius,\n"
-        "    split_repeated_roots as _ssik_split_repeated_roots,\n"
+        "    solve_x2_branches as _ssik_solve_x2_branches,\n"
         "    _back_substitute_inner as _ssik_back_substitute_inner,\n"
         "    _fk_dh as _ssik_fk_dh,\n"
         ")\n"
@@ -166,13 +165,10 @@ def compose(kb: KinBody) -> str:
             e_sin, e_cos, e_one = _ssik_eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
             e_quad, e_lin, e_const = _ssik_weierstrass(e_sin, e_cos, e_one)
             m_quad, m_lin, m_const = _ssik_build_m_matrix(e_quad, e_lin, e_const)
-            roots, eigvecs = _ssik_solve_x2_roots_mobius(m_quad, m_lin, m_const)
-            # A root shared by several branches has a multi-dimensional null
-            # space, and its eigenvector is a mix of them: read each branch
-            # out (#595), as solve_all_ik and the native core do.
-            roots, eigvecs = _ssik_split_repeated_roots(
-                m_quad, m_lin, m_const, roots, eigvecs
-            )
+            # Companion route where accurate, QZ on the pencil where not, and
+            # every branch vector a repeated root carries (#595, #640), as
+            # solve_all_ik and the native core do.
+            roots, eigvecs = _ssik_solve_x2_branches(m_quad, m_lin, m_const)
 
             q_pinv = np.linalg.pinv(q_mat).astype(np.float64)
 

@@ -21,7 +21,8 @@ Poses
     - ``tight_selfmotion`` (7R only): three or four joints 0.05 % to 5 % of
       their range from a limit, which squeezes the in-limit self-motion.
     - ``pinned``: in-limits configurations at which a backend once returned
-      [] (committed in ``POSES_FILE``, each with its issue), run in both tiers.
+      [] or raised (committed in ``POSES_FILE``, each with its issue), run in
+      both tiers.
 
     The other strata are drawn from ``numpy.random.default_rng`` seeded with
     ``SEED`` and the arm and stratum names, so they reproduce exactly.

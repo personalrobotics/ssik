@@ -472,10 +472,9 @@ def test_back_substitute_recovers_seeded_q_star(q_star: NDArray[np.float64]) -> 
 
 def test_solve_all_ik_jaco2_geometry() -> None:
     """Regression: JACO 2 (Kinova j2n6s200) geometry, 60-deg twists at joints 4,5 \u2014 triggers
-    cond(m_quad) ~ 1e16 -- the Manocha-Canny singular-pencil case. The
-    solver must (1) detect the conditioning failure, (2) fall back through
-    Mobius reparameterization + scipy generalized eigenvalue, and (3) recover
-    the seeded q* via Newton refinement of the imprecise eigenvalue seed.
+    cond(m_quad) ~ 1e16 -- the Manocha-Canny singular-pencil case, which the
+    companion route cannot invert. The solver must recover the seeded q*
+    from QZ on the pencil, which never inverts m_quad.
 
     Closes the EAIK gap on the non-Pieper geometry that motivated this work.
     """

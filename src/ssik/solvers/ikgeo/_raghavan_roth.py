@@ -54,8 +54,8 @@ __all__ = [
     "eliminate_q0_q1",
     "pick_best_leftvar",
     "solve_all_ik",
+    "solve_x2_branches",
     "solve_x2_roots",
-    "solve_x2_roots_mobius",
     "weierstrass_eliminate_trig",
 ]
 
@@ -1048,9 +1048,8 @@ def solve_x2_roots(
     :param spurious_tol: width of the near-i / near--i exclusion band.
     :param imag_rel_tol: scale-aware tolerance for accepting an eigenvalue as
         real-valued (analogous to SP5/SP6 imag filter).
-    :param cond_threshold: above this ``cond(m_quad)``, raise -- caller must
-        invoke the M\u00f6bius-reparameterization or generalized-eigenvalue path
-        (Day 4 fallback).
+    :param cond_threshold: above this ``cond(m_quad)``, raise. The solvers use
+        :func:`solve_x2_branches` instead, which never inverts ``m_quad``.
 
     :returns: ``(real_roots, eigvecs)`` -- list of real x_2 values and matching
         24-component eigenvectors. ``len(real_roots) <= 16`` (fewer if some
@@ -1069,7 +1068,7 @@ def solve_x2_roots(
     if cond > cond_threshold:
         raise np.linalg.LinAlgError(
             f"M_quad ill-conditioned (cond={cond:.3e}, equilibrated); "
-            "generalized-eigenvalue fallback required"
+            "use solve_x2_branches (QZ on the pencil)"
         )
 
     # Stack [B|C] into one 12x24 RHS so LU(A) is computed once instead of
@@ -1110,15 +1109,13 @@ def solve_x2_roots(
 
 
 # ---------------------------------------------------------------------------
-# M\u00f6bius reparameterization fallback (Manocha-Canny IV-C).
+# QZ on the pencil: the roots the solvers use (#640).
 # ---------------------------------------------------------------------------
 
-# Below this, a tan-half-angle denominator is taken to be zero, i.e. the joint
-# is at pi and its coordinate is the point at infinity (#571). This is a
+# Below this, the second coordinate of a normalised QZ eigenvalue pair is
+# zero, i.e. the root is the point at infinity: the joint at pi (#571). A
 # recognition threshold, not a rejection one: the root is kept either way, and
-# the only thing the threshold decides is whether it is named ``inf`` or a
-# large finite number. Both give the same angle to within an ulp of pi, so the
-# value is uncritical.
+# |x| > 1e12 gives the same angle to within an ulp of pi. Native uses the same.
 _X_AT_INFINITY_TOL = 1e-12
 
 # A v_12 entry below this fraction of |v_12|_inf is the unit-normalised
@@ -1128,184 +1125,54 @@ _X_AT_INFINITY_TOL = 1e-12
 _V12_NOISE_REL_TOL = 1e-12
 
 
-def _mobius_transform(
-    m_quad: NDArray[np.float64],
-    m_lin: NDArray[np.float64],
-    m_const: NDArray[np.float64],
-    aa: float,
-    bb: float,
-    cc: float,
-    dd: float,
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    """Apply x_2 = (aa*x_tilde + bb) / (cc*x_tilde + dd) to M(x_2) = A x^2 + B x + C.
+def _qz_roots(
+    a_eq: NDArray[np.float64],
+    b_eq: NDArray[np.float64],
+    c_eq: NDArray[np.float64],
+    spurious_tol: float,
+    imag_rel_tol: float,
+) -> list[float]:
+    """Real roots of ``det M(x) = 0`` by QZ on the Manocha-Canny pencil
+    ``M1 - x M2`` (Theorem 2), as native's ``solve_x2_roots`` does.
 
-    After substitution and clearing (cc*x_tilde + dd)^2, the new polynomial has
-    coefficients (Manocha-Canny Eq. 17):
-
-        A_new = aa^2 A + aa*cc B + cc^2 C
-        B_new = 2 aa*bb A + (aa*dd + bb*cc) B + 2 cc*dd C
-        C_new = bb^2 A + bb*dd B + dd^2 C
+    QZ is backward stable on the pencil itself, so it places a root to about
+    eps times its condition number with no ``A^{-1}`` in the way; the
+    companion route's error is amplified by ``cond(A)`` and is far larger at
+    close roots (#640). Each pair (alpha, beta) is read projectively: beta = 0
+    is the root at infinity (the joint at pi, #571), which is real when alpha
+    is. The same spurious and non-real filters as the companion route apply.
+    A QZ that does not converge has no eigenvalues to trust and gives no
+    roots, as on native (#599): the caller treats that like any pose with
+    nothing found.
     """
-    a_new = aa * aa * m_quad + aa * cc * m_lin + cc * cc * m_const
-    b_new = 2.0 * aa * bb * m_quad + (aa * dd + bb * cc) * m_lin + 2.0 * cc * dd * m_const
-    c_new = bb * bb * m_quad + bb * dd * m_lin + dd * dd * m_const
-    return a_new, b_new, c_new
+    from scipy.linalg.lapack import dggev  # type: ignore[import-untyped]
 
-
-def solve_x2_roots_mobius(
-    m_quad: NDArray[np.float64],
-    m_lin: NDArray[np.float64],
-    m_const: NDArray[np.float64],
-    *,
-    cond_threshold: float = 1e10,
-    n_random_tries: int = 8,
-    rng_seed: int = 0,
-    spurious_tol: float = 0.1,
-    imag_rel_tol: float = 1e-3,
-) -> tuple[list[float], list[NDArray[np.complex128]]]:
-    """Robust ``x_2`` root finder with M\u00f6bius reparameterization fallback.
-
-    First tries the straight eigenvalue route via :func:`solve_x2_roots`. If
-    ``m_quad`` is well-conditioned, returns immediately. Otherwise tries a
-    sequence of random M\u00f6bius transforms ``x_2 = (aa*x_tilde + bb) / (cc*x_tilde + dd)``
-    until a transform yields a well-conditioned ``A_new``; uses the eigenvalue
-    route on the transformed pencil; applies the inverse M\u00f6bius
-    ``x_2 = (aa*x_tilde + bb) / (cc*x_tilde + dd)`` to recover ``x_2`` from the eigenvalues.
-
-    The eigenvectors of the transformed pencil have the same block structure
-    ``[v_12; x_tilde * v_12]`` as the un-transformed problem, so the
-    back-substitution stage uses them directly (no transformation needed
-    beyond converting x_tilde -> x_2 for the q_2 extraction).
-
-    :param cond_threshold: above this ``cond(A)``, attempt M\u00f6bius reparameterization.
-    :param n_random_tries: number of random ``(aa, bb, cc, dd)`` quadruples to
-        try; the best by ``cond(A_new)`` is used.
-    :param rng_seed: RNG seed for reproducibility.
-
-    :raises numpy.linalg.LinAlgError: if no random reparameterization gives a
-        well-conditioned matrix (extremely rare; corresponds to a singular
-        pencil and triggers the generalized-eigenvalue fallback in the caller).
-    """
-    # AE-1 (#68): equilibrate first, then check cond on the equilibrated
-    # leading matrix. Often this reduces cond by 1-3 orders and lets us skip
-    # the M\u00f6bius / generalized-eigenvalue fallbacks entirely.
-    a_eq, _b_eq, _c_eq, _, _d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
-    cond_eq = float(np.linalg.cond(a_eq))
-    if cond_eq <= cond_threshold:
-        # Equilibration alone made the pencil tractable. Use the direct
-        # eigenvalue route on the equilibrated matrices; solve_x2_roots
-        # handles the eigenvector de-equilibration internally.
-        return solve_x2_roots(
-            m_quad,
-            m_lin,
-            m_const,
-            spurious_tol=spurious_tol,
-            imag_rel_tol=imag_rel_tol,
-            cond_threshold=cond_threshold,
-            equilibrate=True,
-        )
-
-    # Equilibration insufficient. Track the original cond as the bar to beat
-    # for the M\u00f6bius search, but operate on the raw matrices (M\u00f6bius +
-    # equilibration interaction needs careful eigenvector recovery; raw is
-    # safer for now -- can revisit in a follow-up).
-    cond = float(np.linalg.cond(m_quad))
-    rng = np.random.default_rng(rng_seed)
-    best_aa = best_bb = best_cc = best_dd = 0.0
-    best_cond = cond
-    for trial in range(n_random_tries):
-        # Widen the range each block of tries: (aa, bb, cc, dd) sampled from
-        # increasingly large intervals to escape near-singular regions.
-        scale = 1.0 + (trial // 4) * 2.0
-        aa, bb, cc, dd = rng.uniform(-scale, scale, size=4)
-        if abs(aa * dd - bb * cc) < 1e-3:
-            continue
-        a_new, _, _ = _mobius_transform(m_quad, m_lin, m_const, aa, bb, cc, dd)
-        try_cond = float(np.linalg.cond(a_new))
-        if try_cond < best_cond:
-            best_cond = try_cond
-            best_aa, best_bb, best_cc, best_dd = aa, bb, cc, dd
-
-    if best_cond > cond_threshold:
-        # Singular pencil: every M\u00f6bius transform fails. Fall through to the
-        # generalized-eigenvalue route (scipy.linalg.eig on the pencil M_1 - x M_2).
-        try:
-            from scipy.linalg import eig as scipy_eig  # type: ignore[import-untyped]
-        except ImportError as exc:
-            raise np.linalg.LinAlgError(
-                f"M\u00f6bius reparameterization failed (best cond={best_cond:.3e}); "
-                f"scipy not available for generalized-eigenvalue fallback"
-            ) from exc
-
-        # MC Theorem 2: M(x) = A x^2 + B x + C, build pencil M_1 - x M_2 where
-        #   M_1 = [[I_12,   0   ],
-        #          [  0,    C   ]]  (24x24)
-        #   M_2 = [[0,    I_12  ],
-        #          [-A,    -B   ]]  (24x24)
-        # Generalized eigenvalues are the roots of det M(x) = 0.
-        m1 = np.zeros((24, 24), dtype=np.float64)
-        m1[:12, :12] = np.eye(12)
-        m1[12:, 12:] = m_const
-        m2 = np.zeros((24, 24), dtype=np.float64)
-        m2[:12, 12:] = np.eye(12)
-        m2[12:, :12] = -m_quad
-        m2[12:, 12:] = -m_lin
-        eigvals, eigvecs = scipy_eig(m1, m2)
-
-        real_roots: list[float] = []
-        real_eigvecs: list[NDArray[np.complex128]] = []
-        for k in range(24):
-            ev = eigvals[k]
-            if not np.isfinite(ev):
-                continue
-            if abs(abs(ev.imag) - 1.0) < spurious_tol and abs(ev.real) < spurious_tol:
-                continue
-            if abs(ev.imag) > imag_rel_tol * max(abs(ev.real), 1.0):
-                continue
-            # In the generalized-eigenvalue construction, the kernel vector v_12
-            # lives in the *bottom* half of V (the standard companion-matrix
-            # construction has it in the top half). Swap halves so back_substitute,
-            # which always reads the top 12 entries as v_12, sees the right thing.
-            v = eigvecs[:, k]
-            v_swapped = np.concatenate([v[12:], v[:12]])
-            real_roots.append(float(ev.real))
-            real_eigvecs.append(v_swapped)
-        return real_roots, real_eigvecs
-
-    aa, bb, cc, dd = best_aa, best_bb, best_cc, best_dd
-    a_t, b_t, c_t = _mobius_transform(m_quad, m_lin, m_const, aa, bb, cc, dd)
-
-    # Eigenvalue route on the transformed pencil.
-    x_tilde_roots, eigvecs = solve_x2_roots(
-        a_t,
-        b_t,
-        c_t,
-        spurious_tol=spurious_tol,
-        imag_rel_tol=imag_rel_tol,
-        cond_threshold=cond_threshold,
+    m1 = np.zeros((24, 24), dtype=np.float64, order="F")
+    m1[:12, :12] = np.eye(12)
+    m1[12:, 12:] = c_eq
+    m2 = np.zeros((24, 24), dtype=np.float64, order="F")
+    m2[:12, 12:] = np.eye(12)
+    m2[12:, :12] = -a_eq
+    m2[12:, 12:] = -b_eq
+    alphar, alphai, beta, _vl, _vr, _work, info = dggev(
+        m1, m2, compute_vl=0, compute_vr=0, overwrite_a=1, overwrite_b=1
     )
-    # Map x_tilde -> x_2 = (aa * x_tilde + bb) / (cc * x_tilde + dd).
-    #
-    # A vanishing denominator is a real root, not a failure: it is exactly
-    # x_2 -> infinity, i.e. the joint at pi (#571). The Mobius search has
-    # already done the hard part -- it found a transform under which that root
-    # is an ordinary finite x_tilde on a well-conditioned pencil (cond 1.1e16
-    # -> 34 on the #571 reproducer), and the eigenvector is as good as any
-    # other. Dropping it here threw away a branch the algebra had recovered.
-    #
-    # Infinity carries it through unchanged: the only consumer is
-    # ``q_lin = 2 * arctan(x_lin)`` in _back_substitute_inner, and
-    # ``arctan(inf)`` is exactly ``pi/2``, so q_lin is exactly ``pi``. The
-    # projective line has one point at infinity, so it is always ``+inf``: the
-    # sign of a vanishing denominator is noise, and native does the same.
-    real_roots = []
-    real_eigvecs = []
-    for x_tilde, evec in zip(x_tilde_roots, eigvecs, strict=True):
-        denom = cc * x_tilde + dd
-        x2 = np.inf if abs(denom) < _X_AT_INFINITY_TOL else float((aa * x_tilde + bb) / denom)
-        real_roots.append(x2)
-        real_eigvecs.append(evec)
-    return real_roots, real_eigvecs
+    if info != 0:
+        return []
+    scale = np.hypot(np.hypot(alphar, alphai), beta)
+    ok = np.isfinite(scale) & (scale > 0.0)  # a degenerate pencil row has neither
+    scale = np.where(ok, scale, 1.0)
+    re_n, im_n, b_n = alphar / scale, alphai / scale, beta / scale
+    # The root at infinity: one point, whatever the sign, real when alpha is.
+    at_inf = ok & (np.abs(b_n) < _X_AT_INFINITY_TOL)
+    finite = ok & ~at_inf
+    b_safe = np.where(finite, b_n, 1.0)
+    re, im = re_n / b_safe, np.abs(im_n / b_safe)
+    spurious = (np.abs(im - 1.0) < spurious_tol) & (np.abs(re) < spurious_tol)
+    real = im <= imag_rel_tol * np.maximum(np.abs(re), 1.0)
+    keep_inf = at_inf & (np.abs(im_n) <= imag_rel_tol)
+    keep = finite & ~spurious & real
+    return [float(x) if k else np.inf for x, k, i in zip(re, keep, keep_inf, strict=True) if k or i]
 
 
 # ---------------------------------------------------------------------------
@@ -1360,6 +1227,11 @@ _NULL_RANK_RTOL = float(np.sqrt(np.finfo(np.float64).eps))
 _CLUSTER_RADIUS = 1e-3
 _ILL_CONDITIONED_RTOL = 1e4 * _NULL_RANK_RTOL
 
+# A fixed start for the inverse iteration that reads a root's null vector
+# (_null_vectors): deterministic, and with no structure M(x) could make it
+# orthogonal to the null direction (the monomial layout has sparse rows).
+_INVERSE_ITERATION_START = np.random.default_rng(640).standard_normal(12)
+
 # Monomial index pairs with v_12[hi] = x_lb0 * v_12[lo] (and likewise x_lb1);
 # see the v_12 layout in _back_substitute_inner.
 _SHIFT_LB0 = ((8, 7, 6, 5, 4, 3, 2, 1, 0), (5, 4, 3, 2, 1, 0, 11, 10, 9))
@@ -1383,6 +1255,21 @@ def _m_at(
     return m_quad * (x * x) + m_lin * x + m_const
 
 
+def _m_stack(
+    m_quad: NDArray[np.float64],
+    m_lin: NDArray[np.float64],
+    m_const: NDArray[np.float64],
+    xs: Sequence[float],
+) -> NDArray[np.float64]:
+    """M(x) for every x, stacked (len(xs), 12, 12); see :func:`_m_at`."""
+    xa = np.array(xs, dtype=np.float64)
+    finite = np.isfinite(xa)
+    xf = np.where(finite, xa, 0.0)[:, None, None]
+    stack = m_quad * (xf * xf) + m_lin * xf + m_const
+    stack[~finite] = m_quad
+    return np.asarray(stack)
+
+
 def _chordal(x: float, y: float) -> float:
     """Distance of two points of the projective line (bounded, inf-safe)."""
     if not np.isfinite(x):
@@ -1397,7 +1284,7 @@ def _shift_split_one(
 ) -> list[NDArray[np.float64]] | None:
     """Branch vectors in ``span(null_basis)`` from one shift, or None when
     the shift does not give k distinct real values."""
-    from scipy.linalg import eigvals as scipy_eigvals
+    from scipy.linalg import eigvals as scipy_eigvals  # type: ignore[import-untyped]
 
     k = null_basis.shape[1]
     if k > len(lo):
@@ -1434,43 +1321,22 @@ def _shift_split(null_basis: NDArray[np.float64]) -> list[NDArray[np.float64]] |
     return parts
 
 
-def split_repeated_roots(
+def _roots_to_test(
     m_quad: NDArray[np.float64],
     m_lin: NDArray[np.float64],
     m_const: NDArray[np.float64],
     roots: list[float],
-    eigvecs: list[NDArray[np.complex128]],
-) -> tuple[list[float], list[NDArray[np.complex128]]]:
-    """Replace the eigenvectors of every repeated root by its branches' own
-    monomial vectors (#595).
-
-    Multiplicity is read from M(x)'s singular values, not from how close the
-    eigenvalues are: a defective double root has two equal eigenvalues and a
-    one-dimensional null space, and needs no split. Roots with a
-    one-dimensional null space keep the eigensolver's vector untouched. The
-    singular values are computed only for roots with another root nearby,
-    unless the pencil is ill-conditioned (``_CLUSTER_RADIUS``).
-
-    A root with a k-dimensional null space (k >= 2) is grouped with the other
-    roots whose M(x) that same space is also null for, up to k of them: the
-    k copies QZ returns for a k-fold root, or the k close roots of a near
-    repeat. The group's null space is split into its k branch vectors, each
-    branch is given to the group member it fits best (one each), and a member
-    then reads its branch from the split of its own null space, which is
-    exact at that member's root rather than only within the roots' separation.
-    Branches no member took are still returned (at the member they fit best),
-    so a missing eigenvalue copy cannot lose one. A group whose space does not
-    split into k real branches is left exactly as the eigensolver gave it.
-    """
+) -> list[int]:
+    """The roots that take the multiplicity test (``_CLUSTER_RADIUS``): those
+    with another root nearby, or all of them when the pencil is
+    ill-conditioned."""
     n = len(roots)
     if n < 2:
-        return roots, eigvecs
-    # Only a root with another root nearby can have a multi-dimensional null
-    # space, unless the pencil is ill-conditioned (_CLUSTER_RADIUS); the others
-    # keep k = 1 without an SVD. The chordal distance of x = tan(q/2) values is
-    # |sin(a_i - a_j)| with a = atan(x) on a circle of circumference pi, so a
-    # root's nearest neighbour is one of its two cyclic neighbours in sorted
-    # order (|sin| is pi-periodic, so the wrap-around pair needs no shift).
+        return []
+    # The chordal distance of x = tan(q/2) values is |sin(a_i - a_j)| with
+    # a = atan(x) on a circle of circumference pi, so a root's nearest
+    # neighbour is one of its two cyclic neighbours in sorted order (|sin| is
+    # pi-periodic, so the wrap-around pair needs no shift).
     order = sorted(range(n), key=lambda j: math.atan(roots[j]))
     angles = [math.atan(roots[j]) for j in order]
     gap = [math.inf] * n
@@ -1478,100 +1344,122 @@ def split_repeated_roots(
         d = abs(math.sin(angles[pos] - angles[pos - 1]))
         gap[order[pos]] = min(gap[order[pos]], d)
         gap[order[pos - 1]] = min(gap[order[pos - 1]], d)
-    clustered = [j for j in range(n) if gap[j] <= _CLUSTER_RADIUS]
-    if len(clustered) < n:
+    tested = [j for j in range(n) if gap[j] <= _CLUSTER_RADIUS]
+    if len(tested) < n:
         # The isolated root nearest to another one tells whether the pencil
         # is ill-conditioned; if it is, every root takes the full test.
         probe = min((j for j in range(n) if gap[j] > _CLUSTER_RADIUS), key=gap.__getitem__)
         s = np.linalg.svd(_m_at(m_quad, m_lin, m_const, roots[probe]), compute_uv=False)
         if s[-2] <= _ILL_CONDITIONED_RTOL * s[0]:
-            clustered = list(range(n))
-    if not clustered:
-        return roots, eigvecs
-    xs = np.array([roots[j] for j in clustered], dtype=np.float64)
-    finite = np.isfinite(xs)
-    xf = np.where(finite, xs, 0.0)[:, None, None]
-    sub = m_quad * (xf * xf) + m_lin * xf + m_const
-    sub[~finite] = m_quad  # the root at infinity, read projectively (_m_at)
-    sub_sv = np.linalg.svd(sub, compute_uv=False)  # (m, 12), descending
-    sub_ks = np.count_nonzero(sub_sv <= _NULL_RANK_RTOL * sub_sv[:, :1], axis=1)
-    ks = [1] * n
-    stack: dict[int, NDArray[np.float64]] = {}
-    sv: dict[int, NDArray[np.float64]] = {}
-    for c, j in enumerate(clustered):
-        ks[j] = int(sub_ks[c])
-        stack[j] = sub[c]
-        sv[j] = sub_sv[c]
-    if max(ks) < 2:
-        return roots, eigvecs
+            tested = list(range(n))
+    return tested
 
-    null_cache: dict[int, NDArray[np.float64]] = {}
 
-    def null_basis(j: int) -> NDArray[np.float64]:
-        if j not in null_cache:
-            null_cache[j] = np.linalg.svd(stack[j])[2][-ks[j] :].T
-        return null_cache[j]
+def _null_vectors(stack: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The unit null vector of each M(x) in ``stack`` (m, 12, 12), by two
+    steps of inverse iteration.
 
-    def residual(j: int, v: NDArray[np.float64]) -> float:
-        return float(np.linalg.norm(stack[j] @ v)) / float(sv[j][0])
+    At an accurate (QZ) root, M(x) is singular to round-off, so solving with
+    it amplifies the null direction by s[-2] / s[-1] per step: two steps
+    leave an error of ~(s[-1] / s[-2])^2, comparable to an SVD's
+    eps / s[-2] wherever a lone null vector is read at all (k = 1, so s[-2]
+    above sqrt(eps)), at a fraction of the cost (one batched LU solve per
+    step against an SVD per root). A matrix exactly singular in floating
+    point (LU meets a zero pivot) falls back to the SVD.
+    """
+    start = np.broadcast_to(_INVERSE_ITERATION_START[:, None], (len(stack), 12, 1))
+    try:
+        z = np.linalg.solve(stack, start)
+        z /= np.linalg.norm(z, axis=1, keepdims=True)
+        z = np.linalg.solve(stack, z)
+        z /= np.linalg.norm(z, axis=1, keepdims=True)
+        ok = bool(np.all(np.isfinite(z)))
+    except np.linalg.LinAlgError:
+        ok = False
+    if not ok:
+        return np.asarray(np.linalg.svd(stack)[2][:, -1, :])
+    return np.asarray(z[:, :, 0])
 
+
+def _emit_branches(
+    roots: list[float],
+    vecs: NDArray[np.float64],
+    tested: list[int],
+    stack: NDArray[np.float64],
+) -> tuple[list[float], list[NDArray[np.complex128]]]:
+    """Every root with its own null vector (``vecs``, one row per root), and
+    a root with a k-dimensional null space (k >= 2) also with the k branch
+    vectors of that space (#595, #640). ``stack`` is M(x) at every root; only
+    the ``tested`` roots (``_CLUSTER_RADIUS``) take the multiplicity test, the
+    others have k = 1.
+
+    Multiplicity is read from M(x)'s singular values, not from how close the
+    roots are: a defective double root has two equal roots and a
+    one-dimensional null space, and needs no split. Each root reads only its
+    own null space, never a nearby root's: at two close roots the spaces
+    differ, and a branch vector carried from one to the other is off by
+    their separation, which lost branches at pairs of near-double roots
+    (#640). Nor is a root's own null vector dropped when k >= 2: where the
+    multiplicity test misjudges k, that vector is the one that closes. FK
+    certification downstream keeps the real branches, and a branch emitted
+    at two roots of one cluster merges in the same-root dedup. A space that
+    does not split into k distinct real branches emits only the root's own
+    vector. Mirrors native's ``emit_split_roots``.
+    """
+    ks = [1] * len(roots)
+    if tested:
+        sv = np.linalg.svd(stack[tested], compute_uv=False)  # (m, 12), descending
+        kt = np.count_nonzero(sv <= _NULL_RANK_RTOL * sv[:, :1], axis=1)
+        for j, k in zip(tested, kt, strict=True):
+            ks[j] = int(k)
     out_roots: list[float] = []
     out_vecs: list[NDArray[np.complex128]] = []
-    used = [False] * n
-    for i in range(n):
-        if used[i]:
-            continue
-        k = ks[i]
+    for x, v, k, m in zip(roots, vecs, ks, stack, strict=True):
+        out_roots.append(x)
+        out_vecs.append(np.concatenate([v, v]).astype(np.complex128))
         if k < 2:
-            used[i] = True
-            out_roots.append(roots[i])
-            out_vecs.append(eigvecs[i])
             continue
-        basis = null_basis(i)
-        members = [i]
-        partners = sorted(
-            (_chordal(roots[i], roots[j]), j)
-            for j in range(n)
-            if j != i and not used[j] and ks[j] >= 2
-        )
-        for _, j in partners:
-            if len(members) == k:
-                break
-            if np.linalg.norm(stack[j] @ basis) <= _NULL_RANK_RTOL * sv[j][0]:
-                members.append(j)
-        for j in members:
-            used[j] = True
-
-        branches = _shift_split(basis)
-        if branches is None:
-            for j in members:
-                out_roots.append(roots[j])
-                out_vecs.append(eigvecs[j])
-            continue
-
-        # One branch per member, cheapest fit first.
-        costs = sorted((residual(j, b), j, idx) for j in members for idx, b in enumerate(branches))
-        taken_members: set[int] = set()
-        taken_branches: set[int] = set()
-        for _, j, idx in costs:
-            if j in taken_members or idx in taken_branches:
-                continue
-            taken_members.add(j)
-            taken_branches.add(idx)
-            v = branches[idx]
-            if j != i and ks[j] == k:
-                own = _shift_split(null_basis(j))
-                if own is not None:
-                    ref = branches[idx]
-                    v = own[int(np.argmax([abs(float(w @ ref)) for w in own]))]
-            out_roots.append(roots[j])
-            out_vecs.append(np.concatenate([v, v]).astype(np.complex128))
-        for idx, b in enumerate(branches):
-            if idx not in taken_branches:
-                j = members[int(np.argmin([residual(jj, b) for jj in members]))]
-                out_roots.append(roots[j])
-                out_vecs.append(np.concatenate([b, b]).astype(np.complex128))
+        branches = _shift_split(np.linalg.svd(m)[2][-k:].T)
+        for b in branches or ():
+            out_roots.append(x)
+            out_vecs.append(np.concatenate([b, b]).astype(np.complex128))
     return out_roots, out_vecs
+
+
+def solve_x2_branches(
+    m_quad: NDArray[np.float64],
+    m_lin: NDArray[np.float64],
+    m_const: NDArray[np.float64],
+    *,
+    spurious_tol: float = 0.1,
+    imag_rel_tol: float = 1e-3,
+) -> tuple[list[float], list[NDArray[np.complex128]]]:
+    """The real roots of ``det M(x_2) = 0``, each with every monomial vector
+    it may carry a branch on: the input to back-substitution.
+
+    The roots come from QZ on the equilibrated pencil (:func:`_qz_roots`),
+    which never inverts the leading matrix: accurate at close roots, where
+    the companion route of :func:`solve_x2_roots` is not (#640), and at a
+    singular leading matrix, where it cannot run at all (#658). Each root
+    reads its null vector from M(x) (:func:`_null_vectors`), and a root with
+    a k-dimensional null space (k >= 2) also carries its k branch vectors
+    (:func:`_emit_branches`), as native's ``solve_x2_roots`` does.
+
+    Never raises on a finite pencil: a QZ that does not converge gives no
+    roots, which the caller treats like any pose with nothing found.
+
+    :returns: ``(roots, eigvecs)``; a root at infinity (the joint at pi) is
+        ``inf``. A root may appear several times, once per vector, and each
+        vector is a 24-component ``[v_12; v_12]`` as back-substitution reads
+        it (its first 12 entries).
+    """
+    a_eq, b_eq, c_eq, _d_l, _d_r = _equilibrate_pencil(m_quad, m_lin, m_const)
+    roots = _qz_roots(a_eq, b_eq, c_eq, spurious_tol, imag_rel_tol)
+    if not roots:
+        return [], []
+    stack = _m_stack(m_quad, m_lin, m_const, roots)
+    tested = _roots_to_test(m_quad, m_lin, m_const, roots)
+    return _emit_branches(roots, _null_vectors(stack), tested, stack)
 
 
 # ---------------------------------------------------------------------------
@@ -1622,9 +1510,8 @@ def _back_substitute_inner(
 
     q_lin = 2.0 * np.arctan(x_lin)
 
-    # Eigenvector structure: V = [v_12; lambda * v_12] where lambda is the
-    # eigenvalue (== x_lin for the direct problem, == x_tilde when M\u00f6bius
-    # reparameterization was used). The top half is v_12 in either case.
+    # The top half of the 24-vector is v_12 (the companion eigenvector's
+    # [v_12; x_lin * v_12], or [v_12; v_12] from solve_x2_branches).
     v_12 = np.real(eigvec_24[:12])
 
     # Ratio selection (Manocha-Canny IV-C). v_12 entries:
@@ -2081,12 +1968,9 @@ def solve_all_ik(
     e_sin, e_cos, e_one = eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
     e_quad, e_lin, e_const = weierstrass_eliminate_trig(e_sin, e_cos, e_one)
     m_quad, m_lin, m_const = build_m_matrix(e_quad, e_lin, e_const)
-    # Use the M\u00f6bius-fallback variant: well-conditioned -> direct path; otherwise
-    # try a few random reparameterizations to recondition the leading matrix.
-    roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
-    # A root shared by several branches has a multi-dimensional null space,
-    # and its eigenvector is a mix of them: read each branch out (#595).
-    roots, eigvecs = split_repeated_roots(m_quad, m_lin, m_const, roots, eigvecs)
+    # Companion route where accurate, QZ on the pencil where not, and every
+    # branch vector a repeated root carries (#595, #640).
+    roots, eigvecs = solve_x2_branches(m_quad, m_lin, m_const)
 
     fk_fn = lambda q: _fk_dh(q, dh)  # noqa: E731
     jacobian_fn = lambda q: _spatial_jacobian(q, dh)  # noqa: E731

@@ -37,7 +37,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
     build_m_matrix,
     build_pq,
     eliminate_q0_q1,
-    solve_x2_roots_mobius,
+    solve_x2_branches,
     weierstrass_eliminate_trig,
 )
 
@@ -189,11 +189,11 @@ def main() -> None:
 
     # Stage 5: eigenvalue route
     t0 = time.time()
-    roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
+    roots, eigvecs = solve_x2_branches(m_quad, m_lin, m_const)
     t_eig = time.time() - t0
     x2_star = float(np.tan(q_star[2] / 2.0))
     closest_root = min(roots, key=lambda r: abs(r - x2_star)) if roots else None
-    print(f"solve_x2_roots_mobius:       {t_eig:6.2f}s  -> {len(roots)} real roots")
+    print(f"solve_x2_branches:           {t_eig:6.2f}s  -> {len(roots)} real roots")
     if closest_root is not None:
         print(
             f"  closest root to tan(q_2*/2)={x2_star:.4f}: {closest_root:.4f}  "

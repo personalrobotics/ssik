@@ -43,8 +43,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (
     eliminate_q0_q1 as _ssik_eliminate_q0_q1,
     weierstrass_eliminate_trig as _ssik_weierstrass,
     build_m_matrix as _ssik_build_m_matrix,
-    solve_x2_roots_mobius as _ssik_solve_x2_roots_mobius,
-    split_repeated_roots as _ssik_split_repeated_roots,
+    solve_x2_branches as _ssik_solve_x2_branches,
     _back_substitute_inner as _ssik_back_substitute_inner,
     _fk_dh as _ssik_fk_dh,
 )
@@ -720,13 +719,10 @@ def _solve_algebraic(T_target):
     e_sin, e_cos, e_one = _ssik_eliminate_q0_q1(p_sin, p_cos, p_one, q_mat)
     e_quad, e_lin, e_const = _ssik_weierstrass(e_sin, e_cos, e_one)
     m_quad, m_lin, m_const = _ssik_build_m_matrix(e_quad, e_lin, e_const)
-    roots, eigvecs = _ssik_solve_x2_roots_mobius(m_quad, m_lin, m_const)
-    # A root shared by several branches has a multi-dimensional null
-    # space, and its eigenvector is a mix of them: read each branch
-    # out (#595), as solve_all_ik and the native core do.
-    roots, eigvecs = _ssik_split_repeated_roots(
-        m_quad, m_lin, m_const, roots, eigvecs
-    )
+    # Companion route where accurate, QZ on the pencil where not, and
+    # every branch vector a repeated root carries (#595, #640), as
+    # solve_all_ik and the native core do.
+    roots, eigvecs = _ssik_solve_x2_branches(m_quad, m_lin, m_const)
 
     q_pinv = np.linalg.pinv(q_mat).astype(np.float64)
 

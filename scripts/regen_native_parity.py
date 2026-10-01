@@ -12,7 +12,7 @@ Writes two files next to the gate (tests/test_native_parity.py):
     every platform's pins, so on each platform it fails the same cells as
     the full tier.
   - ``pinned``: in-limits configurations at which a backend once returned
-    [], each with its issue, added by hand and never rewritten here.
+    [] or raised, each with its issue, added by hand and never rewritten here.
 - ``tests/data/native_parity_oracle.json``: the chart-free branch oracle's
   verdict at every 6R pose where it was consulted. The gate looks a pose up
   here and runs the oracle live only for a pose this file lacks, so a missing

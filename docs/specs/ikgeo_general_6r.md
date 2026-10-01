@@ -14,8 +14,8 @@ References (open-access PDFs cached in `/tmp/rrk/`):
   6×9 / 14×8 split, elimination of (q₁, q₂), substitution of half-angles,
   construction of the 12×12 matrix `M(x₃)`.
 - **Manocha-Canny 1994** (Berkeley preprint) — Theorem 1 (24×24 companion
-  matrix), Theorem 2 (generalized-eigenvalue fallback), Möbius
-  reparameterization, eigenvector → (x₄, x₅), Newton refinement.
+  matrix), Theorem 2 (the generalized-eigenvalue pencil the solver uses),
+  eigenvector → (x₄, x₅), Newton refinement.
 
 Provenance: clean-room from Tsai App. C and Manocha–Canny 1994. The RR
 algorithm predates IKFast by 17 years; ssik's implementation is original
@@ -53,24 +53,33 @@ The 12-monomial vector is
 (verify exact ordering against Tsai Eq. C.13–C.15 + MC Eq. 18 on first
 implementation pass).
 
-### Step 5 — Eigenvalue route (MC Theorem 1)
-Compute `cond(A)`. If well-conditioned (rule of thumb: `cond(A) < 1e10`):
-build `Σ = [[0, I₁₂], [−A⁻¹C, −A⁻¹B]]` (24×24), call `numpy.linalg.eig(Σ)`.
-24 eigenvalues; **drop 8 spurious roots near `±i`** (multiplicity 4 each,
-from `(1+x₃²)⁴` factor); the remaining 16 are the candidate `tan(q₃/2)`.
-Filter complex roots by `|imag| < max(|real|, 1) · ε` (scale-aware, same
-pattern as SP5 cluster filter).
+### Step 5 — Roots: QZ on the pencil (MC Theorem 2)
+Equilibrate `(A, B, C)` and solve the 24×24 pencil `M₁ − x·M₂`
+(`M₁ = [[I, 0], [0, C]]`, `M₂ = [[0, I], [−A, −B]]`) by QZ (LAPACK `dggev`;
+Eigen's `GeneralizedEigenSolver` on native). QZ never inverts `A`, so a
+singular leading matrix needs no fallback: its roots come back as eigenvalue
+pairs with `β = 0`, the root at infinity (the joint at π, #571). **Drop the 8
+spurious roots near `±i`** (from the `(1+x₃²)⁴` factor) and roots whose
+imaginary part exceeds `1e-3 · max(|re|, 1)`. A QZ that does not converge
+yields no roots, never an exception (#599, #658).
 
-### Step 6 — Conditioning fallback (MC §IV-C, Theorem 2)
-If `cond(A) > 1e10`, attempt Möbius reparameterization
-`x₃ = (a·x̃₃ + b)/(c·x̃₃ + d)` with random `(a, b, c, d)` (try ≤3
-random draws, keep the one with smallest `cond(A_new)`). Rebuild
-`A_new, B_new, C_new` via the linear transformation in MC Eq. (17); if
-well-conditioned, eigenvalue route on the transformed matrix and apply
-inverse Möbius to recover `x₃`. If still ill-conditioned (singular pencil —
-extremely rare; only when `(A, B, C)` share a common null space): fall
-through to `scipy.linalg.eig(M₁, M₂)` generalized-eigenvalue path
-(Theorem 2). 2.5–3× slower; flag in diagnostics.
+The 24×24 companion route of Theorem 1 (`Σ = [[0, I], [−A⁻¹C, −A⁻¹B]]`,
+`solve_x2_roots`) is kept as a reference only: its error is amplified through
+`A⁻¹`, and at close roots it places them 1e-6 to 3e-3 off, more than their
+separation, so the null vector read there mixes branches (#640). QZ places
+them to ~1e-12.
+
+### Step 6 — Null vectors and repeated roots (#595, #640)
+Each real root `x` reads its monomial vector as the null vector of `M(x)`
+(`A` at infinity): SVD on native, two steps of inverse iteration in Python.
+Roots with another root within chordal distance `1e-3`, or every root when
+the pencil is ill-conditioned (#642's probe), take the multiplicity test:
+`k` = the number of singular values of `M(x)` at most `√ε · s₀`. A root with
+`k ≥ 2` is shared by `k` branches; it emits its own null vector **and** the
+`k` branch vectors of its own null space, split by the `x_lb0` (else
+`x_lb1`) shift of the monomial vector. No root ever takes a vector from a
+nearby root's space; FK certification (Step 9) keeps the real branches and
+the same-root dedup merges repeats. Python and native apply the same rules.
 
 ### Step 7 — Back-substitution (MC §IV-C/D)
 Each eigenvector of Σ has structure `V = [v; x₃·v]`. Per root:
@@ -124,15 +133,16 @@ Bulletproof discipline — same standard as `spherical_two_parallel`:
 5. **Hypothesis fuzz**: 500 random POE-normalized 6R chains × random poses.
    FK-closure on every returned solution.
 6. **Conditioning stress**: poses near `q₃ = π` (drives `x₃ → ∞`); confirm
-   Möbius reparameterization recovers, no NaN/Inf leakage.
+   the QZ root at infinity is recovered, no NaN/Inf leakage.
 
 ## Risks and mitigations
 
 - **Q-rank degeneracy on Pieper arms.** Puma's `Q` has rank ≤7 for some
   poses; rare but real. Mitigation: SVD with explicit rank threshold
   matching MC §IV-B.
-- **Möbius reparameterization fails on singular pencils.** MC reports this
-  is rare; we fall through to generalized eigenvalue. Worst-case ~10 ms.
+- **Singular pencils** (`det M(x) ≡ 0`, e.g. hc10 near_singular/9): no root
+  or split rule can read branches there; tracked as a solution continuum
+  (#662).
 - **POE → DH conversion correctness.** Already shipped in `kinematics.poe`,
   but the JACO 2 fixture will be the first non-orthogonal-twist exercise;
   audit before relying on it.

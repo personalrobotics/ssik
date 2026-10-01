@@ -32,7 +32,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
     build_pq,
     eliminate_q0_q1,
     pick_best_leftvar,
-    solve_x2_roots_mobius,
+    solve_x2_branches,
     weierstrass_eliminate_trig,
 )
 
@@ -135,7 +135,7 @@ def diagnose_arm(
         sigma[12:, 12:] = -a_inv_b
         cond_sigma_at_solve.append(float(np.linalg.cond(sigma)))
 
-        roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
+        roots, eigvecs = solve_x2_branches(m_quad, m_lin, m_const)
         n_roots_per_pose.append(len(roots))
 
         pose_succeeded = False

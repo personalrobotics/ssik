@@ -34,7 +34,7 @@ from ssik.solvers.ikgeo._raghavan_roth import (  # noqa: E402
     build_pq,
     eliminate_q0_q1,
     solve_all_ik,
-    solve_x2_roots_mobius,
+    solve_x2_branches,
     weierstrass_eliminate_trig,
 )
 
@@ -115,7 +115,7 @@ def main() -> None:
         stage_times["build_M"].append(time.perf_counter() - t)
 
         t = time.perf_counter()
-        roots, eigvecs = solve_x2_roots_mobius(m_quad, m_lin, m_const)
+        roots, eigvecs = solve_x2_branches(m_quad, m_lin, m_const)
         stage_times["eigenvalue"].append(time.perf_counter() - t)
 
         t_bs = 0.0
