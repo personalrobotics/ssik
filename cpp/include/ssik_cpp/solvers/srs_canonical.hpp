@@ -153,13 +153,7 @@ inline std::vector<Solution<7>> srs_canonical_solve(const JointConsts<7>& c, con
           q2 = swivel[n];  // direct q2-sweep at the singularity (LM polishes it)
         } else {
           // SP1 for q2 (upper-arm roll mapping the q2=0 wrist pivot onto W_t).
-          const Eigen::Vector3d p_from = W_at_q2_zero - E_t[n];
-          const Eigen::Vector3d p_to = W_t - E_t[n];
-          const double up_pf = d.dot(p_from);
-          const double up_pt = d.dot(p_to);
-          const double num = d.dot(p_from.cross(p_to));
-          const double den = p_from.dot(p_to) - up_pf * up_pt;
-          q2 = std::atan2(num, den);
+          q2 = sp1_angle(d, W_at_q2_zero - E_t[n], W_t - E_t[n]);
         }
         (void)R5;
 

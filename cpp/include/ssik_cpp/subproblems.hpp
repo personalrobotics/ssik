@@ -26,15 +26,31 @@ struct Tolerances {
   double dedup = 1e-3;
 };
 
+// The SP1 angle: theta rotating p about unit axis k toward q, the one rule for
+// every SP1 site (ssik.subproblems.sp1.angle, whose comment derives it). Both
+// terms come from k x p and k x q: for unit k, (k x p) . (k x q) equals
+// p.q - (k.p)(k.q) and k . ((k x p) x (k x q)) equals (k x p) . q, but without
+// their cancellation near a singularity (#661).
+// kxp is k x p, for a caller that has it already.
+inline double sp1_angle_kxp(const Eigen::Vector3d& k, const Eigen::Vector3d& kxp,
+                            const Eigen::Vector3d& q) {
+  const Eigen::Vector3d kxq = k.cross(q);
+  return std::atan2(k.dot(kxp.cross(kxq)), kxp.dot(kxq));
+}
+
+inline double sp1_angle(const Eigen::Vector3d& k, const Eigen::Vector3d& p,
+                        const Eigen::Vector3d& q) {
+  return sp1_angle_kxp(k, k.cross(p), q);
+}
+
 // SP1: the angle theta rotating p about unit axis k toward q.
 // Returns {theta, is_ls}; is_ls is true when the exact feasibility conditions
 // (|p_perp| == |q_perp| and k.p == k.q) do not hold, so theta is the LS optimum.
 inline std::pair<double, bool> sp1(const Eigen::Vector3d& k, const Eigen::Vector3d& p,
                                    const Eigen::Vector3d& q, const Tolerances& tol = {}) {
-  const Eigen::Vector3d kxp = k.cross(p);
   const double kp = k.dot(p);
   const double kq = k.dot(q);
-  const double theta = std::atan2(kxp.dot(q), p.dot(q) - kp * kq);
+  const double theta = sp1_angle(k, p, q);
   const double p_perp_sq = p.dot(p) - kp * kp;
   const double q_perp_sq = q.dot(q) - kq * kq;
   const bool is_ls =

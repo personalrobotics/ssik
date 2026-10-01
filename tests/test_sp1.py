@@ -157,3 +157,33 @@ def test_parametric_roundtrip_z_axis(p: np.ndarray, q: np.ndarray) -> None:
     # Sanity: rotating p by the recovered theta should reproduce q_fixed.
     q_check = rotate(k, theta, p)
     assert np.allclose(q_check, q_fixed, atol=1e-10)
+
+
+@pytest.mark.parametrize("delta", [1e-3, 1e-6, 1e-8])
+def test_angle_error_scales_as_eps_over_perp_near_the_axis(delta: float) -> None:
+    """Near a singularity p and q lie within ``delta`` of a general (not
+    axis-aligned) axis. The SP1 angle then carries an error of order eps / delta,
+    set by the rounding of q itself. The textbook terms p.q - (k.p)(k.q) and
+    (k x p).q cancel O(1) axial parts and cost eps / delta^2 instead, which lost
+    wrist branches (#661). Checked through the scalar rule and the batched one."""
+    rng = np.random.default_rng(661)
+    eps = np.finfo(np.float64).eps
+    ks, ps, qs, thetas = [], [], [], []
+    for _ in range(200):
+        k = _unit(rng.normal(size=3))
+        u = _unit(np.cross(k, rng.normal(size=3)))
+        w = np.cross(k, u)
+        axial = rng.uniform(0.5, 2.0)
+        theta = rng.uniform(-np.pi + 1e-3, np.pi - 1e-3)
+        ks.append(k)
+        ps.append(axial * k + delta * u)
+        qs.append(axial * k + delta * (np.cos(theta) * u + np.sin(theta) * w))
+        thetas.append(theta)
+    k_, p_, q_ = np.array(ks), np.array(ps), np.array(qs)
+    bound = 64 * eps / delta
+    rows = sp1.angle_rows(k_, p_, q_)
+    for i, theta in enumerate(thetas):
+        scalar, _ = sp1.solve(k_[i], p_[i], q_[i])
+        for got in (scalar, float(rows[i])):
+            err = abs(((got - theta + np.pi) % (2 * np.pi)) - np.pi)
+            assert err <= bound, f"delta={delta}: error {err:.1e} > {bound:.1e}"

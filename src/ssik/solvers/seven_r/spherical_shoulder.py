@@ -182,10 +182,9 @@ def _sp1_batch(
     (``k x p`` vanishes): there the rotation angle is free and ``atan2`` of two
     rounding-noise terms would return an arbitrary value -- a slot label must
     map to one canonical representative, identically in Python and C++."""
-    kxp = np.cross(k, p)
-    ang: NDArray[np.float64] = np.arctan2(_bdot(kxp, q), _bdot(p, q) - _bdot(k, p) * _bdot(k, q))
+    kxp = sp1.cross_rows(k, p)
     free = np.linalg.norm(kxp, axis=1) <= _LOCK_TOL * np.linalg.norm(p, axis=1)
-    return np.where(free, 0.0, ang)
+    return np.where(free, 0.0, sp1.angle_rows(k, p, q, kxp))
 
 
 def _sp4_batch(

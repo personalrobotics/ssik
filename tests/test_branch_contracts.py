@@ -133,7 +133,7 @@ def test_soundness_every_returned_branch_closes_fk(name: str, solved: dict[str, 
     assert sols, f"{name}: no solutions at a rank-6 pose"
     for s in sols:
         resid = float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, s.q) - t))
-        assert resid <= _FK_TOL, f"{name}: unsound branch, FK residual {resid:.2e}"
+        assert resid <= BY_NAME[name].fk_tol, f"{name}: unsound branch, FK residual {resid:.2e}"
 
 
 # ---------------------------------------------------------------------------
@@ -281,5 +281,49 @@ def test_completeness_per_backend_and_linearity_choice(
     missing = [b for b in branches if not any(wrapped_linf(q, b) <= _EQUIV_TOL for q in qs)]
     assert not missing, (
         f"{name} lin{lin} {backend}: returned {len(qs)} of {len(branches)} branches; "
+        f"missing {[np.round(b, 4).tolist() for b in missing]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Completeness per backend for the closed-form families.
+#
+# A shipped closed-form arm reaches its subproblems three ways, each with its own
+# copy of the subproblem arithmetic: the native core (the production solve that
+# ``solved`` already holds to the golden above), the generated Python artifact
+# (``native=False``) and the live Python solver a URDF-built arm runs. The two
+# Python ones are held to the golden set here.
+# ---------------------------------------------------------------------------
+
+_BACKEND_CASES = [
+    pytest.param(fx.name, backend, id=f"{fx.name}-{backend}")
+    for fx in FIXTURES
+    if fx.prebuilt is not None and not fx.linearity_choices
+    for backend in ("artifact", "live")
+]
+
+
+@pytest.mark.parametrize(("name", "backend"), _BACKEND_CASES)
+def test_completeness_per_python_backend(name: str, backend: str, solved: dict[str, Any]) -> None:
+    import ssik
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+    arm, t, _ = solved[name]
+    if backend == "artifact":
+        sols = arm.solve(t, respect_limits=False, native=False)
+    else:
+        sols = ssik.Manipulator(arm.kinbody).solve(t, respect_limits=False)
+    # Soundness at the gate the solver certifies with: these poses sit at a
+    # singularity, where a genuine branch closes FK only to about 1e-9.
+    gate = DEFAULT_TOLERANCE_POLICY.subproblem_numerical
+    for s in sols:
+        resid = float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, s.q) - t))
+        assert resid <= gate, f"{name} {backend}: unsound branch, FK {resid:.2e}"
+    branches = _branches(name)
+    missing = [
+        b for b in branches if not any(wrapped_linf(np.asarray(s.q), b) <= _EQUIV_TOL for s in sols)
+    ]
+    assert not missing, (
+        f"{name} {backend}: returned {len(sols)} of {len(branches)} branches; "
         f"missing {[np.round(b, 4).tolist() for b in missing]}"
     )

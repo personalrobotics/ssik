@@ -60,6 +60,10 @@ class BranchFixture:
     complete branch set. Empty: only the production solve is checked. A choice
     is left out where the elimination itself is degenerate for the geometry
     (no representation fix can recover branches the pencil does not carry)."""
+    fk_tol: float = 1e-9
+    """FK closure every returned branch must meet. A pose near a singularity
+    fixes its near-double root only to about eps / (distance to it), so its
+    branches close FK to that conditioning, not to round-off."""
 
     def build(self) -> Any:
         import ssik
@@ -248,6 +252,32 @@ FIXTURES: tuple[BranchFixture, ...] = (
         ),
         prebuilt="xarm6_ik",
         linearity_choices=(0, 1),
+    ),
+    # SP1 near a wrist singularity (#623, #661): the textbook SP1 terms cancel
+    # there, and a wrong wrist angle leaves a candidate no polish recovers.
+    BranchFixture(
+        name="irb6700_wrist_near_singular",
+        description=(
+            "ABB IRB 6700 (spherical_two_parallel) with q5 = 9.3e-8: the wrist is "
+            "nearly singular, so the SP1 inputs for q4 and q6 lie within 1e-7 of "
+            "their axes. The cancelling SP1 cosine gave those angles an FK error "
+            "of 1.5e-3, and the native core and the live Python solver returned "
+            "6 of the 8 branches."
+        ),
+        dh_alpha=(),
+        dh_a=(),
+        dh_d=(),
+        q_star=(
+            -1.27227283075558,
+            -0.5890486995502233,
+            -0.9062763150679832,
+            4.081835091832326,
+            9.278590673389466e-08,
+            -0.22339510986003658,
+        ),
+        prebuilt="irb6700_ik",
+        # q5 = 9.3e-8 is a near-double root known to eps / q5 ~ 2e-9.
+        fk_tol=1e-7,
     ),
 )
 

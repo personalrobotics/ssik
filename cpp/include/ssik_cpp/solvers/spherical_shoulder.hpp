@@ -182,7 +182,7 @@ inline double sp1_both(const Eigen::Vector3d& k, const Eigen::Vector3d& p,
                        const Eigen::Vector3d& q) {
   const Eigen::Vector3d kxp = k.cross(p);
   if (kxp.norm() <= kShLockTol * p.norm()) return 0.0;
-  return std::atan2(kxp.dot(q), p.dot(q) - k.dot(p) * k.dot(q));
+  return sp1_angle_kxp(k, kxp, q);
 }
 
 inline bool sp4_both(const Eigen::Vector3d& h, const Eigen::Vector3d& k, const Eigen::Vector3d& p,

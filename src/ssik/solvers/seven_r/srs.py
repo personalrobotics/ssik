@@ -83,6 +83,7 @@ from ssik.kinematics.predicates import (
     joint_origins,
 )
 from ssik.refinement import dedup_by_wrap_close
+from ssik.subproblems import sp1
 from ssik.subproblems.sp4 import within_tangent_band
 
 if TYPE_CHECKING:  # pragma: no cover -- typing only
@@ -624,23 +625,11 @@ def solve(
                 q_partial[:, 3] = q_3_signed
                 _, W_at_q2_zero = _frame_at_joint_batch(kb, q_partial, 5)
 
-                if _is_singular:
-                    # At the kinematic singularity the wrist-pivot SP1 is
-                    # degenerate -- sweep the swivel grid as q_2 directly
-                    # (#223 layer 3); LM polish closes the clamp offset.
-                    q_2 = swivels
-                else:
-                    # SP1 vectorised: q_2 around the upper-arm axis maps the
-                    # q_2=0 wrist pivot onto W_t.
-                    u_upper = d  # (N, 3)
-                    p_from = W_at_q2_zero - E_t
-                    p_to = W_t - E_t  # (3,) -> broadcasts to (N, 3)
-                    up_dot_pf = (u_upper * p_from).sum(axis=1)
-                    up_dot_pt = (u_upper * p_to).sum(axis=1)
-                    cross_pf_pt = np.cross(p_from, p_to)
-                    num = (u_upper * cross_pf_pt).sum(axis=1)
-                    den = (p_from * p_to).sum(axis=1) - up_dot_pf * up_dot_pt
-                    q_2 = np.arctan2(num, den)
+                # SP1 vectorised: q_2 around the upper-arm axis maps the q_2=0
+                # wrist pivot onto W_t. At the kinematic singularity that SP1 is
+                # degenerate -- sweep the swivel grid as q_2 directly (#223
+                # layer 3); LM polish closes the clamp offset.
+                q_2 = swivels if _is_singular else sp1.angle_rows(d, W_at_q2_zero - E_t, W_t - E_t)
 
                 q_post = q_partial.copy()
                 q_post[:, 2] = q_2
