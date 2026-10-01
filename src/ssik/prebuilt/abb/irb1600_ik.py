@@ -223,11 +223,11 @@ def _solve_algebraic(T_target):
             s3 = math.sin(q3)
             c3 = math.cos(q3)
             # SP1 for q2 (shoulder pitch): closed-form atan2.
-            q2_x0 = -1.0*p_z + 0.0649999999999999*r_20 + 0.4865
-            q2_x1 = 0.6*math.cos(q3)
+            q2_x0 = math.cos(q3)
+            q2_x1 = -1.0*p_z + 0.0649999999999999*r_20 + 0.4865
             q2_x2 = 0.6*math.sin(q3) - 0.475
-            q2_x3 = (-p_x + 0.0649999999999999*r_00)*math.cos(q1) + 1.0*(-p_y + 0.0649999999999999*r_10)*math.sin(q1) + 0.15
-            q2 = math.atan2(q2_x0*q2_x1 + q2_x2*q2_x3, q2_x0*q2_x2 - q2_x1*q2_x3)
+            q2_x3 = -1.0*(-p_x + 0.0649999999999999*r_00)*math.cos(q1) - 1.0*(-p_y + 0.0649999999999999*r_10)*math.sin(q1) - 0.15
+            q2 = math.atan2(0.6*q2_x0*q2_x1 - 1.0*q2_x2*q2_x3, 0.6*q2_x0*q2_x3 + q2_x1*q2_x2)
             s2 = math.sin(q2)
             c2 = math.cos(q2)
             # SP4 for q5 (wrist pitch).
@@ -268,7 +268,7 @@ def _solve_algebraic(T_target):
                 q4_x5 = math.cos(q2)
                 q4_x6 = math.cos(q3)
                 q4_x7 = 1.0*q4_x3*q4_x5 + q4_x4*q4_x6
-                q4 = math.atan2(q4_x2*(-q4_x0*r_00 + 1.0*q4_x1*r_10), -q4_x2*(q4_x0*q4_x7*r_10 + 1.0*q4_x1*q4_x7*r_00 + 1.0*r_20*(-q4_x3*q4_x4 + 1.0*q4_x5*q4_x6)))
+                q4 = math.atan2(q4_x2*(-q4_x0*r_00 + 1.0*q4_x1*r_10), q4_x2*(-q4_x0*q4_x7*r_10 - 1.0*q4_x1*q4_x7*r_00 - 1.0*r_20*(-q4_x3*q4_x4 + 1.0*q4_x5*q4_x6)))
                 # SP1 for q6 (wrist roll-2): closed-form atan2.
                 q6_x0 = math.sin(q2)
                 q6_x1 = math.cos(q3)
@@ -279,9 +279,7 @@ def _solve_algebraic(T_target):
                 q6_x6 = q6_x5*math.cos(q1)
                 q6_x7 = q6_x5*math.sin(q1)
                 q6_x8 = 1.0*math.sin(q5)
-                q6_x9 = q6_x4*r_20 + q6_x6*r_00 + q6_x7*r_10
-                q6_x10 = 1.0*math.cos(q5)
-                q6 = math.atan2(q6_x8*(q6_x4*r_21 + q6_x6*r_01 + q6_x7*r_11), q6_x8*(q6_x4*r_22 + q6_x6*r_02 + q6_x7*r_12))
+                q6 = math.atan2(-q6_x8*(-q6_x4*r_21 - q6_x6*r_01 - q6_x7*r_11), q6_x8*(q6_x4*r_22 + q6_x6*r_02 + q6_x7*r_12))
                 candidates.append([q1, q2, q3, q4, q5, q6])
     return candidates
 

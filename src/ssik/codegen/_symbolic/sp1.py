@@ -3,10 +3,16 @@
 Mirrors :func:`ssik.subproblems.sp1.solve` but takes sympy 3x1 Matrix
 inputs and returns a sympy expression for ``theta``.
 
-SP1 closed form (see :mod:`ssik.subproblems.sp1` docstring for the
-derivation):
+SP1 closed form, the rule of :func:`ssik.subproblems.sp1.angle` (whose
+comment derives it):
 
-    theta = atan2((k x p) . q, p . q - (k.p)(k.q))
+    theta = atan2(k . ((k x p) x (k x q)), (k x p) . (k x q))
+
+Generated code evaluates the expanded expression, so the symbolic form is
+the arithmetic the artifact runs: the textbook terms
+``(k x p) . q, p . q - (k.p)(k.q)`` cancel near a singularity unless the
+expansion happens to cancel the axial terms exactly, which it does only for
+an axis-aligned ``k`` (#661).
 
 The expression is exact for the unique solution. The runtime solver also
 reports an ``is_ls`` flag based on feasibility tolerances; the symbolic
@@ -38,6 +44,5 @@ def sp1_theta_sym(k: sp.Matrix, p: sp.Matrix, q: sp.Matrix) -> sp.Expr:
     running ``sympy.cse`` over the final composed expression.
     """
     kxp = k.cross(p)
-    kp = k.dot(p)
-    kq = k.dot(q)
-    return sp.atan2(kxp.dot(q), p.dot(q) - kp * kq)
+    kxq = k.cross(q)
+    return sp.atan2(k.dot(kxp.cross(kxq)), kxp.dot(kxq))

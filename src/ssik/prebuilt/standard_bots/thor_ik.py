@@ -198,14 +198,14 @@ def _solve_algebraic(T_target):
         c5 = math.cos(q5)
         # SP1 for theta14 = q1+q2+q3+q4 (sum of parallel-axis rotations).
         th14_x0 = 1.0*math.sin(q5)
-        theta14 = math.atan2(-th14_x0*(-6.12323399573677e-17*r_20 - 6.12323399573677e-17*r_21 + 1.0*r_22), -th14_x0*(1.0*(6.12323399573677e-17*r_00 + 6.12323399573677e-17*r_01 - 1.0*r_02)*math.sin(q1) - 1.0*(6.12323399573677e-17*r_10 + 6.12323399573677e-17*r_11 - 1.0*r_12)*math.cos(q1)))
+        theta14 = math.atan2(th14_x0*(6.12323399573677e-17*r_20 + 6.12323399573677e-17*r_21 - 1.0*r_22), -th14_x0*(1.0*(6.12323399573677e-17*r_00 + 6.12323399573677e-17*r_01 - 1.0*r_02)*math.sin(q1) - 1.0*(6.12323399573677e-17*r_10 + 6.12323399573677e-17*r_11 - 1.0*r_12)*math.cos(q1)))
         # SP1 for q6 (wrist roll-2): closed-form atan2.
         q6_x0 = 6.12323399573677e-17*r_02
         q6_x1 = 1.0*math.cos(q1)
         q6_x2 = 6.12323399573677e-17*r_12
         q6_x3 = 1.0*math.sin(q1)
         q6_x4 = 1.0*math.sin(q5)
-        q6 = math.atan2(-q6_x4*(q6_x1*(q6_x0 + 1.0*r_01) + q6_x3*(q6_x2 + 1.0*r_11)), -q6_x4*(q6_x1*(-q6_x0 - 1.0*r_00 + 3.74939945665464e-33*r_01) + q6_x3*(-q6_x2 - 1.0*r_10 + 3.74939945665464e-33*r_11)))
+        q6 = math.atan2(q6_x4*(-q6_x1*(q6_x0 + 1.0*r_01) - q6_x3*(q6_x2 + 1.0*r_11)), -q6_x4*(q6_x1*(-q6_x0 - 1.0*r_00 + 3.74939945665464e-33*r_01) + q6_x3*(-q6_x2 - 1.0*r_10 + 3.74939945665464e-33*r_11)))
         s14 = math.sin(theta14)
         c14 = math.cos(theta14)
         # d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
@@ -244,8 +244,8 @@ def _solve_algebraic(T_target):
             c3 = math.cos(q3)
             # SP1 for q2 (shoulder pitch): closed-form atan2.
             q2_x0 = 0.817000000073868*math.sin(q3)
-            q2_x1 = 0.817000000073868*math.cos(q3) + 1.025
-            q2 = math.atan2(-d_inner_y*q2_x1 - d_inner_z*q2_x0, -d_inner_y*q2_x0 + d_inner_z*q2_x1)
+            q2_x1 = -0.817000000073868*math.cos(q3) - 1.025
+            q2 = math.atan2(d_inner_y*q2_x1 - d_inner_z*q2_x0, -d_inner_y*q2_x0 - d_inner_z*q2_x1)
             q4 = ((theta14 - q2 - q3 + math.pi) % (2.0 * math.pi)) - math.pi
             candidates.append([q1, q2, q3, -q4, q5, q6])
     return candidates

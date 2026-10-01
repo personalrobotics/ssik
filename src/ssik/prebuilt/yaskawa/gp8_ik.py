@@ -222,10 +222,10 @@ def _solve_algebraic(T_target):
             q2_x0 = 0.33 - 1.0*p_z
             q2_x1 = math.sin(q3)
             q2_x2 = math.cos(q3)
-            q2_x3 = 0.04*q2_x1 - 0.34*q2_x2
+            q2_x3 = -0.04*q2_x1 + 0.34*q2_x2
             q2_x4 = -0.34*q2_x1 - 0.04*q2_x2 - 0.345
-            q2_x5 = -p_x*math.cos(q1) - 1.0*p_y*math.sin(q1) + 0.04
-            q2 = math.atan2(-q2_x0*q2_x3 + q2_x4*q2_x5, q2_x0*q2_x4 + q2_x3*q2_x5)
+            q2_x5 = 1.0*p_x*math.cos(q1) + 1.0*p_y*math.sin(q1) - 0.04
+            q2 = math.atan2(1.0*q2_x0*q2_x3 - 1.0*q2_x4*q2_x5, q2_x0*q2_x4 + q2_x3*q2_x5)
             s2 = math.sin(q2)
             c2 = math.cos(q2)
             # SP4 for q5 (wrist pitch).
@@ -258,25 +258,15 @@ def _solve_algebraic(T_target):
                 s5 = math.sin(q5)
                 c5 = math.cos(q5)
                 # SP1 for q4 (wrist roll-1): closed-form atan2.
-                q4_x0 = math.sin(q1)
-                q4_x1 = 1.0*r_00
-                q4_x2 = math.cos(q1)
-                q4_x3 = 1.0*r_10
-                q4_x4 = 1.0*math.sin(q5)
-                q4_x5 = math.sin(q2)
-                q4_x6 = math.cos(q3)
-                q4_x7 = math.sin(q3)
-                q4_x8 = math.cos(q2)
-                q4_x9 = 1.0*q4_x5*q4_x6 - 1.0*q4_x7*q4_x8
-                q4_x10 = 1.0*r_20
-                q4_x11 = q4_x6*q4_x8
-                q4_x12 = 1.0*q4_x5*q4_x7
-                q4_x13 = q4_x11 + q4_x12
-                q4_x14 = q4_x1*q4_x2
-                q4_x15 = q4_x0*q4_x3
-                q4_x16 = -q4_x10*q4_x9 + q4_x13*q4_x14 + q4_x13*q4_x15
-                q4_x17 = 1.0*math.cos(q5)
-                q4 = math.atan2(-q4_x4*(q4_x0*q4_x1 - q4_x2*q4_x3), -q4_x4*(-q4_x10*(1.0*q4_x11 + q4_x12) - q4_x14*q4_x9 - q4_x15*q4_x9))
+                q4_x0 = 1.0*math.sin(q1)
+                q4_x1 = math.cos(q1)
+                q4_x2 = 1.0*math.sin(q5)
+                q4_x3 = math.sin(q2)
+                q4_x4 = 1.0*math.sin(q3)
+                q4_x5 = math.cos(q2)
+                q4_x6 = 1.0*math.cos(q3)
+                q4_x7 = q4_x3*q4_x6 - q4_x4*q4_x5
+                q4 = math.atan2(q4_x2*(-q4_x0*r_00 + 1.0*q4_x1*r_10), -q4_x2*(-q4_x0*q4_x7*r_10 - 1.0*q4_x1*q4_x7*r_00 - 1.0*r_20*(q4_x3*q4_x4 + q4_x5*q4_x6)))
                 # SP1 for q6 (wrist roll-2): closed-form atan2.
                 q6_x0 = math.sin(q2)
                 q6_x1 = math.cos(q3)
@@ -287,7 +277,7 @@ def _solve_algebraic(T_target):
                 q6_x6 = q6_x5*math.cos(q1)
                 q6_x7 = q6_x5*math.sin(q1)
                 q6_x8 = 1.0*math.sin(q5)
-                q6 = math.atan2(-q6_x8*(-q6_x4*r_21 - q6_x6*r_01 - q6_x7*r_11), q6_x8*(-q6_x4*r_22 - q6_x6*r_02 - q6_x7*r_12))
+                q6 = math.atan2(-q6_x8*(-q6_x4*r_21 - q6_x6*r_01 - q6_x7*r_11), -q6_x8*(q6_x4*r_22 + q6_x6*r_02 + q6_x7*r_12))
                 candidates.append([q1, q2, q3, q4, q5, q6])
     return candidates
 
