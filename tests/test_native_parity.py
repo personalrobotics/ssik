@@ -56,20 +56,22 @@ pytestmark = pytest.mark.skipif(
 
 # Known gaps: class -> {arm: the platforms where that cell fails}. Printed by
 # scripts/regen_native_parity.py from the committed per-platform cells.
+# hc10_ik's E and J cells are near_singular/9, where the RR pencil is singular
+# (det M(x) vanishes for every x): no root or split rule reads its branches,
+# and each backend samples the solution continuum at its own points (#662).
 ALL = ("darwin", "linux")
 
 KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
     "E": {
         "cr5_ik": ALL,
-        "fanuc_crx10ial_ik": ("darwin",),
         "fanuc_crx10ialp_ik": ALL,
         "fanuc_crx30ia_ik": ("linux",),
-        "fanuc_crx3ia_ik": ("darwin",),
         "franka_panda_ik": ALL,
+        "hc10_ik": ("darwin",),
         "irb120_ik": ALL,
         "irb6700_ik": ("linux",),
-        "m0609_ik": ALL,
-        "m1013_ik": ALL,
+        "m0609_ik": ("linux",),
+        "m1013_ik": ("linux",),
         "nova5_ik": ("linux",),
         "puma560_ik": ALL,
         "r2000ic210l_ik": ALL,
@@ -102,24 +104,23 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
 
 KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
     "F": {
-        "fanuc_crx20ial_ik": ALL,
+        "fanuc_crx3ia_ik": ALL,
         "m0609_ik": ALL,
         "m1013_ik": ALL,
-        "piper_ik": ALL,
     },
     "J": {
-        "fanuc_crx10ia_ik": ALL,
+        "fanuc_crx10ia_ik": ("linux",),
         "fanuc_crx10ialp_ik": ALL,
-        "fanuc_crx20ial_ik": ALL,
+        "fanuc_crx20ial_ik": ("linux",),
         "fanuc_crx30ia_ik": ("linux",),
         "fanuc_crx3ia_ik": ("linux",),
         "hc10_ik": ALL,
         "hh020_ik": ALL,
         "kr210_r2700_ik": ALL,
-        "m0609_ik": ALL,
-        "m1013_ik": ALL,
+        "m0609_ik": ("linux",),
+        "m1013_ik": ("linux",),
         "nova5_ik": ALL,
-        "piper_ik": ALL,
+        "piper_ik": ("linux",),
         "ur16e_ik": ("linux",),
         "ur20_ik": ("linux",),
         "xarm6_ik": ("linux",),

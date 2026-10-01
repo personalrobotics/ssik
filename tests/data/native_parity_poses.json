@@ -131,9 +131,7 @@
   },
   "fanuc_crx10ia_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/16"
-    ],
+    "darwin": [],
     "linux": [
      "near_singular/16"
     ]
@@ -189,9 +187,7 @@
     [1.4884615725482333, -0.6456261306468952, 0.06786134204255488, 0.8290559530827514, 0.5232352391892314, 2.5169545235908974]
    ],
    "cells": {
-    "darwin": [
-     "reverse:J"
-    ],
+    "darwin": [],
     "linux": [
      "reverse:J"
     ]
@@ -199,9 +195,7 @@
   },
   "fanuc_crx10ial_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/42"
-    ],
+    "darwin": [],
     "linux": []
    },
    "near_singular": [
@@ -255,9 +249,7 @@
     [1.047128694514465, 1.047478174641306, 3.6441231876402425, -0.33572941598702605, 0.32465889922590524, -1.427902250851821]
    ],
    "cells": {
-    "darwin": [
-     "forward:E"
-    ],
+    "darwin": [],
     "linux": []
    },
    "pinned": [
@@ -338,12 +330,7 @@
   },
   "fanuc_crx20ial_ik": {
    "fast_pins": {
-    "darwin": [
-     "uniform/65",
-     "near_limit/4",
-     "near_limit/25",
-     "near_singular/32"
-    ],
+    "darwin": [],
     "linux": [
      "uniform/43",
      "uniform/65",
@@ -402,10 +389,7 @@
     [-0.7787980249210545, -0.5233958801171574, -1.266596142405732, -0.2762105249075531, -0.7607052168826504, 1.6321982850612737]
    ],
    "cells": {
-    "darwin": [
-     "reverse:F",
-     "reverse:J"
-    ],
+    "darwin": [],
     "linux": [
      "forward:F",
      "reverse:J"
@@ -414,9 +398,7 @@
   },
   "fanuc_crx30ia_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_limit/3"
-    ],
+    "darwin": [],
     "linux": [
      "near_limit/3",
      "near_singular/41",
@@ -474,9 +456,7 @@
     [2.2522107578379726, -0.2615878686952405, 0.8003058602074641, -2.7049881067453567, 0.2615481007330834, 1.913718140790003]
    ],
    "cells": {
-    "darwin": [
-     "forward:F"
-    ],
+    "darwin": [],
     "linux": [
      "forward:E",
      "forward:F",
@@ -486,9 +466,7 @@
   },
   "fanuc_crx3ia_ik": {
    "fast_pins": {
-    "darwin": [
-     "at_pi/0"
-    ],
+    "darwin": [],
     "linux": [
      "near_limit/7",
      "at_pi/0"
@@ -546,11 +524,9 @@
    ],
    "cells": {
     "ci": [
-      "reverse:F"
+     "reverse:F"
     ],
-    "darwin": [
-     "forward:E"
-    ],
+    "darwin": [],
     "linux": [
      "forward:F",
      "reverse:J"
@@ -1056,8 +1032,7 @@
   "hc10_ik": {
    "fast_pins": {
     "darwin": [
-     "near_singular/9",
-     "near_singular/33"
+     "near_singular/9"
     ],
     "linux": [
      "near_singular/33"
@@ -1115,6 +1090,7 @@
    ],
    "cells": {
     "darwin": [
+     "forward:E",
      "reverse:J"
     ],
     "linux": [
@@ -1959,14 +1935,7 @@
   },
   "m0609_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_limit/6",
-     "near_limit/16",
-     "near_limit/30",
-     "near_singular/6",
-     "near_singular/8",
-     "near_singular/32"
-    ],
+    "darwin": [],
     "linux": [
      "near_limit/6",
      "near_singular/6",
@@ -2030,10 +1999,7 @@
     "ci": [
      "reverse:F"
     ],
-    "darwin": [
-     "forward:E",
-     "reverse:J"
-    ],
+    "darwin": [],
     "linux": [
      "forward:E",
      "reverse:J"
@@ -2042,10 +2008,7 @@
   },
   "m1013_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/5",
-     "near_singular/22"
-    ],
+    "darwin": [],
     "linux": [
      "uniform/198",
      "near_limit/13",
@@ -2107,10 +2070,7 @@
     "ci": [
      "reverse:F"
     ],
-    "darwin": [
-     "forward:E",
-     "reverse:J"
-    ],
+    "darwin": [],
     "linux": [
      "forward:E",
      "reverse:J"
@@ -2332,13 +2292,7 @@
   },
   "piper_ik": {
    "fast_pins": {
-    "darwin": [
-     "near_singular/15",
-     "near_singular/25",
-     "near_singular/27",
-     "near_singular/28",
-     "near_singular/43"
-    ],
+    "darwin": [],
     "linux": [
      "near_singular/8",
      "near_singular/14",
@@ -2396,10 +2350,7 @@
     [-0.49708508345143854, 0.2604447820822539, -2.966875813586293, -1.6772484961036955, 6.311383911182143e-05, -1.2186217663176346]
    ],
    "cells": {
-    "darwin": [
-     "reverse:F",
-     "reverse:J"
-    ],
+    "darwin": [],
     "linux": [
      "reverse:J"
     ]
