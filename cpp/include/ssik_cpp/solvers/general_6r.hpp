@@ -26,7 +26,6 @@
 #include <cmath>
 #include <complex>
 #include <limits>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -201,7 +200,7 @@ inline Mat12 embed_e(const Mat6x9& e) {
 // v[hi] = x_lb0 * v[lo] over the index pairs below, so inside the null space N
 // (12 x k) the branch vectors are exactly the eigenvectors c of the k x k
 // pencil N[hi] c = w N[lo] c. When the branches share x_lb0 too, the x_lb1
-// shift separates them. Mirrors _raghavan_roth.split_repeated_roots.
+// shift separates them. Mirrors _raghavan_roth._emit_branches.
 
 // Numerical rank tolerance for M(x), relative to its largest singular value:
 // sqrt(eps). A lone null vector read from a space whose next singular value is
@@ -266,115 +265,41 @@ inline bool shift_split(const NullBasis& n_basis, double imag_tol, std::vector<V
          shift_split_one(n_basis, kShiftLb1Lo, kShiftLb1Hi, imag_tol, out);
 }
 
-// Distance of two points of the projective line (bounded, inf-safe).
-inline double chordal(double x, double y) {
-  if (!std::isfinite(x)) return std::isfinite(y) ? 1.0 / std::hypot(1.0, y) : 0.0;
-  if (!std::isfinite(y)) return 1.0 / std::hypot(1.0, x);
-  return std::abs(x - y) / (std::hypot(1.0, x) * std::hypot(1.0, y));
-}
-
-// An accepted root with M(x) (A at infinity) and its SVD.
+// An accepted root with the SVD of M(x) (A at infinity).
 struct RootSvd {
   double x;
-  Mat12 m;
   Vec12 sv;  // singular values, descending
   Mat12 v;   // right singular vectors
 };
 
-// Emit (root, v_12) pairs, splitting every repeated root into its branches.
-// Multiplicity is read from M(x)'s singular values rather than from how close
-// the eigenvalues are: a defective double root has two equal eigenvalues and a
-// one-dimensional null space, and needs no split. A root whose null space is
-// one-dimensional keeps its null vector as before. A root with a k-dim null
-// space (k >= 2) is grouped with up to k-1 other roots for which that space is
-// also null (QZ's copies of a k-fold root, or the close roots of a near
-// repeat); the space is split into its k branches; each branch goes to the
-// member it fits best, one each; and a member reads its branch from the split
-// of its OWN null space, exact at its own root rather than only to within the
-// roots' separation. Branches no member took are still emitted, so a missing
-// eigenvalue copy cannot lose one. A group whose space does not split into k
-// distinct real branches is emitted exactly as before.
+// Emit (root, v_12) pairs: every root with its own null vector, and a root
+// whose null space is k-dimensional (k >= 2) also with the k branch vectors of
+// that space. Multiplicity is read from M(x)'s singular values rather than
+// from how close the eigenvalues are: a defective double root has two equal
+// eigenvalues and a one-dimensional null space, and needs no split. Each root
+// reads only its OWN null space, never a nearby root's: at two close roots the
+// spaces differ, and a branch vector carried from one to the other is off by
+// their separation, which lost branches at pairs of near-double roots (#640).
+// Nor is a root's own null vector dropped when k >= 2: where the multiplicity
+// test misjudges k, that vector is the one that closes. FK certification
+// downstream keeps the real branches, and a branch emitted at two roots of one
+// cluster merges in the same-root dedup. A space that does not split into k
+// distinct real branches emits only the root's own vector. Mirrors
+// _raghavan_roth._emit_branches.
 inline void emit_split_roots(const std::vector<RootSvd>& acc, double imag_tol,
                              std::vector<double>& roots, std::vector<Vec12>& vecs) {
-  const int n = static_cast<int>(acc.size());
-  std::vector<int> ks(n);
-  for (int j = 0; j < n; ++j) {
+  for (const auto& r : acc) {
+    roots.push_back(r.x);
+    vecs.push_back(r.v.col(11));
     int k = 0;
-    for (int r = 0; r < 12; ++r)
-      if (acc[j].sv(r) <= kNullRankRtol * acc[j].sv(0)) ++k;
-    ks[j] = k;
-  }
-  auto basis = [&](int j) -> NullBasis { return acc[j].v.rightCols(ks[j]); };
-  auto residual = [&](int j, const Vec12& w) { return (acc[j].m * w).norm() / acc[j].sv(0); };
-  auto emit = [&](int j, const Vec12& w) {
-    roots.push_back(acc[j].x);
-    vecs.push_back(w);
-  };
-
-  std::vector<bool> used(n, false);
-  for (int i = 0; i < n; ++i) {
-    if (used[i]) continue;
-    const int k = ks[i];
-    if (k < 2) {
-      used[i] = true;
-      emit(i, acc[i].v.col(11));
-      continue;
-    }
-    const NullBasis nb = basis(i);
-    std::vector<int> members{i};
-    std::vector<std::pair<double, int>> partners;
-    for (int j = 0; j < n; ++j)
-      if (j != i && !used[j] && ks[j] >= 2) partners.emplace_back(chordal(acc[i].x, acc[j].x), j);
-    std::sort(partners.begin(), partners.end());
-    for (const auto& pj : partners) {
-      if (static_cast<int>(members.size()) == k) break;
-      const int j = pj.second;
-      if ((acc[j].m * nb).norm() <= kNullRankRtol * acc[j].sv(0)) members.push_back(j);
-    }
-    for (int j : members) used[j] = true;
-
+    for (int i = 0; i < 12; ++i)
+      if (r.sv(i) <= kNullRankRtol * r.sv(0)) ++k;
+    if (k < 2) continue;
     std::vector<Vec12> branches;
-    if (!shift_split(nb, imag_tol, branches)) {
-      for (int j : members) emit(j, acc[j].v.col(11));
-      continue;
-    }
-    // One branch per member, cheapest fit first.
-    std::vector<std::tuple<double, int, int>> costs;
-    for (int j : members)
-      for (int b = 0; b < static_cast<int>(branches.size()); ++b)
-        costs.emplace_back(residual(j, branches[b]), j, b);
-    std::sort(costs.begin(), costs.end());
-    std::vector<int> taken_members;
-    std::vector<bool> taken_branch(branches.size(), false);
-    for (const auto& [cost, j, b] : costs) {
-      (void)cost;
-      if (taken_branch[b] ||
-          std::find(taken_members.begin(), taken_members.end(), j) != taken_members.end())
-        continue;
-      taken_members.push_back(j);
-      taken_branch[b] = true;
-      Vec12 w = branches[b];
-      if (j != i && ks[j] == k) {
-        std::vector<Vec12> own;
-        if (shift_split(basis(j), imag_tol, own)) {
-          double best = -1.0;
-          for (const auto& o : own) {
-            const double overlap = std::abs(o.dot(branches[b]));
-            if (overlap > best) {
-              best = overlap;
-              w = o;
-            }
-          }
-        }
-      }
-      emit(j, w);
-    }
-    for (int b = 0; b < static_cast<int>(branches.size()); ++b) {
-      if (taken_branch[b]) continue;
-      int best_j = members[0];
-      for (int j : members)
-        if (residual(j, branches[b]) < residual(best_j, branches[b])) best_j = j;
-      emit(best_j, branches[b]);
+    if (!shift_split(r.v.rightCols(k), imag_tol, branches)) continue;
+    for (const auto& b : branches) {
+      roots.push_back(r.x);
+      vecs.push_back(b);
     }
   }
 }
@@ -414,7 +339,7 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
   std::vector<RootSvd> accepted;
   auto accept = [&](double x, const Mat12& m) {
     Eigen::JacobiSVD<Mat12> svd(m, Eigen::ComputeFullV);
-    accepted.push_back(RootSvd{x, m, svd.singularValues(), svd.matrixV()});
+    accepted.push_back(RootSvd{x, svd.singularValues(), svd.matrixV()});
   };
   for (Eigen::Index i = 0; i < alphas.size(); ++i) {
     // Work the pair (alpha, beta) projectively rather than forming alpha/beta
