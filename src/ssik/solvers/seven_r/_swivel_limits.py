@@ -41,11 +41,14 @@ from ssik.kinematics.predicates import (
     _classify_srs_7r_geometric,
     is_approximately_srs_7r,
 )
+from ssik.postprocess import _BAND_CAP
+from ssik.refinement import dedup_by_wrap_close
 from ssik.solvers.seven_r._feasible_param import (
     PARAM_GRID,
     feasible_arcs,
     to_limits,
 )
+from ssik.solvers.seven_r._minimax import chart_minima, place, walk
 from ssik.solvers.seven_r._polish import polish_candidates
 from ssik.solvers.seven_r.srs import (
     _arm_constants,
@@ -59,6 +62,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from ssik._kinbody import KinBody
 
 _EPS = 1e-9
+_SWEPT = (0, 1, 2, 4, 5, 6)  # every joint but the elbow, which is fixed along the swivel
 
 
 def _signed_angle(k: NDArray[np.float64], a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
@@ -177,9 +181,7 @@ def _branch_arcs(branch: _Branch, limits: list[tuple[float, float]]) -> list[tup
     if not (limits[3][0] <= branch.q3 <= limits[3][1]):
         return []
     q_grid = branch.q_grid(PARAM_GRID)  # (N, 7) -- one batched eval per branch
-    return feasible_arcs(
-        branch.q, q_grid, (0, 1, 2, 4, 5, 6), limits, PARAM_GRID, q_batch=branch.q_grid
-    )
+    return feasible_arcs(branch.q, q_grid, _SWEPT, limits, PARAM_GRID, q_batch=branch.q_grid)
 
 
 def _enumerate_branches(
@@ -342,7 +344,9 @@ def resolve_in_limits(
             residual = float(np.linalg.norm(poe_forward_kinematics(kb, q) - T))
             if residual <= fk_atol:
                 exact.append(Solution(q=q, fk_residual=residual, refinement_used="none"))
-        return exact
+        if not exact:
+            exact = _contacts(kb, cls, T, limits, fk_atol, policy, exact_chart=True)
+        return exact[:max_solutions] if max_solutions is not None else exact
 
     # Approximately-SRS (#370): best-fit resolver seeds + LM polish.
     approx = is_approximately_srs_7r(kb, max_drift_m=_APPROX_MAX_DRIFT_M, policy=policy)
@@ -351,7 +355,7 @@ def resolve_in_limits(
     seeds = _approx_grid_seeds(kb, approx.base, T)
     if not seeds:
         return []
-    return polish_candidates(
+    sols = polish_candidates(
         kb,
         seeds,
         T,
@@ -360,3 +364,48 @@ def resolve_in_limits(
         limits=limits,
         max_solutions=max_solutions,
     )
+    if not sols:
+        sols = _contacts(kb, approx.base, T, limits, _APPROX_FK_ATOL, policy, exact_chart=False)
+    return sols[:max_solutions] if max_solutions is not None else sols
+
+
+def _contacts(
+    kb: KinBody,
+    cls: SrsClassification,
+    T: NDArray[np.float64],
+    limits: list[tuple[float, float]],
+    fk_atol: float,
+    policy: TolerancePolicy,
+    *,
+    exact_chart: bool,
+) -> list[Solution]:
+    """In-limits contacts when no branch has an in-limits arc (#662): the
+    minimax-margin points of every branch's swivel chart (:mod:`._minimax`).
+    A closed-form chart's minimum is the contact itself; an approximate chart's
+    (best-fit pivots) seeds a walk along the true self-motion curve from each
+    minimum, found over the swept joints only (its elbow is constant and off by
+    the drift)."""
+    branches = _enumerate_branches(kb, cls, T)
+    minima = [
+        (v, b, t)
+        for b, branch in enumerate(branches)
+        for t, v in chart_minima(
+            branch.q_grid, PARAM_GRID, limits, periodic=True, joints=None if exact_chart else _SWEPT
+        )
+    ]
+    minima.sort()
+    out: list[Solution] = []
+    if exact_chart:
+        for v, b, t in minima:
+            if v > _BAND_CAP:
+                break
+            sol = place(kb, branches[b].q(t), T, limits, fk_atol, "none")
+            if sol is not None:
+                out.append(sol)
+    else:
+        for _v, b, t in minima:
+            q = walk(kb, branches[b].q(t), T, limits)
+            sol = None if q is None else place(kb, q, T, limits, fk_atol, "lm")
+            if sol is not None:
+                out.append(sol)
+    return dedup_by_wrap_close(out, policy.subproblem_dedup)

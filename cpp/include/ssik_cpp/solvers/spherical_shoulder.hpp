@@ -28,6 +28,7 @@
 #include "ssik_cpp/newton.hpp"  // lm_refine
 #include "ssik_cpp/rescue.hpp"
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
+#include "ssik_cpp/seven_r/minimax.hpp"
 #include "ssik_cpp/sp6.hpp"  // detail::wrap_pi
 #include "ssik_cpp/subproblems.hpp"
 
@@ -473,6 +474,62 @@ inline std::vector<std::array<double, 7>> solutions_in_interval(
   return out;
 }
 
+// In-limits contacts when no branch has an in-limits arc (#662): the
+// minimax-margin points of every slot chart over the reachable q6 intervals of
+// [lo, hi] (the whole range when the SP3 margin rules out every q6 at an elbow
+// fold whose slot gates still pass). On the exact class a slot's minimum is the
+// contact itself; on the approximate class it seeds a walk along the true
+// self-motion curve from each minimum. Mirrors spherical_shoulder.contacts.
+inline std::vector<Solution<7>> contacts(const JointConsts<7>& c, const JointLimits<7>& lim,
+                                         const Eigen::Matrix<double, 3, 48>& coef, const Pose& T,
+                                         double lo, double hi, const ShLimits& limits,
+                                         double fk_atol, bool exact_chart) {
+  const Tolerances tol;
+  const Pose t_rev = T.inverse();
+  auto ivs = reachable_intervals(coef, t_rev, lo, hi);
+  if (ivs.empty()) ivs.push_back({lo, hi});
+  auto slot_q = [&](int slot, double t) {
+    const SlotEval ev = slot_eval(coef, t_rev, t, tol);
+    std::vector<double> out(7, std::numeric_limits<double>::quiet_NaN());
+    if (ev.valid[slot]) out.assign(ev.q[slot].begin(), ev.q[slot].end());
+    return out;
+  };
+  struct Minimum {
+    double v;
+    int slot;
+    double t;
+  };
+  std::vector<Minimum> minima;
+  for (const auto& iv : ivs) {
+    const std::vector<double> grid = linspace(iv[0], iv[1], kShTrackGrid);
+    for (int slot = 0; slot < kShSlots; ++slot) {
+      auto q_scalar = [&, slot](double t) { return slot_q(slot, t); };
+      for (const auto& [t, v] : minimax::chart_minima(q_scalar, grid, limits, /*periodic=*/false))
+        minima.push_back({v, slot, t});
+    }
+  }
+  std::sort(minima.begin(), minima.end(), [](const Minimum& x, const Minimum& y) {
+    if (x.v != y.v) return x.v < y.v;
+    if (x.slot != y.slot) return x.slot < y.slot;
+    return x.t < y.t;
+  });
+  std::vector<Solution<7>> out;
+  for (const Minimum& m : minima) {
+    const std::vector<double> qv = slot_q(m.slot, m.t);
+    std::array<double, 7> q;
+    std::copy(qv.begin(), qv.end(), q.begin());
+    if (exact_chart) {
+      if (m.v > kBandCap) break;
+      if (auto sol = minimax::place(c, lim, q, T, limits, fk_atol, Refinement::None))
+        out.push_back(*sol);
+    } else if (const auto qw = minimax::walk(c, q, T, limits)) {
+      if (auto sol = minimax::place(c, lim, *qw, T, limits, fk_atol, Refinement::Lm))
+        out.push_back(*sol);
+    }
+  }
+  return minimax::dedup(out, kShDedupAtol);
+}
+
 }  // namespace sh_detail
 
 // Exact in-limits IK for the exact class (spherical_shoulder.resolve_in_limits):
@@ -595,8 +652,13 @@ inline std::vector<Solution<7>> spherical_shoulder_artifact_solve(
   // thin in-limits q6 arc, so an empty limit-filtered set is resolved exactly
   // before the rescue gate below sees it.
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits, [&]() {
-    return polished ? spherical_shoulder_polished_resolve_in_limits(c, sh, T, limits)
-                    : spherical_shoulder_resolve_in_limits(c, sh, T, limits);
+    auto sols = polished ? spherical_shoulder_polished_resolve_in_limits(c, sh, T, limits)
+                         : spherical_shoulder_resolve_in_limits(c, sh, T, limits);
+    if (sols.empty()) {  // a point or sliver no arc brackets (#662)
+      const double lo = polished ? -M_PI : limits[6][0], hi = polished ? M_PI : limits[6][1];
+      sols = sh_detail::contacts(c, lim, sh.coef, T, lo, hi, limits, kShFkAtol, !polished);
+    }
+    return sols;
   });
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
     in_limits = finalize_solutions<7>(rescue_via_T_perturbation<7>(core, c, T), c, lim, T, p_limits);

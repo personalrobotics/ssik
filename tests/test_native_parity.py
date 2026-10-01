@@ -92,7 +92,7 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "I": {
         "gen3_ik": ALL,
-        "j2s7s300_ik": ALL,
+        "j2s7s300_ik": ("linux",),
         "rm75_ik": ALL,
         "yumi_left_ik": ALL,
     },

@@ -47,9 +47,11 @@ from ssik.kinematics._scalar3 import _se3_inv
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.kinematics.predicates import three_consecutive_intersecting
 from ssik.kinematics.reverse import map_reversed_q, reverse_kinematic_chain
-from ssik.postprocess import _onto_limits
+from ssik.postprocess import _BAND_CAP, _onto_limits
+from ssik.refinement import dedup_by_wrap_close
 from ssik.solvers.jointlock.seven_r import _lock_joint
 from ssik.solvers.seven_r._feasible_param import feasible_arcs_bounded, merge, to_limits
+from ssik.solvers.seven_r._minimax import chart_minima, place, walk
 from ssik.subproblems import sp1, sp2, sp3, sp4
 from ssik.subproblems._rotation import rotation_matrix as _rot
 
@@ -666,4 +668,67 @@ def resolve_in_limits(
             out.append(Solution(q=q, fk_residual=residual, refinement_used="none"))
             if max_solutions is not None and len(out) >= max_solutions:
                 return out
-    return out
+    if not out:
+        out = contacts(kb, coef, t_rev, T, (lo, hi), limits, policy, _FK_ATOL, exact_chart=True)
+    return out[:max_solutions] if max_solutions is not None else out
+
+
+def contacts(
+    kb: KinBody,
+    coef: NDArray[np.float64],
+    t_rev: NDArray[np.float64],
+    T: NDArray[np.float64],
+    q6_range: tuple[float, float],
+    limits: list[tuple[float, float]],
+    policy: TolerancePolicy,
+    fk_atol: float,
+    *,
+    exact_chart: bool,
+) -> list[Solution]:
+    """In-limits contacts when no branch has an in-limits arc (#662): the
+    minimax-margin points of every slot chart over the reachable q6 intervals of
+    ``q6_range`` (:mod:`._minimax`). On the exact class a slot's minimum is the
+    contact itself; on the approximate class (``coef`` baked from an arm that is
+    only nearly spherical) it seeds a walk along the true self-motion curve
+    from each minimum."""
+    minima: list[tuple[float, int, float]] = []
+    # The SP3 reach margin can rule out every q6 at an elbow fold whose slot
+    # gates still pass (their feasibility slack); the slots decide here.
+    for a, b in _reachable_intervals(coef, t_rev, *q6_range) or [q6_range]:
+        grid = np.linspace(a, b, _TRACK_GRID)
+        for slot in range(N_SLOTS):
+            for t, v in chart_minima(
+                _slot_fn(coef, t_rev, slot, policy), grid, limits, periodic=False
+            ):
+                minima.append((v, slot, t))
+    minima.sort()
+    out: list[Solution] = []
+    if exact_chart:
+        for v, slot, t in minima:
+            if v > _BAND_CAP:
+                break
+            q = _slot_fn(coef, t_rev, slot, policy)(np.array([t]))[0]
+            sol = place(kb, q, T, limits, fk_atol, "none")
+            if sol is not None:
+                out.append(sol)
+    else:
+        for _v, slot, t in minima:
+            q = walk(kb, _slot_fn(coef, t_rev, slot, policy)(np.array([t]))[0], T, limits)
+            sol = None if q is None else place(kb, q, T, limits, fk_atol, "lm")
+            if sol is not None:
+                out.append(sol)
+    return dedup_by_wrap_close(out, policy.subproblem_dedup)
+
+
+def _slot_fn(
+    coef: NDArray[np.float64], t_rev: NDArray[np.float64], slot: int, policy: TolerancePolicy
+) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
+    """One branch slot as a chart ``q(q6)``, ``NaN`` where the slot is infeasible."""
+
+    def q_of(ts: NDArray[np.float64]) -> NDArray[np.float64]:
+        q, valid = _slot_grid(coef, t_rev, np.asarray(ts, dtype=np.float64), policy)
+        out: NDArray[np.float64] = q[slot].copy()
+        out[~valid[slot]] = np.nan
+        return out
+
+    return q_of

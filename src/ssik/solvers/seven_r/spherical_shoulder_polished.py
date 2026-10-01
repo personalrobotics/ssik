@@ -38,6 +38,7 @@ from ssik.solvers.seven_r.spherical_shoulder import (
     _closed_branches_grid,
     _joint_limits,
     _reachable_intervals,
+    contacts,
     is_spherical_shoulder_7r,
 )
 
@@ -156,6 +157,25 @@ def resolve_in_limits(
     *,
     max_solutions: int | None = None,
 ) -> list[Solution]:
-    """Exact in-limits IK for the approximately-spherical class (polished)."""
+    """Exact in-limits IK for the approximately-spherical class (polished).
+
+    When no polished candidate lands in limits, the minimax-margin contacts of
+    the closed-form slot charts seed walks along the true self-motion curve
+    (:func:`ssik.solvers.seven_r.spherical_shoulder.contacts`, #662)."""
     sols, _ = solve(kb, T_target, policy, max_solutions=max_solutions, respect_limits=True)
+    if not sols and len(kb.joints) == 7:
+        T = np.asarray(T_target, dtype=np.float64)
+        sols = contacts(
+            kb,
+            _bake(kb),
+            _se3_inv(T),
+            T,
+            (-np.pi, np.pi),
+            _joint_limits(kb),
+            policy,
+            _POLISH_FK_ATOL,
+            exact_chart=False,
+        )
+        if max_solutions is not None:
+            sols = sols[:max_solutions]
     return sols

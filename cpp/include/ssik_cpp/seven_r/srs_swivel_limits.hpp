@@ -18,6 +18,7 @@
 #include "ssik_cpp/fk.hpp"
 #include "ssik_cpp/rotation.hpp"  // rotation_matrix
 #include "ssik_cpp/seven_r/feasible_arcs.hpp"
+#include "ssik_cpp/seven_r/minimax.hpp"
 #include "ssik_cpp/solvers/srs_canonical.hpp"  // SrsConsts, srs_detail::swivel_basis
 #include "ssik_cpp/subproblems.hpp"             // within_tangent_band
 
@@ -179,6 +180,56 @@ inline std::vector<Solution<7>> resolve_in_limits(const JointConsts<7>& c, const
     }
   }
   return out;
+}
+
+// In-limits contacts when no branch has an in-limits arc (#662): the
+// minimax-margin points of every branch's swivel chart (minimax.hpp). A
+// closed-form chart's minimum is the contact itself; an approximate chart's
+// (best-fit pivots, srs_polished) seeds a walk along the true self-motion curve
+// from each minimum, found over the swept joints only (its elbow is constant and
+// off by the drift). Mirrors _swivel_limits._contacts.
+inline std::vector<Solution<7>> contacts(const JointConsts<7>& c, const JointLimits<7>& lim,
+                                         const SrsConsts& s, const Pose& T,
+                                         const std::array<std::array<double, 2>, 7>& limits,
+                                         double fk_atol, bool exact_chart, double dedup_tol) {
+  std::array<Eigen::Vector3d, 7> n;
+  for (int i = 0; i < 7; ++i) n[i] = c.axis[i].normalized();
+  const std::vector<Branch> branches = enumerate_branches(n, s, T);
+  static const std::vector<double> grid = feasible::param_grid();
+  struct Minimum {
+    double v;
+    int b;
+    double t;
+  };
+  std::vector<Minimum> minima;
+  for (int b = 0; b < static_cast<int>(branches.size()); ++b) {
+    const Branch& br = branches[b];
+    auto q_scalar = [&br](double psi) {
+      const std::array<double, 7> qv = br.q(psi);
+      return std::vector<double>(qv.begin(), qv.end());
+    };
+    for (const auto& [t, v] : minimax::chart_minima(
+             q_scalar, grid, limits, /*periodic=*/true,
+             exact_chart ? minimax::kAllJoints : minimax::kSrsSwept))
+      minima.push_back({v, b, t});
+  }
+  std::sort(minima.begin(), minima.end(), [](const Minimum& x, const Minimum& y) {
+    if (x.v != y.v) return x.v < y.v;
+    if (x.b != y.b) return x.b < y.b;
+    return x.t < y.t;
+  });
+  std::vector<Solution<7>> out;
+  for (const Minimum& m : minima) {
+    if (exact_chart) {
+      if (m.v > kBandCap) break;
+      if (auto sol = minimax::place(c, lim, branches[m.b].q(m.t), T, limits, fk_atol, Refinement::None))
+        out.push_back(*sol);
+    } else if (const auto q = minimax::walk(c, branches[m.b].q(m.t), T, limits)) {
+      if (auto sol = minimax::place(c, lim, *q, T, limits, fk_atol, Refinement::Lm))
+        out.push_back(*sol);
+    }
+  }
+  return minimax::dedup(out, dedup_tol);
 }
 
 }  // namespace srs_swivel

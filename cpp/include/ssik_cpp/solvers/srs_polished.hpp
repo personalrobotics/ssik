@@ -38,6 +38,7 @@ inline constexpr double kSrsPolishedReachSlack = 0.08;    // 2 * max_drift
 inline constexpr double kSrsPolishedFkAtol = 1e-12;       // polish_fk_atol accept
 inline constexpr double kSrsPolishedKeepAll = 1e9;        // fk_atol=10.0 -> keep every candidate
 inline constexpr int kSrsPolishedMaxIters = 30;          // polish_max_iters (cm-off seeds need it)
+inline constexpr double kSrsPolishedContactFkAtol = 1e-8;  // _swivel_limits._APPROX_FK_ATOL
 
 namespace srs_polished_detail {
 
@@ -146,9 +147,13 @@ inline std::vector<Solution<7>> srs_polished_artifact_solve(const JointConsts<7>
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits, [&]() {
-    return srs_polished_detail::polish(
+    auto sols = srs_polished_detail::polish(
         c, srs_swivel::resolve_in_limits(c, s, T, limits, kSrsPolishedKeepAll), T,
         kSrsPolishedMaxIters, &limits);
+    if (sols.empty())  // a point or sliver no arc brackets (#662): walk the true curve
+      sols = srs_swivel::contacts(c, lim, s, T, limits, kSrsPolishedContactFkAtol,
+                                  /*exact_chart=*/false, kSrsDedupTol);
+    return sols;
   });
 
   // Rescue gate: nothing in-limits at a reachable target -> singular pose.

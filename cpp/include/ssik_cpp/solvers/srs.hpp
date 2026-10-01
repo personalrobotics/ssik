@@ -74,7 +74,11 @@ inline std::vector<Solution<7>> srs_artifact_solve(const JointConsts<7>& c, cons
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
   std::vector<Solution<7>> in_limits = finalize_solutions<7>(core(T), c, lim, T, p_limits, [&]() {
-    return srs_swivel::resolve_in_limits(c, s, T, limits, kSrsFkThreshold);
+    auto sols = srs_swivel::resolve_in_limits(c, s, T, limits, kSrsFkThreshold);
+    if (sols.empty())  // a point or sliver no arc brackets (#662)
+      sols = srs_swivel::contacts(c, lim, s, T, limits, kSrsFkThreshold, /*exact_chart=*/true,
+                                  kSrsDedupTol);
+    return sols;
   });
 
   // 4. Rescue gate (#319/#524): nothing survives the limit filter. If the target
