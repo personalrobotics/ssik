@@ -46,6 +46,18 @@ what users get: around thirty native tests skip and the perf gate skips too.
 `tests/test_native_coverage.py` fails loudly rather than letting that pass
 quietly.
 
+**Rebuild compiled modules after the source changes.** `uv sync` compiles the
+Cython modules in `hatch_build.py`'s `CYTHON_TARGETS` beside their sources, and
+Python imports a compiled module in place of its `.py`. Nothing rebuilds them
+when a pull, checkout or edit changes that source, so the build records the
+sha256 of each source next to its extension, and in a checkout `import ssik`
+refuses an extension whose record is missing or no longer matches, naming the
+files. Rebuild with `uv sync --reinstall-package ssik`, or delete the named
+files to run the pure-Python source (handy while bisecting). Installed wheels
+are not checked: their sources and extensions are built together. Extensions
+left by other Python versions (`*.cpython-310-*.so` under 3.13) are never
+imported by this one; each version checks its own.
+
 **Eigen is pinned.** Every native build (this one, the wheels on every platform,
 and CI) compiles against one Eigen release, pinned by version and sha256 in
 `scripts/fetch_eigen.py`. The build downloads it once into `~/.cache/ssik`

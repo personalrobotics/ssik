@@ -24,6 +24,11 @@ if [[ "${1:-}" == "--no-tests" ]]; then
     run_tests=0
 fi
 
+# A stale in-place Cython build would have the tests below run old code; the
+# import refuses one and says how to rebuild (#614).
+echo "[check] compiled modules match source"
+uv run python -c "import ssik"
+
 echo "[check] ruff check"
 uv run ruff check
 

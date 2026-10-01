@@ -53,6 +53,9 @@ NATIVE_EXT_MODULE = "_ssik_native"
 NATIVE_EXT_SOURCE = "cpp/bindings/three_parallel_py.cpp"
 NATIVE_SUPPORTED_PLATFORMS = ("linux", "darwin")
 
+# The checkout's stale-extension guard (#614); the hook writes the records it reads.
+STALE_GUARD = "src/ssik/_stale_extensions.py"
+
 
 # The header-only C++ solvers for native consumers (#641): every wheel ships
 # cpp/include/ssik_cpp as ssik/cpp/include/ssik_cpp, with a relocatable CMake
@@ -122,6 +125,18 @@ def _render_cmake_package(root: Path, version: str, out: Path) -> None:
     )
 
 
+def _load_module(path: Path, name: str) -> Any:
+    """Import the stdlib-only module at ``path`` without importing its package."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _native_supported() -> bool:
     return sys.platform in NATIVE_SUPPORTED_PLATFORMS
 
@@ -184,6 +199,24 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
         from setuptools import Extension, setup  # type: ignore[import-untyped]
 
         root = Path(self.root)
+        so_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
+
+        # Record the source each extension was built from (#614): in a checkout,
+        # ``import ssik`` refuses an extension whose record is missing or does not
+        # match its .py (src/ssik/_stale_extensions.py). cythonize rebuilds by mtime
+        # alone, so force it whenever a record would change; a record then always
+        # describes the code compiled into its extension.
+        guard = _load_module(root / STALE_GUARD, "_ssik_stale_extensions")
+        records: dict[Path, str] = {}  # record path -> digest of the source it describes
+        for src_py in CYTHON_TARGETS:
+            src_path = root / src_py
+            so_path = src_path.with_name(src_path.stem + so_suffix)
+            record = so_path.with_name(so_path.name + guard.STAMP_SUFFIX)
+            records[record] = guard.source_digest(src_path)
+        force = any(
+            not record.is_file() or record.read_text().strip() != digest
+            for record, digest in records.items()
+        )
 
         # Run setuptools build_ext --inplace. Cython's pure-Python-mode .py
         # files compile to .so beside the source. ``cythonize`` produces
@@ -202,6 +235,7 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 list(CYTHON_TARGETS),
                 compiler_directives={"language_level": "3"},
                 annotate=False,
+                force=force,
             )
             # Append the native C++ solver extension on supported platforms when
             # the pinned Eigen is available. If it is absent (a dev/editable install that
@@ -266,7 +300,6 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
         # Force-include the compiled .so files in the wheel. Hatchling's
         # default wheel target only picks up .py / .pyi files from the
         # ``packages`` setting; we explicitly map each .so so it ships.
-        so_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
         force_include: dict[str, str] = build_data.setdefault("force_include", {})
         for src_py in CYTHON_TARGETS:
             src_path = root / src_py
@@ -279,6 +312,8 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
             # build_data["force_include"] is {source_abs_path: dest_in_wheel}.
             rel_dest = str(so_path.relative_to(root / "src"))
             force_include[str(so_path)] = rel_dest
+        for record, digest in records.items():
+            record.write_text(digest + "\n")
 
         # Force-include the native C++ extension (#506). setuptools infers
         # package_dir[""]="src" from the Cython packages, so build_ext --inplace

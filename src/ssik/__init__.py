@@ -44,13 +44,23 @@ diagnostics::
 
 import logging as _logging
 
-from ssik._version import __version__
-from ssik.core.diagnostic import Diagnostic
-from ssik.core.solution import Solution
-from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
-from ssik.cpp import get_cmake_dir, get_include  # the shipped C++ headers (#641)
-from ssik.manipulator import Manipulator
-from ssik.prebuilt import list_arms  # catalog of shipped arms; imports no artifact (#421)
+from ssik._stale_extensions import check_checkout as _check_checkout
+
+# First, before anything imports a compiled module: in a source checkout, refuse
+# in-place extensions built from other source than the tree holds (#614).
+_check_checkout()
+
+from ssik._version import __version__  # noqa: E402
+from ssik.core.diagnostic import Diagnostic  # noqa: E402
+from ssik.core.solution import Solution  # noqa: E402
+from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy  # noqa: E402
+
+# The shipped C++ headers (#641).
+from ssik.cpp import get_cmake_dir, get_include  # noqa: E402
+from ssik.manipulator import Manipulator  # noqa: E402
+
+# Catalog of shipped arms; imports no artifact (#421).
+from ssik.prebuilt import list_arms  # noqa: E402
 
 # Library best practice: prevent "No handlers could be found" warnings and
 # avoid emitting any log records unless the consuming application configures

@@ -50,6 +50,8 @@ htmlcov/
 site/
 *.cpython-*-darwin.so
 *.cpython-*-linux-gnu.so
+# Source records the build hook writes beside each in-place extension (#614).
+*.source-sha256
 src/ssik/**/*.c
 src/ssik/**/*.html
 # Cython artefacts from per-arm artifact compile (#137 Slice 3).
