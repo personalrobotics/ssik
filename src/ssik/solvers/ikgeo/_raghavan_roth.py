@@ -1193,6 +1193,15 @@ def _qz_roots(
 # exactly the eigenvectors c of the k x k pencil N[hi] c = w N[lo] c, and w is
 # each branch's x_lb0. When branches share x_lb0 too, the x_lb1 shift separates
 # them; when they share both, v_12 itself coincides and nothing here can help.
+#
+# Both shifts are read, and each keeps every eigenvector it determines (a real,
+# simple w), not only an all-or-nothing set of k (#673). A k-dimensional null
+# space need not be k real branches with distinct x_lb0: next to a degenerate
+# pose it also holds directions with no monomial structure, and some branches
+# share x_lb0 while differing in x_lb1. A genuine c still satisfies the shift
+# relation on all its rows, so it stays an eigenvector of the projected k x k
+# pencil whatever the other directions do; the others give complex, repeated or
+# arbitrary values, and FK certification drops whatever they read.
 
 # Numerical rank tolerance for M(x), relative to its largest singular value.
 # Below sqrt(eps) the direction is null for the purpose of reading a branch
@@ -1281,14 +1290,14 @@ def _chordal(x: float, y: float) -> float:
 
 def _shift_split_one(
     null_basis: NDArray[np.float64], lo: tuple[int, ...], hi: tuple[int, ...]
-) -> list[NDArray[np.float64]] | None:
-    """Branch vectors in ``span(null_basis)`` from one shift, or None when
-    the shift does not give k distinct real values."""
+) -> list[NDArray[np.float64]]:
+    """The branch vectors one shift determines in ``span(null_basis)``: one
+    per real, simple eigenvalue of the projected shift pencil."""
     from scipy.linalg import eigvals as scipy_eigvals  # type: ignore[import-untyped]
 
     k = null_basis.shape[1]
     if k > len(lo):
-        return None
+        return []
     low, high = null_basis[list(lo)], null_basis[list(hi)]
     # Both sides map into the same k-dim span, even where w is infinite and
     # the low side vanishes; square the pencil up on that span.
@@ -1299,26 +1308,23 @@ def _shift_split_one(
     for a, b in zip(alpha, beta, strict=True):
         scale = float(np.hypot(abs(a), abs(b)))
         if not np.isfinite(scale) or scale <= 0.0:
-            return None
+            continue  # a singular pencil's indeterminate pair
         a, b = a / scale, b / scale
         if abs(a.imag) > _SPLIT_IMAG_TOL or abs(b.imag) > _SPLIT_IMAG_TOL:
-            return None  # complex pair: these are not real branches
+            continue  # complex: not a real branch
         # c spans the null space of beta*H - alpha*L: read it by SVD rather
         # than from an eigensolver's eigenvector, which is ill-defined at beta=0.
         _, s, vt = np.linalg.svd(b.real * high_k - a.real * low_k)
         if k > 1 and s[-2] <= _NULL_RANK_RTOL * s[0]:
-            return None  # w repeats: this shift cannot tell the branches apart
+            continue  # w repeats: this shift cannot tell those branches apart
         v = null_basis @ vt[-1]
         out.append(v / np.linalg.norm(v))
     return out
 
 
-def _shift_split(null_basis: NDArray[np.float64]) -> list[NDArray[np.float64]] | None:
-    """Split by x_lb0, falling back to x_lb1 when the branches share x_lb0."""
-    parts = _shift_split_one(null_basis, *_SHIFT_LB0)
-    if parts is None:
-        parts = _shift_split_one(null_basis, *_SHIFT_LB1)
-    return parts
+def _shift_split(null_basis: NDArray[np.float64]) -> list[NDArray[np.float64]]:
+    """Every branch vector the x_lb0 shift or the x_lb1 shift determines."""
+    return _shift_split_one(null_basis, *_SHIFT_LB0) + _shift_split_one(null_basis, *_SHIFT_LB1)
 
 
 def _roots_to_test(
@@ -1388,10 +1394,10 @@ def _emit_branches(
     stack: NDArray[np.float64],
 ) -> tuple[list[float], list[NDArray[np.complex128]]]:
     """Every root with its own null vector (``vecs``, one row per root), and
-    a root with a k-dimensional null space (k >= 2) also with the k branch
-    vectors of that space (#595, #640). ``stack`` is M(x) at every root; only
-    the ``tested`` roots (``_CLUSTER_RADIUS``) take the multiplicity test, the
-    others have k = 1.
+    a root with a k-dimensional null space (k >= 2) also with the branch
+    vectors the shifts determine in that space (#595, #640, #673). ``stack``
+    is M(x) at every root; only the ``tested`` roots (``_CLUSTER_RADIUS``)
+    take the multiplicity test, the others have k = 1.
 
     Multiplicity is read from M(x)'s singular values, not from how close the
     roots are: a defective double root has two equal roots and a
@@ -1402,9 +1408,9 @@ def _emit_branches(
     (#640). Nor is a root's own null vector dropped when k >= 2: where the
     multiplicity test misjudges k, that vector is the one that closes. FK
     certification downstream keeps the real branches, and a branch emitted
-    at two roots of one cluster merges in the same-root dedup. A space that
-    does not split into k distinct real branches emits only the root's own
-    vector. Mirrors native's ``emit_split_roots``.
+    at two roots of one cluster merges in the same-root dedup. A shift
+    value that is complex or repeated determines no vector and emits none.
+    Mirrors native's ``emit_split_roots``.
     """
     ks = [1] * len(roots)
     if tested:
@@ -1419,8 +1425,7 @@ def _emit_branches(
         out_vecs.append(np.concatenate([v, v]).astype(np.complex128))
         if k < 2:
             continue
-        branches = _shift_split(np.linalg.svd(m)[2][-k:].T)
-        for b in branches or ():
+        for b in _shift_split(np.linalg.svd(m)[2][-k:].T):
             out_roots.append(x)
             out_vecs.append(np.concatenate([b, b]).astype(np.complex128))
     return out_roots, out_vecs

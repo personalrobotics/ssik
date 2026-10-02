@@ -41,6 +41,7 @@ _FK_TOL = 1e-9
 
 _GOLDENS = load_goldens()["fixtures"]
 _NAMES = [f.name for f in FIXTURES]
+_COMPLETE = [f.name for f in FIXTURES if f.complete]
 
 
 def _golden(name: str) -> dict[str, Any]:
@@ -82,7 +83,7 @@ def test_golden_matches_its_fixture(name: str) -> None:
         f"{name}: the fixture changed since its branch set was generated. "
         f"Re-run: python scripts/regen_branch_goldens.py --fixture {name}"
     )
-    assert g["stabilized"], (
+    assert g["stabilized"] or not fx.complete, (
         f"{name}: golden was recorded from an oracle run that had not stabilized, "
         f"so its branch count is a lower bound and cannot gate completeness"
     )
@@ -100,7 +101,7 @@ def test_golden_branches_are_distinct_and_close_fk(name: str, solved: dict[str, 
             assert wrapped_linf(a, b) > 1e-4, f"{name}: golden holds a duplicate branch"
 
 
-@pytest.mark.parametrize("name", _NAMES)
+@pytest.mark.parametrize("name", _COMPLETE)
 def test_golden_covers_everything_the_solver_finds(name: str, solved: dict[str, Any]) -> None:
     """The golden must be a superset of the solver's output.
 
@@ -160,6 +161,7 @@ def _expect(fx: BranchFixture) -> Any:
 
 
 _CASES = [_expect(f) for f in FIXTURES]
+_COMPLETE_CASES = [_expect(f) for f in FIXTURES if f.complete]
 
 
 @pytest.mark.parametrize("name", _CASES)
@@ -172,7 +174,7 @@ def test_recovery_returns_the_seeded_configuration(name: str, solved: dict[str, 
     )
 
 
-@pytest.mark.parametrize("name", _CASES)
+@pytest.mark.parametrize("name", _COMPLETE_CASES)
 def test_completeness_matches_the_golden(name: str, solved: dict[str, Any]) -> None:
     _, _, sols = solved[name]
     branches = _branches(name)
@@ -298,7 +300,7 @@ def test_completeness_per_backend_and_linearity_choice(
 _BACKEND_CASES = [
     pytest.param(fx.name, backend, id=f"{fx.name}-{backend}")
     for fx in FIXTURES
-    if fx.prebuilt is not None and not fx.linearity_choices
+    if fx.prebuilt is not None and not fx.linearity_choices and fx.complete
     for backend in ("artifact", "live")
 ]
 
@@ -326,4 +328,44 @@ def test_completeness_per_python_backend(name: str, backend: str, solved: dict[s
     assert not missing, (
         f"{name} {backend}: returned {len(sols)} of {len(branches)} branches; "
         f"missing {[np.round(b, 4).tolist() for b in missing]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Recovery per backend where completeness cannot be owed.
+#
+# Beside a singular continuum the oracle never stabilises, so there is no
+# complete set to hold a solver to. What is owed there is the regular branch
+# itself: a well-conditioned q_star must come back from the native core and
+# from the Python artifact, which read the same degenerate null space by the
+# same rule (#673).
+# ---------------------------------------------------------------------------
+
+_RECOVERY_CASES = [
+    pytest.param(fx.name, backend, id=f"{fx.name}-{backend}")
+    for fx in FIXTURES
+    if fx.prebuilt is not None and not fx.complete
+    for backend in ("native", "artifact")
+]
+
+
+@pytest.mark.parametrize(("name", "backend"), _RECOVERY_CASES)
+def test_recovery_per_backend(name: str, backend: str, solved: dict[str, Any]) -> None:
+    from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
+
+    if backend == "native":
+        from tests._cpp_backend import cpp_available
+
+        if not cpp_available():
+            pytest.skip("native extension not built")
+    fx = BY_NAME[name]
+    arm, t, _ = solved[name]
+    sols = arm.solve(t, respect_limits=False, native=backend == "native")
+    gate = DEFAULT_TOLERANCE_POLICY.subproblem_numerical
+    for s in sols:
+        resid = float(np.linalg.norm(poe_forward_kinematics(arm.kinbody, s.q) - t))
+        assert resid <= gate, f"{name} {backend}: unsound branch, FK {resid:.2e}"
+    nearest = min((wrapped_linf(np.asarray(s.q), fx.q_star_array()) for s in sols), default=np.inf)
+    assert nearest <= _EQUIV_TOL, (
+        f"{name} {backend}: q* not recovered; nearest returned branch is {nearest:.3g} rad away"
     )

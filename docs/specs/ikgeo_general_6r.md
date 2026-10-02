@@ -75,11 +75,17 @@ Each real root `x` reads its monomial vector as the null vector of `M(x)`
 Roots with another root within chordal distance `1e-3`, or every root when
 the pencil is ill-conditioned (#642's probe), take the multiplicity test:
 `k` = the number of singular values of `M(x)` at most `√ε · s₀`. A root with
-`k ≥ 2` is shared by `k` branches; it emits its own null vector **and** the
-`k` branch vectors of its own null space, split by the `x_lb0` (else
-`x_lb1`) shift of the monomial vector. No root ever takes a vector from a
-nearby root's space; FK certification (Step 9) keeps the real branches and
-the same-root dedup merges repeats. Python and native apply the same rules.
+`k ≥ 2` may carry up to `k` branches; it emits its own null vector **and**
+every branch vector the `x_lb0` shift and the `x_lb1` shift of the monomial
+vector determine in its own null space: one per real, simple eigenvalue of
+each shift's projected `k × k` pencil. A genuine branch vector satisfies its
+shift relation on every row, so it is an eigenvector of the projected pencil
+whatever the rest of the space holds. Next to a degenerate pose the space
+also holds directions with no monomial structure, and branches that share
+`x_lb0`, so a shift that does not give `k` distinct real values still reads
+the branches it can (#673). No root ever takes a vector from a nearby root's
+space; FK certification (Step 9) keeps the real branches and the same-root
+dedup merges repeats. Python and native apply the same rules.
 
 ### Step 7 — Back-substitution (MC §IV-C/D)
 Each eigenvector of Σ has structure `V = [v; x₃·v]`. Per root:
@@ -140,9 +146,10 @@ Bulletproof discipline — same standard as `spherical_two_parallel`:
 - **Q-rank degeneracy on Pieper arms.** Puma's `Q` has rank ≤7 for some
   poses; rare but real. Mitigation: SVD with explicit rank threshold
   matching MC §IV-B.
-- **Singular pencils** (`det M(x) ≡ 0`, e.g. hc10 near_singular/9): no root
-  or split rule can read branches there; tracked as a solution continuum
-  (#662).
+- **Singular pencils** (`det M(x) ≡ 0`): the regular branches at hc10
+  near_singular/9 sit at roots whose null space is 3-dimensional and are read
+  by the `x_lb1` shift (#673); the pose's singular branches are a solution
+  continuum (#662).
 - **POE → DH conversion correctness.** Already shipped in `kinematics.poe`,
   but the JACO 2 fixture will be the first non-orthogonal-twist exercise;
   audit before relying on it.

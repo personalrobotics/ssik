@@ -40,6 +40,10 @@ GOLDEN_PATH = Path(__file__).parent / "data" / "branch_goldens.json"
 
 PI = np.pi
 
+# FK closure at a pose that also carries singular branches: those are refined
+# only to the solver's closure gate (DEFAULT_TOLERANCE_POLICY.subproblem_numerical).
+_SINGULAR_FK_TOL = 1e-5
+
 
 @dataclass(frozen=True)
 class BranchFixture:
@@ -64,6 +68,12 @@ class BranchFixture:
     """FK closure every returned branch must meet. A pose near a singularity
     fixes its near-double root only to about eps / (distance to it), so its
     branches close FK to that conditioning, not to round-off."""
+    complete: bool = True
+    """Whether the fixture owes the pose's complete branch set. False at a pose
+    beside a singular continuum or with singular branches of its own, where no
+    complete set is owed (the oracle may not even stabilise, and its golden is
+    then a lower bound): the fixture owes only the recovery of the regular
+    branch ``q_star``, on the native core and the Python artifact alike (#673)."""
 
     def build(self) -> Any:
         import ssik
@@ -278,6 +288,126 @@ FIXTURES: tuple[BranchFixture, ...] = (
         prebuilt="irb6700_ik",
         # q5 = 9.3e-8 is a near-double root known to eps / q5 ~ 2e-9.
         fk_tol=1e-7,
+    ),
+    # Regular branches at a root whose null space holds more than its branches
+    # (#673): beside a degenerate pose, M(x) at the branch's root has k = 3 or
+    # 5 null directions, some with no monomial structure, and some branches
+    # share x_lb0. The split used to give up unless one shift produced k
+    # distinct real values, so these well-conditioned, in-limits branches were
+    # left to a near-miss refinement that the accurate QZ roots of #663 no
+    # longer offered. Each shift now keeps every vector it determines. The
+    # chart-free oracle finds each q*, but these poses also carry singular
+    # branches or a continuum, so only q* is owed (complete=False).
+    BranchFixture(
+        name="hc10_pencil_singular_a",
+        description=(
+            "Yaskawa HC10 at #648's near_singular/9, sigma_min/sigma_max(J) = 0.054 "
+            "at q*. M(x) has a 3-dimensional null space at q*'s root; the x_lb0 "
+            "shift returns two equal values there, so only x_lb1 reads q*. "
+            "Python lost it after #663; native returned it."
+        ),
+        dh_alpha=(),
+        dh_a=(),
+        dh_d=(),
+        q_star=(
+            -2.864072569552927,
+            -2.7582261466053692,
+            3.688695266638469,
+            -1.9030869458411246,
+            -0.6809884056146306,
+            -0.8860850549453904,
+        ),
+        prebuilt="hc10_ik",
+        complete=False,
+        fk_tol=_SINGULAR_FK_TOL,
+    ),
+    BranchFixture(
+        name="hc10_pencil_singular_b",
+        description=(
+            "The second branch of the same HC10 pose, at the other root with a "
+            "3-dimensional null space. Neither backend returned it after #663."
+        ),
+        dh_alpha=(),
+        dh_a=(),
+        dh_d=(),
+        q_star=(
+            2.408397724405382,
+            2.758226161082482,
+            2.594490036696848,
+            1.9030870005020777,
+            0.6809883885036729,
+            2.7125853858955304,
+        ),
+        prebuilt="hc10_ik",
+        complete=False,
+        fk_tol=_SINGULAR_FK_TOL,
+    ),
+    BranchFixture(
+        name="crx10ial_q2_at_pi_near_singular",
+        description=(
+            "FANUC CRX-10iA/L at #648's near_singular/42, q2 = pi, sigma ratio "
+            "0.030. M(x) at the root x = -1 has a 5-dimensional null space; the "
+            "x_lb0 shift gives two simple real values and a triple, so the old "
+            "all-or-nothing split emitted nothing. Lost on both backends."
+        ),
+        dh_alpha=(),
+        dh_a=(),
+        dh_d=(),
+        q_star=(
+            -2.902329660869271,
+            3.141592653589793,
+            1.0614672740156639,
+            1.927251991675175,
+            2.5006634943062647,
+            0.8689742235456543,
+        ),
+        prebuilt="fanuc_crx10ial_ik",
+        complete=False,
+        fk_tol=_SINGULAR_FK_TOL,
+    ),
+    BranchFixture(
+        name="crx10ial_q2_at_pi_sing_at_limit",
+        description=(
+            "FANUC CRX-10iA/L at #648's sing_at_limit/8, q2 = pi, sigma ratio "
+            "0.016: the same 5-dimensional null space at x = -1, with complex "
+            "x_lb1 values beside the real ones. Lost on both backends."
+        ),
+        dh_alpha=(),
+        dh_a=(),
+        dh_d=(),
+        q_star=(
+            -0.6713613611924283,
+            3.1415926535897922,
+            -1.189774379278396,
+            -2.374202621389286,
+            -2.8797932657906435,
+            -0.0014787539194081214,
+        ),
+        prebuilt="fanuc_crx10ial_ik",
+        complete=False,
+        fk_tol=_SINGULAR_FK_TOL,
+    ),
+    BranchFixture(
+        name="crx30ia_q2_at_zero_sing_at_limit",
+        description=(
+            "FANUC CRX-30iA at #648's sing_at_limit/9, q2 = 0, sigma ratio 9e-4: "
+            "a 5-dimensional null space at x = 1. Python lost it after #663; "
+            "native returned only an LM point 1.3e-4 away."
+        ),
+        dh_alpha=(),
+        dh_a=(),
+        dh_d=(),
+        q_star=(
+            -1.911823911328105,
+            6.508471570661114e-15,
+            1.524358829611817,
+            -3.2358792733248336,
+            -0.023322301746825567,
+            3.297623286294995,
+        ),
+        prebuilt="fanuc_crx30ia_ik",
+        complete=False,
+        fk_tol=_SINGULAR_FK_TOL,
     ),
 )
 

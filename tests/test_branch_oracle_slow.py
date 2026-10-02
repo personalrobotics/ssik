@@ -36,6 +36,13 @@ def test_oracle_reproduces_the_golden(fixture) -> None:
 
     arm = fixture.build()
     res = enumerate_branches(arm.kinbody, arm.fk(fixture.q_star_array()))
+    if not fixture.complete:
+        # Beside a singular continuum the oracle never stabilises; what it can
+        # still confirm is that q* is one of the branches it converges to.
+        assert res.contains(fixture.q_star_array(), _EQUIV_TOL), (
+            f"{fixture.name}: the oracle does not find q* as a branch"
+        )
+        return
     assert res.stabilized, f"oracle did not stabilize at budget {res.budget_used}"
 
     expected = [np.asarray(b, dtype=np.float64) for b in golden["branches"]]

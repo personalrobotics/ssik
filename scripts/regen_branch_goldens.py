@@ -28,8 +28,21 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "tests"))
 
+import numpy as np  # noqa: E402
 from tests._branch_fixtures import FIXTURES, GOLDEN_PATH  # noqa: E402
 from tests._branch_oracle import enumerate_branches  # noqa: E402
+
+from ssik.refinement import kinbody_jacobian  # noqa: E402
+
+# Where a fixture owes only its regular branch (``complete=False``), the golden
+# keeps the oracle's regular branches only: beside a continuum the oracle
+# returns hundreds of its points, which are neither owed nor stable.
+_REGULAR_RATIO = 1e-4
+
+
+def _regular(kb: object, q: np.ndarray) -> bool:
+    s = np.linalg.svd(kinbody_jacobian(kb, q), compute_uv=False)
+    return bool(s[-1] >= _REGULAR_RATIO * s[0])
 
 
 def main() -> int:
@@ -50,7 +63,10 @@ def main() -> int:
         res = enumerate_branches(arm.kinbody, t_target)
         elapsed = time.perf_counter() - t0
 
-        if not res.stabilized:
+        branches = list(res.branches)
+        if not fx.complete:
+            branches = [q for q in branches if _regular(arm.kinbody, q)]
+        elif not res.stabilized:
             print(
                 f"  {fx.name}: NOT STABILIZED at budget {res.budget_used}; the branch "
                 f"count was still growing, so this is a lower bound. Raise the budgets "
@@ -61,14 +77,14 @@ def main() -> int:
             "fingerprint": fx.fingerprint(),
             "issue": fx.issue,
             "description": fx.description,
-            "n_branches": len(res),
-            "branches": [[float(v) for v in q] for q in res.branches],
+            "n_branches": len(branches),
+            "branches": [[float(v) for v in q] for q in branches],
             "worst_fk": res.worst_fk,
             "budget_used": res.budget_used,
             "stabilized": res.stabilized,
         }
         print(
-            f"  {fx.name}: {len(res)} branches, worst FK {res.worst_fk:.1e}, "
+            f"  {fx.name}: {len(branches)} branches, worst FK {res.worst_fk:.1e}, "
             f"budget {res.budget_used}, {elapsed:.1f}s"
         )
 

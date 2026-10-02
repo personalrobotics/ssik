@@ -201,7 +201,12 @@ inline Mat12 embed_e(const Mat6x9& e) {
 // v[hi] = x_lb0 * v[lo] over the index pairs below, so inside the null space N
 // (12 x k) the branch vectors are exactly the eigenvectors c of the k x k
 // pencil N[hi] c = w N[lo] c. When the branches share x_lb0 too, the x_lb1
-// shift separates them. Mirrors _raghavan_roth._emit_branches.
+// shift separates them. Both shifts are read, and each keeps every eigenvector
+// it determines (a real, simple w), not an all-or-nothing set of k (#673): next
+// to a degenerate pose the null space also holds directions with no monomial
+// structure, and a genuine c stays an eigenvector of the projected pencil
+// whatever they do. FK certification drops what the others read. Mirrors
+// _raghavan_roth._emit_branches.
 
 // Numerical rank tolerance for M(x), relative to its largest singular value:
 // sqrt(eps). A lone null vector read from a space whose next singular value is
@@ -217,13 +222,13 @@ inline constexpr int kShiftLb1Hi[8] = {7, 6, 4, 3, 1, 0, 10, 9};
 
 using NullBasis = Eigen::Matrix<double, 12, Eigen::Dynamic>;
 
-// Branch vectors in span(n_basis) from one shift; false when the shift does not
-// give k distinct real values.
+// The branch vectors one shift determines in span(n_basis), appended to out:
+// one per real, simple eigenvalue of the projected shift pencil.
 template <int R>
-inline bool shift_split_one(const NullBasis& n_basis, const int (&lo)[R], const int (&hi)[R],
+inline void shift_split_one(const NullBasis& n_basis, const int (&lo)[R], const int (&hi)[R],
                             double imag_tol, std::vector<Vec12>& out) {
   const int k = static_cast<int>(n_basis.cols());
-  if (k > R) return false;
+  if (k > R) return;
   Eigen::MatrixXd low(R, k), high(R, k);
   for (int r = 0; r < R; ++r) {
     low.row(r) = n_basis.row(lo[r]);
@@ -239,31 +244,29 @@ inline bool shift_split_one(const NullBasis& n_basis, const int (&lo)[R], const 
 
   Eigen::GeneralizedEigenSolver<Eigen::MatrixXd> ges;
   ges.compute(high_k, low_k, /*computeEigenvectors=*/false);
-  if (ges.info() != Eigen::Success) return false;
-  std::vector<Vec12> parts;
+  if (ges.info() != Eigen::Success) return;
   for (int i = 0; i < k; ++i) {
     const std::complex<double> alpha = ges.alphas()(i);
     const double beta = ges.betas()(i);
     const double scale = std::hypot(std::abs(alpha), std::abs(beta));
-    if (!(scale > 0.0) || !std::isfinite(scale)) return false;
+    if (!(scale > 0.0) || !std::isfinite(scale)) continue;  // singular pencil's indeterminate pair
     const std::complex<double> a = alpha / scale;
-    if (std::abs(a.imag()) > imag_tol) return false;  // complex pair: not real branches
+    if (std::abs(a.imag()) > imag_tol) continue;  // complex: not a real branch
     // c spans the null space of beta*H - alpha*L; read it by SVD, not from a QZ
     // eigenvector, which is ill-defined at beta = 0.
     const Eigen::MatrixXd p = (beta / scale) * high_k - a.real() * low_k;
     Eigen::JacobiSVD<Eigen::MatrixXd> null(p, Eigen::ComputeFullV);
     const auto& s = null.singularValues();
-    if (k > 1 && s(k - 2) <= kNullRankRtol * s(0)) return false;  // w repeats
+    if (k > 1 && s(k - 2) <= kNullRankRtol * s(0)) continue;  // w repeats
     const Vec12 v = n_basis * null.matrixV().col(k - 1);
-    parts.push_back(v.normalized());
+    out.push_back(v.normalized());
   }
-  out = std::move(parts);
-  return true;
 }
 
-inline bool shift_split(const NullBasis& n_basis, double imag_tol, std::vector<Vec12>& out) {
-  return shift_split_one(n_basis, kShiftLb0Lo, kShiftLb0Hi, imag_tol, out) ||
-         shift_split_one(n_basis, kShiftLb1Lo, kShiftLb1Hi, imag_tol, out);
+// Every branch vector the x_lb0 shift or the x_lb1 shift determines.
+inline void shift_split(const NullBasis& n_basis, double imag_tol, std::vector<Vec12>& out) {
+  shift_split_one(n_basis, kShiftLb0Lo, kShiftLb0Hi, imag_tol, out);
+  shift_split_one(n_basis, kShiftLb1Lo, kShiftLb1Hi, imag_tol, out);
 }
 
 // An accepted root with the SVD of M(x) (A at infinity).
@@ -274,18 +277,19 @@ struct RootSvd {
 };
 
 // Emit (root, v_12) pairs: every root with its own null vector, and a root
-// whose null space is k-dimensional (k >= 2) also with the k branch vectors of
-// that space. Multiplicity is read from M(x)'s singular values rather than
-// from how close the eigenvalues are: a defective double root has two equal
-// eigenvalues and a one-dimensional null space, and needs no split. Each root
+// whose null space is k-dimensional (k >= 2) also with the branch vectors the
+// shifts determine in that space. Multiplicity is read from M(x)'s singular
+// values rather than from how close the eigenvalues are: a defective double
+// root has two equal eigenvalues and a one-dimensional null space, and needs no
+// split. Each root
 // reads only its OWN null space, never a nearby root's: at two close roots the
 // spaces differ, and a branch vector carried from one to the other is off by
 // their separation, which lost branches at pairs of near-double roots (#640).
 // Nor is a root's own null vector dropped when k >= 2: where the multiplicity
 // test misjudges k, that vector is the one that closes. FK certification
 // downstream keeps the real branches, and a branch emitted at two roots of one
-// cluster merges in the same-root dedup. A space that does not split into k
-// distinct real branches emits only the root's own vector. Mirrors
+// cluster merges in the same-root dedup. A shift value that is complex or
+// repeated determines no vector and emits none. Mirrors
 // _raghavan_roth._emit_branches.
 inline void emit_split_roots(const std::vector<RootSvd>& acc, double imag_tol,
                              std::vector<double>& roots, std::vector<Vec12>& vecs) {
@@ -297,7 +301,7 @@ inline void emit_split_roots(const std::vector<RootSvd>& acc, double imag_tol,
       if (r.sv(i) <= kNullRankRtol * r.sv(0)) ++k;
     if (k < 2) continue;
     std::vector<Vec12> branches;
-    if (!shift_split(r.v.rightCols(k), imag_tol, branches)) continue;
+    shift_split(r.v.rightCols(k), imag_tol, branches);
     for (const auto& b : branches) {
       roots.push_back(r.x);
       vecs.push_back(b);
