@@ -57,33 +57,17 @@ pytestmark = pytest.mark.skipif(
 # scripts/regen_native_parity.py from the committed per-platform cells.
 # hc10_ik's E and J cells are near_singular/9, where the RR pencil is singular
 # (det M(x) vanishes for every x): no root or split rule reads its branches,
-# and each backend samples the solution continuum at its own points (#662).
+# and each backend samples the solution set at its own points. The solutions
+# one backend misses there are regular roots, not points of a continuum, so the
+# singular-continuum rule (#662) does not reach them.
 ALL = ("darwin", "linux")
 
 KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
     "E": {
-        "cr5_ik": ("darwin",),
         "hc10_ik": ALL,
-        "irb6700_ik": ("linux",),
-        "kr210_r2700_ik": ("darwin",),
-        "nova5_ik": ALL,
-        "puma560_ik": ALL,
-        "rv4fr_ik": ("darwin",),
-        "standardbots_core_ik": ALL,
-        "standardbots_spark_ik": ("darwin",),
-        "standardbots_thor_ik": ALL,
-        "ur10e_ik": ALL,
-        "ur15_ik": ALL,
-        "ur16e_ik": ALL,
-        "ur18_ik": ("darwin",),
-        "ur20_ik": ALL,
-        "ur3e_ik": ("linux",),
-        "ur5_ik": ALL,
-        "ur5e_ik": ALL,
     },
     "F": {
         "fanuc_crx20ial_ik": ("linux",),
-        "fanuc_crx3ia_ik": ALL,
         "openarm_left_ik": ALL,
         "openarm_right_ik": ALL,
     },
@@ -96,33 +80,13 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
         "yumi_left_ik": ALL,
     },
 }
-
 KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
     "F": {
         "fanuc_crx3ia_ik": ("linux",),
-        "piper_ik": ALL,
     },
     "J": {
-        "cr5_ik": ALL,
-        "gp8_ik": ALL,
         "hc10_ik": ("darwin",),
-        "irb6700_ik": ("darwin",),
-        "kr210_r2700_ik": ALL,
-        "lrmate200id_ik": ("darwin",),
-        "nova5_ik": ("linux",),
-        "r2000ic210l_ik": ALL,
-        "rv4fr_ik": ("linux",),
-        "standardbots_core_ik": ("linux",),
-        "standardbots_spark_ik": ("linux",),
-        "standardbots_thor_ik": ALL,
-        "ur10e_ik": ALL,
-        "ur15_ik": ALL,
-        "ur16e_ik": ALL,
-        "ur18_ik": ALL,
-        "ur20_ik": ALL,
-        "ur3e_ik": ALL,
-        "ur7e_ik": ALL,
-        "vs060_ik": ALL,
+        "ur18_ik": ("darwin",),
     },
 }
 

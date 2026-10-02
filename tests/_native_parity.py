@@ -41,7 +41,8 @@ the solve, tested in ``tests/test_winding_enumeration.py``):
        on Python;
     c. 6R coverage: the analytic solve (``allow_rescue=False``) on native
        contains every analytic Python solution, unless ``_Pose.excused``
-       shows the missing one is not a branch native lacks;
+       shows the missing one is not a branch native lacks (among them, two
+       points of one singular continuum match, ``_Pose.joined``, #662);
     d. 7R coverage: the same, except at a kinematic singularity
        (``SEVEN_R_SINGULAR``), where the backends sample a larger continuum
        at their own points and only emptiness is asserted;
@@ -80,7 +81,7 @@ from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY
 from ssik.postprocess import _LIMIT_BAND
 from ssik.prebuilt import list_arms
 from ssik.prebuilt._manifest import load_manifest
-from ssik.refinement import is_same_root, kinbody_jacobian, same_root_floor
+from ssik.refinement import is_same_root, kinbody_jacobian, same_root_floor, se3_log_residual
 
 __all__ = [
     "CLASSES",
@@ -156,32 +157,14 @@ ROUNDOFF_CLASSES: frozenset[str] = frozenset()
 # platform, as (direction, class, arm): non-strict like a round-off class,
 # until the named issue makes them reproducible. Record them under the ``ci``
 # key of the arm's ``cells`` (scripts/regen_native_parity.py).
-#   hc10 near_singular/9: the RR pencil is singular for every x, so each
-#   backend samples the solution continuum at points set by the machine's
-#   kernels, and whether native's land within the match radius of Python's
-#   follows the runner (#662).
-#   The UR cells: poses within |sin q5| ~ 1e-8 of a singular wrist, where q5 is
-#   a near-double root known to about sqrt(eps). A backend whose tangent rounds
-#   to an exact 0 or pi collapses atan2(sin q5 * a, sin q5 * b) and drops the
-#   branch the other keeps, and which backend that is follows the runner's
-#   kernels: two Linux runner types disagree on these cells (#662).
-#   fanuc_crx3ia forward F and piper reverse F: a general_6r solution at a
-#   limit lands past the band on the slow workflow's runner and inside it on
-#   the CI runners, with identical code (#632).
-RUNNER_DEPENDENT_CELLS = frozenset(
-    {
-        ("forward", "E", "hc10_ik"),
-        ("forward", "F", "fanuc_crx3ia_ik"),
-        ("reverse", "F", "piper_ik"),
-        ("forward", "E", "ur10e_ik"),
-        ("reverse", "J", "ur10e_ik"),
-        ("reverse", "J", "ur15_ik"),
-        ("forward", "E", "ur16e_ik"),
-        ("reverse", "J", "ur16e_ik"),
-        ("reverse", "J", "ur18_ik"),
-        ("forward", "E", "ur5e_ik"),
-    }
-)
+#   hc10 near_singular/9: the RR pencil is singular for every x, so no root
+#   or split rule reads its branches, and each backend samples the solution
+#   set at points set by the machine's kernels. The solutions one backend
+#   misses there are regular roots (sigma_min 0.1), not points of a
+#   continuum, so the singular-continuum rule (#662) does not reach them;
+#   whether native's land within the match radius of Python's follows the
+#   runner.
+RUNNER_DEPENDENT_CELLS = frozenset({("forward", "E", "hc10_ik")})
 
 # a. FK closure every returned solution must meet: the default policy's
 # acceptance gate, documented in README ("How to read fk_residual"). Some
@@ -222,6 +205,15 @@ ADJ_TOL = 1e-3
 # root; below it the solution may sit on a fold or a continuum, and only the
 # oracle can tell.
 REGULAR_SIGMA = 1e-3
+
+# c. Two solutions one backend each returns are the same continuum when
+# null-space continuation joins them (_Pose.joined, #662): a direction with
+# sigma at most CONTINUUM_SIGMA sigma_max is null (ssik.continuum.RANK_TOL), the
+# walk moves at most CONTINUATION_STEP rad per step and gives up after
+# CONTINUATION_STEPS (a full wrist turn and more).
+CONTINUUM_SIGMA = 1e-4
+CONTINUATION_STEP = 0.05
+CONTINUATION_STEPS = 200
 
 # False makes every adjudication a live oracle run (the regeneration script).
 USE_COMMITTED_ORACLE = True
@@ -557,13 +549,17 @@ class _Pose:
                 # The other backend has it just across a limit, beyond the band
                 # within which it would have put it on the limit (#624).
                 return "F"
-            if unmatched(q[None], self.sets[("raw", own, False)], self.tol):
-                # Not in its own raw set: its in-limits resolver produced it.
+            own_raw = self.sets[("raw", own, False)]
+            if unmatched(q[None], own_raw, self.tol):
+                # Not in its own raw set: its in-limits resolver produced it,
+                # or (6R) the singular-continuum slide moved one of its raw
+                # solutions along its continuum into the limits (#662).
                 if other == "native" and self.fam.startswith("seven_r.spherical_shoulder"):
                     return "A"
                 if other == "native" and self.fam == "seven_r.srs_polished":
                     return "I"
-                return NEW
+                if not (self.dof == 6 and any(self.joined(q, o) for o in own_raw)):
+                    return NEW
             if hits:
                 return NEW  # the other backend has it inside the limits, yet dropped it
         if self.dof == 6 and self.excused(q, other_raw):
@@ -582,7 +578,11 @@ class _Pose:
         2. A regular root (J full rank, and its FK error moves it far less than
            the match radius) is an isolated branch by the implicit function
            theorem, so it is never excused.
-        3. Near a singular root, the oracle decides (``Adjudication.verdict``).
+        3. Two points of one singular continuum match: null-space continuation
+           joins them (:meth:`joined`, #662). Each backend returns a continuum
+           at the point the rule names, but a point it could not move (a family
+           that closes FK only to the gate) stays wherever its core sampled it.
+        4. Near a singular root, the oracle decides (``Adjudication.verdict``).
         """
         r = self.fk_err(q)
         if any(
@@ -592,8 +592,49 @@ class _Pose:
         s = sigma_min(self.kb, q)
         if s >= REGULAR_SIGMA and r / s <= ADJ_TOL / 10:
             return False
+        if any(self.joined(q, o) for o in other_raw):
+            return True
         self.rep.oracle_poses.add(self.pid)
         return adjudicate(self.arm, self.pid).verdict(q, other_raw) is not None
+
+    def joined(self, q: Q, o: Q) -> bool:
+        """Whether ``q`` and ``o`` are two points of one singular continuum
+        (#662): null-space continuation from ``q`` reaches ``o`` within
+        ``ADJ_TOL`` without FK leaving ``FK_TOL``. Each step moves along the
+        directions where J is rank deficient (sigma at most ``CONTINUUM_SIGMA``
+        sigma_max) toward ``o``, at most ``CONTINUATION_STEP`` rad, then
+        Newton (least norm, the null directions truncated) brings it back
+        toward the solution set. Written independently of ``ssik.continuum``,
+        which it adjudicates. Two points joined so are one family as far as
+        the FK gate can tell, including a family that closes FK only
+        approximately at a pose near a continuum."""
+        x = np.array(q, dtype=np.float64)
+        for _ in range(CONTINUATION_STEPS):
+            gap = (o - x + np.pi) % _TWO_PI - np.pi
+            if float(np.max(np.abs(gap))) <= ADJ_TOL:
+                return True
+            _, s, vt = np.linalg.svd(kinbody_jacobian(self.kb, x))
+            null = vt[s <= CONTINUUM_SIGMA * s[0]]
+            if not null.shape[0]:
+                return False
+            d = null.T @ (null @ gap)
+            n = float(np.linalg.norm(d))
+            if n <= 1e-9:
+                return False  # o is off the continuum through x
+            x = x + d * min(1.0, CONTINUATION_STEP / n)
+            for _ in range(6):
+                t_q = np.asarray(self.m.fk(x), dtype=np.float64)
+                if float(np.linalg.norm(t_q - self.t)) <= self.floor:
+                    break
+                twist = se3_log_residual(self.t @ np.linalg.inv(t_q))
+                # Never along the null directions, or it would undo the step.
+                x = (
+                    x
+                    + np.linalg.lstsq(kinbody_jacobian(self.kb, x), twist, rcond=CONTINUUM_SIGMA)[0]
+                )
+            if self.fk_err(x) > FK_TOL:
+                return False
+        return False
 
     def across_limit(self, want: Q, other: str) -> bool:
         """Whether every solution of ``want`` is in the ``other`` backend's raw
