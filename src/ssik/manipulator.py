@@ -552,6 +552,35 @@ class Manipulator:
             native=native,
         )
 
+    def body_twists(self) -> NDArray[np.float64]:
+        """``(dof, 6)`` joint twists at ``q = 0`` in the end-effector frame, ``(v, w)``
+        order, so that ``fk(q) = fk(0) @ se3_exp(B[0] q[0]) @ ... @ se3_exp(B[-1] q[-1])``.
+
+        See :mod:`ssik.kinematics.twists`.
+        """
+        from ssik.kinematics.twists import body_twists
+
+        return body_twists(self._kb)
+
+    def free_tail(self, generators: ArrayLike, *, tol: float = 1e-9) -> int:
+        """How many of the last joints a partial target leaves free.
+
+        A target that fixes less than a pose (a tool axis on a line, a tool plane on a
+        plane, a tool point on a point) is ``T0 @ exp(span(generators))``, the generators
+        being body-frame twists of the end-effector frame in ``(v, w)`` order. When the
+        last ``k`` joint twists lie in that span, joints ``dof-k+1..dof`` drop out of the
+        target: any values inside their limits keep it satisfied, and only the first
+        ``dof - k`` joints need solving. A spin about the tool axis is the last joint
+        turning; a point at a spherical wrist's centre frees all three wrist joints.
+
+        :param generators: ``(d, 6)`` twists, or one ``(6,)`` twist.
+        :param tol: residual against the span, relative to the twist's norm.
+        :raises ValueError: when ``generators`` is not ``(d, 6)``.
+        """
+        from ssik.kinematics.twists import body_twists, free_tail
+
+        return free_tail(body_twists(self._kb), generators, tol=tol)
+
     def solve_path(
         self,
         poses: ArrayLike,
