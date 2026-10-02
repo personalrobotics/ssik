@@ -71,6 +71,19 @@ _SEEDED_REPROS = [
         [1.5159834099775709, 1.6047548686044288, -9.765352923466948e-05, 1.5707652493169775,
          0.0, -1.0347053998126028],
     ),
+    # #668: UR wrists at (ur15) and 5e-9 from (ur3e) a lock, where the SP6
+    # pitch leaves the wrist SP1s reading angles that miss the FK gate (ur15)
+    # or the elbow's reach (ur3e), so the branch was dropped before the slide.
+    (
+        "ur15_ik",
+        [-0.5626552052533758, 1.6048914870758173, 2.0394662794014966, -2.3270737168086453,
+         -3.141592653589793, 4.502876037038774],
+    ),
+    (
+        "ur3e_ik",
+        [-5.44384408067801, -4.403323468534377, -0.12735119360821867, 2.6179938889367707,
+         3.141592648472754, -1.9550162029918958],
+    ),
 ]  # fmt: skip
 
 
@@ -100,7 +113,7 @@ def _dump(tmp_path: Path, name: str, record: Any) -> None:
 def test_seeded_solve_at_a_singular_wrist_returns_the_seed(
     arm: str, q: list[float], native: bool, tmp_path: Path
 ) -> None:
-    """#653: a configuration on a singular continuum is its own nearest
+    """#653, #668: a configuration on a singular continuum is its own nearest
     solution, so the seeded solve returns it, at its own accuracy."""
     _skip_unbuilt(native)
     m = _module(arm)
