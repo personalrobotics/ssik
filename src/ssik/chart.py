@@ -1369,8 +1369,9 @@ def charts(
         reference.
     :raises NotImplementedError: for a solver family without a closed-form
         chart (see the module docstring).
-    :raises TypeError, ValueError: for a malformed ``T_target``, as
-        ``solve()`` (``docs/api.md``, "Input validation").
+    :raises TypeError: for a ``T_target`` of the wrong type, as ``solve()``
+        (``docs/api.md``, "Input validation").
+    :raises ValueError: for a malformed ``T_target``, as ``solve()``.
     """
     from ssik._solve_inputs import check_pose
 
