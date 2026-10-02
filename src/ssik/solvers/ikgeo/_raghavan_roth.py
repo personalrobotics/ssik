@@ -1163,16 +1163,22 @@ def _qz_roots(
     ok = np.isfinite(scale) & (scale > 0.0)  # a degenerate pencil row has neither
     scale = np.where(ok, scale, 1.0)
     re_n, im_n, b_n = alphar / scale, alphai / scale, beta / scale
-    # The root at infinity: one point, whatever the sign, real when alpha is.
+    # The root at infinity: one point, whatever the sign or phase of alpha
+    # (beta / alpha is real to within the vanishing beta).
     at_inf = ok & (np.abs(b_n) < _X_AT_INFINITY_TOL)
     finite = ok & ~at_inf
     b_safe = np.where(finite, b_n, 1.0)
     re, im = re_n / b_safe, np.abs(im_n / b_safe)
     spurious = (np.abs(im - 1.0) < spurious_tol) & (np.abs(re) < spurious_tol)
-    real = im <= imag_rel_tol * np.maximum(np.abs(re), 1.0)
-    keep_inf = at_inf & (np.abs(im_n) <= imag_rel_tol)
+    # Realness on the projective line (#673): Im x within imag_rel_tol for
+    # |x| <= 1, and Im(1/x) within it beyond, so the test means the same at
+    # every joint angle (Im q ~ 2 Im x / (1 + |x|^2) stays below ~2e-3). A
+    # near-double real root close to q = pi splits under round-off into a
+    # pair whose Im x is large next to Re x but small next to |x|^2; a test
+    # relative to Re x alone rejected it. FK certification decides.
+    real = im <= imag_rel_tol * np.maximum(re * re + im * im, 1.0)
     keep = finite & ~spurious & real
-    return [float(x) if k else np.inf for x, k, i in zip(re, keep, keep_inf, strict=True) if k or i]
+    return [float(x) if k else np.inf for x, k, i in zip(re, keep, at_inf, strict=True) if k or i]
 
 
 # ---------------------------------------------------------------------------

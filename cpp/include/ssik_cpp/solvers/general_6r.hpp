@@ -360,12 +360,11 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
     const double b_n = beta / pair_norm;
 
     if (std::abs(b_n) < 1e-12) {
-      // Root at infinity. Non-real alpha here is not a real branch; a real
-      // alpha gives q = pi, and M(alpha, 0) = alpha^2 * A, so the null
+      // Root at infinity: q = pi, and M(alpha, 0) = alpha^2 * A, so the null
       // vector is A's -- no division by the vanishing beta anywhere. The
-      // projective line has one point at infinity, so it is always +inf (the
-      // sign of the pair is QZ's choice); Python's Mobius path does the same.
-      if (std::abs(a_n.imag()) > imag_rel_tol) continue;
+      // projective line has one point at infinity, whatever the sign or phase
+      // of alpha (beta / alpha is real to within the vanishing beta), so it is
+      // always +inf; Python does the same.
       accept(std::numeric_limits<double>::infinity(), a_mat);
       continue;
     }
@@ -373,7 +372,11 @@ inline void solve_x2_roots(const Mat12& a_mat, const Mat12& b_mat, const Mat12& 
     const std::complex<double> lambda = a_n / b_n;
     const double re = lambda.real(), im = std::abs(lambda.imag());
     if (std::abs(im - 1.0) < spurious_tol && std::abs(re) < spurious_tol) continue;  // near +/-i
-    if (im > imag_rel_tol * std::max(std::abs(re), 1.0)) continue;                    // non-real
+    // Realness on the projective line (#673): Im x within imag_rel_tol for
+    // |x| <= 1 and Im(1/x) within it beyond, the same test at every joint
+    // angle. A near-double real root close to q = pi splits under round-off
+    // into a pair whose Im x is large next to Re x but small next to |x|^2.
+    if (im > imag_rel_tol * std::max(re * re + im * im, 1.0)) continue;  // non-real
     // v_12 = right null-vector of the real 12x12 M(re) = A re^2 + B re + C.
     accept(re, a_mat * (re * re) + b_mat * re + c_mat);
   }

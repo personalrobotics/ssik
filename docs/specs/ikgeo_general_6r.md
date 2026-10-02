@@ -58,10 +58,15 @@ Equilibrate `(A, B, C)` and solve the 24×24 pencil `M₁ − x·M₂`
 (`M₁ = [[I, 0], [0, C]]`, `M₂ = [[0, I], [−A, −B]]`) by QZ (LAPACK `dggev`;
 Eigen's `GeneralizedEigenSolver` on native). QZ never inverts `A`, so a
 singular leading matrix needs no fallback: its roots come back as eigenvalue
-pairs with `β = 0`, the root at infinity (the joint at π, #571). **Drop the 8
-spurious roots near `±i`** (from the `(1+x₃²)⁴` factor) and roots whose
-imaginary part exceeds `1e-3 · max(|re|, 1)`. A QZ that does not converge
-yields no roots, never an exception (#599, #658).
+pairs with `β = 0`, the root at infinity (the joint at π, #571), which is
+kept whatever the phase of `α`. **Drop the 8 spurious roots near `±i`** (from
+the `(1+x₃²)⁴` factor) and roots that are not real on the projective line:
+`|Im x| > 1e-3 · max(|x|², 1)`, i.e. `Im x` above `1e-3` inside the unit disc
+and `Im(1/x)` above it outside, the same bound on `Im q` at every angle
+(#673). A near-double real root close to `q = π` splits under round-off into
+a pair whose `Im x` is large next to `Re x` but small next to `|x|²`; a bound
+relative to `Re x` dropped it. A QZ that does not converge yields no roots,
+never an exception (#599, #658).
 
 The 24×24 companion route of Theorem 1 (`Σ = [[0, I], [−A⁻¹C, −A⁻¹B]]`,
 `solve_x2_roots`) is kept as a reference only: its error is amplified through
