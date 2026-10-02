@@ -203,11 +203,43 @@ def test_both_solvers_agree_on_random_pose(puma_kb: Any, q_star: np.ndarray) -> 
 
 
 _NEAR_SINGULAR_Q = [
-    np.array([0.5, -0.8, 1.0, 0.3, 0.0, 0.4]),  # wrist pitch zero
-    np.array([0.5, -0.8, 1.0, 0.3, np.pi, 0.4]),  # wrist pitch pi
     np.array([0.5, -0.8, 0.0, 0.3, 0.6, 0.4]),  # elbow zero
     np.array([0.0, -0.8, 1.0, 0.3, 0.6, 0.4]),  # shoulder-pan zero
 ]
+
+# Wrist pitch at 0 or pi: the wrist is locked and q4, q6 range over a
+# continuum. spherical_two_parallel returns its documented representative
+# (q6 = 0, ssik.continuum, #662). spherical_two_intersecting (not a shipped
+# family, so without the lock split) returns an arbitrary sample or, where its
+# wrist SP1s divide zero by zero, nothing: every continuum it finds is one
+# spherical_two_parallel returns, and the latter has q*'s own.
+_LOCKED_WRIST_Q = [
+    np.array([0.5, -0.8, 1.0, 0.3, 0.0, 0.4]),
+    np.array([0.5, -0.8, 1.0, 0.3, np.pi, 0.4]),
+]
+
+
+@pytest.mark.parametrize("q_star", _LOCKED_WRIST_Q)
+def test_both_solvers_agree_on_the_continua_at_a_locked_wrist(
+    puma_kb: Any, q_star: np.ndarray
+) -> None:
+    T_star = _fk(puma_kb, q_star)
+    sols_par, _ = spherical_two_parallel.solve(puma_kb, T_star)
+    sols_int, _ = spherical_two_intersecting.solve(puma_kb, T_star)
+
+    def keys(sols: list[Any]) -> list[np.ndarray]:
+        out: list[np.ndarray] = []
+        for s in sols:
+            assert np.allclose(_fk(puma_kb, s.q), T_star, atol=1e-7)
+            k = np.asarray(s.q)[[0, 1, 2, 4]]
+            if not any(_q_close(k, o, 1e-5) for o in out):
+                out.append(k)
+        return out
+
+    par = keys(sols_par)
+    for k in keys(sols_int):
+        assert any(_q_close(k, o, 1e-5) for o in par), f"par lacks {k.tolist()}"
+    assert any(_q_close(q_star[[0, 1, 2, 4]], o, 1e-5) for o in par)
 
 
 @pytest.mark.parametrize("q_star", _NEAR_SINGULAR_Q)

@@ -52,6 +52,79 @@ candidate that *failed* the acceptance gate, and tags a candidate it rescues
 `"lm"`. It stops as soon as the residual is within the gate, so a rescued
 solution is only as accurate as the gate.
 
+### Singular continua
+
+At a singular pose a 6R arm can have a one-parameter family of solutions, a
+**continuum**, instead of isolated ones. The common case is a wrist whose
+outer axes line up (`sin q5 = 0`): only `q4 + q6` (or `q4 - q6`) is fixed, and
+every split of it reaches the target. A solver sees such a family only as
+whatever samples its arithmetic lands on. On both backends, and for every 6R
+family (`three_parallel`, `spherical_two_parallel`, `general_6r`), `solve()`
+returns:
+
+- **Seeded** (`q_seed` given): from each continuum, the point nearest the seed
+  within the joint limits. "Nearest" is along the continuum: the point where
+  the continuum's tangent is orthogonal to the seed offset (every joint
+  compared on the circle), or, if that point is outside the limits, the
+  in-limit point reached by the shortest walk along the continuum from it.
+  The usual seed ranking then orders it among the other solutions, so a
+  configuration on a continuum returns itself as the nearest solution.
+- **Unseeded**: one representative per continuum, the point whose **free
+  joint** is at `0` (modulo `2*pi`). The free joint is `q6` for a locked wrist
+  of the closed-form families and, for `general_6r`, the highest-index joint
+  the continuum moves (by at least a tenth of its unit tangent). If that point
+  is outside the limits, the representative is the in-limit point nearest it
+  along the continuum. If the continuum does not reach it (a UR-type arm whose
+  elbow cannot follow), the representative is where the walk toward it stops,
+  at the turn of the continuum nearest it.
+
+With `respect_limits=False` (or `"wrap"`) the limits play no part: the point
+is the seed's nearest, or the one with the free joint at `0`. A continuum with
+no in-limit point is dropped by the limit pass, as any out-of-limit solution
+is.
+
+Only a solution the solver flags pays for this, and nothing measures the
+Jacobian of every solution:
+
+- The closed-form cores measure how close the wrist is to locked: the sine
+  between the wrist-roll axis and the pitched outer wrist axis. Within `1e-4`
+  they flag the candidate. That covers the precision to which each core
+  resolves the wrist pitch at an exact lock, a double root (within `5.4e-8` of
+  it through `spherical_two_parallel`'s closed form, `5.6e-6` through
+  `three_parallel`'s numerical SP6, over 200 exactly locked poses per arm), so
+  both backends flag the same continuum whichever side of the lock their
+  arithmetic lands. Both keep their wrist angles (on a lock they are a point of
+  the continuum) unless they divide zero by zero (sine within `1e-9`, the
+  rule the spherical-shoulder 7R core already uses) or miss the target's wrist
+  rotation by more than `1e-4`. Then they split the lock. `three_parallel`,
+  whose numerical wrist pitch is too coarse to read the angles there, makes
+  its shoulder and pitch exact for the lock and sets `q6` to the seed's value
+  (`0` unseeded) and to that plus `pi`, each moved to the nearest of 64 values
+  around the circle at which the elbow can reach, reading the other wrist
+  angle off the target. `spherical_two_parallel`, on the lock, sets `q6` to
+  the seed's value (`0` unseeded), and near it returns the two branches on
+  either side.
+- `general_6r` flags an accepted candidate whose Jacobian may be rank
+  deficient: the Frobenius condition number of `J^T J + 1e-9 I`, the matrix
+  its polish solves with anyway, is at least `5e7`. That bounds
+  `(sigma_max / sigma_min)^2` from above, so it misses none, and the slide
+  confirms with an SVD.
+
+A flagged solution moves only along the directions where `J` is rank
+deficient (`sigma <= 1e-4 sigma_max`), each step corrected back onto the
+solution set by Gauss-Newton steps that never move along them, and the moved
+point is kept only if it closes FK to `1e-10`; otherwise the solution stays as
+the solver produced it. Every point of an exact continuum closes FK to
+round-off, so there the rule's point is returned on both backends. At a pose
+only near a continuum, where the family closes FK approximately, an isolated
+solution stays where the solver put it, unless the rule's point is itself an
+exact solution: a seed that is one is returned. Samples that reach the same
+point merge. `fk_residual` is the moved point's. `refinement_used` keeps the
+solver's tag. The definition, with every constant, is in `ssik.continuum`; the
+native backend runs the same one (`cpp/include/ssik_cpp/continuum.hpp`).
+Exactly singular poses get different values from earlier releases, which
+returned whatever sample the arithmetic produced, or none.
+
 ## Diagnostic record: `Diagnostic`
 
 Returned alongside the solution list when `solve(T, explain=True)`.
