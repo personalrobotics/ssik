@@ -39,6 +39,7 @@ your robot's home pose, the artifact is for a different URDF.
 from __future__ import annotations
 
 import math
+from ssik import continuum as _continuum
 from ssik.subproblems import sp6 as _sp6_runtime
 
 _DEG_SQ = 1e-16
@@ -51,6 +52,7 @@ from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.refinement import lm_refine as _lm_refine
+from ssik.continuum import NOT_FLAGGED as _NOT_FLAGGED, slide_continua as _slide_continua
 from ssik.refinement import is_same_root as _is_same_root, same_root_floor as _same_root_floor
 import functools as _functools
 from ssik.refinement.rescue import rescue_via_T_perturbation as _rescue_via_T_perturbation
@@ -152,9 +154,34 @@ def _build_kb() -> KinBody:
 _KB = _build_kb()
 
 
-def _solve_algebraic(T_target):
+# The wrist-lock split's geometry (ssik.continuum): the joint axes and
+# the flange's home rotation.
+_LOCK_AXES = (
+    (0.0, 0.0, 1.0),
+    (6.546032143408815e-06, -0.9999999999785486, -2.2874658688865404e-07),
+    (6.546032143408815e-06, -0.9999999999785486, -2.2874658688865404e-07),
+    (6.546032143408815e-06, -0.9999999999785486, -2.2874658688865404e-07),
+    (1.55038416574638e-11, 3.4444585166346543e-06, 0.9999999999940679),
+    (6.546032143408815e-06, -0.9999999999785485, -2.287465868886538e-07),
+)
+_R_HOME = ((-0.9999999999785749, -3.9548760333570576e-11, 6.546032143408815e-06), (-6.546032143417691e-06, 2.2874658663466737e-07, -0.9999999999785485), (3.805139054365169e-11, -0.9999999999999738, -2.287465868886538e-07))
+# The chain's offsets p[0..6], for the locked wrist's elbow reach.
+_LOCK_OFFSETS = (
+    (0.0, 0.0, 0.240000000000178),
+    (0.0, 0.0, 0.0),
+    (1.9510744523124068e-07, -9.149735757780322e-08, 0.3999999999999422),
+    (1.0446879754166627e-06, -0.13499960834115798, 0.3299999691192693),
+    (4.745851240114065e-12, -2.7449590406236624e-08, 0.11999999999999678),
+    (5.781979271719445e-07, -0.08832799999758359, 3.04242131932142e-07),
+    (0.0, 0.0, 0.0),
+)
+
+
+def _solve_algebraic(T_target, q_free=0.0, free=None):
     """Algebraic IK candidates. Calls runtime SP6 for (q1, q5);
-    inlines the post-SP6 SP1+SP3+SP1 chain.
+    inlines the post-SP6 SP1+SP3+SP1 chain. A locked wrist takes
+    q6 = q_free; ``free``, when given, receives per candidate the
+    free joint of a locked wrist or NOT_FLAGGED (ssik.continuum).
     """
     r_00 = T_target[0, 0]
     r_01 = T_target[0, 1]
@@ -247,83 +274,98 @@ def _solve_algebraic(T_target):
         q6_x22 = 0.999999999993228*q6_x0 - 1.39769753659379e-16*q6_x1 + 1.39770515211236e-16
         q6_x23 = -q6_x11*q6_x6 - q6_x12*q6_x6 + 0.999999999957097*q6_x14 + 6.54603214326839e-6*q6_x15 - q6_x16*q6_x8 + q6_x17*q6_x8 + 6.54603214326839e-6*q6_x19 - 0.999999999957097*q6_x20 - 9.04664685157764e-18*r_20 + 2.28746586883753e-7*r_21 + 6.31088724176809e-30*r_22
         q6 = math.atan2(2.28746586888654e-7*q6_x10*q6_x21 - 0.999999999978548*q6_x10*q6_x9 - 2.28746586888654e-7*q6_x2*q6_x23 - 6.54603214340882e-6*q6_x2*q6_x9 + 6.54603214340882e-6*q6_x21*q6_x22 + 0.999999999978548*q6_x22*q6_x23, q6_x10*q6_x23 + q6_x2*q6_x21 + q6_x22*q6_x9)
-        s14 = math.sin(theta14)
-        c14 = math.cos(theta14)
-        # d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
-        dinr_x0 = math.sin(theta14)
-        dinr_x1 = math.cos(theta14)
-        dinr_x2 = math.sin(q1)
-        dinr_x3 = math.cos(q1)
-        dinr_x4 = 0.999999999957149*dinr_x1 + 4.28505368225414e-11
-        dinr_x5 = math.cos(q5)
-        dinr_x6 = 5.78197927171945e-7*dinr_x5 + 1.38980918926153e-28
-        dinr_x7 = 0.999999999978549*dinr_x0
-        dinr_x8 = 1.49738251046819e-12*dinr_x1 - dinr_x7 - 1.49738251046819e-12
-        dinr_x9 = 3.60961607124249e-18*dinr_x5 + 3.04242131928532e-7
-        dinr_x10 = 0.999999999988136*dinr_x5 + 1.1864294472817e-11
-        dinr_x11 = 2.28746586888654e-7*dinr_x0
-        dinr_x12 = 6.54603214326839e-6*dinr_x1 + dinr_x11 - 6.54603214326839e-6
-        dinr_x13 = math.sin(q5)
-        dinr_x14 = 0.999999999994068*dinr_x13
-        dinr_x15 = 5.34023394376063e-17*dinr_x5
-        dinr_x16 = -dinr_x14 - dinr_x15 + 5.34023394376063e-17
-        dinr_x17 = 3.44445851663465e-6*dinr_x13
-        dinr_x18 = 1.55038416573718e-11*dinr_x5
-        dinr_x19 = 3.04242131932142e-7*dinr_x17 - 3.04242131932142e-7*dinr_x18 + 4.71692183897716e-18
-        dinr_x20 = -5.78197927171945e-7*dinr_x17 - 5.78197927171945e-7*dinr_x18 + 8.96428910949444e-18
-        dinr_x21 = 1.55038416574638e-11*dinr_x13
-        dinr_x22 = 3.44445851661422e-6*dinr_x5
-        dinr_x23 = -3.04242131932142e-7*dinr_x21 - 3.04242131932142e-7*dinr_x22 + 1.04794940244653e-12
-        dinr_x24 = dinr_x21 - dinr_x22 + 3.44445851661422e-6
-        dinr_x25 = 5.78197927171945e-7*dinr_x14 - 5.78197927171945e-7*dinr_x15 + 3.08771219689566e-23
-        dinr_x26 = 4.29027924297998e-11*dinr_x1 + 0.999999999957097
-        dinr_x27 = 6.54603214340882e-6*dinr_x0
-        dinr_x28 = 2.28746586883747e-7*dinr_x1
-        dinr_x29 = -dinr_x27 - dinr_x28 + 2.28746586883747e-7
-        dinr_x30 = 6.54603214326839e-6*dinr_x1 - dinr_x11 - 6.54603214326839e-6
-        dinr_x31 = 0.999999999999948*dinr_x1 + 5.23250010132086e-14
-        dinr_x32 = dinr_x27 - dinr_x28 + 2.28746586883747e-7
-        dinr_x33 = 1.49738251046819e-12*dinr_x1 + dinr_x7 - 1.49738251046819e-12
-        d_inner_x = 0.119999999997429*dinr_x0 - 4.7458512400481e-12*dinr_x1 + 0.0883279999975836*dinr_x10*dinr_x12 - dinr_x12*dinr_x23 - dinr_x12*dinr_x25 + 0.0883279999975836*dinr_x16*dinr_x4 - dinr_x19*dinr_x4 + 1.0*dinr_x2*p_y - dinr_x20*dinr_x8 + 0.0883279999975836*dinr_x24*dinr_x8 + dinr_x3*p_x - dinr_x4*dinr_x6 - dinr_x8*dinr_x9 - 6.59613682074112e-23
-        d_inner_y = 7.85523857210122e-7*dinr_x0 + 2.74495903961601e-8*dinr_x1 + 0.0883279999975836*dinr_x10*dinr_x26 + 0.0883279999975836*dinr_x16*dinr_x30 - dinr_x19*dinr_x30 - 1.0*dinr_x2*p_x - dinr_x20*dinr_x29 - dinr_x23*dinr_x26 + 0.0883279999975836*dinr_x24*dinr_x29 - dinr_x25*dinr_x26 - dinr_x29*dinr_x9 + dinr_x3*p_y - dinr_x30*dinr_x6 + 1.00765421685536e-17
-        d_inner_z = -4.56616533888963e-12*dinr_x0 - 0.119999999999997*dinr_x1 + 0.0883279999975836*dinr_x10*dinr_x32 + 0.0883279999975836*dinr_x16*dinr_x33 - dinr_x19*dinr_x33 - dinr_x20*dinr_x31 - dinr_x23*dinr_x32 + 0.0883279999975836*dinr_x24*dinr_x31 - dinr_x25*dinr_x32 - dinr_x31*dinr_x9 - dinr_x33*dinr_x6 + 1.0*p_z - 0.240000000000178
-        d_elbow = math.sqrt(d_inner_x*d_inner_x + d_inner_y*d_inner_y + d_inner_z*d_inner_z)
-        # SP3 for q3 (elbow): reduces to SP4 with d_elbow target.
-        _q3_R_sq = 0.0174240000000000
-        _q3_rhs = 0.143562436936038 - 1/2*d_elbow**2
-        _q3_phi = 3.95504922500181e-11 - math.pi
-        if _q3_R_sq < _DEG_SQ:
-            theta_q3_plus = 0.0
-            theta_q3_minus = 0.0  # degenerate; verify-step drops
-        else:
-            _q3_R = math.sqrt(_q3_R_sq)
-            if abs(_q3_rhs) > _q3_R + _FEAS_TOL:
-                # LS fallback: theta = phi (or phi + pi if rhs < 0)
-                theta_q3_plus = (
-                    _q3_phi if _q3_rhs > 0 else _q3_phi + math.pi
-                )
-                theta_q3_minus = theta_q3_plus
+        # Wrist lock (ssik.continuum.lock_sine): flag, and split if degenerate.
+        _wrists = ((theta14, q6),)
+        lk_x0 = math.sin(q5)
+        lk_x1 = math.cos(q5)
+        _lk = 0.999999999986507*lk_x0**2 + 1.86502807512523e-21*lk_x0*lk_x1 + 4.93038065763132e-32*lk_x0 + 1.34924357310693e-11*lk_x1**2 - 2.69848714621385e-11*lk_x1 + 1.34924357310693e-11
+        _lock = _lk <= 9.999999999999999e-09
+        if _lock and (_lk <= 9.999999999999997e-19 or _continuum.three_parallel_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14, q6) > _continuum.RANK_TOL):
+            # The SP1s above divide zero by zero, or miss: represent the
+            # branch with q6 at q_free and q_free + pi (ssik.continuum).
+            q1, q5, _wrists = _continuum.three_parallel_lock(
+                _LOCK_AXES, _R_HOME, T_target, q1, q5, q_free, _LOCK_OFFSETS
+            )
+        for theta14, q6 in _wrists:
+            s14 = math.sin(theta14)
+            c14 = math.cos(theta14)
+            # d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
+            dinr_x0 = math.sin(theta14)
+            dinr_x1 = math.cos(theta14)
+            dinr_x2 = math.sin(q1)
+            dinr_x3 = math.cos(q1)
+            dinr_x4 = 0.999999999957149*dinr_x1 + 4.28505368225414e-11
+            dinr_x5 = math.cos(q5)
+            dinr_x6 = 5.78197927171945e-7*dinr_x5 + 1.38980918926153e-28
+            dinr_x7 = 0.999999999978549*dinr_x0
+            dinr_x8 = 1.49738251046819e-12*dinr_x1 - dinr_x7 - 1.49738251046819e-12
+            dinr_x9 = 3.60961607124249e-18*dinr_x5 + 3.04242131928532e-7
+            dinr_x10 = 0.999999999988136*dinr_x5 + 1.1864294472817e-11
+            dinr_x11 = 2.28746586888654e-7*dinr_x0
+            dinr_x12 = 6.54603214326839e-6*dinr_x1 + dinr_x11 - 6.54603214326839e-6
+            dinr_x13 = math.sin(q5)
+            dinr_x14 = 0.999999999994068*dinr_x13
+            dinr_x15 = 5.34023394376063e-17*dinr_x5
+            dinr_x16 = -dinr_x14 - dinr_x15 + 5.34023394376063e-17
+            dinr_x17 = 3.44445851663465e-6*dinr_x13
+            dinr_x18 = 1.55038416573718e-11*dinr_x5
+            dinr_x19 = 3.04242131932142e-7*dinr_x17 - 3.04242131932142e-7*dinr_x18 + 4.71692183897716e-18
+            dinr_x20 = -5.78197927171945e-7*dinr_x17 - 5.78197927171945e-7*dinr_x18 + 8.96428910949444e-18
+            dinr_x21 = 1.55038416574638e-11*dinr_x13
+            dinr_x22 = 3.44445851661422e-6*dinr_x5
+            dinr_x23 = -3.04242131932142e-7*dinr_x21 - 3.04242131932142e-7*dinr_x22 + 1.04794940244653e-12
+            dinr_x24 = dinr_x21 - dinr_x22 + 3.44445851661422e-6
+            dinr_x25 = 5.78197927171945e-7*dinr_x14 - 5.78197927171945e-7*dinr_x15 + 3.08771219689566e-23
+            dinr_x26 = 4.29027924297998e-11*dinr_x1 + 0.999999999957097
+            dinr_x27 = 6.54603214340882e-6*dinr_x0
+            dinr_x28 = 2.28746586883747e-7*dinr_x1
+            dinr_x29 = -dinr_x27 - dinr_x28 + 2.28746586883747e-7
+            dinr_x30 = 6.54603214326839e-6*dinr_x1 - dinr_x11 - 6.54603214326839e-6
+            dinr_x31 = 0.999999999999948*dinr_x1 + 5.23250010132086e-14
+            dinr_x32 = dinr_x27 - dinr_x28 + 2.28746586883747e-7
+            dinr_x33 = 1.49738251046819e-12*dinr_x1 + dinr_x7 - 1.49738251046819e-12
+            d_inner_x = 0.119999999997429*dinr_x0 - 4.7458512400481e-12*dinr_x1 + 0.0883279999975836*dinr_x10*dinr_x12 - dinr_x12*dinr_x23 - dinr_x12*dinr_x25 + 0.0883279999975836*dinr_x16*dinr_x4 - dinr_x19*dinr_x4 + 1.0*dinr_x2*p_y - dinr_x20*dinr_x8 + 0.0883279999975836*dinr_x24*dinr_x8 + dinr_x3*p_x - dinr_x4*dinr_x6 - dinr_x8*dinr_x9 - 6.59613682074112e-23
+            d_inner_y = 7.85523857210122e-7*dinr_x0 + 2.74495903961601e-8*dinr_x1 + 0.0883279999975836*dinr_x10*dinr_x26 + 0.0883279999975836*dinr_x16*dinr_x30 - dinr_x19*dinr_x30 - 1.0*dinr_x2*p_x - dinr_x20*dinr_x29 - dinr_x23*dinr_x26 + 0.0883279999975836*dinr_x24*dinr_x29 - dinr_x25*dinr_x26 - dinr_x29*dinr_x9 + dinr_x3*p_y - dinr_x30*dinr_x6 + 1.00765421685536e-17
+            d_inner_z = -4.56616533888963e-12*dinr_x0 - 0.119999999999997*dinr_x1 + 0.0883279999975836*dinr_x10*dinr_x32 + 0.0883279999975836*dinr_x16*dinr_x33 - dinr_x19*dinr_x33 - dinr_x20*dinr_x31 - dinr_x23*dinr_x32 + 0.0883279999975836*dinr_x24*dinr_x31 - dinr_x25*dinr_x32 - dinr_x31*dinr_x9 - dinr_x33*dinr_x6 + 1.0*p_z - 0.240000000000178
+            d_elbow = math.sqrt(d_inner_x*d_inner_x + d_inner_y*d_inner_y + d_inner_z*d_inner_z)
+            # SP3 for q3 (elbow): reduces to SP4 with d_elbow target.
+            _q3_R_sq = 0.0174240000000000
+            _q3_rhs = 0.143562436936038 - 1/2*d_elbow**2
+            _q3_phi = 3.95504922500181e-11 - math.pi
+            if _q3_R_sq < _DEG_SQ:
+                theta_q3_plus = 0.0
+                theta_q3_minus = 0.0  # degenerate; verify-step drops
             else:
-                _q3_clipped = min(1.0, max(-1.0, _q3_rhs / _q3_R))
-                _q3_delta = math.acos(_q3_clipped)
-                theta_q3_plus = _q3_phi + _q3_delta
-                theta_q3_minus = _q3_phi - _q3_delta
+                _q3_R = math.sqrt(_q3_R_sq)
+                if abs(_q3_rhs) > _q3_R + _FEAS_TOL:
+                    # LS fallback: theta = phi (or phi + pi if rhs < 0)
+                    theta_q3_plus = (
+                        _q3_phi if _q3_rhs > 0 else _q3_phi + math.pi
+                    )
+                    theta_q3_minus = theta_q3_plus
+                else:
+                    _q3_clipped = min(1.0, max(-1.0, _q3_rhs / _q3_R))
+                    _q3_delta = math.acos(_q3_clipped)
+                    theta_q3_plus = _q3_phi + _q3_delta
+                    theta_q3_minus = _q3_phi - _q3_delta
 
-        for q3 in (theta_q3_plus, theta_q3_minus):
-            s3 = math.sin(q3)
-            c3 = math.cos(q3)
-            # SP1 for q2 (shoulder pitch): closed-form atan2.
-            q2_x0 = -2.28746586888654e-7*d_inner_x - 6.54603214340882e-6*d_inner_z
-            q2_x1 = math.sin(q3)
-            q2_x2 = math.cos(q3)
-            q2_x3 = -0.329999999999952*q2_x1 + 1.60976199845432e-7*q2_x2 + 1.95106846282412e-7
-            q2_x4 = -1.60976693978216e-7*q2_x1 - 0.32999999999289*q2_x2 - 0.399999999991383
-            q2_x5 = 0.999999999978549*d_inner_x + 6.54603214340882e-6*d_inner_y
-            q2_x6 = 7.54853199162509e-8*q2_x1 - 2.16019064414746e-6*q2_x2 - 2.61841290199331e-6
-            q2_x7 = 2.28746586888654e-7*d_inner_y - 0.999999999978549*d_inner_z
-            q2 = math.atan2(-6.54603214340882e-6*q2_x0*q2_x3 - 2.28746586888654e-7*q2_x0*q2_x4 - 0.999999999978549*q2_x3*q2_x7 + 0.999999999978549*q2_x4*q2_x5 + 6.54603214340882e-6*q2_x5*q2_x6 + 2.28746586888654e-7*q2_x6*q2_x7, q2_x0*q2_x6 + q2_x3*q2_x5 + q2_x4*q2_x7)
-            q4 = ((theta14 - q2 - q3 + math.pi) % (2.0 * math.pi)) - math.pi
-            candidates.append([q1, q2, q3, q4, q5, q6])
+            for q3 in (theta_q3_plus, theta_q3_minus):
+                s3 = math.sin(q3)
+                c3 = math.cos(q3)
+                # SP1 for q2 (shoulder pitch): closed-form atan2.
+                q2_x0 = -2.28746586888654e-7*d_inner_x - 6.54603214340882e-6*d_inner_z
+                q2_x1 = math.sin(q3)
+                q2_x2 = math.cos(q3)
+                q2_x3 = -0.329999999999952*q2_x1 + 1.60976199845432e-7*q2_x2 + 1.95106846282412e-7
+                q2_x4 = -1.60976693978216e-7*q2_x1 - 0.32999999999289*q2_x2 - 0.399999999991383
+                q2_x5 = 0.999999999978549*d_inner_x + 6.54603214340882e-6*d_inner_y
+                q2_x6 = 7.54853199162509e-8*q2_x1 - 2.16019064414746e-6*q2_x2 - 2.61841290199331e-6
+                q2_x7 = 2.28746586888654e-7*d_inner_y - 0.999999999978549*d_inner_z
+                q2 = math.atan2(-6.54603214340882e-6*q2_x0*q2_x3 - 2.28746586888654e-7*q2_x0*q2_x4 - 0.999999999978549*q2_x3*q2_x7 + 0.999999999978549*q2_x4*q2_x5 + 6.54603214340882e-6*q2_x5*q2_x6 + 2.28746586888654e-7*q2_x6*q2_x7, q2_x0*q2_x6 + q2_x3*q2_x5 + q2_x4*q2_x7)
+                q4 = ((theta14 - q2 - q3 + math.pi) % (2.0 * math.pi)) - math.pi
+                candidates.append([q1, q2, q3, q4, q5, q6])
+                if free is not None:
+                    free.append(5 if _lock else _continuum.NOT_FLAGGED)
     return candidates
 
 
@@ -634,22 +676,28 @@ def solve(
         if _native_sols is not None:
             return _native_sols
     T = np.asarray(T_target, dtype=np.float64)
-    candidates = _solve_algebraic(T)
+    # Per candidate, the free joint of the singular continuum it samples,
+    # or _NOT_FLAGGED (ssik.continuum); a locked wrist's free joint starts
+    # at the seed's value, else 0.
+    _free: list[int] = []
+    candidates = _solve_algebraic(
+        T, 0.0 if q_seed is None else float(q_seed[5]), _free
+    )
 
     fk_atol = 1e-7
     dedup_atol = policy.subproblem_dedup
 
     # Three-bucket sort: exact (closes within fk_atol), near-miss
     # (refinable when allow_refinement=True), or drop.
-    verified: list[tuple[np.ndarray, float, str, int]] = []
-    for cand_q in candidates:
+    verified: list[tuple[np.ndarray, float, str, int, int]] = []
+    for _ci, cand_q in enumerate(candidates):
         q = np.asarray(cand_q, dtype=np.float64)
         if not np.all(np.isfinite(q)):
             continue
         T_check = _fk(q)
         residual = float(np.linalg.norm(T_check - T))
         if residual <= fk_atol:
-            verified.append((q, residual, "none", 0))
+            verified.append((q, residual, "none", 0, _free[_ci]))
             continue
         if not (allow_refinement or True):
             continue
@@ -675,7 +723,7 @@ def solve(
         if refined is None:
             continue
         q_ref, resid_ref, iters = refined
-        verified.append((q_ref, resid_ref, "lm", iters))
+        verified.append((q_ref, resid_ref, "lm", iters, _free[_ci]))
 
     # Same-root dedup (#600), mirroring ``ssik.refinement.dedup_same_root``:
     # a pair within ``dedup_atol`` merges only if its midpoint also
@@ -683,19 +731,25 @@ def solve(
     # changes only on a residual gain above round-off. ``_q_close_wrap``
     # is the cheap pre-filter (typed scalar loop, #137 Slice 3).
     _floor = _same_root_floor(T)
-    deduped: list[tuple[np.ndarray, float, str, int]] = []
-    for cand_q, cand_res, ref_used, ref_iters in verified:
+    deduped: list[tuple[np.ndarray, float, str, int, int]] = []
+    for cand_q, cand_res, ref_used, ref_iters, cand_free in verified:
         dup_idx = None
-        for j, (existing_q, existing_res, _, _) in enumerate(deduped):
+        for j, (existing_q, existing_res, _, _, _) in enumerate(deduped):
             if _q_close_wrap(cand_q, existing_q, dedup_atol) and _is_same_root(
                 cand_q, cand_res, existing_q, existing_res, _fk, T, _floor
             ):
                 dup_idx = j
                 break
         if dup_idx is None:
-            deduped.append((cand_q, cand_res, ref_used, ref_iters))
-        elif cand_res < deduped[dup_idx][1] - _floor:
-            deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)
+            deduped.append((cand_q, cand_res, ref_used, ref_iters, cand_free))
+            continue
+        # A merge keeps the flag either side had.
+        _kept = deduped[dup_idx]
+        _f = _kept[4] if _kept[4] != _NOT_FLAGGED else cand_free
+        if cand_res < _kept[1] - _floor:
+            deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters, _f)
+        elif _f != _kept[4]:
+            deduped[dup_idx] = (*_kept[:4], _f)
 
     solutions = [
         Solution(
@@ -703,8 +757,22 @@ def solve(
             fk_residual=residual,
             refinement_used=ref_used,
         )
-        for q, residual, ref_used, _ref_iters in deduped
+        for q, residual, ref_used, _ref_iters, _f in deduped
     ]
+    # The singular-continuum slide (ssik.continuum, docs/api.md#singular-
+    # continua): each flagged solution moves to its continuum's point under
+    # the rule, seeded or not. Only flagged solutions pay.
+    solutions = _slide_continua(
+        solutions,
+        [_f for _q, _r, _u, _i, _f in deduped],
+        _KB,
+        T,
+        fk=_fk,
+        jac=_spatial_jacobian,
+        q_seed=q_seed,
+        respect_limits=respect_limits,
+        dedup_atol=dedup_atol,
+    )
 
     # Bulletproof fallback (#319): the analytical path found nothing.
     # If the target is within the arm's max reach it may be a

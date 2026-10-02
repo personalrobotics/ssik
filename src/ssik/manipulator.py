@@ -784,6 +784,8 @@ class Manipulator:
             kwargs["max_solutions"] = None if respect_limits or seed_unseen else max_solutions
         if q_seed_arr is not None and "q_seed" in params:
             kwargs["q_seed"] = q_seed_arr
+        if "flag_continua" in params:
+            kwargs["flag_continua"] = True
         # Power-user kwargs override our defaults.
         kwargs.update(solver_kwargs)
 
@@ -847,6 +849,25 @@ class Manipulator:
                 )
 
         raw_candidate_count = len(sols)
+
+        # A solution the solver flagged as a sample of a singular continuum moves
+        # to the continuum's point under the rule (ssik.continuum,
+        # docs/api.md#singular-continua), as in every artifact. Only flagged
+        # solutions pay.
+        from ssik.continuum import free_of, slide_continua
+        from ssik.refinement import kinbody_jacobian as _kinbody_jacobian
+
+        sols = slide_continua(
+            sols,
+            free_of(sols),
+            self._kb,
+            T,
+            fk=self.fk,
+            jac=lambda q: _kinbody_jacobian(self._kb, q),
+            q_seed=q_seed_arr,
+            respect_limits=respect_limits,
+            dedup_atol=policy.subproblem_dedup,
+        )
 
         # Cross-arm postprocess pass (the one shared pipeline -- see
         # ssik.postprocess.finalize_solutions): solvers that didn't honour kwargs

@@ -243,9 +243,25 @@ def _render_specialised(
     # Levenberg-Marquardt step.
     buf.write("from ssik.refinement import lm_refine as _lm_refine\n")
     if SOLVERS[plan.solver_name].polish_accepted:
+        # With the rank flag (#662) the polish also reports which candidates
+        # may sample a singular continuum.
+        polish_fn = (
+            "polish_accepted_flagged as _polish_flagged"
+            if SOLVERS[plan.solver_name].continuum == "rank"
+            else "polish_accepted as _polish_accepted"
+        )
+        buf.write(f"from ssik.refinement.polish import Chain as _PolishChain, {polish_fn}\n")
+    continuum = SOLVERS[plan.solver_name].continuum
+    if continuum is not None:
+        # The singular-continuum slide (#662) and the markers its flags use.
         buf.write(
-            "from ssik.refinement.polish import Chain as _PolishChain, "
-            "polish_accepted as _polish_accepted\n"
+            "from ssik.continuum import NOT_FLAGGED as _NOT_FLAGGED, "
+            "slide_continua as _slide_continua\n"
+        )
+    if continuum == "rank":
+        buf.write(
+            "from ssik.continuum import FREE_FROM_KERNEL as _FREE_FROM_KERNEL, "
+            "has_null as _has_null\n"
         )
     if plan.solver_name != "jointlock.seven_r":
         # 6R roots are isolated: the orchestrator merges only the same root
@@ -313,6 +329,7 @@ def _render_specialised(
                 polish_accepted=_spec.polish_accepted,
                 emit_native=plan.solver_name in _NATIVE_SOLVER_FAMILIES,
                 native_rr=plan.solver_name == "ikgeo.general_6r",
+                continuum=_spec.continuum,
             )
         )
     buf.write(_render_fk_alias())
@@ -464,6 +481,7 @@ def _render_specialised_solve_orchestrator(
     polish_accepted: bool = False,
     emit_native: bool = False,
     native_rr: bool = False,
+    continuum: str | None = None,
 ) -> str:
     """Render the public ``solve()`` for specialised artifacts.
 
@@ -932,6 +950,147 @@ def _render_specialised_solve_orchestrator(
             "    :returns: list of :class:`Solution`; empty list iff no IK",
             _NATIVE_DOC + "    :returns: list of :class:`Solution`; empty list iff no IK",
         )
+    if continuum is not None:
+        template = _with_continuum(template, continuum)
+    return template
+
+
+def _with_continuum(template: str, continuum: str) -> str:
+    """Thread the singular-continuum flags through the orchestrator and slide
+    the flagged solutions before finalize (:mod:`ssik.continuum`, #662).
+
+    ``"lock"``: ``_solve_algebraic`` sets a locked wrist's free joint to the
+    seed's (else 0) and reports the flag. ``"rank"``: the accepted-candidate
+    polish (and a refined near-miss's own Jacobian) reports it. Each verified
+    candidate carries its flag as a fifth element, a same-root merge keeps a
+    flag either side had, and the slide runs once on the deduplicated set."""
+
+    def sub(old: str, new: str) -> None:
+        nonlocal template
+        assert old in template, old
+        template = template.replace(old, new, 1)
+
+    if continuum == "lock":
+        sub(
+            "    candidates = _solve_algebraic(T)\n",
+            "    # Per candidate, the free joint of the singular continuum it samples,\n"
+            "    # or _NOT_FLAGGED (ssik.continuum); a locked wrist's free joint starts\n"
+            "    # at the seed's value, else 0.\n"
+            "    _free: list[int] = []\n"
+            "    candidates = _solve_algebraic(\n"
+            "        T, 0.0 if q_seed is None else float(q_seed[5]), _free\n"
+            "    )\n",
+        )
+        lm_line = '        verified.append((q_ref, resid_ref, "lm", iters, _free[_ci]))\n'
+    else:
+        sub(
+            "    candidates = _solve_algebraic(T)\n",
+            "    candidates = _solve_algebraic(T)\n"
+            "    # Per candidate, whether it may sample a singular continuum\n"
+            "    # (ssik.continuum): set from its Jacobian below.\n"
+            "    _free = [_NOT_FLAGGED] * len(candidates)\n",
+        )
+        lm_line = (
+            "        # A refined near-miss is flagged from the last Jacobian its\n"
+            "        # refinement evaluated (one step from q_ref).\n"
+            "        _f = (\n"
+            "            _FREE_FROM_KERNEL\n"
+            "            if not _lm_jac or _has_null(_lm_jac[-1])\n"
+            "            else _NOT_FLAGGED\n"
+            "        )\n"
+            '        verified.append((q_ref, resid_ref, "lm", iters, _f))\n'
+        )
+        sub(
+            "            jacobian_fn=_spatial_jacobian,\n        )\n        if refined is None:\n",
+            "            jacobian_fn=_lm_jacobian,\n        )\n        if refined is None:\n",
+        )
+        sub(
+            "        refined = _lm_refine(\n",
+            "        _lm_jac.clear()\n        refined = _lm_refine(\n",
+        )
+        sub(
+            "    verified: list[tuple[np.ndarray, float, str, int]] = []\n",
+            "    # The Jacobians the near-miss refinement evaluates, the last of which\n"
+            "    # flags a refined candidate (ssik.continuum.has_null).\n"
+            "    _lm_jac: list[np.ndarray] = []\n\n"
+            "    def _lm_jacobian(x: np.ndarray) -> np.ndarray:\n"
+            "        j = _spatial_jacobian(x)\n"
+            "        _lm_jac.append(j)\n"
+            "        return j\n\n"
+            "    verified: list[tuple[np.ndarray, float, str, int]] = []\n",
+        )
+    sub(
+        "    verified: list[tuple[np.ndarray, float, str, int]] = []\n"
+        "    for cand_q in candidates:\n",
+        "    verified: list[tuple[np.ndarray, float, str, int, int]] = []\n"
+        "    for _ci, cand_q in enumerate(candidates):\n",
+    )
+    sub(
+        '            verified.append((q, residual, "none", 0))\n',
+        '            verified.append((q, residual, "none", 0, _free[_ci]))\n',
+    )
+    sub('        verified.append((q_ref, resid_ref, "lm", iters))\n', lm_line)
+    if continuum == "rank":
+        sub(
+            "        _q_pol, _r_pol, _polished = _polish_accepted(\n",
+            "        _q_pol, _r_pol, _polished, _singular = _polish_flagged(\n",
+        )
+        sub(
+            "        for _k, _i in enumerate(_accepted):\n"
+            "            if _polished[_k]:\n"
+            '                verified[_i] = (_q_pol[_k], float(_r_pol[_k]), "none", 0)\n',
+            "        for _k, _i in enumerate(_accepted):\n"
+            "            _f = _FREE_FROM_KERNEL if _singular[_k] else _NOT_FLAGGED\n"
+            "            if _polished[_k]:\n"
+            '                verified[_i] = (_q_pol[_k], float(_r_pol[_k]), "none", 0, _f)\n'
+            "            else:\n"
+            "                verified[_i] = (*verified[_i][:4], _f)\n",
+        )
+    sub(
+        "    deduped: list[tuple[np.ndarray, float, str, int]] = []\n"
+        "    for cand_q, cand_res, ref_used, ref_iters in verified:\n"
+        "        dup_idx = None\n"
+        "        for j, (existing_q, existing_res, _, _) in enumerate(deduped):\n",
+        "    deduped: list[tuple[np.ndarray, float, str, int, int]] = []\n"
+        "    for cand_q, cand_res, ref_used, ref_iters, cand_free in verified:\n"
+        "        dup_idx = None\n"
+        "        for j, (existing_q, existing_res, _, _, _) in enumerate(deduped):\n",
+    )
+    sub(
+        "        if dup_idx is None:\n"
+        "            deduped.append((cand_q, cand_res, ref_used, ref_iters))\n"
+        "        elif cand_res < deduped[dup_idx][1] - _floor:\n"
+        "            deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters)\n",
+        "        if dup_idx is None:\n"
+        "            deduped.append((cand_q, cand_res, ref_used, ref_iters, cand_free))\n"
+        "            continue\n"
+        "        # A merge keeps the flag either side had.\n"
+        "        _kept = deduped[dup_idx]\n"
+        "        _f = _kept[4] if _kept[4] != _NOT_FLAGGED else cand_free\n"
+        "        if cand_res < _kept[1] - _floor:\n"
+        "            deduped[dup_idx] = (cand_q, cand_res, ref_used, ref_iters, _f)\n"
+        "        elif _f != _kept[4]:\n"
+        "            deduped[dup_idx] = (*_kept[:4], _f)\n",
+    )
+    sub(
+        "        for q, residual, ref_used, _ref_iters in deduped\n    ]\n",
+        "        for q, residual, ref_used, _ref_iters, _f in deduped\n"
+        "    ]\n"
+        "    # The singular-continuum slide (ssik.continuum, docs/api.md#singular-\n"
+        "    # continua): each flagged solution moves to its continuum's point under\n"
+        "    # the rule, seeded or not. Only flagged solutions pay.\n"
+        "    solutions = _slide_continua(\n"
+        "        solutions,\n"
+        "        [_f for _q, _r, _u, _i, _f in deduped],\n"
+        "        _KB,\n"
+        "        T,\n"
+        "        fk=_fk,\n"
+        "        jac=_spatial_jacobian,\n"
+        "        q_seed=q_seed,\n"
+        "        respect_limits=respect_limits,\n"
+        "        dedup_atol=dedup_atol,\n"
+        "    )\n",
+    )
     return template
 
 

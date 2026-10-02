@@ -43,9 +43,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ssik._kinbody import KinBody
+from ssik.continuum import FlaggedSolution, rank_deficient
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 from ssik.kinematics.poe_to_dh import poe_to_dh
+from ssik.refinement import kinbody_fk_jacobian_batch
 from ssik.solvers.ikgeo._raghavan_roth import solve_all_ik
 
 _LOG = logging.getLogger(__name__)
@@ -65,6 +67,7 @@ def solve(
     linearity_joint: int | str = "auto",
     apply_so3: bool = False,
     max_solutions: int | None = None,
+    flag_continua: bool = False,
 ) -> tuple[list[Solution], bool]:
     """Analytic IK for any 6R chain via Raghavan-Roth + AE-3 leftvar selection.
 
@@ -85,6 +88,10 @@ def solve(
         ``Solution.fk_residual`` is measured against the user's POE chain.
         ``is_ls=True`` iff no candidate closed within
         ``policy.subproblem_numerical``.
+    :param flag_continua: return a solution whose Jacobian may be rank
+        deficient as a :class:`ssik.continuum.FlaggedSolution`, for the
+        singular-continuum slide (``Manipulator.solve`` asks; an inner solver
+        user such as jointlock does not pay for it).
     """
     if len(kb.joints) != 6:
         raise ValueError(f"general_6r requires a 6-DOF chain; got {len(kb.joints)} joints")
@@ -134,6 +141,14 @@ def solve(
                 refinement_used=inner.refinement_used,
             )
         )
+    # A solution whose Jacobian may be rank deficient may sample a singular
+    # continuum; flag it for the slide (ssik.continuum), as the artifact does.
+    if flag_continua and solutions:
+        _, jac = kinbody_fk_jacobian_batch(kb, np.array([s.q for s in solutions]))
+        solutions = [
+            FlaggedSolution(s.q, s.fk_residual, s.refinement_used) if flag else s
+            for s, flag in zip(solutions, rank_deficient(jac), strict=True)
+        ]
 
     _LOG.info(
         "%s: %d inner candidates -> %d solutions (is_ls=%s)",

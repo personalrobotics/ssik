@@ -51,6 +51,12 @@ class SolverSpec:
         it never admits a candidate the gate rejected. On for the numerically
         eigen-solved general_6r, whose accepted angles are otherwise only as
         accurate as the gate (#632).
+    :param continuum: how the emitted artifact flags samples of a singular
+        continuum for the slide (:mod:`ssik.continuum`, #662): ``"lock"``, the
+        composed ``_solve_algebraic`` reports the candidates of a locked wrist
+        (closed-form families); ``"rank"``, the accepted-candidate polish
+        reports the candidates whose Jacobian may be rank deficient
+        (general_6r); ``None``, no slide.
     :param auto_dispatch: whether :func:`ssik.core.dispatcher.dispatch` can route
         an arm here automatically. False for the tier-1 univariate-search solvers,
         which are documented as explicit-use-only (RR is ~50-200x faster).
@@ -65,6 +71,7 @@ class SolverSpec:
     fk_atol_expr: str = "policy.subproblem_numerical"
     force_refine: bool = False
     polish_accepted: bool = False
+    continuum: str | None = None
     auto_dispatch: bool = True
 
     @property
@@ -95,6 +102,7 @@ SOLVERS: dict[str, SolverSpec] = {
             composer=f"{_COMPOSE}.three_parallel",
             fk_atol_expr="1e-7",
             force_refine=True,
+            continuum="lock",
         ),
         _spec(
             "ikgeo.spherical_two_parallel",
@@ -102,6 +110,7 @@ SOLVERS: dict[str, SolverSpec] = {
             1.2,
             1_316,
             composer=f"{_COMPOSE}.spherical_two_parallel",
+            continuum="lock",
         ),
         _spec(
             "ikgeo.spherical_two_intersecting",
@@ -143,6 +152,7 @@ SOLVERS: dict[str, SolverSpec] = {
             composer=f"{_COMPOSE}.general_6r",
             force_refine=True,
             polish_accepted=True,
+            continuum="rank",
         ),
         _spec("husty_pfurner.general_6r", 2, 120.0, 50_000_000),
         _spec("seven_r.srs", 0, 8.5, 1_900),

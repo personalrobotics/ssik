@@ -45,6 +45,9 @@ Conventions:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+import numpy as np
 import sympy as sp
 
 from ssik._kinbody import KinBody, canonicalize_spherical_wrist
@@ -52,8 +55,9 @@ from ssik.codegen._compose._target import TargetSymbols, make_target_symbols
 from ssik.codegen._symbolic.sp1 import sp1_theta_sym
 from ssik.codegen._symbolic.sp3 import sp3_branches_sym
 from ssik.codegen._symbolic.sp4 import sp4_branches_sym
+from ssik.continuum import LOCK_TOL, RANK_TOL
 
-__all__ = ["compose", "render_constants_header"]
+__all__ = ["compose", "render_constants_header", "render_lock_constants", "render_lock_test"]
 
 
 # Tolerance defaults baked into the rendered guards. Match
@@ -67,7 +71,11 @@ def render_constants_header() -> str:
 
     Emits ``import math`` plus the SP4-guard tolerance constants.
     """
-    return f"import math\n\n_DEG_SQ = {_DEG_SQ!r}\n_FEAS_TOL = {_FEAS_TOL!r}\n"
+    return (
+        "import math\n"
+        "from ssik import continuum as _continuum\n"
+        f"\n_DEG_SQ = {_DEG_SQ!r}\n_FEAS_TOL = {_FEAS_TOL!r}\n"
+    )
 
 
 def compose(kb: KinBody) -> str:
@@ -191,16 +199,106 @@ def compose(kb: KinBody) -> str:
         comment="SP1 for q6 (wrist roll-2): closed-form atan2.",
     )
 
+    # ---------- Wrist lock: axes[3] || Rot(axes[4], q5) axes[5] (ssik.continuum) ----------
+    lock_cross = _vec_const(axes[3]).cross(rot_axis_4_q5 * _vec_const(axes[5]))
+    lock_lines = render_lock_test(
+        lock_cross,
+        float(np.linalg.norm(axes[3]) * np.linalg.norm(axes[5])),
+        "_continuum.spherical_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q2, q3, q4, q5, q6)",
+        None,
+        [
+            "# The SP1s above divide zero by zero, or miss: on the lock, the",
+            "# free joint at q_free; near it, the branches either side of it",
+            "# (ssik.continuum).",
+            "for q4, q6 in _continuum.spherical_wrist_lock(",
+            "    _LOCK_AXES, _R_HOME, T_target, q1, q2, q3, q5, q_free",
+            "):",
+            "    candidates.append([q1, q2, q3, q4, q5, q6])",
+            "    if free is not None:",
+            "        free.append(5)",
+        ],
+        [
+            "candidates.append([q1, q2, q3, q4, q5, q6])",
+            "if free is not None:",
+            "    free.append(5 if _lock else _continuum.NOT_FLAGGED)",
+        ],
+    )
+
     # Assemble.
-    return _assemble(
+    return render_lock_constants(axes, r_home) + _assemble(
         destructure_lines=_render_destructure(target),
         q1_lines=q1_lines,
         q3_lines=q3_lines,
         q2_lines=q2_lines,
         q5_lines=q5_lines,
         q4_lines=q4_lines,
-        q6_lines=q6_lines,
+        q6_lines=q6_lines + lock_lines,
     )
+
+
+def render_lock_constants(
+    axes: Sequence[object], r_home: object, offsets: Sequence[object] | None = None
+) -> str:
+    """Module-level constants the wrist-lock split reads (:mod:`ssik.continuum`):
+    the joint axes and the home rotation, as the composer saw them."""
+    lines = [
+        "# The wrist-lock split's geometry (ssik.continuum): the joint axes and",
+        "# the flange's home rotation.",
+        "_LOCK_AXES = (",
+    ]
+    for a in axes:
+        lines.append(f"    ({float(a[0])!r}, {float(a[1])!r}, {float(a[2])!r}),")  # type: ignore[index]
+    lines.append(")")
+    rows = ", ".join(
+        "(" + ", ".join(repr(float(r_home[i, j])) for j in range(3)) + ")"  # type: ignore[index]
+        for i in range(3)
+    )
+    lines.append(f"_R_HOME = ({rows})")
+    if offsets is not None:
+        lines.append("# The chain's offsets p[0..6], for the locked wrist's elbow reach.")
+        lines.append("_LOCK_OFFSETS = (")
+        for o in offsets:
+            lines.append(f"    ({float(o[0])!r}, {float(o[1])!r}, {float(o[2])!r}),")  # type: ignore[index]
+        lines.append(")")
+    return "\n".join(lines) + "\n\n\n"
+
+
+def render_lock_test(
+    cross: sp.Matrix,
+    norm_product: float,
+    mismatch: str | None,
+    default: str | None,
+    body: list[str],
+    orelse: list[str] | None = None,
+) -> list[str]:
+    """The wrist-lock tests on ``|k x p| / (|k| |p|)`` (``cross`` is the
+    symbolic ``k x p``, ``norm_product`` the constant ``|k| |p|``): ``_lock``
+    (at most ``RANK_TOL``: flag the candidate for the slide), and ``body`` run
+    at most ``LOCK_TOL``, or where the flagged wrist angles miss the target's
+    wrist rotation by more than ``RANK_TOL`` (``mismatch``, an expression):
+    split the lock (:func:`ssik.continuum.lock_sine`); with ``mismatch``
+    ``None``, every flagged candidate. ``default`` sets the wrist angles the
+    candidates loop over, which ``body`` replaces; ``orelse``, when given,
+    runs when the lock is not split."""
+    n2 = sp.expand(cross.dot(cross))
+    cse_subs, [final] = sp.cse([n2], symbols=sp.numbered_symbols(prefix="lk_x"))
+    lines = ["# Wrist lock (ssik.continuum.lock_sine): flag, and split if degenerate."]
+    if default is not None:
+        lines.append(default)
+    for sym, sub in cse_subs:
+        lines.append(f"{sym} = {sp.pycode(sub)}")
+    lines.append(f"_lk = {sp.pycode(final)}")
+    lines.append(f"_lock = _lk <= {(RANK_TOL * norm_product) ** 2!r}")
+    split = (LOCK_TOL * norm_product) ** 2
+    if mismatch is None:  # every flagged candidate is split
+        lines.append("if _lock:")
+    else:
+        lines.append(f"if _lock and (_lk <= {split!r} or {mismatch} > _continuum.RANK_TOL):")
+    lines.extend("    " + line for line in body)
+    if orelse is not None:
+        lines.append("else:")
+        lines.extend("    " + line for line in orelse)
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -377,8 +475,11 @@ def _assemble(
 ) -> str:
     """Stitch the per-step blocks into the final ``_solve_algebraic`` source."""
     parts = [
-        "def _solve_algebraic(T_target):",
+        "def _solve_algebraic(T_target, q_free=0.0, free=None):",
         '    """Algebraic IK candidates. Up to 8; verify + dedup in solve().',
+        "    A locked wrist takes q6 = q_free; ``free``, when given, receives",
+        "    per candidate the free joint of a locked wrist or NOT_FLAGGED",
+        "    (ssik.continuum).",
         '    """',
         _indent(destructure_lines, 4),
         "    candidates = []",
@@ -403,7 +504,6 @@ def _assemble(
         "                c5 = math.cos(q5)",
         _indent(q4_lines, 16),
         _indent(q6_lines, 16),
-        "                candidates.append([q1, q2, q3, q4, q5, q6])",
         "    return candidates",
         "",
     ]

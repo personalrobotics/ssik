@@ -42,6 +42,7 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik import continuum
 from ssik._kinbody import KinBody
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
@@ -170,6 +171,9 @@ def solve(
     theta15_solutions, _ = sp6.solve(h_sp, k_sp, p_sp, d1, d2, policy)
 
     candidates: list[NDArray[np.float64]] = []
+    # Per candidate, the free joint of a locked wrist, else NOT_FLAGGED
+    # (ssik.continuum).
+    free: list[int] = []
     # Intermediate SP1 / SP3 calls may flag is_ls either on sub-microradian
     # numerical noise (SP1 on rotated unit axes) or on a single branch's
     # local infeasibility (SP3 when one elbow configuration can't reach).
@@ -181,55 +185,71 @@ def solve(
         r_01 = rotation_matrix(axes[0], q1)
         r_45 = rotation_matrix(axes[4], q5)
 
-        theta14, _ = sp1.solve(
-            axes[1],
-            r_45 @ axes[5],
-            r_01.T @ r_06 @ axes[5],
-            policy,
-        )
-        q6, _ = sp1.solve(
-            -axes[5],
-            r_45.T @ axes[1],
-            r_06.T @ r_01 @ axes[1],
-            policy,
-        )
+        # A wrist within RANK_TOL of locked (axes[1] || Rot(axes[4], q5)
+        # axes[5]) is flagged for the slide. Where the SP1s divide zero by zero
+        # (LOCK_TOL) or their angles miss the wrist rotation, the lock is split:
+        # the wrist's limits from either side of it (ssik.continuum).
+        sine = continuum.lock_sine(axes[1], r_45 @ axes[5])
+        theta14, _ = sp1.solve(axes[1], r_45 @ axes[5], r_01.T @ r_06 @ axes[5], policy)
+        q6, _ = sp1.solve(-axes[5], r_45.T @ axes[1], r_06.T @ r_01 @ axes[1], policy)
+        wrists = [(theta14, q6)]
+        if sine <= continuum.RANK_TOL and (
+            sine <= continuum.LOCK_TOL
+            or continuum.three_parallel_wrist_error(axes, r_home, t_target, q1, q5, theta14, q6)
+            > continuum.RANK_TOL
+        ):
+            q1, q5, wrists = continuum.three_parallel_lock(axes, r_home, t_target, q1, q5, 0.0, p)
+            r_01 = rotation_matrix(axes[0], q1)
+            r_45 = rotation_matrix(axes[4], q5)
+        flag = 5 if sine <= continuum.RANK_TOL else continuum.NOT_FLAGGED
 
-        r_14 = rotation_matrix(axes[1], theta14)
-        d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
-        d_elbow = float(np.linalg.norm(d_inner))
+        for theta14, q6 in wrists:
+            r_14 = rotation_matrix(axes[1], theta14)
+            d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
+            d_elbow = float(np.linalg.norm(d_inner))
 
-        theta3_solutions, _ = sp3.solve(axes[1], -p[3], p[2], d_elbow, policy)
+            theta3_solutions, _ = sp3.solve(axes[1], -p[3], p[2], d_elbow, policy)
 
-        for q3 in theta3_solutions:
-            p2_rotated = p[2] + rotate(axes[1], q3, p[3])
-            q2, _ = sp1.solve(axes[1], p2_rotated, d_inner, policy)
-            q4 = _wrap_to_pi(theta14 - q2 - q3)
-            # Negate any anti-parallel trio joint back to its physical convention
-            # (see trio_flip above) before FK-verify on the original chain.
-            candidates.append(np.array([q1, q2, q3, q4, q5, q6]) * trio_flip)
+            for q3 in theta3_solutions:
+                p2_rotated = p[2] + rotate(axes[1], q3, p[3])
+                q2, _ = sp1.solve(axes[1], p2_rotated, d_inner, policy)
+                q4 = _wrap_to_pi(theta14 - q2 - q3)
+                # Negate any anti-parallel trio joint back to its physical
+                # convention (see trio_flip above) before FK-verify on the
+                # original chain.
+                candidates.append(np.array([q1, q2, q3, q4, q5, q6]) * trio_flip)
+                free.append(flag)
 
     # Post-verify and dedup. SP6 has pre-sorted candidates by pre-GN
     # residual (cleanest Bezout-cluster representative first); the
     # verify_candidates helper preserves that insertion order then
     # tie-breaks collisions by lower fk_residual. See #56 for why this
     # specific ordering matters under cluster-root pathology.
-    solutions = verify_candidates(
+    solutions = continuum.verify_flagged(
         candidates,
+        free,
+        lambda cands, cap: verify_candidates(
+            cands,
+            fk_fn=lambda q: poe_forward_kinematics(kb, q),
+            jacobian_fn=lambda q: kinbody_jacobian(kb, q),
+            t_target=t_target,
+            fk_atol=_FK_VERIFY_ATOL,
+            dedup_atol=policy.subproblem_dedup,
+            solver_name=_SOLVER_NAME,
+            # The tight 1e-7 gate drops the spurious near-singular near-miss (#362,
+            # UR ~7e-6) directly. Recovering a *genuine* near-singular solution
+            # (#288, z1 q4=pi/2 ~1e-6 -> machine precision) needs Newton polish, so
+            # the caller opts in via ``allow_refinement`` (the standalone-arm
+            # artifacts force it on -- ``SolverSpec.force_refine``). We honour the
+            # caller here so inner-solver users like jointlock keep their own
+            # refinement policy (and their machine-precision-or-drop contract).
+            allow_refinement=allow_refinement,
+            refinement_max_iters=refinement_max_iters,
+            max_solutions=cap,
+        ),
         fk_fn=lambda q: poe_forward_kinematics(kb, q),
-        jacobian_fn=lambda q: kinbody_jacobian(kb, q),
         t_target=t_target,
-        fk_atol=_FK_VERIFY_ATOL,
         dedup_atol=policy.subproblem_dedup,
-        solver_name=_SOLVER_NAME,
-        # The tight 1e-7 gate drops the spurious near-singular near-miss (#362,
-        # UR ~7e-6) directly. Recovering a *genuine* near-singular solution
-        # (#288, z1 q4=pi/2 ~1e-6 -> machine precision) needs Newton polish, so
-        # the caller opts in via ``allow_refinement`` (the standalone-arm
-        # artifacts force it on -- ``SolverSpec.force_refine``). We honour the
-        # caller here so inner-solver users like jointlock keep their own
-        # refinement policy (and their machine-precision-or-drop contract).
-        allow_refinement=allow_refinement,
-        refinement_max_iters=refinement_max_iters,
         max_solutions=max_solutions,
     )
     _LOG.info(

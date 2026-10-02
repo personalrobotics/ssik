@@ -31,6 +31,7 @@ the runtime solver across 100+ random poses.
 
 from __future__ import annotations
 
+import numpy as np
 import sympy as sp
 
 from ssik._kinbody import KinBody
@@ -42,6 +43,8 @@ from ssik.codegen._compose.spherical_two_parallel import (
     _render_sp4_block,
     _rotation_matrix_sym,
     _vec_const,
+    render_lock_constants,
+    render_lock_test,
 )
 from ssik.codegen._symbolic.sp1 import sp1_theta_sym
 from ssik.codegen._symbolic.sp3 import sp3_branches_sym
@@ -58,6 +61,7 @@ def render_constants_header() -> str:
     """Return constants/imports the rendered three_parallel artifact needs."""
     return (
         "import math\n"
+        "from ssik import continuum as _continuum\n"
         "from ssik.subproblems import sp6 as _sp6_runtime\n"
         "\n"
         f"_DEG_SQ = {_DEG_SQ!r}\n"
@@ -135,6 +139,22 @@ def compose(kb: KinBody) -> str:
         comment="SP1 for q6 (wrist roll-2): closed-form atan2.",
     )
 
+    # ---- Wrist lock: axes[1] || Rot(axes[4], q5) axes[5] (ssik.continuum) ----
+    lock_cross = _vec_const(axes[1]).cross(rot_axes_4_q5 * _vec_const(axes[5]))
+    lock_lines = render_lock_test(
+        lock_cross,
+        float(np.linalg.norm(axes[1]) * np.linalg.norm(axes[5])),
+        "_continuum.three_parallel_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14, q6)",
+        "_wrists = ((theta14, q6),)",
+        [
+            "# The SP1s above divide zero by zero, or miss: represent the",
+            "# branch with q6 at q_free and q_free + pi (ssik.continuum).",
+            "q1, q5, _wrists = _continuum.three_parallel_lock(",
+            "    _LOCK_AXES, _R_HOME, T_target, q1, q5, q_free, _LOCK_OFFSETS",
+            ")",
+        ],
+    )
+
     # ---- d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4] ----
     theta14_sym = sp.Symbol("theta14", real=True)
     rot_axes_1_t14 = _rotation_matrix_sym(_vec_const(axes[1]), theta14_sym)
@@ -182,12 +202,12 @@ def compose(kb: KinBody) -> str:
         comment="SP1 for q2 (shoulder pitch): closed-form atan2.",
     )
 
-    return _assemble_three_parallel(
+    return render_lock_constants(axes, r_home, [*p_offsets, p_tool]) + _assemble_three_parallel(
         destructure_lines=_render_destructure(target),
         sp6_input_lines=sp6_input_lines,
         d1_const=d1,
         theta14_lines=theta14_lines,
-        q6_lines=q6_lines,
+        q6_lines=q6_lines + lock_lines,
         d_inner_lines=d_inner_lines,
         q3_lines=q3_lines,
         q2_lines=q2_lines,
@@ -240,9 +260,11 @@ def _assemble_three_parallel(
     q3_out = "q3" if f2 > 0 else "-q3"
     q4_out = "q4" if f3 > 0 else "-q4"
     parts = [
-        "def _solve_algebraic(T_target):",
+        "def _solve_algebraic(T_target, q_free=0.0, free=None):",
         '    """Algebraic IK candidates. Calls runtime SP6 for (q1, q5);',
-        "    inlines the post-SP6 SP1+SP3+SP1 chain.",
+        "    inlines the post-SP6 SP1+SP3+SP1 chain. A locked wrist takes",
+        "    q6 = q_free; ``free``, when given, receives per candidate the",
+        "    free joint of a locked wrist or NOT_FLAGGED (ssik.continuum).",
         '    """',
         _indent(destructure_lines, 4),
         "    candidates = []",
@@ -264,17 +286,20 @@ def _assemble_three_parallel(
         "        c5 = math.cos(q5)",
         _indent(theta14_lines, 8),
         _indent(q6_lines, 8),
-        "        s14 = math.sin(theta14)",
-        "        c14 = math.cos(theta14)",
-        _indent(d_inner_lines, 8),
-        _indent(q3_lines, 8),
+        "        for theta14, q6 in _wrists:",
+        "            s14 = math.sin(theta14)",
+        "            c14 = math.cos(theta14)",
+        _indent(d_inner_lines, 12),
+        _indent(q3_lines, 12),
         "",
-        "        for q3 in (theta_q3_plus, theta_q3_minus):",
-        "            s3 = math.sin(q3)",
-        "            c3 = math.cos(q3)",
-        _indent(q2_lines, 12),
-        "            q4 = ((theta14 - q2 - q3 + math.pi) % (2.0 * math.pi)) - math.pi",
-        f"            candidates.append([q1, q2, {q3_out}, {q4_out}, q5, q6])",
+        "            for q3 in (theta_q3_plus, theta_q3_minus):",
+        "                s3 = math.sin(q3)",
+        "                c3 = math.cos(q3)",
+        _indent(q2_lines, 16),
+        "                q4 = ((theta14 - q2 - q3 + math.pi) % (2.0 * math.pi)) - math.pi",
+        f"                candidates.append([q1, q2, {q3_out}, {q4_out}, q5, q6])",
+        "                if free is not None:",
+        "                    free.append(5 if _lock else _continuum.NOT_FLAGGED)",
         "    return candidates",
         "",
     ]

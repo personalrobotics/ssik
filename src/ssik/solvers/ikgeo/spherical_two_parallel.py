@@ -56,6 +56,7 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik import continuum
 from ssik._kinbody import KinBody, canonicalize_spherical_wrist
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
@@ -152,6 +153,9 @@ def solve(
     )
 
     candidates: list[NDArray[np.float64]] = []
+    # Per candidate, the free joint of a locked wrist, else NOT_FLAGGED
+    # (ssik.continuum).
+    free: list[int] = []
     for q1 in t1_solutions:
         # Shoulder-plane residual: what (p[2] + Rot(axes[2], q3) @ p[3])
         # must achieve, minus p[1], expressed in the joint-1 frame.
@@ -192,6 +196,12 @@ def solve(
             )
 
             for q5 in t5_solutions:
+                # A wrist within RANK_TOL of locked (axes[3] || Rot(axes[4],
+                # q5) axes[5]) is flagged for the slide. Where the SP1s divide
+                # zero by zero (LOCK_TOL) or their angles miss the wrist
+                # rotation, the lock is split: the wrist's limits from either
+                # side of it (ssik.continuum).
+                sine = continuum.lock_sine(axes[3], rotation_matrix(axes[4], q5) @ axes[5])
                 q4, _ = sp1.solve(
                     axes[3],
                     rotation_matrix(axes[4], q5) @ axes[5],
@@ -204,18 +214,39 @@ def solve(
                     r_36.T @ axes[3],
                     policy,
                 )
-                candidates.append(np.array([q1, q2, q3, q4, q5, q6]))
+                wrists = [(q4, q6)]
+                if sine <= continuum.RANK_TOL and (
+                    sine <= continuum.LOCK_TOL
+                    or continuum.spherical_wrist_error(
+                        axes, r_home, t_target, q1, q2, q3, q4, q5, q6
+                    )
+                    > continuum.RANK_TOL
+                ):
+                    wrists = continuum.spherical_wrist_lock(
+                        axes, r_home, t_target, q1, q2, q3, q5, 0.0
+                    )
+                for q4, q6 in wrists:
+                    candidates.append(np.array([q1, q2, q3, q4, q5, q6]))
+                    free.append(5 if sine <= continuum.RANK_TOL else continuum.NOT_FLAGGED)
 
-    solutions = verify_candidates(
+    solutions = continuum.verify_flagged(
         candidates,
+        free,
+        lambda cands, cap: verify_candidates(
+            cands,
+            fk_fn=lambda q: poe_forward_kinematics(kb, q),
+            jacobian_fn=lambda q: kinbody_jacobian(kb, q),
+            t_target=t_target,
+            fk_atol=policy.subproblem_numerical,
+            dedup_atol=policy.subproblem_dedup,
+            solver_name=_SOLVER_NAME,
+            allow_refinement=allow_refinement,
+            refinement_max_iters=refinement_max_iters,
+            max_solutions=cap,
+        ),
         fk_fn=lambda q: poe_forward_kinematics(kb, q),
-        jacobian_fn=lambda q: kinbody_jacobian(kb, q),
         t_target=t_target,
-        fk_atol=policy.subproblem_numerical,
         dedup_atol=policy.subproblem_dedup,
-        solver_name=_SOLVER_NAME,
-        allow_refinement=allow_refinement,
-        refinement_max_iters=refinement_max_iters,
         max_solutions=max_solutions,
     )
     _LOG.info(

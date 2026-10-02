@@ -35,6 +35,7 @@
 #include "ssik_cpp/dedup.hpp"
 #include "ssik_cpp/finalize.hpp"
 #include "ssik_cpp/ik_types.hpp"
+#include "ssik_cpp/continuum.hpp"
 #include "ssik_cpp/newton.hpp"  // lm_refine (force_refine path)
 #include "ssik_cpp/polish.hpp"
 #include "ssik_cpp/rescue.hpp"
@@ -516,14 +517,19 @@ enum class RrPolish : std::uint8_t { Off, Poe, Dh };
 // residual under the rigid bridge), or the polished chain's. `lim` (POE frame)
 // only keeps the polish from crossing a limit (polish.hpp); no candidate is
 // dropped for its limits, and there is no seed/rescue logic -- that is the
-// artifact layer.
+// artifact layer. With `free_out` (the POE polish only), it receives per
+// returned solution kFreeFromKernel where the candidate's POE Jacobian may be
+// rank deficient (continuum.hpp, evaluated before the polish as Python reads it
+// off the polish's first Jacobian; a refined near-miss at its refined point),
+// else kNotFlagged.
 template <class CoeffFn>
 std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts& rr,
                                          CoeffFn&& coeffs, const Pose& t_poe, double fk_atol,
                                          double dedup_atol, bool allow_refinement,
                                          int refinement_max_iters,
                                          RrPolish polish = RrPolish::Off,
-                                         const JointLimits<6>& lim = {}) {
+                                         const JointLimits<6>& lim = {},
+                                         std::vector<int>* free_out = nullptr) {
   using namespace rr_detail;
   const Eigen::Matrix4d t_dh = rr.t_pre_inv * t_poe * rr.t_post_inv;
   // The limits in DH coordinates (q_dh = q_poe + theta_offset), for the DH polish.
@@ -550,6 +556,7 @@ std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts
   solve_x2_roots(embed_e(e_quad), embed_e(e_lin), embed_e(e_const), roots, vecs);
 
   std::vector<Solution<6>> cands;
+  std::vector<int> cand_free;
   for (std::size_t k = 0; k < roots.size(); ++k) {
     std::array<double, 6> q_dh{};
     double fk_err = 0.0;
@@ -564,10 +571,22 @@ std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts
     std::array<double, 6> q_poe;
     for (int i = 0; i < 6; ++i) q_poe[i] = q_dh[i] - rr.theta_offset[i];
     if (accepted) {
-      if (polish == RrPolish::Poe)
+      if (free_out != nullptr) {
+        // The polish's first Jacobian is this one: evaluate it once.
+        const Eigen::Matrix<double, 6, 6> j0 = spatial_jacobian<6>(c, q_poe);
+        if (rank_deficient(j0)) {
+          cand_free.resize(cands.size(), kNotFlagged);  // flags only once one is set
+          cand_free.push_back(kFreeFromKernel);
+        }
+        if (polish == RrPolish::Poe)
+          polish_accepted<6>([&](const std::array<double, 6>& x) { return fk<6>(c, x); },
+                             [&](const std::array<double, 6>& x) { return spatial_jacobian<6>(c, x); },
+                             t_poe, lim, q_poe, fk_err, &j0);
+      } else if (polish == RrPolish::Poe) {
         polish_accepted<6>([&](const std::array<double, 6>& x) { return fk<6>(c, x); },
                            [&](const std::array<double, 6>& x) { return spatial_jacobian<6>(c, x); },
                            t_poe, lim, q_poe, fk_err);
+      }
       cands.push_back(Solution<6>{q_poe, fk_err, Refinement::None});
     } else if (allow_refinement && fk_err < 0.1) {
       // Refine only near-misses (fk < 0.1): a candidate already >0.1 off is an
@@ -578,10 +597,27 @@ std::vector<Solution<6>> general_6r_core(const JointConsts<6>& c, const RrConsts
       // it in POE frame (keep iff it converges), mirroring solve_all_ik's
       // force_refine path (#528). q_poe is exact-bridge-equivalent to q_dh.
       const auto refined = lm_refine<6>(c, q_poe, t_poe, fk_atol, refinement_max_iters);
-      if (refined) cands.push_back(Solution<6>{refined->first, refined->second, Refinement::Lm});
+      if (refined) {
+        cands.push_back(Solution<6>{refined->first, refined->second, Refinement::Lm});
+        // The same no-false-negative bound as an accepted candidate's (the
+        // Python artifact tests this one exactly, by an SVD, which costs it
+        // less there; the slide's confirmation decides either way).
+        if (free_out != nullptr && rank_deficient(spatial_jacobian<6>(c, refined->first))) {
+          cand_free.resize(cands.size() - 1, kNotFlagged);
+          cand_free.push_back(kFreeFromKernel);
+        }
+      }
     }
   }
-  return dedup_wrap_close(cands, c, t_poe, dedup_atol);
+  if (free_out == nullptr) return dedup_wrap_close(cands, c, t_poe, dedup_atol);
+  if (cand_free.empty()) {  // nothing flagged: no flags to carry
+    free_out->clear();
+    return dedup_wrap_close(cands, c, t_poe, dedup_atol);
+  }
+  cand_free.resize(cands.size(), kNotFlagged);
+  dedup_same_root_flagged<6>(cands, cand_free, c, t_poe, dedup_atol);
+  *free_out = std::move(cand_free);
+  return cands;
 }
 
 // Full artifact-contract solve for a general 6R (RR) arm. All geometry is baked
@@ -598,23 +634,31 @@ std::vector<Solution<6>> general_6r_artifact_solve(const JointConsts<6>& c, cons
   // force_refine=True on the general_6r SolverSpec (#528): the artifact always
   // polishes marginal near-double-root candidates, so the native set matches the
   // Python oracle.
-  const auto core = [&](const Pose& tp) {
+  // The analytic solve: the RR core with the singular-continuum slide
+  // (continuum.hpp) applied to its flagged solutions, seeded or not. The rescue
+  // re-solves unseeded and raw, as the Python artifact's rescue does.
+  const auto core = [&](const Pose& tp, const std::array<double, 6>* seed, bool limits) {
+    std::vector<int> free;
     auto sols = general_6r_core(c, rr, coeffs, tp, kGeneral6rFkAtol, kGeneral6rDedupAtol,
                                /*allow_refinement=*/true, p.refinement_max_iters,
-                               RrPolish::Poe, lim);
+                               RrPolish::Poe, lim, &free);
     // POE-FK re-verify (#533): general_6r_core filters the DH-frame residual, but
     // the rigid poe_to_dh bridge is slightly inconsistent at degenerate geometry
     // (DH-FK closes, POE-FK does not). Re-verify against the actual POE target,
     // as every other family does; drop candidates that miss it.
     std::vector<Solution<6>> verified;
-    for (auto& s : sols) {
+    std::vector<int> verified_free;
+    for (std::size_t i = 0; i < sols.size(); ++i) {
+      auto& s = sols[i];
       const double poe_fk = (fk<6>(c, s.q) - tp).norm();
       if (poe_fk <= kGeneral6rFkAtol) {
         s.fk_residual = poe_fk;
         verified.push_back(s);
+        if (!free.empty()) verified_free.push_back(free[i]);
       }
     }
-    return verified;
+    return slide_continua(std::move(verified), verified_free, c, lim, tp, seed, limits,
+                          kGeneral6rDedupAtol);
   };
 
   // Limit pass only (no seed/tolerance/truncate): the rescue gate is "no
@@ -626,13 +670,16 @@ std::vector<Solution<6>> general_6r_artifact_solve(const JointConsts<6>& c, cons
   p_limits.respect_limits = p.respect_limits;
   p_limits.wrap_only = p.wrap_only;
   p_limits.refinement_max_iters = p.refinement_max_iters;
-  std::vector<Solution<6>> in_limits = finalize_solutions<6>(core(T), c, lim, T, p_limits);
+  std::vector<Solution<6>> in_limits = finalize_solutions<6>(
+      core(T, p.has_seed ? &p.q_seed : nullptr, p.respect_limits && !p.wrap_only), c, lim, T,
+      p_limits);
 
   // Rescue gate: nothing in-limits + target within reach => a measure-zero
   // rank-deficient pose where the closed form degenerates; recover via the
   // shared T-perturbation rescue, then re-apply the limit filter.
   if (in_limits.empty() && p.allow_rescue && T.block<3, 1>(0, 3).norm() <= reach_radius(c)) {
-    in_limits = finalize_solutions<6>(rescue_via_T_perturbation<6>(core, c, T), c, lim, T, p_limits);
+    const auto raw = [&](const Pose& tp) { return core(tp, nullptr, false); };
+    in_limits = finalize_solutions<6>(rescue_via_T_perturbation<6>(raw, c, T), c, lim, T, p_limits);
   }
 
   ArtifactParams<6> p_seed = p;
