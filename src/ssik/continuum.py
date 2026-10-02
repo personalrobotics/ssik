@@ -35,10 +35,14 @@ Jacobian of every solution.
   their arithmetic lands.
 - Both keep their SP1 wrist angles (on a lock they are a point of the
   continuum, whichever side the pitch landed), except within ``LOCK_TOL``,
-  where the SP1s divide zero by zero, or where the angles miss the target's
-  wrist rotation by more than ``RANK_TOL`` (:func:`three_parallel_wrist_error`,
-  :func:`spherical_wrist_error`: an artifact's expanded SP1 loses its
-  accuracy near a lock sooner than the native one). There they split the lock.
+  where the SP1s divide zero by zero, or where the angles are unusable:
+  spherical_two_parallel's miss the target's wrist rotation by more than
+  ``RANK_TOL`` (:func:`spherical_wrist_error`: an artifact's expanded SP1
+  loses its accuracy near a lock sooner than the native one);
+  three_parallel's cannot give a candidate within its 1e-7 FK gate
+  (:func:`three_parallel_wrist_misses`: near a lock each SP1 angle alone is
+  accurate only to about ``eps / sine``, and the SP6 pitch of an exact lock
+  leaves ``sine`` at ~1e-8, #668). There they split the lock.
   three_parallel (:func:`three_parallel_lock`), whose numerical SP6 is too
   coarse there to read the wrist angles or to tell a pose on the lock from one
   just off it, makes ``(q1, q5)`` exact for the lock and sets ``q6`` to the
@@ -148,6 +152,7 @@ __all__ = [
     "spherical_wrist_lock",
     "three_parallel_lock",
     "three_parallel_wrist_error",
+    "three_parallel_wrist_misses",
     "verify_flagged",
 ]
 
@@ -244,6 +249,17 @@ def _sp3_feasible(
     return abs(target - axial) <= amp * (1.0 - LOCK_TOL)
 
 
+def _sp3_miss(
+    k: NDArray[np.float64], p: NDArray[np.float64], q: NDArray[np.float64], d: float
+) -> float:
+    """How far ``d`` lies outside the distances ``|Rot(k, t) p - q|`` reaches
+    (0 within them), about the FK position error of an SP3 solved at ``d``."""
+    s = float(p @ p) + float(q @ q) - 2.0 * float(k @ q) * float(k @ p)
+    amp = 2.0 * float(np.linalg.norm(np.cross(k, p)) * np.linalg.norm(np.cross(k, q)))
+    lo, hi = math.sqrt(max(s - amp, 0.0)), math.sqrt(max(s + amp, 0.0))
+    return max(lo - d, d - hi, 0.0)
+
+
 def three_parallel_lock(
     axes: Sequence[ArrayLike],
     r_home: ArrayLike,
@@ -277,6 +293,21 @@ def three_parallel_lock(
     pose's distance from the lock: within the acceptance gate they are kept as
     they are, beyond it the artifact's refinement takes each to its own
     isolated solution (the two sides give the two wrist branches)."""
+    q1, q5, out, _ = _three_parallel_lock(axes, r_home, t_target, q1, q5, q_free, offsets)
+    return q1, q5, out
+
+
+def _three_parallel_lock(
+    axes: Sequence[ArrayLike],
+    r_home: ArrayLike,
+    t_target: NDArray[np.float64],
+    q1: float,
+    q5: float,
+    q_free: float,
+    offsets: Sequence[ArrayLike],
+) -> tuple[float, float, list[tuple[float, float]], bool]:
+    """:func:`three_parallel_lock`, and whether some free value it tried
+    reaches the elbow."""
     a = [np.asarray(x, dtype=np.float64) for x in axes]
     r_06 = np.asarray(t_target, dtype=np.float64)[:3, :3] @ np.asarray(r_home).T
     p = [np.asarray(x, dtype=np.float64) for x in offsets]
@@ -290,6 +321,7 @@ def three_parallel_lock(
         q1 = min(roots, key=lambda t: abs((t - q1 + math.pi) % _TWO_PI - math.pi))
     r_01 = rotation_matrix(a[0], q1)
     out: list[tuple[float, float]] = []
+    reached = False
     for start in (q_free, q_free + math.pi):
         first: tuple[float, float] | None = None
         for k in [0] + [s * j for j in range(1, LOCK_SEARCH // 2 + 1) for s in (1, -1)]:
@@ -302,10 +334,11 @@ def three_parallel_lock(
             d_inner = r_01.T @ p_16 - p[1] - r_14 @ r_45 @ p[5] - r_14 @ p[4]
             if _sp3_feasible(a[1], -p[3], p[2], float(np.linalg.norm(d_inner))):
                 first = (th, v)
+                reached = True
                 break
         assert first is not None
         out.append(first)
-    return q1, q5, out
+    return q1, q5, out, reached
 
 
 def spherical_wrist_lock(
@@ -405,6 +438,49 @@ def three_parallel_wrist_error(
     want = rotation_matrix(a[0], q1).T @ r_06
     got = rotation_matrix(a[1], theta14) @ rotation_matrix(a[4], q5) @ rotation_matrix(a[5], q6)
     return float(np.linalg.norm(want - got))
+
+
+def three_parallel_wrist_misses(
+    axes: Sequence[ArrayLike],
+    r_home: ArrayLike,
+    t_target: NDArray[np.float64],
+    q1: float,
+    q5: float,
+    theta14: float,
+    q6: float,
+    q_free: float,
+    offsets: Sequence[ArrayLike],
+    gate: float,
+) -> bool:
+    """Whether a flagged three_parallel branch is split
+    (:func:`three_parallel_lock`) because its SP1 wrist angles cannot give a
+    candidate that passes the FK ``gate``. Near a lock the SP1s fix the wrist's
+    sum ``theta14 +- q6`` well, but each angle alone only to about ``eps /
+    sine``, and the numerical SP6 leaves ``sine`` at ~1e-8 at an exact lock
+    (#668). Either the angles miss the target's wrist rotation by more than
+    ``gate`` (:func:`three_parallel_wrist_error`, a lower bound on the
+    candidate's FK residual), or the ``theta14`` they read leaves the elbow
+    more than ``gate`` out of reach while a free value the split tries reaches
+    it. Where none does (the elbow is tangent, exactly stretched or folded,
+    at a single point of the lock), the SP1 angles are the better start for
+    the refinement and are kept."""
+    if three_parallel_wrist_error(axes, r_home, t_target, q1, q5, theta14, q6) > gate:
+        return True
+    a = [np.asarray(x, dtype=np.float64) for x in axes]
+    p = [np.asarray(x, dtype=np.float64) for x in offsets]
+    t = np.asarray(t_target, dtype=np.float64)
+    r_06 = t[:3, :3] @ np.asarray(r_home).T
+    p_16 = t[:3, 3] - p[0] - r_06 @ p[6]
+    r_14 = rotation_matrix(a[1], theta14)
+    d_inner = (
+        rotation_matrix(a[0], q1).T @ p_16
+        - p[1]
+        - r_14 @ rotation_matrix(a[4], q5) @ p[5]
+        - r_14 @ p[4]
+    )
+    if _sp3_miss(a[1], -p[3], p[2], float(np.linalg.norm(d_inner))) <= gate:
+        return False
+    return _three_parallel_lock(axes, r_home, t_target, q1, q5, q_free, offsets)[3]
 
 
 def spherical_wrist_error(

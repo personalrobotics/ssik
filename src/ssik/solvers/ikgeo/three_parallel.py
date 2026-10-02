@@ -187,16 +187,18 @@ def solve(
 
         # A wrist within RANK_TOL of locked (axes[1] || Rot(axes[4], q5)
         # axes[5]) is flagged for the slide. Where the SP1s divide zero by zero
-        # (LOCK_TOL) or their angles miss the wrist rotation, the lock is split:
-        # the wrist's limits from either side of it (ssik.continuum).
+        # (LOCK_TOL) or their angles cannot give a candidate within the FK gate
+        # (they miss the wrist rotation, or leave the elbow out of reach), the
+        # lock is split (ssik.continuum).
         sine = continuum.lock_sine(axes[1], r_45 @ axes[5])
         theta14, _ = sp1.solve(axes[1], r_45 @ axes[5], r_01.T @ r_06 @ axes[5], policy)
         q6, _ = sp1.solve(-axes[5], r_45.T @ axes[1], r_06.T @ r_01 @ axes[1], policy)
         wrists = [(theta14, q6)]
         if sine <= continuum.RANK_TOL and (
             sine <= continuum.LOCK_TOL
-            or continuum.three_parallel_wrist_error(axes, r_home, t_target, q1, q5, theta14, q6)
-            > continuum.RANK_TOL
+            or continuum.three_parallel_wrist_misses(
+                axes, r_home, t_target, q1, q5, theta14, q6, 0.0, p, _FK_VERIFY_ATOL
+            )
         ):
             q1, q5, wrists = continuum.three_parallel_lock(axes, r_home, t_target, q1, q5, 0.0, p)
             r_01 = rotation_matrix(axes[0], q1)

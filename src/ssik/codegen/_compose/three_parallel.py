@@ -48,7 +48,7 @@ from ssik.codegen._compose.spherical_two_parallel import (
 )
 from ssik.codegen._symbolic.sp1 import sp1_theta_sym
 from ssik.codegen._symbolic.sp3 import sp3_branches_sym
-from ssik.solvers.ikgeo.three_parallel import trio_reference_signs
+from ssik.solvers.ikgeo.three_parallel import _FK_VERIFY_ATOL, trio_reference_signs
 
 __all__ = ["compose", "render_constants_header"]
 
@@ -144,7 +144,8 @@ def compose(kb: KinBody) -> str:
     lock_lines = render_lock_test(
         lock_cross,
         float(np.linalg.norm(axes[1]) * np.linalg.norm(axes[5])),
-        "_continuum.three_parallel_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14, q6)",
+        "_continuum.three_parallel_wrist_misses(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14,"
+        f" q6, q_free, _LOCK_OFFSETS, {_FK_VERIFY_ATOL!r})",
         "_wrists = ((theta14, q6),)",
         [
             "# The SP1s above divide zero by zero, or miss: represent the",

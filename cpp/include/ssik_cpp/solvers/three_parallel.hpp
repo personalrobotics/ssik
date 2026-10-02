@@ -83,15 +83,18 @@ inline std::vector<Solution<6>> three_parallel_solve_flagged(
     Eigen::Matrix3d r_45 = rotation_matrix(axes[4], q5);
 
     // A wrist within kRankTol of locked is flagged for the slide (#662). Where
-    // the SP1s below divide zero by zero (kLockTol) or their angles miss the
-    // wrist rotation, the lock is split: the wrist's limits from either side.
+    // the SP1s below divide zero by zero (kLockTol) or their angles cannot give
+    // a candidate within the FK gate (three_parallel_wrist_misses), the lock is
+    // split.
     const double sine = lock_sine(axes[1], r_45 * axes[5]);
     const double th = sp1(axes[1], r_45 * axes[5], r_01.transpose() * r_06 * axes[5], tol).first;
     const double q6r = sp1(-axes[5], r_45.transpose() * axes[1], r_06.transpose() * r_01 * axes[1], tol).first;
     std::array<WristPair, 2> wrists = {WristPair{th, q6r}, WristPair{0.0, 0.0}};
     int n_wrists = 1;
     if (sine <= kRankTol &&
-        (sine <= kLockTol || three_parallel_wrist_error(axes, r_06, q1, q5, th, q6r) > kRankTol)) {
+        (sine <= kLockTol ||
+         three_parallel_wrist_misses(axes, r_06, p_0t, p, q1, q5, th, q6r, q_free,
+                                     kThreeParallelFkAtol))) {
       const WristSplit split = three_parallel_lock(axes, r_06, p_0t, p, q1, q5, q_free);
       wrists = split.pairs;
       n_wrists = split.count;

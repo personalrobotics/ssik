@@ -95,10 +95,14 @@ Jacobian of every solution:
   both backends flag the same continuum whichever side of the lock their
   arithmetic lands. Both keep their wrist angles (on a lock they are a point of
   the continuum) unless they divide zero by zero (sine within `1e-9`, the
-  rule the spherical-shoulder 7R core already uses) or miss the target's wrist
-  rotation by more than `1e-4`. Then they split the lock. `three_parallel`,
-  whose numerical wrist pitch is too coarse to read the angles there, makes
-  its shoulder and pitch exact for the lock and sets `q6` to the seed's value
+  rule the spherical-shoulder 7R core already uses) or the angles are unusable:
+  `spherical_two_parallel`'s miss the target's wrist rotation by more than
+  `1e-4`; `three_parallel`'s cannot give a candidate within its `1e-7` FK gate
+  (they miss the wrist rotation by more than that, or leave the elbow out of
+  reach where another point of the lock reaches it). Then they split the lock.
+  `three_parallel`, whose numerical wrist pitch is too coarse to read the
+  angles there (near a lock each SP1 angle alone is accurate only to about
+  `eps / sine`, though their sum is fixed), makes its shoulder and pitch exact for the lock and sets `q6` to the seed's value
   (`0` unseeded) and to that plus `pi`, each moved to the nearest of 64 values
   around the circle at which the elbow can reach, reading the other wrist
   angle off the target. `spherical_two_parallel`, on the lock, sets `q6` to

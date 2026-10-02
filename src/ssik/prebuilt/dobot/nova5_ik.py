@@ -280,7 +280,7 @@ def _solve_algebraic(T_target, q_free=0.0, free=None):
         lk_x1 = math.cos(q5)
         _lk = 0.999999999986507*lk_x0**2 + 1.86502807512523e-21*lk_x0*lk_x1 + 4.93038065763132e-32*lk_x0 + 1.34924357310693e-11*lk_x1**2 - 2.69848714621385e-11*lk_x1 + 1.34924357310693e-11
         _lock = _lk <= 9.999999999999999e-09
-        if _lock and (_lk <= 9.999999999999997e-19 or _continuum.three_parallel_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14, q6) > _continuum.RANK_TOL):
+        if _lock and (_lk <= 9.999999999999997e-19 or _continuum.three_parallel_wrist_misses(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14, q6, q_free, _LOCK_OFFSETS, 1e-07)):
             # The SP1s above divide zero by zero, or miss: represent the
             # branch with q6 at q_free and q_free + pi (ssik.continuum).
             q1, q5, _wrists = _continuum.three_parallel_lock(

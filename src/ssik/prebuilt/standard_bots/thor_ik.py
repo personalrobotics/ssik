@@ -237,7 +237,7 @@ def _solve_algebraic(T_target, q_free=0.0, free=None):
         _wrists = ((theta14, q6),)
         _lk = 1.0*math.sin(q5)**2
         _lock = _lk <= 1e-08
-        if _lock and (_lk <= 1e-18 or _continuum.three_parallel_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14, q6) > _continuum.RANK_TOL):
+        if _lock and (_lk <= 1e-18 or _continuum.three_parallel_wrist_misses(_LOCK_AXES, _R_HOME, T_target, q1, q5, theta14, q6, q_free, _LOCK_OFFSETS, 1e-07)):
             # The SP1s above divide zero by zero, or miss: represent the
             # branch with q6 at q_free and q_free + pi (ssik.continuum).
             q1, q5, _wrists = _continuum.three_parallel_lock(

@@ -275,6 +275,7 @@ struct WristSplit {
   std::array<WristPair, 2> pairs;
   int count;
   double q1, q5;  // three_parallel: the branch's (q1, q5), made exact on a lock
+  bool reached = false;  // three_parallel: some free value tried reaches the elbow
 };
 
 // ssik.continuum.LOCK_SEARCH.
@@ -287,6 +288,17 @@ inline bool sp3_feasible(const Eigen::Vector3d& k, const Eigen::Vector3d& p,
   const double axial = k.dot(q) * k.dot(p);
   const double amp = k.cross(p).norm() * k.cross(q).norm();
   return std::abs(target - axial) <= amp * (1.0 - kLockTol);
+}
+
+// How far d lies outside the distances |Rot(k, t) p - q| reaches, 0 within them
+// (ssik.continuum._sp3_miss).
+inline double sp3_miss(const Eigen::Vector3d& k, const Eigen::Vector3d& p,
+                       const Eigen::Vector3d& q, double d) {
+  const double s = p.dot(p) + q.dot(q) - 2.0 * k.dot(q) * k.dot(p);
+  const double amp = 2.0 * k.cross(p).norm() * k.cross(q).norm();
+  const double lo = std::sqrt(std::max(s - amp, 0.0));
+  const double hi = std::sqrt(std::max(s + amp, 0.0));
+  return std::max({lo - d, d - hi, 0.0});
 }
 
 // The representatives of a three_parallel branch within kRankTol of a lock
@@ -337,6 +349,7 @@ inline WristSplit three_parallel_lock(const std::array<Eigen::Vector3d, 6>& axes
           r_01.transpose() * p_16 - p[1] - r_14 * r_45 * p[5] - r_14 * p[4];
       if (sp3_feasible(axes[1], -p[3], p[2], d_inner.norm())) {
         out.pairs[side] = {th, v};
+        out.reached = true;
         break;
       }
     }
@@ -376,6 +389,25 @@ inline double three_parallel_wrist_error(const std::array<Eigen::Vector3d, 6>& a
   const Eigen::Matrix3d got = rotation_matrix(axes[1], theta14) * rotation_matrix(axes[4], q5) *
                               rotation_matrix(axes[5], q6);
   return (want - got).norm();
+}
+
+// Whether a flagged three_parallel branch is split because its SP1 wrist
+// angles cannot give a candidate within the FK `gate`: they miss the wrist
+// rotation by more than it, or their theta14 leaves the elbow farther than it
+// out of reach while a free value the split tries reaches it
+// (ssik.continuum.three_parallel_wrist_misses). `p` is the chain's p[0..6].
+inline bool three_parallel_wrist_misses(const std::array<Eigen::Vector3d, 6>& axes,
+                                        const Eigen::Matrix3d& r_06, const Eigen::Vector3d& p_0t,
+                                        const std::array<Eigen::Vector3d, 7>& p, double q1,
+                                        double q5, double theta14, double q6, double q_free,
+                                        double gate) {
+  if (three_parallel_wrist_error(axes, r_06, q1, q5, theta14, q6) > gate) return true;
+  const Eigen::Vector3d p_16 = p_0t - p[0] - r_06 * p[6];
+  const Eigen::Matrix3d r_14 = rotation_matrix(axes[1], theta14);
+  const Eigen::Vector3d d_inner = rotation_matrix(axes[0], q1).transpose() * p_16 - p[1] -
+                                  r_14 * rotation_matrix(axes[4], q5) * p[5] - r_14 * p[4];
+  if (sp3_miss(axes[1], -p[3], p[2], d_inner.norm()) <= gate) return false;
+  return three_parallel_lock(axes, r_06, p_0t, p, q1, q5, q_free).reached;
 }
 
 // How far a spherical wrist's angles miss R_36 (ssik.continuum.spherical_wrist_error).

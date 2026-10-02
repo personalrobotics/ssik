@@ -204,7 +204,8 @@ def compose(kb: KinBody) -> str:
     lock_lines = render_lock_test(
         lock_cross,
         float(np.linalg.norm(axes[3]) * np.linalg.norm(axes[5])),
-        "_continuum.spherical_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q2, q3, q4, q5, q6)",
+        "_continuum.spherical_wrist_error(_LOCK_AXES, _R_HOME, T_target, q1, q2, q3, q4, q5, q6)"
+        " > _continuum.RANK_TOL",
         None,
         [
             "# The SP1s above divide zero by zero, or miss: on the lock, the",
@@ -274,8 +275,8 @@ def render_lock_test(
     """The wrist-lock tests on ``|k x p| / (|k| |p|)`` (``cross`` is the
     symbolic ``k x p``, ``norm_product`` the constant ``|k| |p|``): ``_lock``
     (at most ``RANK_TOL``: flag the candidate for the slide), and ``body`` run
-    at most ``LOCK_TOL``, or where the flagged wrist angles miss the target's
-    wrist rotation by more than ``RANK_TOL`` (``mismatch``, an expression):
+    at most ``LOCK_TOL``, or where the flagged wrist angles miss
+    (``mismatch``, a boolean expression):
     split the lock (:func:`ssik.continuum.lock_sine`); with ``mismatch``
     ``None``, every flagged candidate. ``default`` sets the wrist angles the
     candidates loop over, which ``body`` replaces; ``orelse``, when given,
@@ -293,7 +294,7 @@ def render_lock_test(
     if mismatch is None:  # every flagged candidate is split
         lines.append("if _lock:")
     else:
-        lines.append(f"if _lock and (_lk <= {split!r} or {mismatch} > _continuum.RANK_TOL):")
+        lines.append(f"if _lock and (_lk <= {split!r} or {mismatch}):")
     lines.extend("    " + line for line in body)
     if orelse is not None:
         lines.append("else:")
