@@ -157,13 +157,6 @@ ROUNDOFF_CLASSES: frozenset[str] = frozenset()
 # platform, as (direction, class, arm): non-strict like a round-off class,
 # until the named issue makes them reproducible. Record them under the ``ci``
 # key of the arm's ``cells`` (scripts/regen_native_parity.py).
-#   hc10 near_singular/9: the RR pencil is singular for every x, so no root
-#   or split rule reads its branches, and each backend samples the solution
-#   set at points set by the machine's kernels. The solutions one backend
-#   misses there are regular roots (sigma_min 0.1), not points of a
-#   continuum, so the singular-continuum rule (#662) does not reach them;
-#   whether native's land within the match radius of Python's follows the
-#   runner.
 #   fanuc_crx3ia forward F and piper reverse F: a general_6r solution at a
 #   limit lands past the band on some Linux runners and inside it on others,
 #   with identical code (#632).
@@ -173,7 +166,6 @@ ROUNDOFF_CLASSES: frozenset[str] = frozenset()
 #   The slide cannot help: it starts only from a verified point.
 RUNNER_DEPENDENT_CELLS = frozenset(
     {
-        ("forward", "E", "hc10_ik"),
         ("forward", "F", "fanuc_crx3ia_ik"),
         ("reverse", "F", "piper_ik"),
         ("forward", "E", "ur7e_ik"),

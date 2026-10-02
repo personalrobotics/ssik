@@ -55,16 +55,10 @@ pytestmark = pytest.mark.skipif(
 
 # Known gaps: class -> {arm: the platforms where that cell fails}. Printed by
 # scripts/regen_native_parity.py from the committed per-platform cells.
-# hc10_ik's E and J cells are near_singular/9, where the RR pencil is singular
-# (det M(x) vanishes for every x): no root or split rule reads its branches,
-# and each backend samples the solution set at its own points. The solutions
-# one backend misses there are regular roots, not points of a continuum, so the
-# singular-continuum rule (#662) does not reach them.
 ALL = ("darwin", "linux")
 
 KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
     "E": {
-        "hc10_ik": ALL,
         "ur7e_ik": ALL,
     },
     "F": {
@@ -88,7 +82,6 @@ KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
         "piper_ik": ALL,
     },
     "J": {
-        "hc10_ik": ("darwin",),
         "ur18_ik": ("darwin",),
     },
 }
