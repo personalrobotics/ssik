@@ -149,6 +149,10 @@ def _render_thin_wrapper(
     buf.write("from ssik._kinbody import Joint, KinBody, Link\n")
     buf.write("from ssik.core.solution import Solution\n")
     buf.write("from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy\n")
+    buf.write(
+        "from ssik._solve_inputs import check_joints as _check_joints, "
+        "check_solve_inputs as _check_solve_inputs\n"
+    )
     buf.write("from ssik.postprocess import finalize_solutions as _ps_finalize\n")
     # Bulletproof rescue fallback (#319 / #358): thin-wrapper solvers (the
     # SRS family -- seven_r.srs / srs_polished) get the same T-perturbation
@@ -238,6 +242,10 @@ def _render_specialised(
     buf.write("from ssik._kinbody import Joint, KinBody, Link\n")
     buf.write("from ssik.core.solution import Solution\n")
     buf.write("from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy\n")
+    buf.write(
+        "from ssik._solve_inputs import check_joints as _check_joints, "
+        "check_solve_inputs as _check_solve_inputs\n"
+    )
     # _spatial_jacobian is inlined per-arm in the orchestrator (#126); the
     # only refinement primitive imported from runtime is the generic
     # Levenberg-Marquardt step.
@@ -335,6 +343,22 @@ def _render_specialised(
     buf.write(_render_fk_alias())
     buf.write(_render_all_export())
     return buf.getvalue()
+
+
+# The check that opens every generated solve() (#574, docs/api.md "Input
+# validation"): target, seed and max_solutions are validated once, before a
+# backend is picked. The native hooks below are injected right after it.
+_CHECK_INPUTS = (
+    "    T_target, q_seed, max_solutions = _check_solve_inputs(\n"
+    "        T_target,\n"
+    "        q_seed,\n"
+    "        DOF,\n"
+    "        max_solutions=max_solutions,\n"
+    "        seed_tolerance=seed_tolerance,\n"
+    "        refinement_max_iters=refinement_max_iters,\n"
+    "        policy=policy,\n"
+    "    )\n"
+)
 
 
 # Injected into the 6R orchestrator's solve() for native-capable families (#507):
@@ -775,8 +799,15 @@ def _render_specialised_solve_orchestrator(
                 closed within ``policy.subproblem_numerical`` (or all
                 IKs were filtered by ``respect_limits=True``).
             """
-            if seed_tolerance is not None and q_seed is None:
-                raise ValueError("seed_tolerance requires q_seed")
+            T_target, q_seed, max_solutions = _check_solve_inputs(
+                T_target,
+                q_seed,
+                DOF,
+                max_solutions=max_solutions,
+                seed_tolerance=seed_tolerance,
+                refinement_max_iters=refinement_max_iters,
+                policy=policy,
+            )
             T = np.asarray(T_target, dtype=np.float64)
             candidates = _solve_algebraic(T)
 
@@ -940,9 +971,8 @@ def _render_specialised_solve_orchestrator(
             "    enumerate_windings: bool = True,\n    native: bool = True,\n):",
         )
         template = template.replace(
-            '        raise ValueError("seed_tolerance requires q_seed")\n'
-            "    T = np.asarray(T_target, dtype=np.float64)",
-            '        raise ValueError("seed_tolerance requires q_seed")\n'
+            _CHECK_INPUTS + "    T = np.asarray(T_target, dtype=np.float64)",
+            _CHECK_INPUTS
             + (_NATIVE_HOOK_RR if native_rr else _NATIVE_HOOK)
             + "    T = np.asarray(T_target, dtype=np.float64)",
         )
@@ -1407,8 +1437,15 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
                     T_target, q_seed=q_current, max_solutions=1,
                 )
             """
-            if seed_tolerance is not None and q_seed is None:
-                raise ValueError("seed_tolerance requires q_seed")
+            T_target, q_seed, max_solutions = _check_solve_inputs(
+                T_target,
+                q_seed,
+                DOF,
+                max_solutions=max_solutions,
+                seed_tolerance=seed_tolerance,
+                refinement_max_iters=refinement_max_iters,
+                policy=policy,
+            )
             T = np.asarray(T_target, dtype=np.float64)
             # Lock-sweep filters limits in-flight (#238 review): the
             # short-circuit fires on the first in-limits valid IK, not
@@ -1553,9 +1590,8 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
             "    enumerate_windings: bool = True,\n    native: bool = True,\n):",
         )
         template = template.replace(
-            '        raise ValueError("seed_tolerance requires q_seed")\n'
-            "    T = np.asarray(T_target, dtype=np.float64)",
-            '        raise ValueError("seed_tolerance requires q_seed")\n'
+            _CHECK_INPUTS + "    T = np.asarray(T_target, dtype=np.float64)",
+            _CHECK_INPUTS
             + _JOINTLOCK_NATIVE_HOOK
             + "    T = np.asarray(T_target, dtype=np.float64)",
         )
@@ -1841,8 +1877,15 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
 
             Solver: {solver_short}.
             \"\"\"
-            if seed_tolerance is not None and q_seed is None:
-                raise ValueError("seed_tolerance requires q_seed")
+            T_target, q_seed, max_solutions = _check_solve_inputs(
+                T_target,
+                q_seed,
+                DOF,
+                max_solutions=max_solutions,
+                seed_tolerance=seed_tolerance,
+                refinement_max_iters=refinement_max_iters,
+                policy=policy,
+            )
             # Seeded numerical-tracking fast path (#380): the caller gave a seed
             # and wants a single IK -- the trajectory-tracking idiom. Newton-
             # continue from the seed (~0.2 ms) instead of resolving the whole
@@ -1954,11 +1997,8 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
             "    enumerate_windings: bool = True,\n    native: bool = True,\n):",
         )
         template = template.replace(
-            "    if seed_tolerance is not None and q_seed is None:\n"
-            '        raise ValueError("seed_tolerance requires q_seed")\n',
-            "    if seed_tolerance is not None and q_seed is None:\n"
-            '        raise ValueError("seed_tolerance requires q_seed")\n'
-            "    if native:\n"
+            _CHECK_INPUTS,
+            _CHECK_INPUTS + "    if native:\n"
             "        _native_sols = _try_native_solve_7r(\n"
             "            SOLVER_NAME,\n"
             "            _KB,\n"
@@ -2002,7 +2042,15 @@ def _render_fk_alias() -> str:
     """Specialised templates already define ``_fk``; expose it publicly
     so callers can do ``arm_ik.fk(q)`` instead of the private mangled
     name."""
-    return "\nfk = _fk\n"
+    return textwrap.dedent(
+        """\
+
+
+        def fk(q):
+            \"\"\"Forward kinematics: the 4x4 base->ee pose at ``q``, shape ``(DOF,)``.\"\"\"
+            return _fk(_check_joints(q, DOF, "q", finite=False))
+        """
+    )
 
 
 def _render_fk_function_from_kb() -> str:
@@ -2017,6 +2065,6 @@ def _render_fk_function_from_kb() -> str:
 
         def fk(q):
             \"\"\"Forward kinematics: returns the 4x4 base->ee pose at ``q``.\"\"\"
-            return _poe_fk(_KB, np.asarray(q, dtype=np.float64))
+            return _poe_fk(_KB, _check_joints(q, DOF, "q", finite=False))
         """
     )

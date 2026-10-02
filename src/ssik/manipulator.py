@@ -717,37 +717,29 @@ class Manipulator:
             ``(sols, Diagnostic)`` -- inspect ``Diagnostic.summary()``
             to attribute empty-list failures.
 
-        :raises ValueError: if ``T_target.shape != (4, 4)`` or
-            ``len(q_seed) != dof`` when ``q_seed`` is given.
+        :raises TypeError: if ``T_target`` or ``q_seed`` is not an array of
+            real numbers, or ``max_solutions`` is not an integer.
+        :raises ValueError: if ``T_target`` is not a finite ``(4, 4)`` rigid
+            transform, ``q_seed`` is not a finite ``(dof,)`` vector, or
+            ``max_solutions`` is negative. The exact rules, the same on every
+            backend, are in ``docs/api.md`` ("Input validation").
         """
+        from ssik._solve_inputs import check_solve_inputs
         from ssik.postprocess import finalize_solutions as _ps_finalize
-
-        T = np.asarray(T_target, dtype=np.float64)
-        if T.shape != (4, 4):
-            raise ValueError(f"solve expected T_target of shape (4, 4), got {T.shape}")
-        if seed_tolerance is not None and q_seed is None:
-            raise ValueError("seed_tolerance requires q_seed")
-        if q_seed is not None:
-            q_seed_arr: NDArray[np.float64] | None = np.asarray(q_seed, dtype=np.float64)
-            assert q_seed_arr is not None
-            if q_seed_arr.shape != (self.dof,):
-                raise ValueError(f"q_seed expected shape ({self.dof},), got {q_seed_arr.shape}")
-        else:
-            q_seed_arr = None
 
         # Built by from_prebuilt: answer from the artifact's own solver, which
         # bakes per-arm work this path redoes per call (0.089 ms against 3.627
-        # ms on the Panda, same 502 solutions). Placed after the argument
-        # checks above so a bad T_target or q_seed raises identically either
-        # way, and before the live kwargs below so nothing is computed twice.
+        # ms on the Panda, same 502 solutions). The artifact runs the same input
+        # check as the live path below (ssik._solve_inputs), so a bad T_target
+        # or q_seed raises identically either way, checked once.
         # ``explain`` and extra solver_kwargs have no artifact equivalent, so
         # those calls fall through; every artifact takes exactly the fixed
         # parameter set used here, which test_prebuilt_namespace pins.
         if self._prebuilt is not None and not explain and set(solver_kwargs) <= {"native"}:
             sols: list[Solution] = self._prebuilt.solve(
-                T,
+                T_target,
                 max_solutions=max_solutions,
-                q_seed=q_seed_arr,
+                q_seed=q_seed,
                 respect_limits=respect_limits,
                 allow_refinement=allow_refinement,
                 allow_rescue=allow_rescue,
@@ -759,6 +751,16 @@ class Manipulator:
                 **solver_kwargs,
             )
             return sols
+
+        T, q_seed_arr, max_solutions = check_solve_inputs(
+            T_target,
+            q_seed,
+            self.dof,
+            max_solutions=max_solutions,
+            seed_tolerance=seed_tolerance,
+            refinement_max_iters=refinement_max_iters,
+            policy=policy,
+        )
 
         # Filter kwargs by the dispatched solver's signature so callers can
         # pass q_seed (or any other not-universally-supported kwarg) without

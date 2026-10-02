@@ -221,16 +221,16 @@ def test_ik_q_seed_silently_ignored_when_unsupported() -> None:
 
 def test_solve_rejects_wrong_T_shape() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "ur5.urdf", base="base_link", ee="ee_link")
-    with pytest.raises(ValueError, match="solve expected T_target"):
+    with pytest.raises(ValueError, match="T_target must have shape"):
         arm.solve(np.eye(3))
-    with pytest.raises(ValueError, match="solve expected T_target"):
+    with pytest.raises(ValueError, match="T_target must have shape"):
         arm.solve(np.zeros(16))
 
 
 def test_ik_rejects_wrong_q_seed_shape() -> None:
     arm = ssik.Manipulator.from_urdf(FIXTURES / "rizon4.urdf", base="base_link", ee="flange")
     T = arm.fk(np.zeros(7))
-    with pytest.raises(ValueError, match="q_seed expected shape"):
+    with pytest.raises(ValueError, match="q_seed must have shape"):
         arm.solve(T, q_seed=np.zeros(6))
 
 

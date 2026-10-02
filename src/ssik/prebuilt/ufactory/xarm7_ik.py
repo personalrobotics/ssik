@@ -43,6 +43,7 @@ import numpy as np
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik._solve_inputs import check_joints as _check_joints, check_solve_inputs as _check_solve_inputs
 from ssik.postprocess import finalize_solutions as _ps_finalize
 import functools as _functools
 from ssik.refinement import kinbody_jacobian as _kinbody_jacobian
@@ -212,8 +213,15 @@ def solve(
 
     Solver: spherical_shoulder_polished.
     """
-    if seed_tolerance is not None and q_seed is None:
-        raise ValueError("seed_tolerance requires q_seed")
+    T_target, q_seed, max_solutions = _check_solve_inputs(
+        T_target,
+        q_seed,
+        DOF,
+        max_solutions=max_solutions,
+        seed_tolerance=seed_tolerance,
+        refinement_max_iters=refinement_max_iters,
+        policy=policy,
+    )
     if native:
         _native_sols = _try_native_solve_7r(
             SOLVER_NAME,
@@ -337,7 +345,7 @@ from ssik.kinematics.poe_fk import poe_forward_kinematics as _poe_fk
 
 def fk(q):
     """Forward kinematics: returns the 4x4 base->ee pose at ``q``."""
-    return _poe_fk(_KB, np.asarray(q, dtype=np.float64))
+    return _poe_fk(_KB, _check_joints(q, DOF, "q", finite=False))
 
 __all__ = [
     "BASE_LINK",

@@ -54,6 +54,7 @@ import numpy as np
 from ssik._kinbody import Joint, KinBody, Link
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
+from ssik._solve_inputs import check_joints as _check_joints, check_solve_inputs as _check_solve_inputs
 from ssik.refinement import lm_refine as _lm_refine
 from ssik.refinement.polish import Chain as _PolishChain, polish_accepted_flagged as _polish_flagged
 from ssik.continuum import NOT_FLAGGED as _NOT_FLAGGED, slide_continua as _slide_continua
@@ -1022,8 +1023,15 @@ def solve(
         closed within ``policy.subproblem_numerical`` (or all
         IKs were filtered by ``respect_limits=True``).
     """
-    if seed_tolerance is not None and q_seed is None:
-        raise ValueError("seed_tolerance requires q_seed")
+    T_target, q_seed, max_solutions = _check_solve_inputs(
+        T_target,
+        q_seed,
+        DOF,
+        max_solutions=max_solutions,
+        seed_tolerance=seed_tolerance,
+        refinement_max_iters=refinement_max_iters,
+        policy=policy,
+    )
     if native:
         _native_sols = _try_native_solve(
             SOLVER_NAME,
@@ -1232,7 +1240,10 @@ def solve(
         enumerate_windings=enumerate_windings and respect_limits,
     )
 
-fk = _fk
+
+def fk(q):
+    """Forward kinematics: the 4x4 base->ee pose at ``q``, shape ``(DOF,)``."""
+    return _fk(_check_joints(q, DOF, "q", finite=False))
 
 __all__ = [
     "BASE_LINK",

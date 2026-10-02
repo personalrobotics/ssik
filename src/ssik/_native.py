@@ -20,6 +20,7 @@ from typing import Any, Literal, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik._solve_inputs import INT32_MAX
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
 
@@ -87,6 +88,13 @@ def _validate_seed_metric(seed_metric: str, q_seed: NDArray[np.float64] | None) 
     which reaches the metric only when ranking against ``q_seed``)."""
     if q_seed is not None and seed_metric not in ("wrap_l2", "wrap_linf"):
         raise ValueError(f"unknown metric {seed_metric!r}; expected 'wrap_l2' or 'wrap_linf'")
+
+
+# The adapters below take the target and seed as ssik._solve_inputs checked them
+# (float64 arrays); the binding converts anything else and rejects a malformed
+# array itself. The extension's ``int`` options are 32-bit: a cap no result can
+# reach is no cap (-1), and an iteration count past 2**31 is unbounded either way,
+# so both are clamped inline (#574).
 
 
 class _KinBodyCache:
@@ -231,9 +239,7 @@ def try_native_solve(
 
     axes, t_left, t_right, types, lo, hi, has_limits = _consts(solver_name, kb)
     has_seed = q_seed is not None
-    seed_arr = (
-        np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(len(kb.joints), np.float64)
-    )
+    seed_arr = q_seed if has_seed else np.zeros(len(kb.joints), np.float64)
     qs, resids, refine = ext.native_artifact_solve(
         solver_name,
         axes,
@@ -243,16 +249,16 @@ def try_native_solve(
         lo,
         hi,
         has_limits,
-        np.asarray(t_target, dtype=np.float64),
+        t_target,
         _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,
         seed_tolerance is not None,
         seed_tolerance if seed_tolerance is not None else 0.0,
-        max_solutions if max_solutions is not None else -1,
+        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
         allow_rescue,
-        refinement_max_iters,
+        min(refinement_max_iters, INT32_MAX),
         enumerate_windings,
     )
     return [
@@ -287,9 +293,7 @@ def _rr_native_solve(
     po_rc = np.stack([po_r, po_c], axis=1).astype(np.int32)
     q_rc = np.stack([q_r, q_c], axis=1).astype(np.int32)
     has_seed = q_seed is not None
-    seed_arr = (
-        np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(len(kb.joints), np.float64)
-    )
+    seed_arr = q_seed if has_seed else np.zeros(len(kb.joints), np.float64)
     qs, resids, refine = ext.general_6r_tensor_artifact_solve(
         axes,
         t_left,
@@ -317,16 +321,16 @@ def _rr_native_solve(
         q_rc,
         np.asarray(q_m, dtype=np.int32),
         np.asarray(q_co, dtype=np.float64),
-        np.asarray(t_target, dtype=np.float64),
+        t_target,
         _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,
         seed_tolerance is not None,
         seed_tolerance if seed_tolerance is not None else 0.0,
-        max_solutions if max_solutions is not None else -1,
+        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
         allow_rescue,
-        refinement_max_iters,
+        min(refinement_max_iters, INT32_MAX),
         enumerate_windings,
     )
     return [
@@ -927,7 +931,7 @@ def try_native_jointlock_solve(
         return None
     g = jointlock_geometry
     has_seed = q_seed is not None
-    seed_arr = np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(7, np.float64)
+    seed_arr = q_seed if has_seed else np.zeros(7, np.float64)
     tail = (
         _limit_mode(respect_limits),
         has_seed,
@@ -935,9 +939,9 @@ def try_native_jointlock_solve(
         seed_metric,
         seed_tolerance is not None,
         seed_tolerance if seed_tolerance is not None else 0.0,
-        max_solutions if max_solutions is not None else -1,
+        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
         allow_rescue,
-        refinement_max_iters,
+        min(refinement_max_iters, INT32_MAX),
         enumerate_windings,
     )
     common = (g["axes"], g["t_left"], g["t_right"], g["types"], int(g["lock_idx"]), g["q_lock"])
@@ -963,7 +967,7 @@ def try_native_jointlock_solve(
             g["lo"],
             g["hi"],
             g["has_limits"],
-            np.asarray(t_target, np.float64),
+            t_target,
             *tail,
         )
     else:
@@ -991,7 +995,7 @@ def try_native_jointlock_solve(
             g["lo"],
             g["hi"],
             g["has_limits"],
-            np.asarray(t_target, np.float64),
+            t_target,
             *tail,
         )
     return [
@@ -1069,7 +1073,7 @@ def try_native_srs_solve(
     if a is None:
         return None
     has_seed = q_seed is not None
-    seed_arr = np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(7, np.float64)
+    seed_arr = q_seed if has_seed else np.zeros(7, np.float64)
     qs, resids, refine = ext.srs_artifact_solve(
         a["axes"],
         a["t_left"],
@@ -1086,7 +1090,7 @@ def try_native_srs_solve(
         a["lo"],
         a["hi"],
         a["has_limits"],
-        np.asarray(t_target, dtype=np.float64),
+        t_target,
         a["general_path"],
         _limit_mode(respect_limits),
         has_seed,
@@ -1094,9 +1098,9 @@ def try_native_srs_solve(
         seed_metric,
         seed_tolerance is not None,
         seed_tolerance if seed_tolerance is not None else 0.0,
-        max_solutions if max_solutions is not None else -1,
+        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
         allow_rescue,
-        refinement_max_iters,
+        min(refinement_max_iters, INT32_MAX),
         polished=(solver_name == "seven_r.srs_polished"),
         enumerate_windings=enumerate_windings,
     )
@@ -1169,7 +1173,7 @@ def try_native_spherical_shoulder_solve(
     if a is None:
         return None
     has_seed = q_seed is not None
-    seed_arr = np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(7, np.float64)
+    seed_arr = q_seed if has_seed else np.zeros(7, np.float64)
     qs, resids, refine = ext.spherical_shoulder_artifact_solve(
         a["axes"],
         a["t_left"],
@@ -1179,16 +1183,16 @@ def try_native_spherical_shoulder_solve(
         a["lo"],
         a["hi"],
         a["has_limits"],
-        np.asarray(t_target, dtype=np.float64),
+        t_target,
         _limit_mode(respect_limits),
         has_seed,
         seed_arr,
         seed_metric,
         seed_tolerance is not None,
         seed_tolerance if seed_tolerance is not None else 0.0,
-        max_solutions if max_solutions is not None else -1,
+        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
         allow_rescue,
-        refinement_max_iters,
+        min(refinement_max_iters, INT32_MAX),
         polished,
         enumerate_windings,
     )

@@ -545,7 +545,9 @@ class Chart:
         ts = np.asarray(t, dtype=np.float64)
         scalar = ts.ndim == 0
         raw, fold = self._raw_tangent(np.atleast_1d(ts))
-        native = _native_fn("chart_tangent")
+        # The native tail takes the 7R charts' (N, 7) tangents; a 6R chart's
+        # (zero-dimensional, all-NaN) ones take the reference.
+        native = _native_fn("chart_tangent") if raw.shape[1] == 7 else None
         if native is None:
             direction, rate = _tangent_tail(raw)
         else:
@@ -1367,10 +1369,12 @@ def charts(
         reference.
     :raises NotImplementedError: for a solver family without a closed-form
         chart (see the module docstring).
+    :raises TypeError, ValueError: for a malformed ``T_target``, as
+        ``solve()`` (``docs/api.md``, "Input validation").
     """
-    T = np.asarray(T_target, dtype=np.float64)
-    if T.shape != (4, 4):
-        raise ValueError(f"charts expected T_target of shape (4, 4), got {T.shape}")
+    from ssik._solve_inputs import check_pose
+
+    T = check_pose(T_target, policy=policy)
     if solver_name is None:
         from ssik.core.dispatcher import dispatch
 
@@ -2470,9 +2474,18 @@ def track_all(
     When ``poses[-1]`` equals ``poses[0]`` (to ``close_tol``, max abs entry)
     the path is a loop and :attr:`PathTrack.permutation` is its monodromy.
     """
-    P = np.asarray(poses, dtype=np.float64)
+    from ssik._solve_inputs import as_real_array, check_joints, check_pose
+
+    P = as_real_array(poses, "poses")
     if P.ndim != 3 or P.shape[1:] != (4, 4) or P.shape[0] < 1:
         raise ValueError(f"track_all: poses must be (N, 4, 4) with N >= 1, got {P.shape}")
+    for i in range(P.shape[0]):
+        check_pose(P[i], policy=policy, name=f"poses[{i}]")
+    if q0 is not None:
+        starts_arr = np.atleast_2d(as_real_array(q0, "q0"))
+        if starts_arr.ndim != 2:
+            raise ValueError(f"q0 must have shape (dof,) or (k, dof), got {starts_arr.shape}")
+        q0 = np.stack([check_joints(row, len(kb.joints), "q0") for row in starts_arr])
     fam = charts(kb, P[0], solver_name=solver_name, policy=policy, native=native)
     heads: list[tuple[Chart, float, NDArray[np.float64]]] = []
     if q0 is None:
