@@ -5,10 +5,12 @@
 // needs no Python; Python stays the reference oracle). It exists purely to run
 // tests/test_three_parallel.py against both backends.
 #include <array>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <pybind11/numpy.h>
@@ -34,6 +36,248 @@ namespace py = pybind11;
 
 namespace {
 
+// Argument checks (#574). pybind's unchecked<N>() view checks the rank only, so
+// a short array would be read out of bounds; every array is checked against its
+// full shape before it is read, and every integer used as an index against its
+// range. A malformed direct call raises ValueError instead. The public Python
+// entry points validate their input first (ssik._solve_inputs), so on the
+// shipped path these checks never fire: they make the bindings themselves safe.
+std::string shape_str(const py::ssize_t* dims, py::ssize_t n) {
+  std::string s = "(";
+  for (py::ssize_t k = 0; k < n; ++k) {
+    if (k) s += ", ";
+    s += dims[k] < 0 ? std::string("any") : std::to_string(dims[k]);
+  }
+  return s + (n == 1 ? ",)" : ")");
+}
+
+template <class T>
+void require_dims(const py::array_t<T>& arr, std::initializer_list<py::ssize_t> shape,
+                  const char* name) {
+  bool ok = arr.ndim() == static_cast<py::ssize_t>(shape.size());
+  py::ssize_t k = 0;
+  for (py::ssize_t s : shape) {
+    if (!ok) break;
+    ok = s < 0 || arr.shape(k) == s;  // s < 0: any length
+    ++k;
+  }
+  if (!ok)
+    throw std::invalid_argument(std::string(name) + " must have shape " +
+                                shape_str(shape.begin(), static_cast<py::ssize_t>(shape.size())) +
+                                ", got " + shape_str(arr.shape(), arr.ndim()));
+}
+
+// The unchecked view of `arr` once its shape is `shape`.
+template <int D, class T>
+py::detail::unchecked_reference<T, D> view(const py::array_t<T>& arr,
+                                           std::initializer_list<py::ssize_t> shape,
+                                           const char* name) {
+  require_dims(arr, shape, name);
+  return arr.template unchecked<D>();
+}
+
+[[noreturn]] void throw_nonfinite(const char* name) {
+  throw std::invalid_argument(std::string(name) + " must be finite (no NaN or inf)");
+}
+
+void require_index(int v, int lo, int hi, const char* name) {
+  if (v < lo || v >= hi)
+    throw std::invalid_argument(std::string(name) + " must be in [" + std::to_string(lo) + ", " +
+                                std::to_string(hi) + "), got " + std::to_string(v));
+}
+
+// A target pose: (4, 4) and finite. Rigidity is the Python boundary's check
+// (ssik._solve_inputs); the solvers stay memory-safe on any finite matrix.
+ssik::Pose make_pose(const py::array_t<double>& target) {
+  auto tm = view<2>(target, {4, 4}, "target");
+  ssik::Pose T;
+  for (int r = 0; r < 4; ++r)
+    for (int col = 0; col < 4; ++col) {
+      T(r, col) = tm(r, col);
+      if (!std::isfinite(T(r, col))) throw_nonfinite("target");
+    }
+  return T;
+}
+
+// The numeric half of the Python boundary's input check (#574; normative in
+// docs/api.md "Input validation", reference in ssik._solve_inputs._input_defect_py):
+// 0 valid, 1 a target entry NaN or inf, 2 the rotation block off SO(3)
+// (||R^T R - I||_F > ortho_tol), 3 a reflection (det R <= 0), 4 the bottom row
+// off [0, 0, 0, 1] (Euclidean distance > row_tol), 5 a seed entry NaN or inf.
+int input_defect(const double* t, double ortho_tol, double row_tol, const double* seed,
+                 Py_ssize_t n_seed) {
+  for (int i = 0; i < 16; ++i)
+    if (!std::isfinite(t[i])) return 1;
+  Eigen::Matrix3d R;
+  for (int r = 0; r < 3; ++r)
+    for (int col = 0; col < 3; ++col) R(r, col) = t[4 * r + col];
+  if ((R.transpose() * R - Eigen::Matrix3d::Identity()).norm() > ortho_tol) return 2;
+  if (R.determinant() <= 0.0) return 3;
+  const Eigen::Vector4d bottom(t[12], t[13], t[14], t[15] - 1.0);
+  if (bottom.norm() > row_tol) return 4;
+  for (Py_ssize_t i = 0; i < n_seed; ++i)
+    if (!std::isfinite(seed[i])) return 5;
+  return 0;
+}
+
+// A C-contiguous float64 buffer of the given rank (the Python boundary hands
+// over exactly that), or a Python error set and ok == false.
+struct F64Buffer {
+  Py_buffer view{};
+  bool ok = false;
+  F64Buffer(PyObject* obj, int ndim, const char* name) {
+    if (PyObject_GetBuffer(obj, &view, PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) != 0) {
+      PyErr_Clear();
+      PyErr_Format(PyExc_ValueError, "%s must be a C-contiguous float64 array", name);
+      return;
+    }
+    const bool f64 = view.format != nullptr && view.format[0] == 'd' && view.format[1] == '\0';
+    if (!f64 || view.ndim != ndim) {
+      PyBuffer_Release(&view);
+      PyErr_Format(PyExc_ValueError, "%s must be a %d-D float64 array", name, ndim);
+      return;
+    }
+    ok = true;
+  }
+  ~F64Buffer() {
+    if (ok) PyBuffer_Release(&view);
+  }
+  F64Buffer(const F64Buffer&) = delete;
+  F64Buffer& operator=(const F64Buffer&) = delete;
+};
+
+// input_defect(target, ortho_tol, row_tol, q_seed=None) -> int. A raw
+// METH_FASTCALL function rather than a pybind11 binding: it runs before every
+// solve, and pybind's argument conversion alone costs several times the check.
+PyObject* input_defect_fastcall(PyObject*, PyObject* const* args, Py_ssize_t nargs) {
+  if (nargs < 3 || nargs > 4) {
+    PyErr_SetString(PyExc_TypeError,
+                    "input_defect(target, ortho_tol, row_tol, q_seed=None) takes 3 or 4 arguments");
+    return nullptr;
+  }
+  const double ortho_tol = PyFloat_AsDouble(args[1]);
+  if (ortho_tol == -1.0 && PyErr_Occurred()) return nullptr;
+  const double row_tol = PyFloat_AsDouble(args[2]);
+  if (row_tol == -1.0 && PyErr_Occurred()) return nullptr;
+  F64Buffer t(args[0], 2, "target");
+  if (!t.ok) return nullptr;
+  if (t.view.shape[0] != 4 || t.view.shape[1] != 4) {
+    PyErr_Format(PyExc_ValueError, "target must have shape (4, 4), got (%zd, %zd)",
+                 t.view.shape[0], t.view.shape[1]);
+    return nullptr;
+  }
+  const double* seed = nullptr;
+  Py_ssize_t n_seed = 0;
+  std::optional<F64Buffer> s;
+  if (nargs == 4 && args[3] != Py_None) {
+    s.emplace(args[3], 1, "q_seed");
+    if (!s->ok) return nullptr;
+    seed = static_cast<const double*>(s->view.buf);
+    n_seed = s->view.shape[0];
+  }
+  return PyLong_FromLong(input_defect(static_cast<const double*>(t.view.buf), ortho_tol, row_tol,
+                                      seed, n_seed));
+}
+
+PyMethodDef input_defect_def = {
+    "input_defect", reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)()>(&input_defect_fastcall)),
+    METH_FASTCALL,
+    "input_defect(target, ortho_tol, row_tol, q_seed=None) -> int\n\n"
+    "The solve boundary's numeric input check (ssik._solve_inputs): 0 if valid, else a defect "
+    "code."};
+
+template <int N>
+ssik::JointLimits<N> make_limits(const py::array_t<double>& lo, const py::array_t<double>& hi,
+                                 const py::array_t<int>& has_limits) {
+  auto lo_u = view<1>(lo, {N}, "lo");
+  auto hi_u = view<1>(hi, {N}, "hi");
+  auto hl_u = view<1>(has_limits, {N}, "has_limits");
+  ssik::JointLimits<N> lim;
+  for (int i = 0; i < N; ++i) {
+    lim.lo[i] = lo_u(i);
+    lim.hi[i] = hi_u(i);
+    lim.present[i] = hl_u(i) != 0;
+  }
+  return lim;
+}
+
+// The ArtifactParams surface shared by every *_artifact_solve binding.
+template <int N>
+ssik::ArtifactParams<N> make_params(int limit_mode, bool has_seed, const py::array_t<double>& q_seed,
+                                    const std::string& seed_metric, bool has_seed_tolerance,
+                                    double seed_tolerance, int max_solutions, bool allow_rescue,
+                                    int refinement_max_iters, bool enumerate_windings) {
+  require_index(limit_mode, 0, 3, "respect_limits");  // the limit mode, 0..2
+  // The metric is read only to rank against a seed (and ignored without one,
+  // as in Python).
+  if (has_seed && seed_metric != "wrap_l2" && seed_metric != "wrap_linf")
+    throw std::invalid_argument("seed_metric must be 'wrap_l2' or 'wrap_linf', got '" +
+                                seed_metric + "'");
+  if (max_solutions < -1)
+    throw std::invalid_argument("max_solutions must be -1 (no cap) or >= 0, got " +
+                                std::to_string(max_solutions));
+  ssik::ArtifactParams<N> p;
+  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
+  p.respect_limits = limit_mode != 0;
+  p.wrap_only = limit_mode == 2;
+  p.has_seed = has_seed;
+  if (has_seed) {
+    auto qs_u = view<1>(q_seed, {N}, "q_seed");
+    for (int i = 0; i < N; ++i) {
+      p.q_seed[i] = qs_u(i);
+      if (!std::isfinite(p.q_seed[i])) throw_nonfinite("q_seed");
+    }
+  }
+  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
+  p.has_seed_tolerance = has_seed_tolerance;
+  p.seed_tolerance = seed_tolerance;
+  p.max_solutions = max_solutions;
+  p.allow_rescue = allow_rescue;
+  p.refinement_max_iters = refinement_max_iters;
+  // Lifting is defined against the joint limits, so a caller who waived them
+  // gets the raw geometric set. Applied here, at the boundary where the
+  // caller's own respect_limits is unambiguous: some of these entry points
+  // run finalize once themselves, others go through an artifact solver whose
+  // final pass runs with respect_limits=false by then.
+  p.enumerate_windings = enumerate_windings && limit_mode != 0;
+  return p;
+}
+
+Eigen::Vector3d make_vec3(const py::array_t<double>& arr, const char* name) {
+  auto u = view<1>(arr, {3}, name);
+  return Eigen::Vector3d(u(0), u(1), u(2));
+}
+
+Eigen::Matrix4d make_mat4(const py::array_t<double>& arr, const char* name) {
+  auto u = view<2>(arr, {4, 4}, name);
+  Eigen::Matrix4d m;
+  for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 4; ++j) m(i, j) = u(i, j);
+  return m;
+}
+
+// The SRS constants (ssik._native.srs_native_geometry). elbow_index picks one
+// of the seven joint axes.
+ssik::SrsConsts make_srs_consts(double l_se, double l_ew, const py::array_t<double>& ee_offset,
+                                const py::array_t<double>& shoulder_pivot,
+                                const py::array_t<double>& r_post, int elbow_index,
+                                const py::array_t<double>& upper_home,
+                                const py::array_t<double>& forearm_home) {
+  require_index(elbow_index, 0, 7, "elbow_index");
+  ssik::SrsConsts s;
+  s.l_se = l_se;
+  s.l_ew = l_ew;
+  s.elbow_index = elbow_index;
+  s.ee_offset_local = make_vec3(ee_offset, "ee_offset_local");
+  s.shoulder_pivot = make_vec3(shoulder_pivot, "shoulder_pivot");
+  s.upper_home = make_vec3(upper_home, "upper_home");
+  s.forearm_home = make_vec3(forearm_home, "forearm_home");
+  auto rp = view<2>(r_post, {3, 3}, "r_post_wrist");
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
+  return s;
+}
+
 // Build a native JointConsts<N> from the KinBody arrays marshalled by the Python
 // adapter. Shapes: axes (N,3), t_left/t_right (N,4,4), types (N,).
 template <int N>
@@ -41,10 +285,10 @@ ssik::JointConsts<N> make_consts_n(const py::array_t<double>& axes,
                                    const py::array_t<double>& t_left,
                                    const py::array_t<double>& t_right,
                                    const py::array_t<int>& types) {
-  auto a = axes.unchecked<2>();
-  auto tl = t_left.unchecked<3>();
-  auto tr = t_right.unchecked<3>();
-  auto ty = types.unchecked<1>();
+  auto a = view<2>(axes, {N, 3}, "axes");
+  auto tl = view<3>(t_left, {N, 4, 4}, "t_left");
+  auto tr = view<3>(t_right, {N, 4, 4}, "t_right");
+  auto ty = view<1>(types, {N}, "types");
   ssik::JointConsts<N> c;
   for (int i = 0; i < N; ++i) {
     c.axis[i] = Eigen::Vector3d(a(i, 0), a(i, 1), a(i, 2));
@@ -76,18 +320,12 @@ py::tuple srs_canonical_solve_py(py::array_t<double> axes, py::array_t<double> t
   ssik::SrsConsts s;
   s.l_se = l_se;
   s.l_ew = l_ew;
-  auto eo = ee_offset.unchecked<1>();
-  auto sp = shoulder_pivot.unchecked<1>();
-  auto rp = r_post_wrist.unchecked<2>();
-  for (int i = 0; i < 3; ++i) {
-    s.ee_offset_local[i] = eo(i);
-    s.shoulder_pivot[i] = sp(i);
+  s.ee_offset_local = make_vec3(ee_offset, "ee_offset_local");
+  s.shoulder_pivot = make_vec3(shoulder_pivot, "shoulder_pivot");
+  auto rp = view<2>(r_post_wrist, {3, 3}, "r_post_wrist");
+  for (int i = 0; i < 3; ++i)
     for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
-  }
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<7>> sols = ssik::srs_canonical_solve(c, s, T);
   const int n = static_cast<int>(sols.size());
@@ -113,26 +351,9 @@ py::tuple srs_general_solve_py(py::array_t<double> axes, py::array_t<double> t_l
                                int elbow_index, py::array_t<double> upper_home,
                                py::array_t<double> forearm_home, py::array_t<double> target) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
-  ssik::SrsConsts s;
-  s.l_se = l_se;
-  s.l_ew = l_ew;
-  s.elbow_index = elbow_index;
-  auto eo = ee_offset.unchecked<1>();
-  auto sp = shoulder_pivot.unchecked<1>();
-  auto uh = upper_home.unchecked<1>();
-  auto fh = forearm_home.unchecked<1>();
-  auto rp = r_post.unchecked<2>();
-  for (int i = 0; i < 3; ++i) {
-    s.ee_offset_local[i] = eo(i);
-    s.shoulder_pivot[i] = sp(i);
-    s.upper_home[i] = uh(i);
-    s.forearm_home[i] = fh(i);
-    for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
-  }
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::SrsConsts s = make_srs_consts(l_se, l_ew, ee_offset, shoulder_pivot, r_post,
+                                            elbow_index, upper_home, forearm_home);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<7>> sols = ssik::srs_general_solve(c, s, T);
   const int n = static_cast<int>(sols.size());
@@ -152,10 +373,7 @@ py::tuple three_parallel_solve_py(py::array_t<double> axes, py::array_t<double> 
                                   py::array_t<double> target, bool allow_refinement,
                                   int refinement_max_iters) {
   const ssik::JointConsts<6> c = make_consts(axes, t_left, t_right, types);
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<6>> sols =
       ssik::three_parallel_solve(c, T, {}, allow_refinement, refinement_max_iters);
@@ -180,10 +398,7 @@ py::tuple spherical_two_parallel_solve_py(py::array_t<double> axes, py::array_t<
                                           py::array_t<double> target, bool allow_refinement,
                                           int refinement_max_iters) {
   const ssik::JointConsts<6> c = make_consts(axes, t_left, t_right, types);
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<6>> sols =
       ssik::spherical_two_parallel_solve(c, T, {}, allow_refinement, refinement_max_iters);
@@ -215,42 +430,13 @@ py::tuple native_artifact_solve_py(
     bool enumerate_windings) {
   const ssik::JointConsts<6> c = make_consts(axes, t_left, t_right, types);
 
-  ssik::JointLimits<6> lim;
-  auto lo_u = lo.unchecked<1>();
-  auto hi_u = hi.unchecked<1>();
-  auto hl_u = has_limits.unchecked<1>();
-  for (int i = 0; i < 6; ++i) {
-    lim.lo[i] = lo_u(i);
-    lim.hi[i] = hi_u(i);
-    lim.present[i] = hl_u(i) != 0;
-  }
+  const ssik::JointLimits<6> lim = make_limits<6>(lo, hi, has_limits);
 
-  ssik::ArtifactParams<6> p;
-  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
-  p.respect_limits = limit_mode != 0;
-  p.wrap_only = limit_mode == 2;
-  p.has_seed = has_seed;
-  if (has_seed) {
-    auto qs_u = q_seed.unchecked<1>();
-    for (int i = 0; i < 6; ++i) p.q_seed[i] = qs_u(i);
-  }
-  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
-  p.has_seed_tolerance = has_seed_tolerance;
-  p.seed_tolerance = seed_tolerance;
-  p.max_solutions = max_solutions;
-  p.allow_rescue = allow_rescue;
-  p.refinement_max_iters = refinement_max_iters;
-  // Lifting is defined against the joint limits, so a caller who waived them
-  // gets the raw geometric set. Applied here, at the boundary where the
-  // caller's own respect_limits is unambiguous: some of these entry points
-  // run finalize once themselves, others go through an artifact solver whose
-  // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && limit_mode != 0;
+  const ssik::ArtifactParams<6> p = make_params<6>(
+      limit_mode, has_seed, q_seed, seed_metric, has_seed_tolerance, seed_tolerance,
+      max_solutions, allow_rescue, refinement_max_iters, enumerate_windings);
 
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   // The full artifact solve, family-selected: core (force-refined, as the
   // artifact always polishes) -> empty-gated rescue -> finalize. The rescue is
@@ -289,17 +475,20 @@ py::tuple native_artifact_solve_py(
 py::list feasible_arcs_test_py(py::array_t<double> coeffs, py::array_t<int> swept,
                                py::array_t<double> lo, py::array_t<double> hi,
                                py::array_t<double> grid_arr, bool bounded) {
-  auto co = coeffs.unchecked<2>();
+  auto co = view<2>(coeffs, {-1, 5}, "coeffs");
   const int K = static_cast<int>(co.shape(0));
-  auto lo_u = lo.unchecked<1>();
-  auto hi_u = hi.unchecked<1>();
+  auto lo_u = view<1>(lo, {K}, "lo");
+  auto hi_u = view<1>(hi, {K}, "hi");
   std::vector<ssik::feasible::Arc> limits(K);
   for (int i = 0; i < K; ++i) limits[i] = {lo_u(i), hi_u(i)};
   std::vector<int> sw;
-  auto sw_u = swept.unchecked<1>();
-  for (int i = 0; i < static_cast<int>(sw_u.shape(0)); ++i) sw.push_back(sw_u(i));
+  auto sw_u = view<1>(swept, {-1}, "swept");
+  for (int i = 0; i < static_cast<int>(sw_u.shape(0)); ++i) {
+    require_index(sw_u(i), 0, K, "swept");
+    sw.push_back(sw_u(i));
+  }
   std::vector<double> grid;
-  auto g_u = grid_arr.unchecked<1>();
+  auto g_u = view<1>(grid_arr, {-1}, "grid");
   for (int k = 0; k < static_cast<int>(g_u.shape(0)); ++k) grid.push_back(g_u(k));
 
   auto q_scalar = [&](double t) {
@@ -328,30 +517,13 @@ py::list srs_resolve_in_limits_py(py::array_t<double> axes, py::array_t<double> 
                                   py::array_t<double> hi, py::array_t<double> target,
                                   double fk_atol) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
-  ssik::SrsConsts s;
-  s.l_se = l_se;
-  s.l_ew = l_ew;
-  s.elbow_index = elbow_index;
-  auto eo = ee_offset.unchecked<1>();
-  auto sp = shoulder_pivot.unchecked<1>();
-  auto uh = upper_home.unchecked<1>();
-  auto fh = forearm_home.unchecked<1>();
-  auto rp = r_post.unchecked<2>();
-  for (int i = 0; i < 3; ++i) {
-    s.ee_offset_local[i] = eo(i);
-    s.shoulder_pivot[i] = sp(i);
-    s.upper_home[i] = uh(i);
-    s.forearm_home[i] = fh(i);
-    for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
-  }
+  const ssik::SrsConsts s = make_srs_consts(l_se, l_ew, ee_offset, shoulder_pivot, r_post,
+                                            elbow_index, upper_home, forearm_home);
   std::array<std::array<double, 2>, 7> limits;
-  auto lo_u = lo.unchecked<1>();
-  auto hi_u = hi.unchecked<1>();
+  auto lo_u = view<1>(lo, {7}, "lo");
+  auto hi_u = view<1>(hi, {7}, "hi");
   for (int i = 0; i < 7; ++i) limits[i] = {lo_u(i), hi_u(i)};
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   const auto sols = ssik::srs_swivel::resolve_in_limits(c, s, T, limits, fk_atol);
   py::list out;
@@ -382,60 +554,17 @@ py::tuple srs_artifact_solve_py(py::array_t<double> axes, py::array_t<double> t_
                                 int refinement_max_iters, bool polished,
     bool enumerate_windings) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
-  ssik::SrsConsts s;
-  s.l_se = l_se;
-  s.l_ew = l_ew;
-  s.elbow_index = elbow_index;
+  ssik::SrsConsts s = make_srs_consts(l_se, l_ew, ee_offset, shoulder_pivot, r_post, elbow_index,
+                                      upper_home, forearm_home);
   s.general_path = general_path;
-  auto eo = ee_offset.unchecked<1>();
-  auto sp = shoulder_pivot.unchecked<1>();
-  auto uh = upper_home.unchecked<1>();
-  auto fh = forearm_home.unchecked<1>();
-  auto rp = r_post.unchecked<2>();
-  for (int i = 0; i < 3; ++i) {
-    s.ee_offset_local[i] = eo(i);
-    s.shoulder_pivot[i] = sp(i);
-    s.upper_home[i] = uh(i);
-    s.forearm_home[i] = fh(i);
-    for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
-  }
 
-  ssik::JointLimits<7> lim;
-  auto lo_u = lo.unchecked<1>();
-  auto hi_u = hi.unchecked<1>();
-  auto hl_u = has_limits.unchecked<1>();
-  for (int i = 0; i < 7; ++i) {
-    lim.lo[i] = lo_u(i);
-    lim.hi[i] = hi_u(i);
-    lim.present[i] = hl_u(i) != 0;
-  }
+  const ssik::JointLimits<7> lim = make_limits<7>(lo, hi, has_limits);
 
-  ssik::ArtifactParams<7> p;
-  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
-  p.respect_limits = limit_mode != 0;
-  p.wrap_only = limit_mode == 2;
-  p.has_seed = has_seed;
-  if (has_seed) {
-    auto qs_u = q_seed.unchecked<1>();
-    for (int i = 0; i < 7; ++i) p.q_seed[i] = qs_u(i);
-  }
-  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
-  p.has_seed_tolerance = has_seed_tolerance;
-  p.seed_tolerance = seed_tolerance;
-  p.max_solutions = max_solutions;
-  p.allow_rescue = allow_rescue;
-  p.refinement_max_iters = refinement_max_iters;
-  // Lifting is defined against the joint limits, so a caller who waived them
-  // gets the raw geometric set. Applied here, at the boundary where the
-  // caller's own respect_limits is unambiguous: some of these entry points
-  // run finalize once themselves, others go through an artifact solver whose
-  // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && limit_mode != 0;
+  const ssik::ArtifactParams<7> p = make_params<7>(
+      limit_mode, has_seed, q_seed, seed_metric, has_seed_tolerance, seed_tolerance,
+      max_solutions, allow_rescue, refinement_max_iters, enumerate_windings);
 
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   // srs_polished (#550): exact SRS canonical core -> LM-polish cm-off candidates
   // against true FK -> dedup, for approximately-SRS arms (relaxed classifier).
@@ -471,45 +600,17 @@ py::tuple spherical_shoulder_artifact_solve_py(
     bool enumerate_windings) {
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
   ssik::SphericalShoulderConsts sh;
-  auto cf = coef.unchecked<2>();  // (3, 48)
+  auto cf = view<2>(coef, {3, 48}, "coef");
   for (int i = 0; i < 3; ++i)
     for (int j = 0; j < 48; ++j) sh.coef(i, j) = cf(i, j);
 
-  ssik::JointLimits<7> lim;
-  auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
-  auto hl_u = has_limits.unchecked<1>();
-  for (int i = 0; i < 7; ++i) {
-    lim.lo[i] = lo_u(i);
-    lim.hi[i] = hi_u(i);
-    lim.present[i] = hl_u(i) != 0;
-  }
+  const ssik::JointLimits<7> lim = make_limits<7>(lo, hi, has_limits);
 
-  ssik::ArtifactParams<7> p;
-  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
-  p.respect_limits = limit_mode != 0;
-  p.wrap_only = limit_mode == 2;
-  p.has_seed = has_seed;
-  if (has_seed) {
-    auto qs_u = q_seed.unchecked<1>();
-    for (int i = 0; i < 7; ++i) p.q_seed[i] = qs_u(i);
-  }
-  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
-  p.has_seed_tolerance = has_seed_tolerance;
-  p.seed_tolerance = seed_tolerance;
-  p.max_solutions = max_solutions;
-  p.allow_rescue = allow_rescue;
-  p.refinement_max_iters = refinement_max_iters;
-  // Lifting is defined against the joint limits, so a caller who waived them
-  // gets the raw geometric set. Applied here, at the boundary where the
-  // caller's own respect_limits is unambiguous: some of these entry points
-  // run finalize once themselves, others go through an artifact solver whose
-  // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && limit_mode != 0;
+  const ssik::ArtifactParams<7> p = make_params<7>(
+      limit_mode, has_seed, q_seed, seed_metric, has_seed_tolerance, seed_tolerance,
+      max_solutions, allow_rescue, refinement_max_iters, enumerate_windings);
 
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<7>> sols =
       ssik::spherical_shoulder_artifact_solve(c, sh, lim, T, p, polished);
@@ -532,15 +633,12 @@ py::tuple spherical_shoulder_artifact_solve_py(
 // Python decompose_3axis oracle. Returns the up-to-2 (a,b,c) branches.
 py::list decompose_3axis_test_py(py::array_t<double> R_arr, py::array_t<double> n1,
                                  py::array_t<double> n2, py::array_t<double> n3) {
-  auto rm = R_arr.unchecked<2>();
+  auto rm = view<2>(R_arr, {3, 3}, "R");
   Eigen::Matrix3d R;
   for (int i = 0; i < 3; ++i)
     for (int j = 0; j < 3; ++j) R(i, j) = rm(i, j);
-  auto v = [](py::array_t<double> a) {
-    auto u = a.unchecked<1>();
-    return Eigen::Vector3d(u(0), u(1), u(2));
-  };
-  const auto branches = ssik::geuler::decompose_3axis(R, v(n1), v(n2), v(n3));
+  const auto branches = ssik::geuler::decompose_3axis(R, make_vec3(n1, "n1"), make_vec3(n2, "n2"),
+                                                      make_vec3(n3, "n3"));
   py::list out;
   for (const auto& b : branches) {
     py::array_t<double> t(3);
@@ -553,14 +651,45 @@ py::list decompose_3axis_test_py(py::array_t<double> R_arr, py::array_t<double> 
   return out;
 }
 
+// The HP binding inputs: a (4, 8, 2) Study tensor, the DH tail (dh_a/dh_l
+// [a_1..a_5], dh_d [d_2..d_5]) and the target's Study coordinates (8,).
+void load_hp_tensor(const py::array_t<double>& a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst,
+                    const char* name) {
+  auto u = view<3>(a, {4, 8, 2}, name);
+  for (int i = 0; i < 4; ++i)
+    for (int j = 0; j < 8; ++j)
+      for (int k = 0; k < 2; ++k) dst[k](i, j) = u(i, j, k);
+}
+
+void load_hp_dh(ssik::HpConsts& hp, const py::array_t<double>& dh_a, const py::array_t<double>& dh_l,
+                const py::array_t<double>& dh_d) {
+  auto av = view<1>(dh_a, {5}, "dh_a"), lv = view<1>(dh_l, {5}, "dh_l");
+  auto dv = view<1>(dh_d, {4}, "dh_d");
+  for (int i = 0; i < 5; ++i) {  // dh_a/dh_l = [a_1..a_5] -> hp.a[1..5]
+    hp.a[i + 1] = av(i);
+    hp.l[i + 1] = lv(i);
+  }
+  for (int i = 0; i < 4; ++i) hp.d[i + 2] = dv(i);  // dh_d = [d_2..d_5] -> hp.d[2..5]
+}
+
+ssik::Vec8 make_sigma_e(const py::array_t<double>& arr) {
+  auto se = view<1>(arr, {8}, "sigma_e");
+  ssik::Vec8 sigma_E;
+  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+  return sigma_E;
+}
+
+// drop_idx names one of the eight Study rows the elimination drops.
+constexpr int kHpRows = 8;
+
 // HP f/g kernel parity (#537): given the baked (4,8,2) tensors T_u / T_w_pre,
 // the target's Study DQ sigma_E, and drop_idx, return (f (9,7), g (6,5)) exactly
 // as _eliminate.compute_fg_numeric. Validates the sigma_E injection + Cramer
 // RR geometry validation (#599). The baked RR bundle is not just data: its COO
 // row/col/monomial entries and its joint-role indices are used as indices into
 // fixed-size matrices and the 6-joint q array, so a malformed bundle would write
-// out of bounds rather than fail. Reject it at the boundary. (Target, seed and
-// the shared JointConsts arrays are the general #574 hardening.)
+// out of bounds rather than fail. Reject it at the boundary. (Every other
+// argument is checked by require_dims and require_index, above.)
 template <class T>
 void require_shape(const py::array_t<T>& arr, std::initializer_list<py::ssize_t> shape,
                    const char* name) {
@@ -698,7 +827,7 @@ py::tuple rr_eval_coeffs_test_py(py::array_t<double> p_sin, py::array_t<double> 
   const ssik::rr_detail::RrCoeffTensor t =
       make_rr_tensor(p_sin, p_cos, mono_factors, po_rc, po_mono, po_coeff, q_rc, q_mono, q_coeff);
   double t12[12];
-  auto tv = t12_arr.unchecked<1>();
+  auto tv = view<1>(t12_arr, {12}, "t12");
   for (int i = 0; i < 12; ++i) t12[i] = tv(i);
   ssik::rr_detail::PqCoeffs pq;
   ssik::rr_detail::rr_eval_coeffs(t, t12, pq);
@@ -745,10 +874,7 @@ py::tuple general_6r_tensor_solve_py(
     po = pq.p_one;
     q = pq.q;
   };
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
   ssik::JointLimits<6> lim;  // no limits (respect_limits=false path)
   ssik::ArtifactParams<6> p;
   p.respect_limits = false;
@@ -797,41 +923,13 @@ py::tuple general_6r_tensor_artifact_solve_py(
     q = pq.q;
   };
 
-  ssik::JointLimits<6> lim;
-  auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
-  auto hl_u = has_limits.unchecked<1>();
-  for (int i = 0; i < 6; ++i) {
-    lim.lo[i] = lo_u(i);
-    lim.hi[i] = hi_u(i);
-    lim.present[i] = hl_u(i) != 0;
-  }
+  const ssik::JointLimits<6> lim = make_limits<6>(lo, hi, has_limits);
 
-  ssik::ArtifactParams<6> p;
-  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
-  p.respect_limits = limit_mode != 0;
-  p.wrap_only = limit_mode == 2;
-  p.has_seed = has_seed;
-  if (has_seed) {
-    auto qs_u = q_seed.unchecked<1>();
-    for (int i = 0; i < 6; ++i) p.q_seed[i] = qs_u(i);
-  }
-  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
-  p.has_seed_tolerance = has_seed_tolerance;
-  p.seed_tolerance = seed_tolerance;
-  p.max_solutions = max_solutions;
-  p.allow_rescue = allow_rescue;
-  p.refinement_max_iters = refinement_max_iters;
-  // Lifting is defined against the joint limits, so a caller who waived them
-  // gets the raw geometric set. Applied here, at the boundary where the
-  // caller's own respect_limits is unambiguous: some of these entry points
-  // run finalize once themselves, others go through an artifact solver whose
-  // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && limit_mode != 0;
+  const ssik::ArtifactParams<6> p = make_params<6>(
+      limit_mode, has_seed, q_seed, seed_metric, has_seed_tolerance, seed_tolerance,
+      max_solutions, allow_rescue, refinement_max_iters, enumerate_windings);
 
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<6>> sols =
       ssik::general_6r_artifact_solve(c, rr, coeff_fn, lim, T, p);
@@ -853,21 +951,14 @@ py::tuple general_6r_tensor_artifact_solve_py(
 // interpolation + convolution stage bit-for-bit against Python.
 py::tuple hp_compute_fg_test_py(py::array_t<double> t_u_arr, py::array_t<double> t_w_pre_arr,
                                 py::array_t<double> sigma_e_arr, int drop_idx) {
-  auto load_tensor = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
-    auto u = a.unchecked<3>();  // (4, 8, 2)
-    for (int i = 0; i < 4; ++i)
-      for (int j = 0; j < 8; ++j)
-        for (int k = 0; k < 2; ++k) dst[k](i, j) = u(i, j, k);
-  };
   ssik::HpConsts hp;
-  load_tensor(t_u_arr, hp.t_u);
-  load_tensor(t_w_pre_arr, hp.t_w_pre);
-  auto se = sigma_e_arr.unchecked<1>();
-  ssik::Vec8 sigma_E;
-  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+  load_hp_tensor(t_u_arr, hp.t_u, "t_u");
+  load_hp_tensor(t_w_pre_arr, hp.t_w_pre, "t_w_pre");
+  const ssik::Vec8 sigma_E = make_sigma_e(sigma_e_arr);
 
   ssik::hp_detail::Mat9x7 f;
   ssik::hp_detail::Mat6x5 g;
+  require_index(drop_idx, 0, kHpRows, "drop_idx");
   ssik::hp_detail::compute_fg(hp, sigma_E, drop_idx, f, g);
 
   py::array_t<double> f_out({9, 7});
@@ -886,8 +977,8 @@ py::tuple hp_compute_fg_test_py(py::array_t<double> t_u_arr, py::array_t<double>
 // solve_pencil_eigenvalues / _pencil.solve_polynomial_matrix_eigenvalues.
 py::array_t<double> hp_pencil_roots_test_py(py::array_t<double> f_arr, py::array_t<double> g_arr,
                                             double real_tol, double max_magnitude) {
-  auto fm = f_arr.unchecked<2>();  // (9, 7)
-  auto gm = g_arr.unchecked<2>();  // (6, 5)
+  auto fm = view<2>(f_arr, {9, 7}, "f");
+  auto gm = view<2>(g_arr, {6, 5}, "g");
   ssik::hp_detail::Mat9x7 f;
   ssik::hp_detail::Mat6x5 g;
   for (int i = 0; i < 9; ++i)
@@ -908,18 +999,10 @@ py::array_t<double> hp_eliminate_uw_pairs_test_py(py::array_t<double> t_u_arr,
                                                   py::array_t<double> t_w_pre_arr,
                                                   py::array_t<double> sigma_e_arr,
                                                   double accept_residue_tol) {
-  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
-    auto u = a.unchecked<3>();
-    for (int i = 0; i < 4; ++i)
-      for (int j = 0; j < 8; ++j)
-        for (int k = 0; k < 2; ++k) dst[k](i, j) = u(i, j, k);
-  };
   ssik::HpConsts hp;
-  load(t_u_arr, hp.t_u);
-  load(t_w_pre_arr, hp.t_w_pre);
-  auto se = sigma_e_arr.unchecked<1>();
-  ssik::Vec8 sigma_E;
-  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+  load_hp_tensor(t_u_arr, hp.t_u, "t_u");
+  load_hp_tensor(t_w_pre_arr, hp.t_w_pre, "t_w_pre");
+  const ssik::Vec8 sigma_E = make_sigma_e(sigma_e_arr);
   const auto pairs = ssik::hp_detail::eliminate_uw_pairs(hp, sigma_E, {7, 4, 0}, accept_residue_tol);
   py::array_t<double> out({static_cast<py::ssize_t>(pairs.size()), py::ssize_t{2}});
   auto om = out.mutable_unchecked<2>();
@@ -939,26 +1022,14 @@ py::array_t<double> hp_back_substitute_test_py(py::array_t<double> t_u_arr,
                                                py::array_t<double> dh_a, py::array_t<double> dh_l,
                                                py::array_t<double> dh_d, int right_parametric_var,
                                                int drop_idx) {
-  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
-    auto u3 = a.unchecked<3>();
-    for (int i = 0; i < 4; ++i)
-      for (int j = 0; j < 8; ++j)
-        for (int k = 0; k < 2; ++k) dst[k](i, j) = u3(i, j, k);
-  };
   ssik::HpConsts hp;
-  load(t_u_arr, hp.t_u);
-  load(t_w_pre_arr, hp.t_w_pre);
+  load_hp_tensor(t_u_arr, hp.t_u, "t_u");
+  load_hp_tensor(t_w_pre_arr, hp.t_w_pre, "t_w_pre");
+  require_index(drop_idx, 0, kHpRows, "drop_idx");
   hp.drop_idx = drop_idx;
   hp.right_parametric_var = right_parametric_var;
-  auto av = dh_a.unchecked<1>(), lv = dh_l.unchecked<1>(), dv = dh_d.unchecked<1>();
-  for (int i = 0; i < 5; ++i) {  // dh_a/dh_l = [a_1..a_5] -> hp.a[1..5]
-    hp.a[i + 1] = av(i);
-    hp.l[i + 1] = lv(i);
-  }
-  for (int i = 0; i < 4; ++i) hp.d[i + 2] = dv(i);  // dh_d = [d_2..d_5] -> hp.d[2..5]
-  auto se = sigma_e_arr.unchecked<1>();
-  ssik::Vec8 sigma_E;
-  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+  load_hp_dh(hp, dh_a, dh_l, dh_d);
+  const ssik::Vec8 sigma_E = make_sigma_e(sigma_e_arr);
 
   const ssik::hp_detail::JointTuple v =
       ssik::hp_detail::back_substitute_one(hp, sigma_E, u, w);
@@ -974,25 +1045,12 @@ py::array_t<double> hp_solve_ik_test_py(py::array_t<double> t_u_arr, py::array_t
                                         py::array_t<double> sigma_e_arr, py::array_t<double> dh_a,
                                         py::array_t<double> dh_l, py::array_t<double> dh_d,
                                         int right_parametric_var) {
-  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
-    auto u3 = a.unchecked<3>();
-    for (int i = 0; i < 4; ++i)
-      for (int j = 0; j < 8; ++j)
-        for (int k = 0; k < 2; ++k) dst[k](i, j) = u3(i, j, k);
-  };
   ssik::HpConsts hp;
-  load(t_u_arr, hp.t_u);
-  load(t_w_pre_arr, hp.t_w_pre);
+  load_hp_tensor(t_u_arr, hp.t_u, "t_u");
+  load_hp_tensor(t_w_pre_arr, hp.t_w_pre, "t_w_pre");
   hp.right_parametric_var = right_parametric_var;
-  auto av = dh_a.unchecked<1>(), lv = dh_l.unchecked<1>(), dv = dh_d.unchecked<1>();
-  for (int i = 0; i < 5; ++i) {
-    hp.a[i + 1] = av(i);
-    hp.l[i + 1] = lv(i);
-  }
-  for (int i = 0; i < 4; ++i) hp.d[i + 2] = dv(i);
-  auto se = sigma_e_arr.unchecked<1>();
-  ssik::Vec8 sigma_E;
-  for (int i = 0; i < 8; ++i) sigma_E[i] = se(i);
+  load_hp_dh(hp, dh_a, dh_l, dh_d);
+  const ssik::Vec8 sigma_E = make_sigma_e(sigma_e_arr);
 
   const auto sols = ssik::hp_detail::solve_ik(hp, sigma_E);
   py::array_t<double> out({static_cast<py::ssize_t>(sols.size()), py::ssize_t{6}});
@@ -1015,40 +1073,20 @@ py::tuple hp_artifact_solve_test_py(py::array_t<double> axes, py::array_t<double
                                     int drop_idx, py::array_t<double> target, bool allow_refinement) {
   const ssik::JointConsts<6> c = make_consts_n<6>(axes, t_left, t_right, types);
   ssik::HpConsts hp;
-  auto load = [](py::array_t<double> a, std::array<Eigen::Matrix<double, 4, 8>, 2>& dst) {
-    auto u3 = a.unchecked<3>();
-    for (int i = 0; i < 4; ++i)
-      for (int j = 0; j < 8; ++j)
-        for (int k = 0; k < 2; ++k) dst[k](i, j) = u3(i, j, k);
-  };
-  load(t_u_arr, hp.t_u);
-  load(t_w_pre_arr, hp.t_w_pre);
-  auto mat4 = [](py::array_t<double> a) {
-    auto u = a.unchecked<2>();
-    Eigen::Matrix4d m;
-    for (int i = 0; i < 4; ++i)
-      for (int j = 0; j < 4; ++j) m(i, j) = u(i, j);
-    return m;
-  };
-  hp.t_pre_inv = mat4(t_pre_inv);
-  hp.t_post_inv = mat4(t_post_inv);
-  hp.t_z_neg_d1 = mat4(t_z_neg_d1);
-  hp.t_joint6_offset_inv = mat4(t_joint6_offset_inv);
+  load_hp_tensor(t_u_arr, hp.t_u, "t_u");
+  load_hp_tensor(t_w_pre_arr, hp.t_w_pre, "t_w_pre");
+  hp.t_pre_inv = make_mat4(t_pre_inv, "t_pre_inv");
+  hp.t_post_inv = make_mat4(t_post_inv, "t_post_inv");
+  hp.t_z_neg_d1 = make_mat4(t_z_neg_d1, "t_z_neg_d1");
+  hp.t_joint6_offset_inv = make_mat4(t_joint6_offset_inv, "t_joint6_offset_inv");
   hp.right_parametric_var = right_parametric_var;
+  require_index(drop_idx, 0, kHpRows, "drop_idx");
   hp.drop_idx = drop_idx;
-  auto av = dh_a.unchecked<1>(), lv = dh_l.unchecked<1>(), dv = dh_d.unchecked<1>();
-  auto to = theta_offset.unchecked<1>();
-  for (int i = 0; i < 5; ++i) {
-    hp.a[i + 1] = av(i);
-    hp.l[i + 1] = lv(i);
-  }
-  for (int i = 0; i < 4; ++i) hp.d[i + 2] = dv(i);
+  load_hp_dh(hp, dh_a, dh_l, dh_d);
+  auto to = view<1>(theta_offset, {6}, "theta_offset");
   for (int i = 0; i < 6; ++i) hp.theta_offset[i] = to(i);
 
-  ssik::Pose T;
-  auto tm = target.unchecked<2>();
-  for (int i = 0; i < 4; ++i)
-    for (int j = 0; j < 4; ++j) T(i, j) = tm(i, j);
+  const ssik::Pose T = make_pose(target);
 
   ssik::JointLimits<6> lim;  // no limits for the parity test
   lim.present = {false, false, false, false, false, false};
@@ -1105,6 +1143,7 @@ static ssik::HpConsts make_hp_consts_slice(
   for (int k = 0; k < 4; ++k) hp.d[k + 2] = dh_d(i, k);
   for (int k = 0; k < 6; ++k) hp.theta_offset[k] = theta_offset(i, k);
   hp.right_parametric_var = right_pv(i);
+  require_index(drop_idx(i), 0, kHpRows, "drop_idx");
   hp.drop_idx = drop_idx(i);
   return hp;
 }
@@ -1128,26 +1167,30 @@ py::tuple jointlock_hp_artifact_solve_py(
     bool enumerate_windings) {
   constexpr int N = 16;
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  // lock_idx picks the locked joint of seven; the other six fill the sub-chain.
+  require_index(lock_idx, 0, 7, "lock_idx");
   ssik::JointlockConsts<N> jl;
   jl.lock_idx = lock_idx;
-  auto ql = q_lock.unchecked<1>();
+  auto ql = view<1>(q_lock, {N}, "q_lock");
   for (int i = 0; i < N; ++i) jl.q_lock[i] = ql(i);
 
-  auto tu = t_u.unchecked<4>(), tw = t_w_pre.unchecked<4>();
-  auto da = dh_a.unchecked<2>(), dl = dh_l.unchecked<2>(), dd = dh_d.unchecked<2>(),
-       to = theta_offset.unchecked<2>();
-  auto tpi = t_pre_inv.unchecked<3>(), tpo = t_post_inv.unchecked<3>(),
-       tz = t_z_neg_d1.unchecked<3>(), tj = t_joint6_offset_inv.unchecked<3>();
-  auto rpv = right_pv.unchecked<1>(), di = drop_idx.unchecked<1>();
+  auto tu = view<4>(t_u, {N, 4, 8, 2}, "t_u"), tw = view<4>(t_w_pre, {N, 4, 8, 2}, "t_w_pre");
+  auto da = view<2>(dh_a, {N, 5}, "dh_a"), dl = view<2>(dh_l, {N, 5}, "dh_l"),
+       dd = view<2>(dh_d, {N, 4}, "dh_d"), to = view<2>(theta_offset, {N, 6}, "theta_offset");
+  auto tpi = view<3>(t_pre_inv, {N, 4, 4}, "t_pre_inv"),
+       tpo = view<3>(t_post_inv, {N, 4, 4}, "t_post_inv"),
+       tz = view<3>(t_z_neg_d1, {N, 4, 4}, "t_z_neg_d1"),
+       tj = view<3>(t_joint6_offset_inv, {N, 4, 4}, "t_joint6_offset_inv");
+  auto rpv = view<1>(right_pv, {N}, "right_pv"), di = view<1>(drop_idx, {N}, "drop_idx");
   std::array<ssik::HpConsts, N> hp;
   for (int i = 0; i < N; ++i)
     hp[i] = make_hp_consts_slice(tu, tw, da, dl, dd, to, tpi, tpo, tz, tj, rpv, di, i);
 
   // 16 sub-chain JointConsts<6> (hp_core FK-verify + lm_refine).
-  auto sax = sub_axes.unchecked<3>();
-  auto stl = sub_t_left.unchecked<4>();
-  auto str = sub_t_right.unchecked<4>();
-  auto sty = sub_types.unchecked<2>();
+  auto sax = view<3>(sub_axes, {N, 6, 3}, "sub_axes");
+  auto stl = view<4>(sub_t_left, {N, 6, 4, 4}, "sub_t_left");
+  auto str = view<4>(sub_t_right, {N, 6, 4, 4}, "sub_t_right");
+  auto sty = view<2>(sub_types, {N, 6}, "sub_types");
   std::array<ssik::JointConsts<6>, N> sub;
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < 6; ++j) {
@@ -1161,39 +1204,11 @@ py::tuple jointlock_hp_artifact_solve_py(
     }
   }
 
-  ssik::JointLimits<7> lim;
-  auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
-  auto hl_u = has_limits.unchecked<1>();
-  for (int i = 0; i < 7; ++i) {
-    lim.lo[i] = lo_u(i);
-    lim.hi[i] = hi_u(i);
-    lim.present[i] = hl_u(i) != 0;
-  }
-  ssik::ArtifactParams<7> p;
-  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
-  p.respect_limits = limit_mode != 0;
-  p.wrap_only = limit_mode == 2;
-  p.has_seed = has_seed;
-  if (has_seed) {
-    auto qs_u = q_seed.unchecked<1>();
-    for (int i = 0; i < 7; ++i) p.q_seed[i] = qs_u(i);
-  }
-  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
-  p.has_seed_tolerance = has_seed_tolerance;
-  p.seed_tolerance = seed_tolerance;
-  p.max_solutions = max_solutions;
-  p.allow_rescue = allow_rescue;
-  p.refinement_max_iters = refinement_max_iters;
-  // Lifting is defined against the joint limits, so a caller who waived them
-  // gets the raw geometric set. Applied here, at the boundary where the
-  // caller's own respect_limits is unambiguous: some of these entry points
-  // run finalize once themselves, others go through an artifact solver whose
-  // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && limit_mode != 0;
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::JointLimits<7> lim = make_limits<7>(lo, hi, has_limits);
+  const ssik::ArtifactParams<7> p = make_params<7>(
+      limit_mode, has_seed, q_seed, seed_metric, has_seed_tolerance, seed_tolerance,
+      max_solutions, allow_rescue, refinement_max_iters, enumerate_windings);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<7>> sols =
       ssik::jointlock_hp_artifact_solve<N>(c, jl, hp, sub, lim, T, p);
@@ -1238,9 +1253,11 @@ py::tuple jointlock_rr_artifact_solve_py(
     bool enumerate_windings) {
   constexpr int N = 16;
   const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
+  // lock_idx picks the locked joint of seven; the other six fill the sub-chain.
+  require_index(lock_idx, 0, 7, "lock_idx");
   ssik::JointlockConsts<N> jl;
   jl.lock_idx = lock_idx;
-  auto ql = q_lock.unchecked<1>();
+  auto ql = view<1>(q_lock, {N}, "q_lock");
   for (int i = 0; i < N; ++i) jl.q_lock[i] = ql(i);
 
   // 16 RrConsts from the stacked fixed-size arrays.
@@ -1281,6 +1298,11 @@ py::tuple jointlock_rr_artifact_solve_py(
 
   // 16 RrCoeffTensors from the variable-length COO py::lists; type-erase each into
   // a std::function bound to its tensor (tensors[] outlives the solve).
+  for (const auto* lst : {&p_sin, &p_cos, &mono_factors, &po_rc, &po_mono, &po_coeff, &q_rc,
+                          &q_mono, &q_coeff})
+    if (static_cast<int>(lst->size()) != N)
+      throw std::invalid_argument("RR geometry: each tensor list must have " + std::to_string(N) +
+                                  " entries, got " + std::to_string(lst->size()));
   std::array<ssik::rr_detail::RrCoeffTensor, N> tensors;
   std::array<TensorCoeffFn, N> coeffs;
   for (int i = 0; i < N; ++i) {
@@ -1302,39 +1324,11 @@ py::tuple jointlock_rr_artifact_solve_py(
     };
   }
 
-  ssik::JointLimits<7> lim;
-  auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
-  auto hl_u = has_limits.unchecked<1>();
-  for (int i = 0; i < 7; ++i) {
-    lim.lo[i] = lo_u(i);
-    lim.hi[i] = hi_u(i);
-    lim.present[i] = hl_u(i) != 0;
-  }
-  ssik::ArtifactParams<7> p;
-  // limit_mode: 0 raw set, 1 wrap + drop (True), 2 wrap only ("wrap").
-  p.respect_limits = limit_mode != 0;
-  p.wrap_only = limit_mode == 2;
-  p.has_seed = has_seed;
-  if (has_seed) {
-    auto qs_u = q_seed.unchecked<1>();
-    for (int i = 0; i < 7; ++i) p.q_seed[i] = qs_u(i);
-  }
-  p.seed_metric = seed_metric == "wrap_l2" ? ssik::SeedMetric::WrapL2 : ssik::SeedMetric::WrapLinf;
-  p.has_seed_tolerance = has_seed_tolerance;
-  p.seed_tolerance = seed_tolerance;
-  p.max_solutions = max_solutions;
-  p.allow_rescue = allow_rescue;
-  p.refinement_max_iters = refinement_max_iters;
-  // Lifting is defined against the joint limits, so a caller who waived them
-  // gets the raw geometric set. Applied here, at the boundary where the
-  // caller's own respect_limits is unambiguous: some of these entry points
-  // run finalize once themselves, others go through an artifact solver whose
-  // final pass runs with respect_limits=false by then.
-  p.enumerate_windings = enumerate_windings && limit_mode != 0;
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
+  const ssik::JointLimits<7> lim = make_limits<7>(lo, hi, has_limits);
+  const ssik::ArtifactParams<7> p = make_params<7>(
+      limit_mode, has_seed, q_seed, seed_metric, has_seed_tolerance, seed_tolerance,
+      max_solutions, allow_rescue, refinement_max_iters, enumerate_windings);
+  const ssik::Pose T = make_pose(target);
 
   const std::vector<ssik::Solution<7>> sols =
       ssik::jointlock_artifact_solve<N>(c, jl, rr, coeffs, lim, T, p);
@@ -1360,16 +1354,8 @@ py::tuple jointlock_rr_artifact_solve_py(
 
 namespace {
 
-ssik::Pose make_pose(const py::array_t<double>& target) {
-  auto tm = target.unchecked<2>();
-  ssik::Pose T;
-  for (int r = 0; r < 4; ++r)
-    for (int col = 0; col < 4; ++col) T(r, col) = tm(r, col);
-  return T;
-}
-
 std::array<double, 7> make_q7(const py::array_t<double>& q) {
-  auto qu = q.unchecked<1>();
+  auto qu = view<1>(q, {7}, "q");
   std::array<double, 7> out;
   for (int i = 0; i < 7; ++i) out[i] = qu(i);
   return out;
@@ -1384,7 +1370,7 @@ void bind_charts(py::module_& m) {
                        double degeneracy) {
              const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
              Eigen::Matrix<double, 3, 48> cm;
-             auto cf = coef.unchecked<2>();
+             auto cf = view<2>(coef, {3, 48}, "coef");
              for (int i = 0; i < 3; ++i)
                for (int j = 0; j < 48; ++j) cm(i, j) = cf(i, j);
              ssik::Tolerances tol;
@@ -1418,9 +1404,14 @@ void bind_charts(py::module_& m) {
                                }
                                return out;
                              })
-      .def("nonempty", [](const ShCharts& f, int chart) { return f.nonempty(chart); })
+      .def("nonempty",
+           [](const ShCharts& f, int chart) {
+             require_index(chart, 0, f.n_charts(), "chart");
+             return f.nonempty(chart);
+           })
       .def("domain",
            [](const ShCharts& f, int chart) {
+             require_index(chart, 0, f.n_charts(), "chart");
              const auto& d = f.domain(chart);
              const int n = static_cast<int>(d.size());
              py::array_t<double> out({n, 2});
@@ -1433,6 +1424,7 @@ void bind_charts(py::module_& m) {
            })
       .def("q",
            [](const ShCharts& f, int chart, py::array_t<double> ts) {
+             require_index(chart, 0, f.n_charts(), "chart");
              auto tu = ts.unchecked<1>();
              const int n = static_cast<int>(tu.shape(0));
              py::array_t<double> out({n, 7});
@@ -1447,7 +1439,8 @@ void bind_charts(py::module_& m) {
            })
       .def("in_limits",
            [](const ShCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
-             auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+             require_index(chart, 0, f.n_charts(), "chart");
+             auto lo_u = view<1>(lo, {7}, "lo"), hi_u = view<1>(hi, {7}, "hi");
              std::array<std::array<double, 2>, 7> lim;
              for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
              const auto arcs = f.in_limits(chart, lim);
@@ -1462,6 +1455,7 @@ void bind_charts(py::module_& m) {
            })
       .def("tangent",
            [](const ShCharts& f, int chart, py::array_t<double> ts) {
+             require_index(chart, 0, f.n_charts(), "chart");
              auto tu = ts.unchecked<1>();
              const int n = static_cast<int>(tu.shape(0));
              py::array_t<double> out({n, 7});
@@ -1509,23 +1503,9 @@ void bind_charts(py::module_& m) {
                        py::array_t<double> forearm_home, bool general_path,
                        py::array_t<double> target) {
              const ssik::JointConsts<7> c = make_consts_n<7>(axes, t_left, t_right, types);
-             ssik::SrsConsts s;
-             s.l_se = l_se;
-             s.l_ew = l_ew;
-             s.elbow_index = elbow_index;
+             ssik::SrsConsts s = make_srs_consts(l_se, l_ew, ee_offset, shoulder_pivot, r_post,
+                                                 elbow_index, upper_home, forearm_home);
              s.general_path = general_path;
-             auto eo = ee_offset.unchecked<1>();
-             auto sp = shoulder_pivot.unchecked<1>();
-             auto uh = upper_home.unchecked<1>();
-             auto fh = forearm_home.unchecked<1>();
-             auto rp = r_post.unchecked<2>();
-             for (int i = 0; i < 3; ++i) {
-               s.ee_offset_local[i] = eo(i);
-               s.shoulder_pivot[i] = sp(i);
-               s.upper_home[i] = uh(i);
-               s.forearm_home[i] = fh(i);
-               for (int j = 0; j < 3; ++j) s.r_post_wrist(i, j) = rp(i, j);
-             }
              auto obj = std::make_unique<SrsCharts>();
              obj->init(c, s, make_pose(target));
              return obj;
@@ -1549,6 +1529,7 @@ void bind_charts(py::module_& m) {
                              })
       .def("q",
            [](const SrsCharts& f, int chart, py::array_t<double> ts) {
+             require_index(chart, 0, f.size(), "chart");
              auto tu = ts.unchecked<1>();
              const int n = static_cast<int>(tu.shape(0));
              py::array_t<double> out({n, 7});
@@ -1561,7 +1542,8 @@ void bind_charts(py::module_& m) {
            })
       .def("in_limits",
            [](const SrsCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
-             auto lo_u = lo.unchecked<1>(), hi_u = hi.unchecked<1>();
+             require_index(chart, 0, f.size(), "chart");
+             auto lo_u = view<1>(lo, {7}, "lo"), hi_u = view<1>(hi, {7}, "hi");
              std::array<std::array<double, 2>, 7> lim;
              for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
              const auto arcs = f.in_limits(chart, lim);
@@ -1576,6 +1558,7 @@ void bind_charts(py::module_& m) {
            })
       .def("tangent",
            [](const SrsCharts& f, int chart, py::array_t<double> ts) {
+             require_index(chart, 0, f.size(), "chart");
              auto tu = ts.unchecked<1>();
              const int n = static_cast<int>(tu.shape(0));
              py::array_t<double> out({n, 7});
@@ -1599,7 +1582,7 @@ void bind_charts(py::module_& m) {
   m.def(
       "chart_tangent",
       [](py::array_t<double> tangent) {
-        auto tg = tangent.unchecked<2>();
+        auto tg = view<2>(tangent, {-1, 7}, "tangent");
         const auto n = static_cast<py::ssize_t>(tg.shape(0));
         py::array_t<double> d_out({n, static_cast<py::ssize_t>(7)});
         py::array_t<double> rate_out(n);
@@ -1622,7 +1605,7 @@ void bind_charts(py::module_& m) {
   m.def(
       "chart_frame",
       [](py::array_t<double> tangent, py::object metric) {
-        auto tg = tangent.unchecked<2>();
+        auto tg = view<2>(tangent, {-1, 7}, "tangent");
         const auto n = static_cast<py::ssize_t>(tg.shape(0));
         const double* mp = nullptr;
         py::array_t<double, py::array::c_style | py::array::forcecast> mm;
@@ -1677,6 +1660,8 @@ PYBIND11_MODULE(_ssik_native, m) {
                             std::to_string(EIGEN_MAJOR_VERSION) + "." +
                             std::to_string(EIGEN_MINOR_VERSION);
 #endif
+  m.add_object("input_defect", py::reinterpret_steal<py::object>(PyCFunction_NewEx(
+                                   &input_defect_def, nullptr, m.attr("__name__").ptr())));
   m.def("decompose_3axis_test", &decompose_3axis_test_py, py::arg("R"), py::arg("n1"),
         py::arg("n2"), py::arg("n3"));
   m.def("hp_compute_fg_test", &hp_compute_fg_test_py, py::arg("t_u"), py::arg("t_w_pre"),
