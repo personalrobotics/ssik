@@ -172,6 +172,10 @@ PUBLIC_CASES: dict[str, Callable[[np.ndarray, np.ndarray], tuple[Any, dict]]] = 
     "q_seed length 1 + max_solutions=1": _with(q_seed=lambda T, q: q[:1], max_solutions=1),
     # scalar options
     "max_solutions=0": _with(max_solutions=0),
+    "max_solutions=0 + T shape (3, 3)": _with(lambda T, q: np.eye(3), max_solutions=0),
+    "max_solutions=0 + T NaN": _with(lambda T, q: _set(T, (0, 3), np.nan), max_solutions=0),
+    "max_solutions=0 + q_seed length 1": _with(q_seed=lambda T, q: q[:1], max_solutions=0),
+    "max_solutions=0 + seed_tolerance without seed": _with(max_solutions=0, seed_tolerance=0.1),
     "max_solutions=-1": _with(max_solutions=-1),
     "max_solutions=-5": _with(max_solutions=-5),
     "max_solutions=2.5": _with(max_solutions=2.5),

@@ -347,7 +347,8 @@ def _render_specialised(
 
 # The check that opens every generated solve() (#574, docs/api.md "Input
 # validation"): target, seed and max_solutions are validated once, before a
-# backend is picked. The native hooks below are injected right after it.
+# backend is picked, and a cap of 0 then returns [] without solving. The native
+# hooks below are injected right after it.
 _CHECK_INPUTS = (
     "    T_target, q_seed, max_solutions = _check_solve_inputs(\n"
     "        T_target,\n"
@@ -358,6 +359,8 @@ _CHECK_INPUTS = (
     "        refinement_max_iters=refinement_max_iters,\n"
     "        policy=policy,\n"
     "    )\n"
+    "    if max_solutions == 0:  # at most 0 solutions: checked, nothing to solve\n"
+    "        return []\n"
 )
 
 
@@ -808,6 +811,8 @@ def _render_specialised_solve_orchestrator(
                 refinement_max_iters=refinement_max_iters,
                 policy=policy,
             )
+            if max_solutions == 0:  # at most 0 solutions: checked, nothing to solve
+                return []
             T = np.asarray(T_target, dtype=np.float64)
             candidates = _solve_algebraic(T)
 
@@ -1446,6 +1451,8 @@ def _render_specialised_solve_orchestrator_7r(emit_native: bool = False) -> str:
                 refinement_max_iters=refinement_max_iters,
                 policy=policy,
             )
+            if max_solutions == 0:  # at most 0 solutions: checked, nothing to solve
+                return []
             T = np.asarray(T_target, dtype=np.float64)
             # Lock-sweep filters limits in-flight (#238 review): the
             # short-circuit fires on the first in-limits valid IK, not
@@ -1886,6 +1893,8 @@ def _render_solve_function(solver_short: str, emit_native: bool = False) -> str:
                 refinement_max_iters=refinement_max_iters,
                 policy=policy,
             )
+            if max_solutions == 0:  # at most 0 solutions: checked, nothing to solve
+                return []
             # Seeded numerical-tracking fast path (#380): the caller gave a seed
             # and wants a single IK -- the trajectory-tracking idiom. Newton-
             # continue from the seed (~0.2 ms) instead of resolving the whole

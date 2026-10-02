@@ -906,6 +906,8 @@ def solve(
         refinement_max_iters=refinement_max_iters,
         policy=policy,
     )
+    if max_solutions == 0:  # at most 0 solutions: checked, nothing to solve
+        return []
     if native:
         _native_sols = _try_native_jointlock_solve(
             SOLVER_NAME,

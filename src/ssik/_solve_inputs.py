@@ -199,15 +199,15 @@ def check_joints(q: Any, dof: int, name: str, *, finite: bool = True) -> NDArray
 
 
 def check_max_solutions(max_solutions: Any) -> int | None:
-    """``None`` or a positive integer (any type with ``__index__``).
+    """``None`` or a non-negative integer (any type with ``__index__``).
 
-    ``0`` and negative caps are rejected: the backends read them differently
-    (native took a negative cap as no cap, Python as an empty result, and the
-    jointlock solvers raised on ``0``), and an empty list must mean "no
-    solution", not "asked for none" (#575).
+    The cap means "at most k solutions", so ``0`` is valid and the entry points
+    return ``[]`` for it without solving (as ``heapq.nsmallest(0, ...)``). A
+    negative cap is rejected: the backends read it differently (native as no
+    cap, Python as an empty result, the jointlock solvers as an error).
 
     :raises TypeError: for a non-integer (``2.5``, ``"3"``).
-    :raises ValueError: for an integer below 1.
+    :raises ValueError: for a negative integer.
     """
     if max_solutions is None:
         return None
@@ -217,8 +217,8 @@ def check_max_solutions(max_solutions: Any) -> int | None:
         raise TypeError(
             f"max_solutions must be None or an integer, got {type(max_solutions).__name__}"
         ) from None
-    if k < 1:
-        raise ValueError(f"max_solutions must be >= 1 or None, got {k}")
+    if k < 0:
+        raise ValueError(f"max_solutions must be None or >= 0, got {k}")
     return k
 
 
@@ -258,7 +258,8 @@ def check_solve_inputs(
 
     Returns ``(T, q_seed, max_solutions)``: the target as a float64 ``(4, 4)``
     rigid transform, the seed as a float64 ``(dof,)`` vector (or ``None``), and
-    ``max_solutions`` as an ``int`` (or ``None``). ``seed_tolerance`` and
+    ``max_solutions`` as an ``int`` (or ``None``); a caller returns ``[]``
+    for a cap of ``0`` once this has passed. ``seed_tolerance`` and
     ``refinement_max_iters`` are checked for the values the two backends read
     differently (a NaN tolerance, a negative or non-integer iteration count);
     the remaining option rules (``respect_limits``, ``seed_metric`` without a
@@ -270,7 +271,7 @@ def check_solve_inputs(
         _check_seed_tolerance(seed_tolerance, q_seed)
     if type(refinement_max_iters) is not int or refinement_max_iters < 0:
         _check_refinement_max_iters(refinement_max_iters)
-    if max_solutions is not None and (type(max_solutions) is not int or max_solutions < 1):
+    if max_solutions is not None and (type(max_solutions) is not int or max_solutions < 0):
         max_solutions = check_max_solutions(max_solutions)
     tol = policy.subproblem_numerical
     lim = _limits_cache.get(tol) or _limits(tol)

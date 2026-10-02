@@ -78,14 +78,17 @@ returns no solutions there, as before: the `three_parallel` artifacts accept at
 
 | Option | Rule | Otherwise |
 |---|---|---|
-| `max_solutions` | `None` or an integer `>= 1` (Python or numpy) | `TypeError` for a non-integer, `ValueError` below 1 |
+| `max_solutions` | `None` or an integer `>= 0` (Python or numpy) | `TypeError` for a non-integer, `ValueError` below 0 |
 | `seed_tolerance` | `None`, or a real number that is not NaN, and only with `q_seed` | `TypeError` for a non-number, `ValueError` for NaN or without `q_seed` |
 | `refinement_max_iters` | an integer `>= 0` | `TypeError` for a non-integer, `ValueError` below 0 |
 | `seed_metric` | `"wrap_linf"` or `"wrap_l2"` when `q_seed` is given | `ValueError` |
 
-A `max_solutions` of `0` or below used to mean different things on different
-backends (none, all, or an error), and an empty list must mean that no
-solution exists. A cap larger than any result is no cap on either backend. The
+`max_solutions` means "at most this many solutions". A cap of `0` returns `[]`
+on every backend without solving, once every other input has passed its checks
+(as `heapq.nsmallest(0, ...)` does), so a caller computing a remaining budget
+can pass it unchanged. A negative cap used to mean different things on
+different backends (all solutions, none, or an error) and is rejected. A cap
+larger than any result is no cap on either backend. The
 rules for the remaining options (`respect_limits`, `enumerate_windings`,
 `allow_rescue`, `policy`, a `bool` given as an integer) are tracked in #575.
 

@@ -761,6 +761,23 @@ class Manipulator:
             refinement_max_iters=refinement_max_iters,
             policy=policy,
         )
+        if max_solutions == 0:  # at most 0 solutions: checked, nothing to solve
+            if not explain:
+                return []
+            return [], Diagnostic(
+                solver_name=self._plan.solver_name,
+                solver_tier=self._plan.tier,
+                dispatch_reason=self._plan.reason,
+                raw_candidates=0,
+                dropped_by_limits=0,
+                dropped_by_max_solutions=0,
+                geometric_branches=0,
+                winding_representatives=0,
+                final_count=0,
+                max_fk_residual=float("nan"),
+                refinement_engaged=0,
+                fk_atol=policy.subproblem_numerical,
+            )
 
         # Filter kwargs by the dispatched solver's signature so callers can
         # pass q_seed (or any other not-universally-supported kwarg) without

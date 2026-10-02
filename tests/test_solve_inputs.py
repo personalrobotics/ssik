@@ -7,8 +7,9 @@ Protected failure modes, each one observed on v7.0 before this contract:
   Python backend raised an unrelated ``IndexError``;
 - NaN or inf in the target or seed: ``[]`` (or a hang, on the HP jointlock arm)
   on one backend and an exception on the other;
-- ``max_solutions < 1``, a NaN ``seed_tolerance`` and a negative or
-  non-integer ``refinement_max_iters`` meant different things per backend;
+- a negative ``max_solutions`` (and ``0``, which raised on the jointlock
+  Python path only), a NaN ``seed_tolerance`` and a negative or non-integer
+  ``refinement_max_iters`` meant different things per backend;
 - direct calls to ``ssik._ssik_native`` read short arrays and out-of-range
   indices instead of failing.
 
@@ -77,9 +78,16 @@ EXPECTED: dict[str, tuple[str, str]] = {
     "q_seed strings": ("TypeError", r"real numbers"),
     "q_seed complex": ("TypeError", r"real numbers"),
     "q_seed length 1 + max_solutions=1": _SHAPE,
-    "max_solutions=0": ("ValueError", r"max_solutions must be >= 1"),
-    "max_solutions=-1": ("ValueError", r"max_solutions must be >= 1"),
-    "max_solutions=-5": ("ValueError", r"max_solutions must be >= 1"),
+    "max_solutions=-1": ("ValueError", r"max_solutions must be None or >= 0"),
+    "max_solutions=-5": ("ValueError", r"max_solutions must be None or >= 0"),
+    # A cap of 0 is valid, but only once everything else is.
+    "max_solutions=0 + T shape (3, 3)": _SHAPE,
+    "max_solutions=0 + T NaN": _FINITE,
+    "max_solutions=0 + q_seed length 1": _SHAPE,
+    "max_solutions=0 + seed_tolerance without seed": (
+        "ValueError",
+        r"seed_tolerance requires q_seed",
+    ),
     "max_solutions=2.5": ("TypeError", r"max_solutions must be None or an integer"),
     "max_solutions='3'": ("TypeError", r"max_solutions must be None or an integer"),
     "seed_tolerance without seed": ("ValueError", r"seed_tolerance requires q_seed"),
@@ -148,6 +156,18 @@ ACCEPTED = (
     "fk q NaN",
 )
 _FAST_ARMS = ("ur5_ik", "irb6700_ik", "iiwa14_ik", "franka_panda_ik")
+
+
+@needs_native
+def test_zero_cap_returns_empty_on_every_backend(tmp_path: Path) -> None:
+    """``max_solutions=0`` returns ``[]`` on every family's artifact (native,
+    Python, Python without the native kernel) and the live ``Manipulator``,
+    including the jointlock arms, whose Python path used to raise on it."""
+    rows = probe.run_jobs(probe.public_jobs(["max_solutions=0"]), timeout_s=120.0)
+    _write(tmp_path, "solve_inputs_zero_cap.json", rows)
+    assert len(rows) == 3 * len(probe.ARMS) + 1
+    bad = [r for r in rows if r["outcome"] != "ok:0"]
+    assert not bad, bad
 
 
 @needs_native
