@@ -84,10 +84,17 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik.continuum import RANK_DAMPING, rank_deficient_normal
 from ssik.postprocess import _LIMIT_BAND
 from ssik.refinement import _se3_log_residual_batch, same_root_floor
 
-__all__ = ["POLISH_MAX_ITERS", "POLISH_TARGET", "Chain", "polish_accepted"]
+__all__ = [
+    "POLISH_MAX_ITERS",
+    "POLISH_TARGET",
+    "Chain",
+    "polish_accepted",
+    "polish_accepted_flagged",
+]
 
 # Residual a polished candidate must reach to replace the original: seven
 # orders of magnitude below the 1e-5 acceptance gate and well above FK
@@ -101,7 +108,7 @@ POLISH_TARGET = 1e-12
 POLISH_MAX_ITERS = 4
 
 # lm_refine_batch's (and the rescue polish's) step parameters.
-_DAMPING = 1e-9
+_DAMPING = RANK_DAMPING  # 1e-9
 _STEP_CLIP = 0.5
 
 _TWO_PI = 2.0 * np.pi
@@ -288,14 +295,39 @@ def polish_accepted(
         the row is ``q0``'s, unchanged (its residual as evaluated here; callers
         that already measured it keep their own value).
     """
+    q, r, ok, _ = _polish(q0, t_target, chain, flag=False)
+    return q, r, ok
+
+
+def polish_accepted_flagged(
+    q0: NDArray[np.float64],
+    t_target: NDArray[np.float64],
+    chain: Chain,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_], NDArray[np.bool_]]:
+    """:func:`polish_accepted`, plus per candidate whether its Jacobian may be
+    rank deficient (:func:`ssik.continuum.rank_deficient`), read from the
+    Jacobian the polish evaluates at ``q0`` anyway: general_6r's flag for the
+    singular-continuum slide (#662). 6-joint chains only."""
+    return _polish(q0, t_target, chain, flag=True)
+
+
+def _polish(
+    q0: NDArray[np.float64],
+    t_target: NDArray[np.float64],
+    chain: Chain,
+    *,
+    flag: bool,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_], NDArray[np.bool_]]:
     q0 = np.asarray(q0, dtype=np.float64)
     n, dof = q0.shape
     t_target = np.asarray(t_target, dtype=np.float64)
     if n == 0:
-        return q0.copy(), np.empty(0, dtype=np.float64), np.zeros(0, dtype=bool)
+        none = np.zeros(0, dtype=bool)
+        return q0.copy(), np.empty(0, dtype=np.float64), none, none
     floor = same_root_floor(t_target)
 
     fk, jac = chain.fk_jacobian(q0)
+    singular = np.zeros(n, dtype=bool)
     r0 = np.linalg.norm((fk - t_target).reshape(n, -1), axis=1)
     q = q0.copy()
     best_q = q0.copy()
@@ -303,6 +335,16 @@ def polish_accepted(
     eta = np.zeros(n, dtype=np.float64)
     active = r0 > floor
     eye = np.eye(dof, dtype=np.float64)
+    inv0: NDArray[np.float64] | None = None
+    if flag:
+        # The flag reads every candidate's normal matrix and its inverse, and
+        # the first step below reuses that inverse (ssik.continuum).
+        normal0 = np.swapaxes(jac, 1, 2) @ jac + _DAMPING * eye
+        try:
+            inv0 = np.asarray(np.linalg.inv(normal0), dtype=np.float64)
+            singular = rank_deficient_normal(normal0, inv0)
+        except np.linalg.LinAlgError:
+            singular = np.ones(n, dtype=bool)
 
     for k in range(POLISH_MAX_ITERS):
         idx = np.flatnonzero(active)
@@ -311,7 +353,10 @@ def polish_accepted(
         j = jac[idx]
         jt = np.swapaxes(j, 1, 2)
         twist = _se3_log_residual_batch(t_target @ _inv_rigid(fk[idx]))
-        dq = np.linalg.solve(jt @ j + _DAMPING * eye, jt @ twist[..., None])[..., 0]
+        if k == 0 and inv0 is not None:
+            dq = (inv0[idx] @ (jt @ twist[..., None]))[..., 0]
+        else:
+            dq = np.asarray(np.linalg.solve(jt @ j + _DAMPING * eye, jt @ twist[..., None]))[..., 0]
         dq = np.clip(dq, -_STEP_CLIP, _STEP_CLIP)
         if k == 0:
             eta[idx] = np.linalg.norm(dq, axis=1)
@@ -331,4 +376,4 @@ def polish_accepted(
     ok = (best_r <= POLISH_TARGET) & (best_r < r0)
     ok &= np.linalg.norm(best_q - q0, axis=1) <= 2.0 * eta
     ok &= chain.keeps_limit_windings(q0, best_q)
-    return np.where(ok[:, None], best_q, q0), np.where(ok, best_r, r0), ok
+    return np.where(ok[:, None], best_q, q0), np.where(ok, best_r, r0), ok, singular

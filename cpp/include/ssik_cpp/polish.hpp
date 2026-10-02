@@ -59,9 +59,11 @@ bool keeps_limit_windings(const std::array<double, N>& x0, const std::array<doub
 // lim: the joint limits in the same coordinates, which the polish must not cross.
 // On acceptance overwrites q and r with the polished point and its Frobenius
 // residual and returns true; otherwise leaves both untouched and returns false.
+// `j0`, when given, is jac(q), already evaluated by the caller.
 template <int N, class FkFn, class JacFn>
 bool polish_accepted(FkFn&& fk, JacFn&& jac, const Pose& t_target, const JointLimits<N>& lim,
-                     std::array<double, N>& q, double& r) {
+                     std::array<double, N>& q, double& r,
+                     const Eigen::Matrix<double, 6, N>* j0 = nullptr) {
   constexpr double kStepClip = 0.5;
   constexpr double kDamping = 1e-9;
   const double floor = same_root_floor(t_target);
@@ -72,7 +74,7 @@ bool polish_accepted(FkFn&& fk, JacFn&& jac, const Pose& t_target, const JointLi
   std::array<double, N> cur = q, best_q = q;
   double best_r = r0, eta = 0.0;
   for (int k = 0; k < kPolishMaxIters; ++k) {
-    const Eigen::Matrix<double, 6, N> js = jac(cur);
+    const Eigen::Matrix<double, 6, N> js = (k == 0 && j0 != nullptr) ? *j0 : jac(cur);
     const Eigen::Matrix<double, 6, 1> res = se3_log_residual(t_target * t_q.inverse());
     const Eigen::Matrix<double, N, N> jtj =
         js.transpose() * js + kDamping * Eigen::Matrix<double, N, N>::Identity();
