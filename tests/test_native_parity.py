@@ -65,9 +65,11 @@ ALL = ("darwin", "linux")
 KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
     "E": {
         "hc10_ik": ALL,
+        "ur7e_ik": ALL,
     },
     "F": {
         "fanuc_crx20ial_ik": ("linux",),
+        "fanuc_crx3ia_ik": ALL,
         "openarm_left_ik": ALL,
         "openarm_right_ik": ALL,
     },
@@ -83,6 +85,7 @@ KNOWN_FORWARD: dict[str, dict[str, tuple[str, ...]]] = {
 KNOWN_REVERSE: dict[str, dict[str, tuple[str, ...]]] = {
     "F": {
         "fanuc_crx3ia_ik": ("linux",),
+        "piper_ik": ALL,
     },
     "J": {
         "hc10_ik": ("darwin",),

@@ -164,7 +164,21 @@ ROUNDOFF_CLASSES: frozenset[str] = frozenset()
 #   continuum, so the singular-continuum rule (#662) does not reach them;
 #   whether native's land within the match radius of Python's follows the
 #   runner.
-RUNNER_DEPENDENT_CELLS = frozenset({("forward", "E", "hc10_ik")})
+#   fanuc_crx3ia forward F and piper reverse F: a general_6r solution at a
+#   limit lands past the band on some Linux runners and inside it on others,
+#   with identical code (#632).
+#   ur7e near_singular/7: the wrist locks with the elbow fully stretched
+#   (q3 = 0, a tangent elbow), so the core's candidates there miss FK by
+#   ~1e-3 and only the refinement recovers them, on some machines (#623).
+#   The slide cannot help: it starts only from a verified point.
+RUNNER_DEPENDENT_CELLS = frozenset(
+    {
+        ("forward", "E", "hc10_ik"),
+        ("forward", "F", "fanuc_crx3ia_ik"),
+        ("reverse", "F", "piper_ik"),
+        ("forward", "E", "ur7e_ik"),
+    }
+)
 
 # a. FK closure every returned solution must meet: the default policy's
 # acceptance gate, documented in README ("How to read fk_residual"). Some
