@@ -18,6 +18,85 @@ Auto-generated from docstrings. The public surface is small by design — most u
         - solver_name
         - kinbody
 
+## Input validation
+
+Every public entry point that takes a pose or a joint vector checks it once,
+before it picks a backend: each prebuilt artifact's `solve` and `fk`,
+`Manipulator.solve`, `Manipulator.self_motion` and `Manipulator.solve_path`.
+A malformed call raises the same exception, with the same message, on
+`native=True` and `native=False`, and the native extension only ever sees
+well-formed input. The implementation is `ssik._solve_inputs`.
+
+**Arrays** (`T_target`, `q_seed`, an artifact's `fk(q)`, `solve_path`'s
+`poses` and `q0`). Anything numpy converts to an array of real numbers is
+accepted and converted to a C-contiguous `float64` array: `float64`, `float32`
+and integer arrays, lists and tuples, Fortran-ordered arrays and strided views,
+and object arrays whose elements are all real numbers. The caller's array is
+never modified. Rejected:
+
+| Input | Exception |
+|---|---|
+| `bool`, complex, string, bytes, datetime or structured dtype; an object array with any element that is not a real number (`None`, a string) | `TypeError` |
+| Ragged nesting (`[[1, 0, 0, 0], [0, 1, 0]]`) | `ValueError` |
+| Wrong shape: `T_target` not `(4, 4)`, `q_seed` or `fk`'s `q` not `(dof,)`, `poses` not `(N, 4, 4)`, `q0` not `(dof,)` or `(k, dof)` | `ValueError` |
+| A NaN or infinite entry in `T_target`, `q_seed`, `poses` or `q0` | `ValueError` |
+
+Converting a rejected dtype would invent or drop information: a complex
+target's imaginary part, a string's parse. `fk(q)` checks only the shape, so a
+NaN joint value gives a NaN pose, as `Manipulator.fk` does.
+
+**Rigid targets.** `T_target` (and each pose of a path) must be a rigid
+transform. With `R` its rotation block and `tol =
+policy.subproblem_numerical` (`1e-5` by default), it is rejected with a
+`ValueError` when
+
+- `||R^T R - I||_F > max(3 * tol, 1e-12)`,
+- `det(R) <= 0` (a reflection), or
+- its bottom row is further than `max(tol, 1e-12)` (Euclidean) from
+  `[0, 0, 0, 1]`.
+
+The tolerance rejects only a target no configuration can reach. Every solver
+accepts a configuration only when `||FK(q) - T_target||_F` is within `tol` or
+tighter, and `FK(q)` is rigid, so that residual is at least the distance `d`
+from `R` to the nearest rotation. For `d < 1`, `||R^T R - I||_F <= 3 d`: each
+singular value `s` of `R` is within `d` of 1, and
+`|s^2 - 1| = |s - 1| (s + 1) <= 3 |s - 1|`. A target past `3 * tol` therefore
+has `d > tol` and could only ever have returned `[]`. The bottom row adds its
+distance to the residual directly. The `1e-12` floor applies when a policy is
+tighter than round-off: computing `R^T R` itself rounds by about `1e-15`, which
+must not reject a rigid target.
+
+A target inside the tolerance is solved as given, never projected onto SO(3),
+and `fk_residual` is measured against it. Float64 round-off from upstream pose
+arithmetic (around `1e-15`) and a `float32` pose (around `1e-7`) are well
+inside. A target off SO(3) by more than one arm's own acceptance gate still
+returns no solutions there, as before: the `three_parallel` artifacts accept at
+`1e-7` and the exact `seven_r.spherical_shoulder` arms at `1e-10`, so a
+`float32` pose can return `[]` on those.
+
+**Options.** These are checked with the arrays:
+
+| Option | Rule | Otherwise |
+|---|---|---|
+| `max_solutions` | `None` or an integer `>= 1` (Python or numpy) | `TypeError` for a non-integer, `ValueError` below 1 |
+| `seed_tolerance` | `None`, or a real number that is not NaN, and only with `q_seed` | `TypeError` for a non-number, `ValueError` for NaN or without `q_seed` |
+| `refinement_max_iters` | an integer `>= 0` | `TypeError` for a non-integer, `ValueError` below 0 |
+| `seed_metric` | `"wrap_linf"` or `"wrap_l2"` when `q_seed` is given | `ValueError` |
+
+A `max_solutions` of `0` or below used to mean different things on different
+backends (none, all, or an error), and an empty list must mean that no
+solution exists. A cap larger than any result is no cap on either backend. The
+rules for the remaining options (`respect_limits`, `enumerate_windings`,
+`allow_rescue`, `policy`, a `bool` given as an integer) are tracked in #575.
+
+**The native extension.** `ssik._ssik_native` is internal and its functions
+are not part of the semver contract, but none of them reads memory it was not
+given. Each checks every array's shape and every index argument's range, and
+the target's and seed's finiteness, before it reads them, and raises
+`ValueError` otherwise. The C++ headers do not check their input: their
+preconditions are in
+[`cpp/README.md`](https://github.com/personalrobotics/ssik/blob/main/cpp/README.md#use-it-from-the-python-wheel).
+
 ## Per-call return: `Solution`
 
 ::: ssik.Solution

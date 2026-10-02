@@ -118,6 +118,14 @@ d.lo, d.hi, d.present                        # JointLimits<6>
 auto sols = ssik::three_parallel_artifact_solve(consts, limits, T, ssik::ArtifactParams<6>{});
 ```
 
+The `*_artifact_solve` functions take their input as given and do not check
+it. They expect a finite rigid `T` (rotation block in SO(3), bottom row
+`[0, 0, 0, 1]`), a finite `p.q_seed` when `p.has_seed`, and `p.max_solutions`
+of `-1` (no cap) or at least 1. Python's `solve()` checks exactly this before
+it calls them (`docs/api.md`, "Input validation"); a C++ caller with poses from
+an untrusted source checks them first. On a non-finite target a solver may
+return nothing or run for a long time.
+
 `examples/wheel_consumer/` is a complete version, run against the installed
 wheel in CI ("Native wheel build"). For a generated artifact, emit it from a
 checkout (`python scripts/cpp_emit.py <arm>_ik`) or use the `cmake --install`
