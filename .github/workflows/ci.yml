@@ -15,7 +15,7 @@ name: CI
 # #348 cached the description repos and parallelized pytest (-n auto).
 # Doc-only PRs skip CI entirely via paths-ignore; PRs that change only
 # examples (and docs) run the examples lane instead of the full suite (see the
-# `changes` job).
+# `changes` job). Pushes to main and workflow_dispatch always run the full suite.
 
 on:
   pull_request:
@@ -31,6 +31,7 @@ on:
       - "docs/**"
       - "LICENSE"
       - ".gitignore"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -45,7 +46,7 @@ jobs:
     # (examples/, docs/, *.md, LICENSE, .gitignore; never under src/, tests/,
     # scripts/, cpp/, tools/ or .github/) gets the examples lane: lint, the
     # native wheels running every example, and tests/test_teleop.py. Anything
-    # else, every push, and any doubt (no merge commit, a failed diff, no
+    # else, every push and workflow_dispatch, and any doubt (no merge commit, a failed diff, no
     # changes) gets the full suite. The diff is the PR's merge commit against
     # its first parent, i.e. exactly what merging would change, with renames
     # split so a move out of src/ counts as a src/ change.
@@ -150,7 +151,7 @@ jobs:
       # the job added entries, so a shard's cache grows to cover its tests.
       - name: Restore the RR derivation cache
         id: rr-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cache/ssik/rr-derivations
           key: rr-derivations-py${{ matrix.python-version }}-${{ matrix.shard }}-${{ hashFiles('src/ssik/solvers/ikgeo/_raghavan_roth.py', 'uv.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -228,7 +229,7 @@ jobs:
 
       - name: Save the RR derivation cache
         if: ${{ !cancelled() && steps.rr-after.outputs.grew == 'true' }}
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: ~/.cache/ssik/rr-derivations
           key: ${{ steps.rr-cache.outputs.cache-primary-key }}
