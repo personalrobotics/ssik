@@ -27,8 +27,10 @@ solve that might land on another one:
   back to the seeded solve.
 
 The candidate is then judged, and :class:`TrackStatus` reports the outcome.
-``docs/api.md`` ("Streaming IK") is the normative statement of the statuses
-and thresholds; this module is their implementation.
+On a 7R chart arm :meth:`Tracker.set_redundancy` is the other input: it slides
+the followed point along its chart at the held target, so the elbow moves and
+the hand does not. ``docs/api.md`` ("Streaming IK") is the normative statement
+of the statuses and thresholds; this module is their implementation.
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ if TYPE_CHECKING:
     from ssik.chart import Chart
     from ssik.manipulator import Manipulator
 
-__all__ = ["TrackStatus", "Tracker", "TrackerStep"]
+__all__ = ["Redundancy", "TrackStatus", "Tracker", "TrackerStep"]
 
 # The redundant 7R families whose branches are continued on the chart, as
 # solve_path does. The UR-class 6R arms also have charts, but their charts
@@ -57,6 +59,28 @@ __all__ = ["TrackStatus", "Tracker", "TrackerStep"]
 _CHART_FAMILIES = frozenset({"seven_r.spherical_shoulder", "seven_r.srs"})
 
 HoldReason = Literal["unreachable", "limits", "jump"]
+
+# set_redundancy samples the slide every this many radians of the coordinate,
+# finer where a joint would step further than _SLIDE_MAX_STEP between samples,
+# so the slide is followed continuously (windings kept) and a rate limit is
+# applied along the chart rather than across it.
+_SLIDE_DT = 0.01
+_SLIDE_MAX_STEP = 0.05
+_SLIDE_MAX_SAMPLES = 4096
+# A rate-limited slide stops within (_SLIDE_DT / _NARROW_POINTS**_NARROW_ROUNDS)
+# ~ 1e-8 of the coordinate where the first joint reaches its limit.
+_NARROW_ROUNDS = 4
+_NARROW_POINTS = 34
+# Slack on coordinates compared against an arc: in_limits() places its ends to
+# ~1e-10 by bisection, and a point held at a joint limit sits inside the limit
+# band (docs/api.md, "Joint limits").
+_COORD_TOL = 1e-8
+_END_INSETS = (1e-8, 1e-7, 1e-6)
+_TWO_PI = 2.0 * math.pi
+# A chart point closes FK to ~1e-13 except within ~1e-5 rad of a fold, where a
+# double root is determined only to sqrt(eps) (Chart.q). One Gauss-Newton step
+# on FK restores closure there; it runs only above this residual.
+_POLISH_ABOVE = 1e-11
 
 
 class TrackStatus(enum.Enum):
@@ -114,6 +138,35 @@ class TrackerStep:
     def reachable(self) -> bool:
         """``False`` only when no configuration reaches the target."""
         return self.reason != "unreachable"
+
+
+@dataclass(frozen=True, eq=False)
+class Redundancy:
+    """Where a :class:`Tracker` is on its arm's self-motion (:attr:`Tracker.redundancy`).
+
+    :param chart: the followed chart, at :attr:`Tracker.target`.
+    :param label: its branch label (``chart.label``).
+    :param parameter: the redundancy coordinate's name: ``"q6"``
+        (``seven_r.spherical_shoulder``) or ``"swivel"`` (``seven_r.srs``).
+    :param periodic: whether the coordinate lives on a circle (the swivel).
+    :param t: the coordinate of the followed point (the point the arm is at,
+        unless a rate limit holds it back).
+    :param arc: ``(lo, hi)`` with ``lo <= t <= hi``: the stretch of the chart
+        :meth:`Tracker.set_redundancy` can slide along. It is the
+        :meth:`~ssik.chart.Chart.in_limits` arc containing ``t`` (the chart's
+        domain interval when the tracker does not respect limits); a fold or a
+        branch junction is an end, and a single in-limit point is ``(t, t)``.
+        On the periodic swivel the pieces that meet at ``+-pi`` are one arc,
+        shifted by ``2*pi`` where needed to contain ``t``; ``(-pi, pi)`` when
+        the whole circle is in limits.
+    """
+
+    chart: Chart
+    label: tuple[int, ...]
+    parameter: str
+    periodic: bool
+    t: float
+    arc: tuple[float, float]
 
 
 def _check_positive(x: Any, name: str, dof: int | None = None) -> float | NDArray[np.float64]:
@@ -338,10 +391,16 @@ class Tracker:
         )
         return sols
 
-    def _admit(self, q: NDArray[np.float64], T: NDArray[np.float64]) -> NDArray[np.float64] | None:
+    def _admit(
+        self,
+        q: NDArray[np.float64],
+        T: NDArray[np.float64],
+        seed: NDArray[np.float64] | None = None,
+    ) -> NDArray[np.float64] | None:
         """A chart point as a commanded configuration: the representative
-        nearest the followed branch point, inside the limits when they are
-        respected (``None`` if it cannot be), as ``solve()`` reports one."""
+        nearest ``seed`` (default: the followed branch point), inside the
+        limits when they are respected (``None`` if it cannot be), as
+        ``solve()`` reports one."""
         from ssik.postprocess import respect_limits, rewrap_to_seed, wrap_to_limits
 
         res = float(np.linalg.norm(self._arm.fk(q) - T))
@@ -350,7 +409,7 @@ class Tracker:
             sols = respect_limits(wrap_to_limits(sols, self._kb, T_target=T), self._kb, T_target=T)
             if not sols:
                 return None
-        sols = rewrap_to_seed(sols, self._kb, self._goal, T_target=T)
+        sols = rewrap_to_seed(sols, self._kb, self._goal if seed is None else seed, T_target=T)
         return np.asarray(sols[0].q, dtype=np.float64)
 
     def _held_point(self, fam: Any) -> tuple[Chart, float, NDArray[np.float64]] | None:
@@ -453,6 +512,7 @@ class Tracker:
         t: float | None,
         reason: HoldReason | None = None,
         branch_distance: float = math.nan,
+        lag_to: NDArray[np.float64] | None = None,
     ) -> TrackerStep:
         moved = self._dist(self._q, q_new)
         self._q = q_new
@@ -463,9 +523,20 @@ class Tracker:
             fk_residual=float(np.linalg.norm(self._arm.fk(q_new) - T)),
             moved=moved,
             branch_distance=branch_distance,
-            lag=self._dist(q_new, self._goal),
+            lag=self._dist(q_new, self._goal if lag_to is None else lag_to),
             t=t,
         )
+
+    def _advance_time(self, t: Any) -> tuple[float | None, float | None]:
+        """Validate timestamp ``t`` against the last one; return it and the
+        ``dt`` since the last one (``None`` without both), and record it."""
+        tt = _check_time(t)
+        if tt is not None and self._t_last is not None and tt < self._t_last:
+            raise ValueError(f"t must not decrease: got {tt} after {self._t_last}")
+        dt = None if tt is None or self._t_last is None else tt - self._t_last
+        if tt is not None:
+            self._t_last = tt
+        return tt, dt
 
     def update(self, T: ArrayLike, t: float | None = None) -> TrackerStep:
         """Follow the branch to target ``T`` (timestamp ``t``, seconds).
@@ -494,12 +565,7 @@ class Tracker:
         from ssik._solve_inputs import check_pose
 
         T_arr = check_pose(T, policy=self._policy, name="T")
-        tt = _check_time(t)
-        if tt is not None and self._t_last is not None and tt < self._t_last:
-            raise ValueError(f"t must not decrease: got {tt} after {self._t_last}")
-        dt = None if tt is None or self._t_last is None else tt - self._t_last
-        if tt is not None:
-            self._t_last = tt
+        tt, dt = self._advance_time(t)
 
         cand, head, blocked = self._candidate(T_arr)
         dist = math.inf if cand is None else self._dist(self._goal, cand)
@@ -599,3 +665,265 @@ class Tracker:
         return self._step(
             q_new, TrackStatus.JUMPED, self._target, self._t_last, branch_distance=dist
         )
+
+    # ------------------------------------------------------------------
+    # Redundancy
+    # ------------------------------------------------------------------
+
+    def _arc(self, chart: Chart, t: float) -> tuple[float, float]:
+        """The stretch of ``chart`` containing ``t`` that a slide may cover:
+        its in-limits arc (its domain interval when limits are not respected),
+        ``(t, t)`` when none contains ``t``. On a periodic chart the pieces
+        meeting at ``+-pi`` are one arc, shifted by ``2*pi`` to contain ``t``."""
+        pieces = list(chart.in_limits() if self._respect else chart.domain)
+        if chart.periodic:
+            low = [p for p in pieces if p[0] <= -math.pi + _COORD_TOL]
+            high = [p for p in pieces if p[1] >= math.pi - _COORD_TOL]
+            if low and high and low[0] is not high[0]:
+                pieces = [p for p in pieces if p is not low[0] and p is not high[0]]
+                pieces.append((high[0][0], low[0][1] + _TWO_PI))
+            for lo, hi in pieces:
+                if hi - lo >= _TWO_PI - _COORD_TOL:
+                    return (-math.pi, math.pi)
+                for shift in (0.0, -_TWO_PI):
+                    if lo + shift - _COORD_TOL <= t <= hi + shift + _COORD_TOL:
+                        return (lo + shift, hi + shift)
+            return (t, t)
+        for lo, hi in pieces:
+            if lo - _COORD_TOL <= t <= hi + _COORD_TOL:
+                return (lo, hi)
+        return (t, t)
+
+    @property
+    def redundancy(self) -> Redundancy | None:
+        """Where the tracker is on the self-motion: the followed chart, its
+        coordinate, and the arc :meth:`set_redundancy` can slide along.
+
+        ``None`` on an arm without a closed-form chart (6R arms, and 7R arms
+        other than ``seven_r.spherical_shoulder`` / ``seven_r.srs``), and on a
+        chart arm whose followed point no chart locates (a branch junction).
+        Computed when read (the chart's :meth:`~ssik.chart.Chart.in_limits`),
+        so :meth:`update` pays nothing for it.
+        """
+        if not self._chart_family or self._head is None:
+            return None
+        chart, t = self._head
+        if chart.periodic:
+            t = _wrap(t)
+        return Redundancy(
+            chart=chart,
+            label=chart.label,
+            parameter=chart.parameter,
+            periodic=chart.periodic,
+            t=float(t),
+            arc=self._arc(chart, t),
+        )
+
+    def _on_circle(self, d: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Every joint difference wrapped to ``[-pi, pi)``: a chart returns one
+        representative of each angle, so its values are compared on the circle
+        before they are followed."""
+        return np.asarray((d + np.pi) % _TWO_PI - np.pi, dtype=np.float64)
+
+    @staticmethod
+    def _snap(qs: NDArray[np.float64], near: NDArray[np.float64]) -> NDArray[np.float64]:
+        """``qs`` moved by whole turns to the representative nearest ``near``."""
+        return np.asarray(qs + _TWO_PI * np.round((near - qs) / _TWO_PI), dtype=np.float64)
+
+    def _chart_q(self, chart: Chart, t: float, near: NDArray[np.float64]) -> NDArray[np.float64]:
+        q = chart.q(_wrap(t) if chart.periodic else t)
+        return self._snap(np.asarray(q, dtype=np.float64), near)
+
+    def _slide_path(
+        self, chart: Chart, t0: float, t1: float
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]] | None:
+        """``(ts, qs)``: the chart from ``t0`` to ``t1``, sampled finely enough
+        that no joint steps more than ``_SLIDE_MAX_STEP``, each row in the
+        winding continuous with the followed point. ``None`` if the chart does
+        not exist along the way."""
+        n = max(2, math.ceil(abs(t1 - t0) / _SLIDE_DT) + 1)
+        while True:
+            ts = np.linspace(t0, t1, n)
+            qs = chart.q((ts + np.pi) % _TWO_PI - np.pi if chart.periodic else ts)
+            if not np.all(np.isfinite(qs)):
+                return None
+            steps = self._on_circle(np.diff(qs, axis=0))
+            if n > _SLIDE_MAX_SAMPLES or float(np.max(np.abs(steps))) <= _SLIDE_MAX_STEP:
+                break
+            n = 4 * n
+        start = self._goal + self._on_circle(qs[0] - self._goal)
+        cont = start + np.vstack([np.zeros((1, qs.shape[1])), np.cumsum(steps, axis=0)])
+        return ts, self._snap(qs, cont)
+
+    def _polish(self, q: NDArray[np.float64], T: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Gauss-Newton steps on FK (two at most) for a chart point near a fold
+        (``_POLISH_ABOVE``); ``q`` itself when it already closes."""
+        from ssik.refinement import kinbody_jacobian, se3_log_residual
+
+        best, best_res = q, float(np.linalg.norm(self._arm.fk(q) - T))
+        for _ in range(2):
+            if best_res <= _POLISH_ABOVE:
+                break
+            err = se3_log_residual(T @ np.linalg.inv(self._arm.fk(best)))
+            dq = np.linalg.lstsq(kinbody_jacobian(self._kb, best), err, rcond=None)[0]
+            cand = best + dq
+            res = float(np.linalg.norm(self._arm.fk(cand) - T))
+            if not res < best_res:
+                break
+            best, best_res = cand, res
+        return best
+
+    def _closes(self, q: NDArray[np.float64], T: NDArray[np.float64]) -> bool:
+        return float(np.linalg.norm(self._arm.fk(q) - T)) <= _POLISH_ABOVE
+
+    def _resolve(
+        self, chart: Chart, t0: float, arc: tuple[float, float], value: float
+    ) -> float | HoldReason:
+        """The coordinate to slide to for a requested ``value``: the
+        representative reached from ``t0`` without leaving ``arc``, or why
+        there is none."""
+        lo, hi = arc
+        if chart.periodic:
+            if hi - lo >= _TWO_PI - _COORD_TOL:  # the whole circle: the shorter way
+                return t0 + float(self._on_circle(np.asarray(value - t0)))
+            base = value + _TWO_PI * round((t0 - value) / _TWO_PI)
+            inside = [
+                r
+                for r in (base - _TWO_PI, base, base + _TWO_PI)
+                if lo - _COORD_TOL <= r <= hi + _COORD_TOL
+            ]
+            if inside:
+                nearest: float = min(inside, key=lambda r: abs(r - t0))
+                return min(max(nearest, lo), hi)
+            return "limits" if chart.contains(value) else "jump"
+        if lo - _COORD_TOL <= value <= hi + _COORD_TOL:
+            return min(max(value, lo), hi)
+        same_piece = any(
+            lo_d - _COORD_TOL <= t0 <= hi_d + _COORD_TOL
+            and lo_d - _COORD_TOL <= value <= hi_d + _COORD_TOL
+            for lo_d, hi_d in chart.domain
+        )
+        return "limits" if same_piece else "jump"
+
+    def set_redundancy(self, value: float, t: float | None = None) -> TrackerStep:
+        """Slide along the self-motion at the held target: the hand stays at
+        :attr:`target` while the followed chart's redundancy coordinate (``q6``
+        or the swivel angle, :attr:`redundancy`) moves to ``value``.
+
+        - ``OK``: ``value`` is on :attr:`redundancy`'s ``arc`` (on the swivel,
+          some ``value + 2*pi*k`` is; with the whole circle in limits, the
+          shorter way round is taken). ``q`` is the chart point there, followed
+          along the arc from the current one, and closes FK to the target.
+        - ``LIMITED`` (``max_joint_speed`` and timestamps): the slide goes
+          along the chart only as far as no joint moves more than
+          ``max_joint_speed * dt``, so the hand stays on the target. That
+          point becomes the one followed, and ``lag`` is the distance still to
+          go. The rest is not queued: sending ``value`` again on later ticks
+          continues the slide, and the call that arrives is ``OK``.
+        - ``HELD``: ``q`` unchanged. ``reason`` is ``"limits"`` when ``value``
+          is on the chart but outside the arc, and ``"jump"`` when it is past a
+          fold or a branch junction (going on would mean leaving the chart for
+          another branch) or :attr:`redundancy` is ``None``.
+
+        A slide stays on one branch however long it is, so ``moved`` can
+        exceed ``jump_threshold`` without a rate limit; ``max_joint_speed``
+        bounds the motion per tick. :meth:`update` then holds the coordinate
+        set here as the target moves.
+
+        :param value: the redundancy coordinate to slide to.
+        :param t: optional timestamp, as for :meth:`update`.
+
+        :raises NotImplementedError: on an arm without a closed-form chart, as
+            ``Manipulator.self_motion`` raises (:attr:`redundancy` is always
+            ``None`` there).
+        :raises TypeError: if ``value`` or ``t`` is not a real number.
+        :raises ValueError: if ``value`` or ``t`` is not finite, or ``t`` is
+            earlier than the previous timestamp.
+        """
+        if isinstance(value, bool) or not isinstance(value, numbers.Real):
+            raise TypeError(f"value must be a real number, got {type(value).__name__}")
+        v = float(value)
+        if not math.isfinite(v):
+            raise ValueError(f"value must be finite, got {v}")
+        _check_time(t)
+        if not self._chart_family:
+            raise NotImplementedError(
+                f"set_redundancy: {self._arm.solver_name} has no closed-form chart, so a "
+                "Tracker on it has no redundancy coordinate"
+            )
+        tt, dt = self._advance_time(t)
+        T = self._target
+        red = self.redundancy
+        if red is None:
+            return self._step(self._q.copy(), TrackStatus.HELD, T, tt, "jump")
+        chart, t0 = red.chart, red.t
+        t1 = self._resolve(chart, t0, red.arc, v)
+        if isinstance(t1, str):
+            return self._step(self._q.copy(), TrackStatus.HELD, T, tt, t1)
+        path = self._slide_path(chart, t0, t1)
+        if path is None:
+            return self._step(self._q.copy(), TrackStatus.HELD, T, tt, "jump")
+        ts, qs = path
+        requested = self._admit(self._polish(qs[-1], T), T, seed=qs[-1])
+        lo, hi = red.arc
+        inward = 1.0 if t1 - lo < hi - t1 else -1.0
+        t_end = t1
+        for inset in _END_INSETS:
+            # An arc end found by in_limits() can sit a few 1e-8 rad past the
+            # limit it marks, where the limits either refuse the point or
+            # clamp it onto the limit (which costs FK closure ~1e-9). Step
+            # in from it to the first point admitted as it is.
+            if requested is not None and self._closes(requested, T):
+                break
+            t_in = t1 + inward * inset
+            if not lo <= t_in <= hi:
+                break
+            q_in = self._chart_q(chart, t_in, qs[-1])
+            inner = self._admit(self._polish(q_in, T), T, seed=q_in)
+            if inner is not None and (requested is None or self._closes(inner, T)):
+                requested, t_end = inner, t_in
+        t1 = t_end
+        if requested is None:
+            return self._step(self._q.copy(), TrackStatus.HELD, T, tt, "limits")
+
+        if self._speed is not None and dt is not None:
+            cap = np.broadcast_to(np.asarray(self._speed, dtype=np.float64) * dt, qs[-1].shape)
+
+            def within(q: NDArray[np.float64]) -> bool:
+                return bool(np.all(np.abs(self._delta(self._q, q)) <= cap))
+
+            first_out = next((i for i in range(len(ts)) if not within(qs[i])), None)
+            if first_out == 0:
+                # The arm is still behind the followed point (an earlier rate
+                # limit): close that gap first, as update() does.
+                q_new, _ = self._toward(self._goal, dt)
+                return self._step(q_new, TrackStatus.LIMITED, T, tt, lag_to=requested)
+            if first_out is not None:
+                # Narrow down the furthest point of the slide the limit
+                # reaches, one batched chart evaluation per round.
+                a, b = float(ts[first_out - 1]), float(ts[first_out])
+                q_a = qs[first_out - 1]
+                for _ in range(_NARROW_ROUNDS):
+                    sub = np.linspace(a, b, _NARROW_POINTS)[1:-1]
+                    q_sub = chart.q((sub + np.pi) % _TWO_PI - np.pi if chart.periodic else sub)
+                    for tm, qm in zip(sub, q_sub, strict=True):
+                        qm = self._snap(qm, q_a)
+                        if not within(qm):
+                            b = float(tm)
+                            break
+                        a, q_a = float(tm), qm
+                reached = self._admit(self._polish(q_a, T), T, seed=q_a)
+                if reached is not None and within(reached):
+                    self._goal = reached
+                    self._head = (chart, _wrap(a) if chart.periodic else a)
+                    return self._step(reached.copy(), TrackStatus.LIMITED, T, tt, lag_to=requested)
+                return self._step(self._q.copy(), TrackStatus.LIMITED, T, tt, lag_to=requested)
+
+        self._goal = requested
+        self._head = (chart, _wrap(t1) if chart.periodic else t1)
+        return self._step(requested.copy(), TrackStatus.OK, T, tt)
+
+
+def _wrap(t: float) -> float:
+    """A coordinate on the circle, in ``[-pi, pi)``."""
+    return float((t + math.pi) % _TWO_PI - math.pi)

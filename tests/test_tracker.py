@@ -19,10 +19,20 @@ previous configuration unchanged; ``OK`` closes FK to the target; ``LIMITED``
 moves at most ``max_joint_speed * dt`` per joint; and on a redundant 7R arm the
 tracker returns what ``solve_path`` returns for the same poses.
 
+``set_redundancy`` (#685) is driven the same way on the Panda and the iiwa:
+the elbow is swept across the whole in-limits arc at a fixed target, and the
+oracle is the chart rebuilt independently at that target, evaluated at the
+requested coordinate. The hand must stay on the target (FK to 1e-9) in every
+``OK`` and ``LIMITED`` step, the slide must hold past the arc's ends, a
+rate-limited slide must catch up, ``update()`` must keep the chosen coordinate
+on a small target motion, and on the iiwa the slide crosses the swivel's
+``+-pi`` cut.
+
 Artifact. Every scenario writes its per-update trace to
 ``<tmp_path>/tracker_trace_<scenario>.json``: one record per update with the
 segment name, status, hold reason, ``q``, ``fk_residual``, ``moved``, ``lag``
-and ``branch_distance``. To inspect it::
+and ``branch_distance`` (the redundancy traces add the requested ``value``
+and the ``redundancy_t`` reached). To inspect it::
 
     uv run pytest tests/test_tracker.py --basetemp=/tmp/ssik-tracker
     ls /tmp/ssik-tracker/*/tracker_trace_*.json
@@ -356,3 +366,160 @@ def test_update_validates_like_solve() -> None:
         arm.tracker(np.zeros(5))
     # A rejected update leaves the tracker as it was.
     np.testing.assert_array_equal(tracker.q, q_before)
+
+
+# ---------------------------------------------------------------------------
+# Redundancy: set_redundancy slides along the followed chart (#685)
+# ---------------------------------------------------------------------------
+
+
+def _same_angles(a: np.ndarray, b: np.ndarray) -> float:
+    """Largest joint difference modulo ``2*pi``: a chart returns one
+    representative of each angle, the tracker the in-limit one."""
+    return _wrapped(np.asarray(a) - np.asarray(b))
+
+
+def _in_limits(arm: ssik.Manipulator, q: np.ndarray) -> bool:
+    return all(
+        lim is None or lim[0] <= v <= lim[1] for v, lim in zip(q, arm.joint_limits, strict=True)
+    )
+
+
+@pytest.mark.parametrize("native", BACKENDS)
+@pytest.mark.parametrize("name", sorted(SEVEN_R))
+def test_set_redundancy_slides_the_arc(name: str, native: bool, tmp_path: Path) -> None:
+    """Hand fixed, elbow swept end to end of the in-limits arc and held past
+    its ends; rate limited along the chart; the coordinate kept by update()."""
+    arm = ssik.Manipulator.from_prebuilt(name)
+    q0 = SEVEN_R[name][0]
+    tracker = arm.tracker(q0, native=native)
+    T = tracker.target
+    red = tracker.redundancy
+    assert red is not None
+    lo, hi = red.arc
+    assert lo < red.t < hi
+    # The oracle: the chart at T rebuilt independently, evaluated at the
+    # requested coordinate (FK^-1(T) itself, not the tracker's bookkeeping).
+    oracle = arm.self_motion(T, native=native).by_label(red.label)
+    assert oracle is not None
+    trace: list[dict[str, Any]] = []
+    steps: list[ssik.TrackerStep] = []
+
+    def record(st: ssik.TrackerStep, segment: str, value: float | None) -> None:
+        steps.append(st)
+        rec = _record(st, segment)
+        rec["value"] = value
+        now = tracker.redundancy
+        rec["redundancy_t"] = None if now is None else now.t
+        trace.append(rec)
+
+    # Out to one end, across to the other, back to the start.
+    sweep = np.concatenate(
+        [np.linspace(red.t, hi, 40), np.linspace(hi, lo, 80)[1:], np.linspace(lo, red.t, 40)[1:]]
+    )
+    for v in sweep:
+        st = tracker.set_redundancy(float(v))
+        record(st, "sweep", float(v))
+        assert st.status is ssik.TrackStatus.OK, (v, st)
+        assert np.linalg.norm(arm.fk(st.q) - T) <= FK_TOL  # the hand did not move
+        assert _in_limits(arm, st.q)
+        now = tracker.redundancy
+        assert now is not None
+        assert now.label == red.label
+        # At the coordinate asked for (an arc end is stepped back to the first
+        # admitted point, at most 1e-6 in), on the chart.
+        assert abs(_wrapped(np.array([now.t - v]))) <= 1e-6
+        assert _same_angles(st.q, oracle.q(now.t)) <= 1e-8
+    drift = max(s.fk_residual for s in steps)
+    assert drift <= FK_TOL
+
+    # Past either end: held, unchanged, for a reason. Inside again: OK.
+    for v in (hi + 0.05, lo - 0.05):
+        q_before = tracker.q.copy()
+        st = tracker.set_redundancy(v)
+        record(st, "beyond", v)
+        assert st.status is ssik.TrackStatus.HELD
+        assert st.reason in ("limits", "jump")
+        np.testing.assert_array_equal(st.q, q_before)
+    _check_contract(steps, jump=0.5, cap=None)
+
+    # Rate limited: the slide goes along the chart, so the hand stays put while
+    # the elbow lags, and re-sending the coordinate catches up.
+    dt, speed = 0.02, 1.0
+    limited = arm.tracker(q0, max_joint_speed=speed, native=native, t0=0.0)
+    lim_steps = []
+    for i in range(1, 400):
+        st = limited.set_redundancy(hi, t=dt * i)
+        lim_steps.append(st)
+        trace.append(_record(st, "rate_limited"))
+        assert np.linalg.norm(arm.fk(st.q) - T) <= FK_TOL
+        if st.status is ssik.TrackStatus.OK:
+            break
+    statuses = [s.status for s in lim_steps]
+    assert statuses[0] is ssik.TrackStatus.LIMITED
+    assert statuses[-1] is ssik.TrackStatus.OK
+    assert all(s is ssik.TrackStatus.LIMITED for s in statuses[:-1])
+    assert all(a.lag > b.lag for a, b in itertools.pairwise(lim_steps))
+    _check_contract(lim_steps, jump=0.5, cap=speed)
+    np.testing.assert_allclose(lim_steps[-1].q, tracker.set_redundancy(hi).q, atol=1e-12)
+
+    # update() keeps the chosen coordinate as the target moves a little.
+    mid = 0.5 * (red.t + hi)
+    st = tracker.set_redundancy(mid)
+    assert st.status is ssik.TrackStatus.OK
+    t_kept = tracker.redundancy.t  # type: ignore[union-attr]
+    for k in range(1, 11):
+        T_k = T.copy()
+        T_k[:3, 3] += np.array([0.002, -0.001, 0.0015]) * k
+        st = tracker.update(T_k)
+        record(st, "update_after", None)
+        assert st.status is ssik.TrackStatus.OK
+        assert st.fk_residual <= FK_TOL
+        assert st.moved <= 0.05  # the same branch, a small hand motion away
+        # The label's interval index may renumber across poses (the label
+        # contract, ssik.chart); the coordinate is what is held.
+        now = tracker.redundancy
+        assert now is not None
+        assert abs(_wrapped(np.array([now.t - t_kept]))) <= 1e-12
+
+    if red.periodic:
+        # The swivel is a circle: an in-limits arc through +-pi is one arc,
+        # and the slide crosses the cut without a hold or a jump.
+        fam = arm.self_motion(T, native=native)
+        chart = next(
+            c
+            for c in fam.charts
+            if any(lo_ <= -np.pi + 1e-9 for lo_, _ in c.in_limits())
+            and any(hi_ >= np.pi - 1e-9 for _, hi_ in c.in_limits())
+        )
+        start = next(a for a in chart.in_limits() if a[1] >= np.pi - 1e-9)
+        q_start = tracker._admit(chart.q(0.5 * (start[0] + np.pi)), T)
+        assert q_start is not None
+        wrapper = arm.tracker(q_start, native=native)
+        arc = wrapper.redundancy.arc  # type: ignore[union-attr]
+        assert arc[1] > np.pi  # merged across the cut
+        for v in np.linspace(wrapper.redundancy.t, arc[1], 30):  # type: ignore[union-attr]
+            st = wrapper.set_redundancy(float(v))
+            trace.append(_record(st, "across_pi"))
+            assert st.status is ssik.TrackStatus.OK
+            assert st.fk_residual <= FK_TOL
+            assert st.moved <= 0.2
+        assert wrapper.redundancy.t < 0  # type: ignore[union-attr]  # reported on [-pi, pi)
+
+    path = _write(tmp_path, f"redundancy_{name}_{'native' if native else 'python'}", trace)
+    assert path.exists()
+
+
+@pytest.mark.parametrize("name", ["irb120", "gen3"])
+def test_redundancy_without_a_chart(name: str) -> None:
+    """A 6R arm, and Gen3 (``seven_r.srs_polished``, approximate SRS, no
+    closed-form chart): no coordinate to set, and asking is an error."""
+    arm = ssik.Manipulator.from_prebuilt(name)
+    q0 = IRB_Q0 if arm.dof == 6 else SEVEN_R["iiwa14"][0]
+    tracker = arm.tracker(q0)
+    assert tracker.redundancy is None
+    with pytest.raises(NotImplementedError, match="no closed-form chart"):
+        tracker.set_redundancy(0.1)
+    with pytest.raises(TypeError):
+        tracker.set_redundancy("0.1")  # type: ignore[arg-type]
+    np.testing.assert_array_equal(tracker.q, q0)

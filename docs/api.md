@@ -358,6 +358,67 @@ becomes the one followed, and later timestamped updates carry the arm there
 (`LIMITED` until it arrives). `reset(q, t=None)` restarts from a
 configuration the arm is at.
 
+**Self-motion.** On a redundant 7R arm with a closed-form chart the tracker
+can move the elbow while the hand stays at the target ("keep my hand here,
+swing the elbow"):
+
+```python
+red = tracker.redundancy           # ssik.Redundancy, or None
+red.label, red.parameter, red.t    # the followed chart, "q6" or "swivel", its coordinate
+lo, hi = red.arc                   # the stretch a slide can cover
+step = tracker.set_redundancy(0.3, t)   # slide to coordinate 0.3 at tracker.target
+```
+
+- `redundancy` is the followed chart at `tracker.target` (the
+  [chart](#self-motion-charts-ssikchart) a `solve_path` would follow), its
+  coordinate `t`, and `arc`, the `Chart.in_limits()` arc that contains `t`
+  (the chart's domain interval with `respect_limits=False`). A fold or a
+  branch junction is an end of the arc, and an in-limit single point is a
+  zero-width arc `(t, t)`. On the periodic swivel the pieces meeting at
+  `+-pi` are one arc, shifted by `2*pi` where needed so that `lo <= t <= hi`,
+  and the whole circle is `(-pi, pi)`; `t` itself is reported in `[-pi, pi)`.
+  It is `None` on an arm without a closed-form chart (6R arms,
+  `seven_r.srs_polished` such as the Kinova Gen3, `jointlock.seven_r`), and on
+  a chart arm whose followed point no chart locates (a branch junction). It is
+  computed when read, so `update()` costs the same as before.
+- `set_redundancy(value, t=None)` slides along the followed chart, from its
+  coordinate to `value`, at the target the tracker holds; `t` is a timestamp,
+  as for `update()`. The statuses are `update()`'s:
+  - `OK`: `value` is on `arc` (on the swivel, some `value + 2*pi*k` is; with
+    the whole circle in limits the shorter way round is taken). `q` is the
+    chart point there, followed along the arc from the current one (so a
+    joint keeps its winding), inside the joint limits, and FK closes to the
+    target. Within about `1e-5` rad of a fold the closed form closes FK only
+    to `1e-9`..`1e-7` (`Chart.q`), so such a point gets a Gauss-Newton step
+    on FK. An arc end that `in_limits()` placed a hair past its joint limit
+    is stepped in (at most `1e-6` in `t`) to the first point the limits
+    admit without clamping it onto the limit.
+  - `LIMITED` (`max_joint_speed` and timestamps): the slide goes along the
+    chart only as far as no joint moves more than `max_joint_speed * dt`, so
+    the hand stays on the target while the elbow lags. That point becomes the
+    one followed and `lag` is the distance still to go. The rest is not
+    queued: sending `value` again on later ticks, as a slider or a teleop
+    loop does, continues the slide, and the call that arrives is `OK`. An
+    arm still behind its followed point from an earlier rate limit first
+    closes that gap, as `update()` does.
+  - `HELD`: `q` unchanged. `reason` is `"limits"` when `value` is on the chart
+    but outside the arc, and `"jump"` when it is past a fold or a branch
+    junction (going on would mean leaving the chart for another branch) or
+    `redundancy` is `None`. A slide never switches chart or branch.
+  - On an arm without a closed-form chart it raises `NotImplementedError`, as
+    `Manipulator.self_motion` does: that is a property of the arm, not of
+    the stream.
+
+  A slide stays on one branch however long it is, so `moved` can exceed
+  `jump_threshold`; `max_joint_speed` is what bounds the motion per tick.
+- `update(T)` holds the redundancy coordinate fixed, so after
+  `set_redundancy` it keeps the chosen coordinate as the target moves, while
+  the point there is within `jump_threshold` and inside the limits. Where it
+  is not, `update()` takes the seeded solve as usual and `redundancy` reports
+  the coordinate it landed on. A chart's label may renumber its reachable
+  interval across poses (the label contract in `ssik.chart`); the coordinate
+  is what is held.
+
 ::: ssik.Tracker
     options:
       show_root_heading: false
@@ -368,6 +429,12 @@ configuration the arm is at.
         - reset
         - q
         - target
+        - redundancy
+        - set_redundancy
+
+::: ssik.Redundancy
+    options:
+      show_root_heading: false
 
 ::: ssik.TrackStatus
     options:
