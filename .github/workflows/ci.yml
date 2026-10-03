@@ -47,6 +47,8 @@ jobs:
     # means changing both the matrix and the /2 in the pytest step.
     name: Linux py${{ matrix.python-version }} (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
+    env:
+      SSIK_DERIVATION_CACHE: ~/.cache/ssik/rr-derivations
     strategy:
       fail-fast: false
       matrix:
@@ -95,6 +97,23 @@ jobs:
         # Serial clone before pytest so the parallel (-n auto) workers only
         # read the cache -- no concurrent clones racing on the same dir.
         run: uv run python scripts/prewarm_descriptions.py
+
+      # The symbolic Raghavan-Roth derivations (~10-45 s each, cached on disk by
+      # _raghavan_roth.py and keyed there on its own source + the sympy version,
+      # so a stale entry can only miss). Restored from this shard's latest save
+      # for the same derivation source and lockfile; saved again below only when
+      # the job added entries, so a shard's cache grows to cover its tests.
+      - name: Restore the RR derivation cache
+        id: rr-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ssik/rr-derivations
+          key: rr-derivations-py${{ matrix.python-version }}-${{ matrix.shard }}-${{ hashFiles('src/ssik/solvers/ikgeo/_raghavan_roth.py', 'uv.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: rr-derivations-py${{ matrix.python-version }}-${{ matrix.shard }}-${{ hashFiles('src/ssik/solvers/ikgeo/_raghavan_roth.py', 'uv.lock') }}-
+
+      - name: Count the restored derivations
+        id: rr-before
+        run: echo "n=$(find ~/.cache/ssik/rr-derivations -name '*.pkl' 2>/dev/null | wc -l)" | tee -a "$GITHUB_OUTPUT"
 
       - name: ruff check
         if: matrix.shard == 1
@@ -152,6 +171,23 @@ jobs:
         # measured without cross-worker CPU contention. Small, fast set. (#348)
         run: uv run pytest -q -m "not slow and perf"
 
+      - name: Count the derivations after the run
+        id: rr-after
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ steps.rr-before.outputs.n }}
+        run: |
+          n=$(find ~/.cache/ssik/rr-derivations -name '*.pkl' 2>/dev/null | wc -l)
+          echo "n=$n (restored ${BEFORE:-0})"
+          echo "grew=$([ "$n" -gt "${BEFORE:-0}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Save the RR derivation cache
+        if: ${{ !cancelled() && steps.rr-after.outputs.grew == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ssik/rr-derivations
+          key: ${{ steps.rr-cache.outputs.cache-primary-key }}
+
   test_shards:
     # Fails unless, for every Python version, shards 1..N all ran, agree on N,
     # collected the same tests, and ran disjoint slices whose union is the whole
@@ -194,6 +230,10 @@ jobs:
     # arrived. Changing the shard count means changing both the matrix and N.
     name: C++ emit + drift guard (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    env:
+      # The drift guard checks the committed artifacts against derivations run
+      # from scratch here, never against cached ones.
+      SSIK_DERIVATION_CACHE: "off"
     strategy:
       fail-fast: false
       matrix:
