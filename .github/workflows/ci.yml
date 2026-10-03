@@ -55,17 +55,24 @@ jobs:
     # which means the full suite with every sweep in full. The diff is the PR's
     # merge commit against its first parent, i.e. exactly what merging would
     # change, with renames split so a move out of src/ counts as a src/ change.
+    #
+    # Within the full suite, the C++ jobs (emit + drift guard, conformance, and
+    # the Python suite reused against the native backend) are skipped only when
+    # every path is examples or docs, under tests/, or one of the Python modules
+    # the C++ emit never imports (`cpp=false`). Every push, workflow_dispatch and
+    # any doubt run them.
     name: Classify changed files
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.classify.outputs.full }}
+      cpp: ${{ steps.classify.outputs.cpp }}
       pr_sweeps: ${{ steps.classify.outputs.pr_sweeps }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Full suite or examples lane, and which sweeps run a sample?
+      - name: Full suite or examples lane, C++ jobs or not, and which sweeps run a sample?
         id: classify
         env:
           EVENT: ${{ github.event_name }}
@@ -398,7 +405,7 @@ jobs:
     # arrived. Changing the shard count means changing both the matrix and N.
     name: C++ emit + drift guard (${{ matrix.shard }}/4)
     needs: [changes, build]
-    if: needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
     env:
       # The drift guard checks the committed artifacts against derivations run
@@ -513,10 +520,13 @@ jobs:
 
   cpp_suite:
     # The reused Python suite needs only the pybind extension, not the emitted
-    # cpp/gen artifacts, so it runs alongside the emit instead of after it.
+    # cpp/gen artifacts, so it runs alongside the emit instead of after it. Its
+    # tests also run in every Linux pytest job, which has the native extension
+    # too, so it follows the C++ jobs' lane: a change that skips it is still
+    # tested there.
     name: Reused Python suite vs the C++ backend
     needs: [changes, build]
-    if: needs.changes.outputs.full == 'true'
+    if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-latest
     env:
       SSIK_PR_SWEEPS: ${{ needs.changes.outputs.pr_sweeps }}
@@ -678,9 +688,9 @@ jobs:
         run: uv run pytest -q tests/test_teleop.py
 
   ci_ok:
-    # One check that is green exactly when every job the lane needs passed and
-    # every job outside it was skipped, so a classification bug that skips the
-    # full suite on a full-lane change shows up red here.
+    # One check that is green exactly when every job the lanes need passed and
+    # every job outside them was skipped, so a classification bug that skips the
+    # full suite or the C++ jobs on a change that needs them shows up red here.
     name: CI result
     if: always()
     needs:
@@ -700,16 +710,18 @@ jobs:
         env:
           NEEDS: ${{ toJSON(needs) }}
           FULL: ${{ needs.changes.outputs.full }}
+          CPP: ${{ needs.changes.outputs.cpp }}
         run: |
           python3 - <<'PY'
           import json, os, sys
           needs = json.loads(os.environ["NEEDS"])
-          full = os.environ["FULL"]
-          if full not in ("true", "false"):
-              sys.exit(f"no lane chosen (full={full!r}); changes: {needs['changes']['result']}")
+          full, cpp = os.environ["FULL"], os.environ["CPP"]
+          if (full, cpp) not in (("true", "true"), ("true", "false"), ("false", "false")):
+              sys.exit(f"no lane chosen (full={full!r}, cpp={cpp!r}); changes: {needs['changes']['result']}")
           lane = {"true": "success", "false": "skipped"}
           want = {j: "success" for j in ("changes", "build", "native_wheel", "native_wheel_eigen")}
-          want |= {j: lane[full] for j in ("test", "test_shards", "cpp_emit", "cpp", "cpp_suite")}
+          want |= {j: lane[full] for j in ("test", "test_shards")}
+          want |= {j: lane[cpp] for j in ("cpp_emit", "cpp", "cpp_suite")}
           want["examples_lane"] = "skipped" if full == "true" else "success"
           bad = {j: (needs[j]["result"], w) for j, w in want.items() if needs[j]["result"] != w}
           for j, (got, w) in sorted(bad.items()):
