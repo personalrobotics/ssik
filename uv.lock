@@ -2560,6 +2560,7 @@ dev = [
     { name = "ruff" },
     { name = "setuptools" },
     { name = "urchin" },
+    { name = "viser" },
     { name = "xacrodoc" },
     { name = "yourdfpy" },
 ]
@@ -2602,6 +2603,7 @@ dev = [
     { name = "ruff", specifier = ">=0.8" },
     { name = "setuptools", specifier = ">=70" },
     { name = "urchin", specifier = ">=0.0.27" },
+    { name = "viser", specifier = ">=1.0" },
     { name = "xacrodoc", specifier = ">=2.0.1" },
     { name = "yourdfpy", specifier = ">=0.0.60" },
 ]
