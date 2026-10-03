@@ -47,6 +47,19 @@ For a 6R arm, the list contains the certified isolated IK branches ssik recovere
 
 An empty list means **no certified solution was returned** — which, by itself, is not a mathematical proof that the pose is unreachable. Use `explain=True` when diagnosing an empty result.
 
+### Examples
+
+Each script in [`examples/`](examples/) checks the claims it prints and exits non-zero if one fails; CI runs them against the built wheel with [`scripts/run_examples.py`](scripts/run_examples.py). `pip install 'ssik[demo]'` installs what all of them need.
+
+| Script | Shows |
+|---|---|
+| [`01_quickstart.py`](examples/01_quickstart.py) | `list_arms`, `from_prebuilt`, fk/solve, joint limits and windings, input validation, `explain=True` |
+| [`02_trajectory_tracking.py`](examples/02_trajectory_tracking.py) | seeded tracking through a wrist singularity, `seed_metric` / `seed_tolerance`, `solve_path` |
+| [`03_your_own_robot.py`](examples/03_your_own_robot.py) | `from_urdf` on a non-Pieper URDF, the one-time derivation cost, `ssik build`, limit filtering |
+| [`04_redundant_arms.py`](examples/04_redundant_arms.py) | 7-DOF self-motion (Panda); sampled solutions and seeded tracking (Gen3) |
+| [`05_viser_interactive_ik.py`](examples/05_viser_interactive_ik.py) | the interactive viewer below |
+| [`07_cpp_from_the_wheel.py`](examples/07_cpp_from_the_wheel.py) | the C++ headers and solver input shipped in the wheel |
+
 ### See every branch at once
 
 ```bash

@@ -407,6 +407,24 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+      - name: Run every example against the installed wheel
+        # #681: each example asserts its own claims and exits non-zero on a
+        # failed one. The demo extra brings what they all need (viewer, URDF
+        # loading for ssik build). They run in parallel; logs and summary.json
+        # (status and per-claim result for each) are the inspectable artifact.
+        run: |
+          uv pip install --python .wheelenv/bin/python "$(ls dist/*.whl)[demo]"
+          .wheelenv/bin/python scripts/run_examples.py --out examples-smoke
+
+      - name: Upload the examples' logs and summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: examples-smoke-${{ matrix.os }}
+          path: examples-smoke/
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Upload the Eigen version this wheel compiled against
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
