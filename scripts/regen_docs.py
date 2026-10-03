@@ -35,8 +35,6 @@ the reviewer.
 Files this script does NOT yet handle (left for follow-up):
 
   outreach/*.md                       prose name lists (no live counts today)
-  examples/04_compare_vs_eaik.py      FIXTURES list (a standalone demo; the doc
-                                      source of truth is now scripts/regen_bench.py)
 """
 
 from __future__ import annotations

@@ -139,7 +139,6 @@ uv run python scripts/bench_seven_r.py            # synthetic 7R
 - `scripts/regen_artifacts.py` — which arms to emit + their `--include-slow` gating
 - `scripts/regen_bench.py` — measures each prebuilt and writes the `[arms.*.bench]` blocks in place
 - `scripts/regen_docs.py` — the AUTOGEN doc tables (README prebuilt + EAIK comparison, docs/quickstart, src/ssik/prebuilt/README)
-- `examples/04_compare_vs_eaik.py` — bench fixtures
 
 Doc tables wrapped in `<!-- AUTOGEN:name --> ... <!-- /AUTOGEN -->` are generated from the manifest. **Never edit inside those markers by hand** — CI's drift gate (`scripts/regen_docs.py --check`) will reject it. Edit `MANIFEST.toml`, then:
 
@@ -191,7 +190,7 @@ The metadata for a shipped arm lives in `MANIFEST.toml`. The flow is now mostly 
    uv run python scripts/regen_bench.py --arm <name>_ik --docs   # fills [bench] + rewrites doc tables
    ```
 
-   `regen_bench.py` measures the prebuilt's `solve()` (time / FK / branch count, examples/04 methodology) and writes the `[arms.<name>_ik.bench]` block in place, then runs `regen_docs.py`. Run it on the reference machine (timing is machine-dependent; FK/sols are not). Omit `--arm` to re-bench every arm.
+   `regen_bench.py` measures the prebuilt's `solve()` (time / FK / branch count, over the same reachable poses it gives EAIK) and writes the `[arms.<name>_ik.bench]` block in place, then runs `regen_docs.py`. Run it on the reference machine (timing is machine-dependent; FK/sols are not). Omit `--arm` to re-bench every arm.
 
    Then refresh the perf-regression baseline (a new arm without one fails `test_perf_regression.py::test_baseline_covers_benched_arms`):
 

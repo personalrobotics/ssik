@@ -3,7 +3,7 @@
 Reads the sibling ``MANIFEST.toml`` and exposes per-arm metadata as a
 typed dataclass. All consumers (doc generators, test parametrisations,
 the build orchestration in ``scripts/regen_artifacts.py``, the
-``examples/04_compare_vs_eaik.py`` bench, the ``ssik add-arm`` CLI)
+``scripts/regen_bench.py`` bench, the ``ssik add-arm`` CLI)
 read from this loader rather than hard-coding arm lists.
 
 See ``MANIFEST.toml`` itself for the schema reference.

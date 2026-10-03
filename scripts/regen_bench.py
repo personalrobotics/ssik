@@ -12,11 +12,11 @@ adding an arm (or refreshing the whole set) is one command::
     uv run python scripts/regen_bench.py --eaik-only     # leave ssik numbers alone
     uv run python scripts/regen_bench.py --docs          # + regenerate docs
 
-Methodology (matches ``examples/04_compare_vs_eaik.py``): reachable poses
-sampled in the joint interior, a warm-up pass, then bootstrap mean ± 95% CI on
-solve time, plus worst FK residual and the branch-count range, over the **same
-poses** for ssik and EAIK. ``respect_limits=False`` so the branch count reflects
-the analytical solver, not the limit postprocess. The EAIK side records its
+Methodology: reachable poses sampled in the joint interior, a warm-up pass,
+then bootstrap mean ± 95% CI on solve time, plus worst FK residual and the
+branch-count range, over the **same poses** for ssik and EAIK.
+``respect_limits=False`` so the branch count reflects the analytical solver,
+not the limit postprocess. The EAIK side records its
 support verdict + numbers, or its verbatim refusal (its kinematic-family string
 or the first sentence of its error) -- EAIK is fed each manufacturer fixture
 as-is (no manual joint-locking), the same chain ssik is given.
@@ -60,7 +60,7 @@ _EAIK_FK_CORRECT_ATOL = 1e-6
 
 
 def _gen_poses(mod: object, n: int, rng: np.random.Generator) -> list[NDArray[np.float64]]:
-    """Reachable poses sampled in the safe joint interior (matches examples/04)."""
+    """Reachable poses sampled in the safe joint interior."""
     dof = mod.DOF  # type: ignore[attr-defined]
     poses: list[NDArray[np.float64]] = []
     while len(poses) < n:
@@ -75,7 +75,7 @@ def _gen_poses(mod: object, n: int, rng: np.random.Generator) -> list[NDArray[np
 
 
 def _mean_ci95(samples: NDArray[np.float64], n_boot: int = 1000) -> tuple[float, float]:
-    """Bootstrap mean + 95% CI half-width (matches examples/04)."""
+    """Bootstrap mean + 95% CI half-width."""
     rng = np.random.default_rng(0)
     n = len(samples)
     means = np.empty(n_boot)
@@ -115,16 +115,18 @@ def bench_arm(mod: object, poses: list[NDArray[np.float64]]) -> dict[str, float 
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 
 
-def _load_eaik(arm: object) -> object:
-    """Load an EAIK robot for ``arm`` from its manifest fixture (URDF) or DH
-    (specs). Raises on failure (captured as a refusal by the caller)."""
-    import eaik.IK_DH  # type: ignore[import-untyped]
-    import eaik.IK_URDF  # type: ignore[import-untyped]
+def _eaik_dh(arm: object) -> object | None:
+    """The DH parameters EAIK's DH adapter gets for ``arm``, or ``None`` for a
+    URDF fixture (EAIK loads those itself).
 
+    This is ssik's side of the harness, so it runs outside the ``try`` that
+    records EAIK's own errors as refusals: a failure here is a harness defect
+    and must raise, not be published as "EAIK refuses" (#681).
+    """
     from ssik.kinematics.poe_to_dh import poe_to_dh
 
     if arm.fixture_kind == "urdf":  # type: ignore[attr-defined]
-        return eaik.IK_URDF.UrdfRobot(str(FIXTURES_DIR / arm.fixture))  # type: ignore[attr-defined]
+        return None
     if arm.fixture_kind == "specs":  # type: ignore[attr-defined]
         # specs arm: rebuild the KinBody to extract DH for EAIK's DH adapter.
         sys.path.insert(0, str(FIXTURES_DIR))
@@ -141,8 +143,18 @@ def _load_eaik(arm: object) -> object:
         kb = formats.get(arm.fixture_kind).load(  # type: ignore[attr-defined]
             FIXTURES_DIR / arm.fixture, arm.base_link, arm.ee_link, {}
         )
-    dh = poe_to_dh(kb)
-    return eaik.IK_DH.DhRobot(dh.alpha, dh.a, dh.d)
+    return poe_to_dh(kb)
+
+
+def _load_eaik(arm: object, dh: object | None) -> object:
+    """Construct EAIK's robot for ``arm``: its URDF loader for a URDF fixture,
+    else its DH adapter on ``dh``. Raises EAIK's own error on refusal."""
+    import eaik.IK_DH  # type: ignore[import-untyped]
+    import eaik.IK_URDF  # type: ignore[import-untyped]
+
+    if dh is None:
+        return eaik.IK_URDF.UrdfRobot(str(FIXTURES_DIR / arm.fixture))  # type: ignore[attr-defined]
+    return eaik.IK_DH.DhRobot(dh.alpha, dh.a, dh.d)  # type: ignore[attr-defined]
 
 
 def _clean_refusal(msg: str) -> str:
@@ -164,8 +176,9 @@ def bench_eaik(arm: object, poses: list[NDArray[np.float64]]) -> dict[str, objec
     except ImportError:
         return None
 
+    dh = _eaik_dh(arm)
     try:
-        robot = _load_eaik(arm)
+        robot = _load_eaik(arm, dh)
     except Exception as exc:
         return {"supported": False, "refusal": _clean_refusal(str(exc))}
 

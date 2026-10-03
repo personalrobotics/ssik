@@ -3,9 +3,8 @@
 # Every arm shipped under ``ssik.prebuilt.*`` has an entry here. Doc
 # tables (README, docs/, outreach/, CITATION.cff), test parametrisations
 # (test_prebuilt_uniform_fuzz.py, test_prebuilt_sanity.py,
-# test_artifact_snapshots.py), bench fixtures
-# (examples/04_compare_vs_eaik.py), and the build orchestration
-# (scripts/regen_artifacts.py) all read from this file.
+# test_artifact_snapshots.py), the benchmark (scripts/regen_bench.py), and
+# the build orchestration (scripts/regen_artifacts.py) all read from this file.
 #
 # Adding a new arm: prefer ``ssik add-arm <urdf> --name ... --base ... --ee ...``
 # (it benches + populates this entry + regenerates docs end-to-end).

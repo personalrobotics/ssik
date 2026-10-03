@@ -13,7 +13,7 @@ Oracles (per #158):
    clean spherical-wrist arm (exact count parity + branch-level joint match,
    robust to LAPACK-backend numeric drift). (A direct EAIK cross-check needs
    joint-convention reconciliation; the EAIK timing / coverage comparison
-   lives in ``examples/04_compare_vs_eaik.py``.)
+   lives in ``scripts/regen_bench.py``.)
 5. **Hypothesis fuzz over random 6R chains** -- FK closure on every
    returned ``q`` (slow; opt-in).
 6. **Numerical-stability sweep** -- near-parallel-axis tangencies and
@@ -146,7 +146,7 @@ def test_oracle1_fk_closure_ur5() -> None:
 # and per-joint sign/offset conventions differ from ssik's POE, so a correct
 # comparison needs joint-convention reconciliation -- tracked separately. The
 # HP-vs-RR check below gives stronger, dependency-free cross-solver coverage;
-# the EAIK timing/coverage comparison lives in examples/04_compare_vs_eaik.py.)
+# the EAIK timing/coverage comparison lives in scripts/regen_bench.py.)
 # ----------------------------------------------------------------------------
 
 

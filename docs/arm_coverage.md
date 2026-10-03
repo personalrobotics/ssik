@@ -1,6 +1,6 @@
 # Arm coverage
 
-Per-arm tested fixture tables, dispatched solver, and measured speed. Numbers come from [`examples/04_compare_vs_eaik.py`](https://github.com/personalrobotics/ssik/blob/main/examples/04_compare_vs_eaik.py): 100 random reachable poses per arm, Apple M3 single-thread, mean ± 95% CI via 1000-resample bootstrap. The README's EAIK comparison table reports the same measurements; this doc breaks them down by kinematic class and points at where each arm's prebuilt lives.
+Per-arm tested fixture tables, dispatched solver, and speed, by kinematic class, with where each arm's prebuilt lives. The Speed column is a hand-kept snapshot from an earlier release and is not regenerated. Current measurements for every shipped arm are in the README's EAIK comparison table, which [`scripts/regen_bench.py`](https://github.com/personalrobotics/ssik/blob/main/scripts/regen_bench.py) measures into `MANIFEST.toml` (reachable poses in the joint interior, single-thread on the reference machine, mean ± 95% CI via 1000-resample bootstrap) and `scripts/regen_docs.py` renders.
 
 **Status legend**: ✅ shipped in [`ssik.prebuilt`](https://github.com/personalrobotics/ssik/tree/main/src/ssik/prebuilt) and exercised by the test suite. 🔗 external URDF, fixture import pending. 📐 synthetic-only (no canonical commercial arm with this exact topology).
 

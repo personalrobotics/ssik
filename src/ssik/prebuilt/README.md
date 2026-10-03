@@ -332,10 +332,12 @@ every IK call hits warm-cache speed.
 
 See [`examples/`](../../../examples/) for runnable scripts:
 
-- `01_ur5_quickstart.py`: basic API tour using `ur5_ik`
-- `02_jaco2_non_pieper.py`: non-Pieper 6R using `jaco2_ik`
-- `03_gen3_polished_srs.py`: approximate-SRS using `gen3_ik`
-- `04_compare_vs_eaik.py`: measured benchmark vs EAIK over 100 random poses
+- `01_quickstart.py`: the basic API tour on `ur5_ik`
+- `02_trajectory_tracking.py`: seeded tracking through a UR5 wrist singularity
+- `04_redundant_arms.py`: self-motion on `franka_panda_ik`, samples and tracking on `gen3_ik`
+- `07_cpp_from_the_wheel.py`: the C++ solver input for `ur5_ik`
+
+The EAIK comparison behind the README's table is `scripts/regen_bench.py`.
 
 ## Regenerating
 
