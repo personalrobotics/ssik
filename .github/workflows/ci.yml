@@ -14,8 +14,10 @@ name: CI
 # grown to 43-68 min (serial pytest + uncached robot_descriptions clones);
 # #348 cached the description repos and parallelized pytest (-n auto).
 # Doc-only PRs skip CI entirely via paths-ignore; PRs that change only
-# examples (and docs) run the examples lane instead of the full suite (see the
-# `changes` job). Pushes to main and workflow_dispatch always run the full suite.
+# examples (and docs) run the examples lane instead of the full suite, and PRs
+# that leave an exhaustive sweep's code alone run its fixed PR sample (see the
+# `changes` job and tests/_sweeps.py). Pushes to main and workflow_dispatch
+# always run everything in full.
 
 on:
   pull_request:
@@ -42,45 +44,39 @@ permissions:
 
 jobs:
   changes:
-    # Picks the lane. A pull request whose changes are all examples or docs
-    # (examples/, docs/, *.md, LICENSE, .gitignore; never under src/, tests/,
-    # scripts/, cpp/, tools/ or .github/) gets the examples lane: lint, the
-    # native wheels running every example, and tests/test_teleop.py. Anything
-    # else, every push and workflow_dispatch, and any doubt (no merge commit, a failed diff, no
-    # changes) gets the full suite. The diff is the PR's merge commit against
-    # its first parent, i.e. exactly what merging would change, with renames
-    # split so a move out of src/ counts as a src/ change.
+    # Picks the lane and the sweep tier (scripts/classify_changes.py). A pull
+    # request whose changes are all examples or docs (examples/, docs/, *.md,
+    # LICENSE, .gitignore; never under src/, tests/, scripts/, cpp/, tools/ or
+    # .github/) gets the examples lane: lint, the native wheels running every
+    # example, and tests/test_teleop.py. Anything else gets the full suite, in
+    # which each exhaustive sweep whose covered code (tests/_sweeps.py) the PR
+    # leaves alone runs its fixed PR sample. Every push, workflow_dispatch, and
+    # any doubt (no merge commit, a failed diff, no changes) classify no paths,
+    # which means the full suite with every sweep in full. The diff is the PR's
+    # merge commit against its first parent, i.e. exactly what merging would
+    # change, with renames split so a move out of src/ counts as a src/ change.
     name: Classify changed files
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.classify.outputs.full }}
+      pr_sweeps: ${{ steps.classify.outputs.pr_sweeps }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Full suite, or examples lane?
+      - name: Full suite or examples lane, and which sweeps run a sample?
         id: classify
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          full=true
+          : > changed.txt
           if [ "$EVENT" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
-            changed=$(git diff --no-renames --name-only HEAD^1 HEAD) || changed=""
-            printf 'changed:\n%s\n' "$changed"
-            if [ -n "$changed" ]; then
-              full=false
-              while IFS= read -r f; do
-                case "$f" in
-                  src/*|tests/*|scripts/*|cpp/*|tools/*|.github/*) full=true ;;
-                  examples/*|docs/*|*.md|LICENSE|.gitignore) ;;
-                  *) full=true ;;
-                esac
-              done <<< "$changed"
-            fi
+            git diff --no-renames --name-only HEAD^1 HEAD > changed.txt || : > changed.txt
           fi
-          echo "event=$EVENT full=$full"
-          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "event=$EVENT; changed:"
+          cat changed.txt
+          python3 scripts/classify_changes.py < changed.txt | tee -a "$GITHUB_OUTPUT"
 
   test:
     # Each Python version's suite is split across two jobs (`pytest --shard`,
@@ -95,6 +91,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SSIK_DERIVATION_CACHE: ~/.cache/ssik/rr-derivations
+      # The sweeps that run their PR sample (tests/_sweeps.py); empty = all full.
+      SSIK_PR_SWEEPS: ${{ needs.changes.outputs.pr_sweeps }}
     strategy:
       fail-fast: false
       matrix:
@@ -407,6 +405,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
+    env:
+      SSIK_PR_SWEEPS: ${{ needs.changes.outputs.pr_sweeps }}
     steps:
       - uses: actions/checkout@v4
         with:

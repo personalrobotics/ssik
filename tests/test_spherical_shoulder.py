@@ -15,6 +15,7 @@ import pytest
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.solvers.seven_r.spherical_shoulder import resolve_in_limits
+from tests import _sweeps
 
 FIXTURES = __import__("pathlib").Path(__file__).parent / "fixtures"
 
@@ -28,6 +29,13 @@ def _limits(kb):
     return [(float(j.limits[0]), float(j.limits[1])) for j in kb.joints]
 
 
+# Poses per arm: the full sweep, and the PR sample (tests/_sweeps.py), the first
+# _PR_POSES poses of the same stream.
+_POSES = 150
+_PR_POSES = 20
+
+
+@pytest.mark.sweep
 @pytest.mark.parametrize(("name", "base", "ee"), _ARMS, ids=[a[0] for a in _ARMS])
 def test_resolves_every_in_limits_pose(name: str, base: str, ee: str) -> None:
     """Every reachable in-limits pose gets an in-limits, FK-closing solution --
@@ -37,7 +45,7 @@ def test_resolves_every_in_limits_pose(name: str, base: str, ee: str) -> None:
     lims = _limits(kb)
     rng = np.random.default_rng(11)
     worst = 0.0
-    for _ in range(150):
+    for _ in range(_sweeps.cases("in_limits_resolvers", full=_POSES, pr=_PR_POSES)):
         q = np.array([rng.uniform(lo, hi) for lo, hi in lims])
         T = poe_forward_kinematics(kb, q)
         sols = resolve_in_limits(kb, T)
