@@ -12,6 +12,12 @@ analytical IK solution at that pose as a live arm:
   target pose, different elbow / wrist / shoulder configuration
   (``Tracker.solutions()``). "Cycle preferred branch" switches the solid
   arm to the next one (``Tracker.next_branch()``).
+* On a 7-DOF arm with a closed-form self-motion chart (Panda, FR3, iiwa)
+  the **Elbow** slider swings the solid arm along its self-motion while the
+  hand stays put (``Tracker.set_redundancy()``). Its range is the in-limits
+  arc of the branch at the current target, so a fold, a branch junction or a
+  joint limit is an end; dragging the marker afterwards keeps the chosen
+  coordinate. ``--self-motion`` sweeps the slider on its own.
 
 Toggle through arms in the GUI, from Pieper-class 6R to non-Pieper 6R and
 7R; the badge shows which ssik solver each one dispatches to.
@@ -759,8 +765,21 @@ def main(
     show_ghosts_chk = server.gui.add_checkbox("Show ghost branches", True)
     cycle_btn = server.gui.add_button("Cycle preferred branch")
     reset_btn = server.gui.add_button("Reset marker → current EE")
+    # The elbow slider: on a 7-DOF arm with a closed-form chart (Panda, FR3,
+    # iiwa) it moves the solid arm along its self-motion with the hand fixed
+    # (``Tracker.set_redundancy``). Its range is the in-limits arc of the
+    # followed chart at the current target, re-read after every marker move;
+    # a fold or a branch junction is an end. Hidden on every other arm.
+    elbow_slider = server.gui.add_slider(
+        "Elbow", min=-1.0, max=1.0, step=1e-3, initial_value=0.0, visible=False
+    )
 
     state: dict[str, ArmRuntime | None] = {"arm": None}
+    # Set while the demo itself moves the slider to follow the arm (after a
+    # marker move), so that write is not taken as an elbow command.
+    syncing = {"on": False}
+    # The last elbow command's step, for the scripted sweep's drift gate.
+    elbow_steps: list[ssik.TrackerStep] = []
 
     marker = server.scene.add_transform_controls(
         "/ee_target",
@@ -832,6 +851,7 @@ def main(
             ][:max_ghosts]
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
+        _sync_elbow(rt)
         if step.status is ssik.TrackStatus.HELD:
             reason = _HELD_TEXT.get(step.reason or "", step.reason)
             stats_md.content = f"**Branches**: 0 ({reason})\n\n**Solve**: {elapsed_ms:.2f} ms"
@@ -881,6 +901,62 @@ def main(
             f"**Solve**: {elapsed_ms:.2f} ms"
         )
         return True
+
+    def _sync_elbow(rt: ArmRuntime) -> None:
+        """Bind the elbow slider to where the tracker is on its self-motion:
+        the followed chart's in-limits arc at the current target, and its
+        coordinate. Hidden when the arm has none (6R, Gen3, joint-lock 7R)."""
+        red = rt.tracker.redundancy
+        if red is None:
+            elbow_slider.visible = False
+            return
+        lo, hi = red.arc
+        syncing["on"] = True
+        try:
+            elbow_slider.label = f"Elbow ({red.parameter}, rad)"
+            if hi - lo < 1e-6:
+                # A single in-limit point: the elbow cannot move here.
+                lo, hi = red.t - 1e-3, red.t + 1e-3
+                elbow_slider.disabled = True
+            else:
+                elbow_slider.disabled = False
+            elbow_slider.min = lo
+            elbow_slider.max = hi
+            elbow_slider.step = max((hi - lo) / 1000.0, 1e-6)
+            elbow_slider.value = red.t
+            elbow_slider.visible = True
+        finally:
+            syncing["on"] = False
+
+    def _set_elbow(value: float) -> ssik.TrackerStep | None:
+        """Slide the solid arm to elbow coordinate ``value`` with the hand
+        fixed. The target does not change, so neither do the ghosts: they are
+        the other points of the same pose's solution set (the self-motion
+        samples and the other branches) that the solid arm slides past."""
+        with lock:
+            rt = state["arm"]
+            if syncing["on"] or rt is None or rt.tracker.redundancy is None:
+                return None
+            t0 = time.perf_counter()
+            step = rt.tracker.set_redundancy(float(value))
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            elbow_steps.append(step)
+            if step.status is ssik.TrackStatus.HELD:
+                reason = _HELD_TEXT.get(step.reason or "", step.reason)
+                stats_md.content = f"**Elbow**: held ({reason})"
+                return step
+            with server.atomic():
+                rt.active.set_q(step.q)
+            stats_md.content = (
+                f"**Elbow**: {value:+.3f} rad ({step.status.name.lower()})\n\n"
+                f"**FK closure**: {step.fk_residual:.2e}\n\n"
+                f"**Slide**: {elapsed_ms:.2f} ms"
+            )
+            return step
+
+    @elbow_slider.on_update
+    def _(_):
+        _set_elbow(elbow_slider.value)
 
     def select_arm(label: str) -> None:
         with lock:
@@ -1017,6 +1093,9 @@ def main(
             _run_self_motion(
                 select_arm=select_arm,
                 move_marker=_move_marker,
+                solve_and_render=_solve_and_render,
+                elbow_slider=elbow_slider,
+                elbow_steps=elbow_steps,
                 state=state,
                 lock=lock,
                 arm_label=self_motion_arm,
@@ -1336,43 +1415,58 @@ def _uniform_q(kb, rng) -> np.ndarray:
     return np.array(out, dtype=float)
 
 
-def _pick_self_motion_branch(arm, kb, *, rng, tries: int = 12, min_points: int = 40):
-    """A pose and branch worth animating, from ``tries`` random draws.
+def _pick_self_motion_branch(arm, kb, *, rng, tries: int = 12, min_width: float = 0.3):
+    """A pose and a configuration on a long in-limits arc of one branch there,
+    from ``tries`` random draws: ``(T, n_branches, q_start)``.
 
-    Scored by how far the *proximal* joints travel along the branch, not by
-    arc length. Arc length counts wrist rotation equally with shoulder
-    rotation, and a branch that spends its length spinning joint 7 barely
-    moves on screen: an early draft picked one of those and changed 2.5% of
-    the pixels across the whole sweep. Shoulder and elbow travel is what a
-    viewer actually sees, and it is also the honest illustration, since the
-    point being made is that the arm reconfigures substantially while the
-    hand holds still.
+    Scored by how far the *proximal* joints travel along the arc, not by arc
+    length. Arc length counts wrist rotation equally with shoulder rotation,
+    and a branch that spends its length spinning joint 7 barely moves on
+    screen: an early draft picked one of those and changed 2.5% of the pixels
+    across the whole sweep. Shoulder and elbow travel is what a viewer
+    actually sees, and it is also the honest illustration, since the point
+    being made is that the arm reconfigures substantially while the hand holds
+    still.
     """
+    from ssik.postprocess import wrap_to_limits
+
     best = None
     for _ in range(tries):
         t_target = arm.fk(_uniform_q(kb, rng))
         try:
             manifold = arm.self_motion(t_target)
+            charts = manifold.charts
         except Exception as e:  # a draw near a singularity is not worth animating
             print(f"  self-motion: skipping a pose ({type(e).__name__})", flush=True)
             continue
-        for chart in manifold.charts:
-            segments = chart.sample(400, limits=True)
-            if not segments:
-                continue
-            _, qs = max(segments, key=lambda s: len(s[0]))
-            if len(qs) < min_points:
-                continue
-            travel = float(np.sum(qs[:, :4].max(axis=0) - qs[:, :4].min(axis=0)))
-            if best is None or travel > best[0]:
-                best = (travel, t_target, len(manifold.charts), qs)
-    return None if best is None else best[1:]
+        for chart in charts:
+            for lo, hi in chart.in_limits():
+                if hi - lo < min_width:
+                    continue
+                qs = np.unwrap(chart.q(np.linspace(lo, hi, 200)), axis=0)
+                if not np.all(np.isfinite(qs)):
+                    continue
+                travel = float(np.sum(qs[:, :4].max(axis=0) - qs[:, :4].min(axis=0)))
+                if best is None or travel > best[0]:
+                    q_mid = chart.q(0.5 * (lo + hi))
+                    best = (travel, t_target, len(charts), q_mid)
+    if best is None:
+        return None
+    _, t_target, n_charts, q_mid = best
+    # The chart returns one representative of each angle; the arm starts at
+    # the one inside its joint box.
+    sol = ssik.Solution(q=q_mid, fk_residual=float(np.linalg.norm(arm.fk(q_mid) - t_target)))
+    q_start = np.asarray(wrap_to_limits([sol], kb, T_target=t_target)[0].q, dtype=float)
+    return t_target, n_charts, q_start
 
 
 def _run_self_motion(
     *,
     select_arm,
     move_marker,
+    solve_and_render,
+    elbow_slider,
+    elbow_steps,
     state,
     lock,
     arm_label: str,
@@ -1384,14 +1478,15 @@ def _run_self_motion(
     settle_s: float = 3.0,
     seed: int = 23,
 ) -> None:
-    """Sweep one branch of a redundant arm's self-motion manifold with the
-    end-effector pinned in place.
+    """Auto-sweep the elbow slider: one redundant arm, one fixed target, the
+    solid arm sliding along one branch of its self-motion manifold.
 
-    The animation makes the feature's claim visually: the marker never moves,
-    the ghosts are frozen postures along the same continuous branch, and the
-    solid arm slides through them. Every frame is an exact IK solution for one
-    unchanging target, not an interpolation between two of them, and the
-    printed EE drift is the evidence.
+    Every frame is a programmatic move of the GUI slider, so it runs the same
+    callback a drag does (``Tracker.set_redundancy``). The marker never moves,
+    and every frame is an exact IK solution for that one target, not an
+    interpolation between two of them: the drift gate checks each frame's
+    end-effector against the target and stops the sweep if one is off by
+    more than 1e-9.
     """
     fps = 30
     _capture = _make_capture(server, record_dir, record_size)
@@ -1404,62 +1499,70 @@ def _run_self_motion(
 
     arm = rt.arm
     kb = arm.kinbody
-    if arm.dof < 7:
+    if arm.dof < 7 or rt.tracker.redundancy is None:
         raise SystemExit(
-            f"self-motion needs a redundant arm; {arm_label!r} has {arm.dof} DOF. "
-            f"Pick a 7R, e.g. --self-motion-arm 'Franka Panda — anthropomorphic 7R'"
+            f"self-motion needs a redundant arm with a closed-form chart; {arm_label!r} "
+            f"({arm.dof} DOF, {arm.solver_name}) has none. "
+            f"Pick e.g. --self-motion-arm 'Franka Panda — anthropomorphic 7R'"
         )
 
     print(f"  self-motion: searching for a long admissible arc on {arm_label}", flush=True)
     picked = _pick_self_motion_branch(arm, kb, rng=np.random.default_rng(seed))
     if picked is None:
         raise SystemExit("self-motion: no branch with a usable in-limits arc; try another --seed")
-    t_target, n_charts, qs = picked
+    t_target, n_charts, q_start = picked
 
-    # The claim, measured before a single frame is drawn. If this is not at
-    # FK tolerance the animation would be showing something untrue.
-    drift = max(float(np.linalg.norm(arm.fk(q) - t_target)) for q in qs)
-    print(
-        f"  self-motion: {n_charts} branches at this pose; animating {len(qs)} postures "
-        f"along one of them, EE drift <= {drift:.2e}",
-        flush=True,
-    )
-    if drift > 1e-9:
-        raise SystemExit(f"self-motion: postures do not hold the pose (drift {drift:.2e})")
-
-    # Out along the arc and back, so the GIF loops without a jump cut.
-    sweep = np.vstack([qs, qs[::-1][1:-1]]) if len(qs) > 2 else qs
-
-    # Ghosts are frozen waypoints on the same arc: the continuum the solid arm
-    # is sliding along. They are set once and never touched again, which is
-    # why this drives the renderers directly instead of going through
-    # ``_solve_and_render`` (that re-solves and rebinds every ghost per frame).
     # The lock is held for the whole sweep so a stray GUI event cannot redraw
-    # the arms in between.
+    # the arms in between; the slider callback re-enters it on this thread.
     with lock:
-        slots = min(n_ghosts, len(rt.ghosts))
-        picks = np.linspace(0, len(qs) - 1, slots).astype(int) if slots else np.array([], dtype=int)
+        # Put the arm on the chosen branch and the marker on its hand; the
+        # render then binds the slider to that branch's in-limits arc.
+        rt.tracker.reset(q_start)
         move_marker(rt.active.base_offset @ t_target)
+        solve_and_render()
+        red = rt.tracker.redundancy
+        if red is None:
+            raise SystemExit("self-motion: the start configuration is on no chart")
+        lo, hi = red.arc
+        target = rt.tracker.target
+
+        # Out along the arc and back, so the GIF loops without a jump cut.
+        n_frames = max(int(seconds * fps), 2)
+        half = np.linspace(lo, hi, (n_frames + 1) // 2 + 1)
+        values = np.concatenate([half, half[::-1][1:-1]])
+        walk = np.linspace(0.0, len(values) - 1.0, n_frames).round().astype(int)
+        print(
+            f"  self-motion: {n_charts} branches at this pose; sweeping the elbow slider "
+            f"({red.parameter}) over [{lo:+.3f}, {hi:+.3f}] rad in {n_frames} frames",
+            flush=True,
+        )
+        # Start the loop at one end of the arc, before the settle.
+        elbow_slider.value = float(values[0])
+
+        # Ghosts: --self-motion-ghosts N freezes N postures spread along the
+        # same arc (the continuum the solid arm slides along); by default they
+        # are hidden, since same-coloured ghosts read as a fan of peers.
+        slots = min(n_ghosts, len(rt.ghosts))
         with server.atomic():
-            for slot in range(slots):
-                rt.ghosts[slot].set_visible(True)
-                rt.ghosts[slot].set_q(qs[picks[slot]])
-            for slot in range(slots, len(rt.ghosts)):
-                rt.ghosts[slot].set_visible(False)
-            rt.active.set_q(sweep[0])
+            for slot in range(len(rt.ghosts)):
+                rt.ghosts[slot].set_visible(slot < slots)
+                rt.ghost_qs[slot] = None
+            for slot, v in zip(range(slots), np.linspace(lo, hi, slots), strict=True):
+                tv = float((v + np.pi) % (2 * np.pi) - np.pi) if red.periodic else float(v)
+                rt.ghosts[slot].set_q(red.chart.q(tv))
 
         # Frame the shot. The interactive default camera is wherever the user
         # last orbited to; a captured asset needs a deliberate viewpoint, or
         # the arm renders as a speck in the middle of an empty frame.
         # Three-quarter view from slightly above, framed on the target the arm
         # is holding.
-        target = (rt.active.base_offset @ t_target)[:3, 3]
-        reach = float(np.linalg.norm(target)) or 0.8
+        target_render = (rt.active.base_offset @ target)[:3, 3]
+        reach = float(np.linalg.norm(target_render)) or 0.8
         # Frame on the arm's mid-height rather than the target itself: the
         # sweep moves the elbow far more than the hand, and the hand is by
         # construction the one thing that does not move.
         base = rt.active.base_offset[:3, 3]
-        focus = 0.5 * (base + target) + np.array([0.0, 0.0, 0.08])
+        focus = 0.5 * (base + target_render) + np.array([0.0, 0.0, 0.08])
         for client in (server.get_clients() or {}).values():
             with contextlib.suppress(Exception):
                 client.camera.position = focus + reach * np.array([0.90, -0.75, 0.30])
@@ -1478,21 +1581,29 @@ def _run_self_motion(
                         height=128, width=128, transport_format="jpeg"
                     )
 
-        # Map the requested duration onto the whole out-and-back loop.
-        # Indexing ``sweep`` by frame number instead would make the fraction
-        # of the arc covered depend on the frame count: at 30fps a 3s capture
-        # would walk 90 of this branch's 800 postures and the arm would look
-        # almost still.
-        n_frames = max(int(seconds * fps), 2)
-        walk = np.linspace(0.0, len(sweep) - 1.0, n_frames).round().astype(int)
-
         frame_idx = 0
+        drift = 0.0
         for i in range(n_frames):
-            with server.atomic():
-                rt.active.set_q(sweep[walk[i]])
+            del elbow_steps[:]
+            elbow_slider.value = float(values[walk[i]])
+            # A repeated value (the loop's turning points) sends no event.
+            q = elbow_steps[-1].q if elbow_steps else rt.tracker.q
+            if elbow_steps and elbow_steps[-1].status is not ssik.TrackStatus.OK:
+                step = elbow_steps[-1]
+                raise SystemExit(f"self-motion: the slider held ({step.reason}) inside its arc")
+            # The claim, measured on every frame against the fixed target. If
+            # it is not at FK tolerance the animation would be showing
+            # something untrue.
+            drift = max(drift, float(np.linalg.norm(arm.fk(q) - target)))
+            if drift > 1e-9:
+                raise SystemExit(f"self-motion: postures do not hold the pose (drift {drift:.2e})")
             frame_idx = _capture(frame_idx)
             if record_dir is None:
                 time.sleep(1.0 / fps)
+        print(
+            f"  self-motion: {n_frames} slider positions, EE drift <= {drift:.2e}",
+            flush=True,
+        )
 
     if record_dir is not None:
         import json
@@ -1586,14 +1697,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--self-motion",
         action="store_true",
-        help="animate one branch of a redundant arm's self-motion manifold with "
-        "the end-effector pinned (for the README asset). Reuses --tour-record-dir, "
-        "--tour-record-size, --tour-delay and --tour-settle.",
+        help="sweep the elbow slider: one branch of a redundant arm's self-motion "
+        "manifold, end to end of its in-limits arc, with the end-effector pinned (for "
+        "the README asset); the server keeps running afterwards unless --tour-exit. "
+        "Reuses --tour-record-dir, --tour-record-size, --tour-delay and --tour-settle.",
     )
     parser.add_argument(
         "--self-motion-arm",
         default="Franka Panda — anthropomorphic 7R",
-        help="which arm to sweep; must be 7-DOF (default: the Panda)",
+        help="which arm to sweep; a 7-DOF arm with a closed-form chart: Panda, FR3 "
+        "or iiwa14 (default: the Panda)",
     )
     parser.add_argument(
         "--self-motion-seconds",

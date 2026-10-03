@@ -9,6 +9,7 @@ engagement, with scaling equal to ``scale_about`` at the device anchor.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ from ssik.teleop import (
 )
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+IIWA_LABEL = "KUKA iiwa14 — SRS 7R"  # an ArmSpec label in examples/05
 TOL = 1e-12
 
 
@@ -207,12 +209,17 @@ def test_teleop_example_runs_headless() -> None:
     [
         ["--tour", "--tour-per-arm", "0.2"],
         ["--self-motion", "--self-motion-seconds", "0.3"],
+        ["--self-motion", "--self-motion-seconds", "0.3", "--self-motion-arm", IIWA_LABEL],
     ],
-    ids=["tour", "self_motion"],
+    ids=["tour", "self_motion", "self_motion_iiwa"],
 )
 def test_viser_demo_runs_headless(mode: list[str]) -> None:
     """``examples/05_viser_interactive_ik.py`` (rebuilt on ``Tracker``) runs its
     scripted modes end to end with primitives, no browser and no downloads.
+    The self-motion mode sweeps the elbow slider by setting its value, which
+    runs the slider's own callback (``Tracker.set_redundancy``), on the Panda
+    (``q6`` chart) and the iiwa (swivel chart), and gates every frame's
+    end-effector drift against the fixed target.
     Needs ``viser`` (``pip install 'ssik[demo]'``)."""
     pytest.importorskip("viser")
     out = subprocess.run(
@@ -241,5 +248,8 @@ def test_viser_demo_runs_headless(mode: list[str]) -> None:
         assert out.count("  tour: ") == 9
         assert "tour: complete" in out
     else:
-        assert "EE drift <=" in out
+        assert "sweeping the elbow slider" in out
+        drift = re.search(r"EE drift <= (\S+)", out)
+        assert drift is not None
+        assert float(drift.group(1)) <= 1e-9
         assert "self-motion: complete" in out
