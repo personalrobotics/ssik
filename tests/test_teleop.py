@@ -1,4 +1,4 @@
-"""Teleoperation frame helpers (``ssik.teleop``) and the ``07_teleop`` example.
+"""Teleoperation frame helpers (``ssik.teleop``) and the ``06_teleop`` example.
 
 The helpers are rigid-transform algebra, so the tests check the algebra's
 invariants on random rigid poses rather than particular outputs: calibration
@@ -129,11 +129,11 @@ def test_frame_inputs_follow_the_solve_contract() -> None:
 
 
 def test_teleop_example_runs_headless() -> None:
-    """``examples/07_teleop.py`` runs end to end with its scripted source and
+    """``examples/06_teleop.py`` runs end to end with its scripted source and
     shows the statuses a teleop loop meets: tracking, a speed limit, an
     unreachable stretch it holds through, and recovery."""
     out = subprocess.run(
-        [sys.executable, str(EXAMPLES / "07_teleop.py")],
+        [sys.executable, str(EXAMPLES / "06_teleop.py")],
         capture_output=True,
         text=True,
         timeout=300,

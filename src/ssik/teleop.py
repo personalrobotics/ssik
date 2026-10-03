@@ -57,7 +57,7 @@ class PoseSource(Protocol):
     ``poses()`` yields ``(T, t)`` pairs: ``T`` a 4x4 rigid transform (the
     device's pose in its own fixed frame) and ``t`` a timestamp in seconds that
     never decreases. The iterator ends when the stream does. ssik ships no
-    adapters; ``examples/07_teleop.py`` has a scripted source and a stub showing
+    adapters; ``examples/06_teleop.py`` has a scripted source and a stub showing
     where a VR or SpaceMouse reader plugs in.
     """
 

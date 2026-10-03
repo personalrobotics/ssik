@@ -382,7 +382,7 @@ configuration the arm is at.
 The steps between a device and `Tracker.update` are rigid-transform
 compositions, collected in `ssik.teleop`. ssik ships no device code: a device
 is anything with a `poses()` method yielding `(T, t)`, the `PoseSource`
-protocol. `examples/07_teleop.py` wires a scripted source through every step.
+protocol. `examples/06_teleop.py` wires a scripted source through every step.
 
 **Conventions.** A pose is a 4x4 homogeneous rigid transform `a_T_b`, the pose
 of frame `b` in frame `a`; it maps `b`-coordinates to `a`-coordinates and

@@ -11,7 +11,7 @@ of the grip to reposition, reaches far out of the workspace and comes back.
 
 Run::
 
-    python examples/07_teleop.py
+    python examples/06_teleop.py
 """
 
 from __future__ import annotations

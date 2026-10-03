@@ -32,7 +32,7 @@ headless).
 The marker lives in the rendered scene's frame; the rigid offset between
 that frame and the arm's base frame is a calibration
 (``ssik.teleop.apply_calibration``), the same step a VR or SpaceMouse
-loop takes (``examples/07_teleop.py``).
+loop takes (``examples/06_teleop.py``).
 
 Run::
 
@@ -684,7 +684,7 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec, *, meshes: bool) 
         arm=arm,
         # allow_jump: the solid arm is always the branch nearest the last one,
         # however far, as a demo wants. A teleop loop keeps the default and
-        # holds instead (examples/07_teleop.py).
+        # holds instead (examples/06_teleop.py).
         tracker=arm.tracker(q0, allow_jump=True),
         active=active,
         ghosts=ghosts,
