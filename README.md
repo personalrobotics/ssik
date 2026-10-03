@@ -616,7 +616,7 @@ A 7R arm holding a 6-DOF pose is not at a point in configuration space, it is on
 
 <img src="docs/assets/self_motion.gif" alt="A Franka Panda sweeping one branch of its self-motion manifold: the elbow travels from folded to fully extended while the gripper and its frame stay exactly in place." height="256">
 
-One Panda, one target, one branch. The shoulder and elbow travel several radians while the hand does not move: every frame is an exact IK solution for the same pose, not an interpolation between two of them. Reproduce it with `python examples/06_self_motion.py` (no display needed) or `python examples/05_viser_interactive_ik.py --self-motion`.
+One Panda, one target, one branch. The shoulder and elbow travel several radians while the hand does not move: every frame is an exact IK solution for the same pose, not an interpolation between two of them. `python examples/04_redundant_arms.py` checks that claim on a Panda branch with no display; `python examples/05_viser_interactive_ik.py --self-motion` animates it.
 
 ```python
 arm = ssik.Manipulator.from_prebuilt("panda")   # charts live on Manipulator
