@@ -35,6 +35,7 @@ import pytest
 from hypothesis import settings
 
 from ssik.solvers.ikgeo import _raghavan_roth as _rr_mod
+from tests import _sweeps
 
 # CI determinism (#479). Unseeded Hypothesis boundary-hunting occasionally lands
 # in a measure-zero near-cancellation shell (#466: openarm exact-SRS at a
@@ -65,6 +66,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--shard", type=_parse_shard, metavar="K/N", help="run only shard K of N (1-based)"
     )
     parser.addoption("--shard-record", metavar="PATH", help="write the shard's selection here")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    try:
+        _sweeps.sampled()
+    except ValueError as e:
+        raise pytest.UsageError(str(e)) from None
+
+
+def pytest_report_header(config: pytest.Config) -> str:
+    sampled = _sweeps.sampled()
+    full = [s for s in _sweeps.SWEEPS if s not in sampled]
+    return f"sweeps: PR sample {sorted(sampled) or 'none'}, full {full or 'none'}"
 
 
 def _parse_shard(spec: str) -> tuple[int, int]:

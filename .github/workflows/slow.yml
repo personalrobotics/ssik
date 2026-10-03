@@ -10,7 +10,9 @@ name: Slow suite
 #
 # Two jobs. `slow`: pytest takes 12-14 min on a 4-vCPU runner, and ~11-13 min
 # of that is the Rizon 4 composer test alone, which bounds the wall-clock
-# however the suite is sharded. `native_parity`: the full tier of the
+# however the suite is sharded. It also runs the exhaustive sweeps
+# (`-m sweep`, tests/_sweeps.py) in full, which most PRs run only as a fixed
+# sample; they fit beside the Rizon 4 test on the other workers. `native_parity`: the full tier of the
 # native-parity gate (tests/test_native_parity.py, #626), on its own runner so
 # it adds no wall-clock to `slow`.
 
@@ -76,10 +78,13 @@ jobs:
         # pinned Eigen itself (#606); no system Eigen.
         run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
 
-      - name: pytest -m slow (parallel)
-        # The native-parity gate runs in its own job below.
+      - name: pytest -m "slow or sweep" (parallel)
+        # The native-parity gate runs in its own job below. SSIK_PR_SWEEPS is
+        # empty, so every sweep runs in full.
+        env:
+          SSIK_PR_SWEEPS: ""
         run: >-
-          uv run pytest -q -n 4 --dist worksteal -m slow --durations=25
+          uv run pytest -q -n 4 --dist worksteal -m "slow or sweep" --durations=25
           --ignore=tests/test_native_parity.py
 
   native_parity:

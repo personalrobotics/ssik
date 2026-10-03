@@ -285,6 +285,12 @@ warn_unused_ignores = false
 module = "sympy.*"
 ignore_missing_imports = true
 
+# mpmath (sympy's numeric backend) ships no type stubs; its version keys the
+# on-disk derivation cache in the same module.
+[[tool.mypy.overrides]]
+module = "mpmath.*"
+ignore_missing_imports = true
+
 # urchin (URDF parser) ships no type stubs.
 [[tool.mypy.overrides]]
 module = "urchin.*"
@@ -368,4 +374,5 @@ addopts = ["-ra", "--strict-markers", "-m", "not slow"]
 markers = [
     "slow: symbolic IK generation tests that run on the order of seconds to minutes; opt in with `-m slow`",
     "perf: wall-clock performance gates; run serially (CI runs them in a separate non-parallel step) since `-n auto` worker contention inflates timing (#348)",
+    "sweep: an exhaustive seeded sweep that most pull requests run as a fixed sample (tests/_sweeps.py); slow.yml runs it in full with `-m sweep`",
 ]

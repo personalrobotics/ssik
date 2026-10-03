@@ -19,6 +19,7 @@ import ssik._native
 from ssik._urdf import load_urdf_kinbody_normalized
 from ssik.chart import charts
 from ssik.kinematics.poe_fk import poe_forward_kinematics
+from tests import _sweeps
 from tests._cpp_backend import _load_ext, cpp_available
 
 pytestmark = pytest.mark.skipif(not cpp_available(), reason="ssik._ssik_native not built")
@@ -75,12 +76,19 @@ def _raw_tangents(chart, pad: float = 0.05, n: int = 120):
     return np.ascontiguousarray(chart._deriv(ts), dtype=np.float64)
 
 
+# Poses per arm: the full sweep, and the PR sample (tests/_sweeps.py), the first
+# _PR_POSES poses of the same stream.
+_POSES = 25
+_PR_POSES = 2
+
+
+@pytest.mark.sweep
 @pytest.mark.parametrize("name", list(_ARMS))
 def test_native_matches_python_reference(name: str) -> None:
     kb = _kb(name)
     solver = _ARMS[name][2]
     rng = np.random.default_rng(31)
-    for _ in range(25):
+    for _ in range(_sweeps.cases("chart_native", full=_POSES, pr=_PR_POSES)):
         q = _random_q(kb, rng)
         T = poe_forward_kinematics(kb, q)
         nat = charts(kb, T, solver_name=solver, native=True)

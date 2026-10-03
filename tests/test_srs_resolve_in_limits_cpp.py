@@ -28,6 +28,7 @@ from ssik.solvers.seven_r.srs import (  # type: ignore[attr-defined]
     _arm_constants,
     _classify_srs_7r_geometric,
 )
+from tests import _sweeps
 from tests._cpp_backend import _load_ext, cpp_available
 
 pytestmark = pytest.mark.skipif(not cpp_available(), reason="ssik._ssik_native not built")
@@ -78,6 +79,14 @@ def _match(py: list[np.ndarray], cpp: list[np.ndarray], tol: float = 1e-9) -> bo
     return all(np.allclose(p, c, atol=tol) for p, c in zip(py, cpp, strict=True))
 
 
+# Poses per arm: the full sweep, and the PR sample (tests/_sweeps.py), the first
+# _PR_POSES poses of the same stream, which still has to clear the same >= 75%
+# nonempty floor.
+_POSES = 200
+_PR_POSES = 12
+
+
+@pytest.mark.sweep
 @pytest.mark.parametrize(
     ("name", "base", "ee", "canonical"),
     _SRS_ARMS,
@@ -95,8 +104,9 @@ def test_cpp_resolve_matches_python(name: str, base: str, ee: str, canonical: bo
     fk_atol = float(_POL.subproblem_numerical)
 
     rng = np.random.default_rng(0)
+    n = _sweeps.cases("srs_resolve_cpp", full=_POSES, pr=_PR_POSES)
     mismatch = nonempty = 0
-    for _ in range(200):
+    for _ in range(n):
         q = np.array([rng.uniform(a, b) for a, b in lims])
         T = poe_forward_kinematics(kb, q)
 
@@ -125,6 +135,6 @@ def test_cpp_resolve_matches_python(name: str, base: str, ee: str, canonical: bo
             mismatch += 1
         nonempty += len(py) > 0
 
-    assert mismatch == 0, f"{name}: {mismatch}/200 resolve_in_limits mismatches vs Python"
+    assert mismatch == 0, f"{name}: {mismatch}/{n} resolve_in_limits mismatches vs Python"
     # Sanity: the fuzz actually drove solutions through the resolver.
-    assert nonempty > 150, f"{name}: only {nonempty}/200 poses produced a solution"
+    assert nonempty > 3 * n // 4, f"{name}: only {nonempty}/{n} poses produced a solution"

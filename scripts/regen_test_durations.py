@@ -8,9 +8,11 @@ least ``_MIN_S``. ``--shard K/N`` (tests/conftest.py) balances the shards by
 these numbers; a test missing from the file counts as ``_MIN_S``.
 
 The file only balances CI shards: a stale one makes them uneven, never
-incomplete. Regenerate it when the suite's heavy tests change a lot:
+incomplete. Regenerate it when the suite's heavy tests change a lot, with the
+sweeps at their PR sample (tests/_sweeps.py; most PRs run that tier) and a warm
+derivation cache (run the suite once first):
 
-  uv run python scripts/regen_test_durations.py -n 4
+  SSIK_PR_SWEEPS=all uv run python scripts/regen_test_durations.py -n 4
 """
 
 from __future__ import annotations

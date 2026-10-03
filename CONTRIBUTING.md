@@ -77,15 +77,28 @@ cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release \
   -DSSIK_EIGEN_VERSION="$(python3 scripts/fetch_eigen.py --version)"
 ```
 
+**Symbolic derivations are cached on disk.** The general-6R solver's
+Raghavan-Roth derivation costs ~10-45 s of sympy per arm and linearity choice.
+The first process to run one stores it in `~/.cache/ssik/rr-derivations`
+(under `$XDG_CACHE_HOME` when set; `SSIK_DERIVATION_CACHE` moves it and
+`SSIK_DERIVATION_CACHE=off` disables it), and every later process, including
+each pytest-xdist worker, reloads it in under a second. An entry is keyed on the
+exact DH, the linearity choice, the source of `_raghavan_roth.py` and the sympy
+and mpmath versions, so editing the derivation or upgrading sympy can only miss.
+Deleting the directory is always safe. CI's artifact drift guard runs with the
+cache off.
+
 ## Pre-push gate
 
-CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes skip it) takes ~15-25 min. It runs:
+CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes skip it) takes ~15-25 min. A PR that changes only `examples/` (plus docs, `*.md`, `LICENSE` or `.gitignore`) runs the examples lane instead: lint, `regen_docs.py --check`, `tests/test_teleop.py` and the native wheel jobs, which run every example. Every other change, and every push to `main`, runs the full suite:
 
 - **Linux, Python 3.10-3.14**: ruff, format, mypy, `regen_docs.py --check`, and the fast pytest suite with the native extension built, split into two shards per version plus a check that the shards together ran every test; then the serial perf gates.
 - **C++**: the native artifact drift guard and the conformance build, ctest and external-consumer smoke; plus the Python suite reused against the native backend.
 - **Wheels**: a native wheel build and smoke on Linux and macOS.
 
-Slow tests (`-m slow`) don't run on PRs; `.github/workflows/slow.yml` runs them nightly on Linux, and on demand (`gh workflow run slow.yml --ref <branch>`). The native-parity gate (`tests/test_native_parity.py`) runs a fast tier on PRs and its full tier nightly. Its known gaps are strict xfails, one per (arm, gap class): a PR that fixes a class must delete that class's arms from the gate's `KNOWN_*` tables. Boundary poses resolve differently on Linux and macOS, so the tables record the platforms each cell fails on. After changing a solver, refresh both platforms. On macOS, run `scripts/regen_native_parity.py`. For Linux, run `gh workflow run slow.yml --ref <branch> -f regen=true`, then commit the files from its `native-parity-data` artifact. The script prints the merged tables to paste. Run the same checks locally before you push, so CI is a safety net rather than your test loop:
+**Exhaustive sweeps run a fixed sample on most PRs.** A few tests (marked `sweep`) check hundreds or thousands of seeded cases: the C++ `feasible_arcs` fuzz, the C++ SRS `resolve_in_limits` parity, the spherical-shoulder and swivel-limits `test_resolves_every_in_limits_pose`, and the native chart parity. `tests/_sweeps.py` lists each sweep's covered code. A PR that changes none of it runs that sweep's PR sample, the first cases of the same seeded stream, so every run checks the same cases. A PR that changes any of it runs the sweep in full, and so do pushes to `main`, `workflow_dispatch` runs, the nightly slow workflow and local runs. `SSIK_PR_SWEEPS` is the switch: a comma-separated list of sweeps to sample, or `all`. Unset or empty means every sweep runs in full. CI's `Classify changed files` job sets it with `scripts/classify_changes.py`. To run the PR tier locally, use `SSIK_PR_SWEEPS=all uv run pytest`. To run only the full sweeps, use `uv run pytest -m sweep`. When you add a sweep, register it in `tests/_sweeps.py` with the paths it covers.
+
+Slow tests (`-m slow`) don't run on PRs; `.github/workflows/slow.yml` runs them nightly on Linux, together with the full sweeps (`-m "slow or sweep"`), and on demand (`gh workflow run slow.yml --ref <branch>`). The native-parity gate (`tests/test_native_parity.py`) runs a fast tier on PRs and its full tier nightly. Its known gaps are strict xfails, one per (arm, gap class): a PR that fixes a class must delete that class's arms from the gate's `KNOWN_*` tables. Boundary poses resolve differently on Linux and macOS, so the tables record the platforms each cell fails on. After changing a solver, refresh both platforms. On macOS, run `scripts/regen_native_parity.py`. For Linux, run `gh workflow run slow.yml --ref <branch> -f regen=true`, then commit the files from its `native-parity-data` artifact. The script prints the merged tables to paste. Run the same checks locally before you push, so CI is a safety net rather than your test loop:
 
 ```bash
 scripts/check.sh                        # ruff + format + mypy + pytest (~5 min)

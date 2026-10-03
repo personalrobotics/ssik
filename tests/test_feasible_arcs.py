@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from ssik.solvers.seven_r._feasible_param import PARAM_GRID, feasible_arcs, feasible_arcs_bounded
+from tests import _sweeps
 from tests._cpp_backend import _load_ext, cpp_available
 
 pytestmark = pytest.mark.skipif(not cpp_available(), reason="ssik._ssik_native not built")
@@ -26,8 +27,11 @@ _N = 3000
 # The fuzz is split into chunks so xdist can run them on different workers: as
 # one test it was ~half the parallel suite's wall-clock on a single worker. Every
 # chunk replays the same RNG stream and checks only its own slice, so together
-# they check exactly the original _N cases.
+# they check exactly the original _N cases. The PR sample checks the first
+# _PR_PER_CHUNK cases of each chunk (tests/_sweeps.py): 20 per chunk, 120 in
+# all, still draws dozens of multi-arc and empty cases, at ~2 s a chunk.
 _CHUNKS = 6
+_PR_PER_CHUNK = 20
 
 
 def _q_scalar(coeffs: np.ndarray):  # type: ignore[no-untyped-def]
@@ -54,14 +58,17 @@ def _match(a: list[Any], b: list[Any], tol: float = 1e-6) -> bool:
     )
 
 
+@pytest.mark.sweep
 @pytest.mark.parametrize("chunk", range(_CHUNKS))
 def test_feasible_arcs_matches_oracle(chunk: int) -> None:
     ext = _load_ext()
     rng = np.random.default_rng(0)
-    mine = range(chunk * _N // _CHUNKS, (chunk + 1) * _N // _CHUNKS)
+    start = chunk * _N // _CHUNKS
+    per_chunk = _sweeps.cases("feasible_arcs", full=_N // _CHUNKS, pr=_PR_PER_CHUNK)
+    mine = range(start, start + per_chunk)
     periodic_mismatch = bounded_mismatch = 0
     multi = empty = 0
-    for case in range(_N):
+    for case in range(mine.stop):
         coeffs = rng.uniform(-1.5, 1.5, (_K, 5))
         coeffs[:, 0] = rng.uniform(-np.pi, np.pi, _K)
         lo = rng.uniform(-np.pi, np.pi, _K)
@@ -97,7 +104,8 @@ def test_feasible_arcs_matches_oracle(chunk: int) -> None:
     assert periodic_mismatch == 0, f"{periodic_mismatch}/{n} periodic feasible_arcs mismatches"
     assert bounded_mismatch == 0, f"{bounded_mismatch}/{n} bounded feasible_arcs mismatches"
     # Sanity: the fuzz actually exercised the interesting branches. Over all
-    # chunks this is at least the unsplit test's > 100 of each.
-    floor = -(-100 // _CHUNKS)
+    # full chunks this is at least the unsplit test's > 100 of each; a sample
+    # keeps the same rate.
+    floor = -(-100 * n // _N)
     assert multi > floor, f"only {multi} multi-arc cases -- fuzz not exercising arc splits"
     assert empty > floor, f"only {empty} empty-arc cases -- fuzz not exercising infeasibility"
