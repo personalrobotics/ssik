@@ -54,11 +54,11 @@ pip install 'ssik[demo]'
 python examples/05_viser_interactive_ik.py
 ```
 
-Opens a browser viewer: drag a 3D handle and watch every analytical IK solution render as a live arm in real time. Cycle through the full prebuilt roster, including the non-Pieper 6R and 7R arms EAIK refuses.
+Opens a browser viewer: drag a 3D handle and watch every analytical IK solution render as a live arm in real time. Cycle through 19 of the <!-- AUTOGEN:arm_count -->72<!-- /AUTOGEN --> prebuilt arms, including the non-Pieper 6R and 7R arms EAIK refuses. Arms that `robot_descriptions` packages are drawn with their meshes, fetched on first use; the others are drawn as a joint-and-link skeleton.
 
 #### Eight arms, every analytical branch
 
-Each loop below is one arm's interactive demo running for ~3 seconds: the live red arm tracks the marker; the faded reds are the other analytical IK branches at the same instant. Captured from [`examples/05_viser_interactive_ik.py`](examples/05_viser_interactive_ik.py).
+Each loop below is one arm's interactive demo running for ~3 seconds: one arm tracks the marker, and the other analytical IK branches at the same instant are drawn in the same red, since each is an equally valid solution. Captured from [`examples/05_viser_interactive_ik.py`](examples/05_viser_interactive_ik.py) before ssik 7.0.
 
 **UR5**: three-parallel 6R (Pieper). EAIK supports this class.
 

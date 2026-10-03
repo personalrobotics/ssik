@@ -2532,7 +2532,9 @@ bench = [
 demo = [
     { name = "imageio" },
     { name = "robot-descriptions" },
+    { name = "urchin" },
     { name = "viser" },
+    { name = "xacrodoc" },
     { name = "yourdfpy" },
 ]
 mjcf = [
@@ -2578,9 +2580,11 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.13" },
     { name = "sympy", specifier = ">=1.10" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.1.0" },
+    { name = "urchin", marker = "extra == 'demo'", specifier = ">=0.0.27" },
     { name = "urchin", marker = "extra == 'urdf'", specifier = ">=0.0.27" },
     { name = "urchin", marker = "extra == 'xacro'", specifier = ">=0.0.27" },
     { name = "viser", marker = "extra == 'demo'", specifier = ">=1.0" },
+    { name = "xacrodoc", marker = "extra == 'demo'", specifier = ">=2.0.1" },
     { name = "xacrodoc", marker = "extra == 'xacro'", specifier = ">=2.0.1" },
     { name = "yourdfpy", marker = "extra == 'demo'", specifier = ">=0.0.60" },
 ]
