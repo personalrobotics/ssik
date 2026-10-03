@@ -15,6 +15,8 @@ Auto-generated from docstrings. The public surface is small by design — most u
         - self_motion
         - solve_path
         - tracker
+        - body_twists
+        - free_tail
         - dof
         - solver_name
         - kinbody
@@ -224,6 +226,14 @@ Returned alongside the solution list when `solve(T, explain=True)`.
 ## Tuning: `TolerancePolicy`
 
 ::: ssik.TolerancePolicy
+    options:
+      show_root_heading: false
+
+## Partial targets: `Manipulator.free_tail`
+
+A target that fixes less than a pose (a tool axis on a line, a tool plane on a plane, a tool point on a point) is `T0 @ exp(span(G))`, with `G` the body-frame twists that leave the primitive in place. `Manipulator.body_twists()` returns the joint twists `B` with `fk(q) = fk(0) @ se3_exp(B[0] q[0]) @ ... @ se3_exp(B[-1] q[-1])`, and `Manipulator.free_tail(G)` returns how many of the last joints have their twist in `span(G)`. Those joints drop out of the target: any values inside their limits keep it satisfied. A spin about the tool axis is the last joint turning, a plane normal to the last axis frees it wherever the plane sits, and a point at a spherical wrist's centre frees all three wrist joints. Twists are in `(v, w)` order throughout.
+
+::: ssik.kinematics.twists
     options:
       show_root_heading: false
 
