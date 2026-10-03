@@ -654,6 +654,8 @@ Available for `seven_r.spherical_shoulder` (Panda, FR3), `seven_r.srs` (iiwa and
 
 On the native backend a family builds in roughly 20 µs and `q(t)` costs a few µs, so this fits inside a 1 kHz loop. See [`docs/api.md`](docs/api.md) for the full surface.
 
+In a streaming loop, `Tracker.set_redundancy(t)` slides the arm along its chart with the hand held at the target, and `Tracker.redundancy` gives the in-limits arc it can slide along. `examples/05_viser_interactive_ik.py` shows it as an elbow slider on the Panda, FR3 and iiwa; `--self-motion` sweeps that slider.
+
 ### Diagnosing an empty result: `explain=True`
 
 If `solve()` returns `[]`, you can attribute the failure with `explain=True` instead of guessing:
