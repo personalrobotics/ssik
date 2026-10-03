@@ -1,4 +1,4 @@
-"""``ssik`` command-line interface.
+"""``ssik`` command-line interface (the ``ssik`` console script).
 
 Three subcommands:
 
