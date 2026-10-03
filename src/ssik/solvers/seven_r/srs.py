@@ -1,4 +1,4 @@
-"""Native 7R analytical IK for SRS-class arms (Singh-Kreutz 1989).
+"""Native analytical 7R IK for SRS-class arms (Singh-Kreutz 1989).
 
 SRS = Spherical-Roll-Spherical: shoulder axes (joints 0, 1, 2) meet at
 one point ``S``, joint 3 is the elbow, wrist axes (joints 4, 5, 6) meet
