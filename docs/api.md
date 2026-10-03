@@ -401,27 +401,50 @@ argument's name in the message.
 
 **Clutch.** Relative teleoperation: the arm follows the device's motion since
 the grip was pressed, not its absolute pose. `engage(T_device, T_robot)`
-stores the device anchor `A_d` and the arm anchor `A_r`, both in one frame
-(normally the arm's base frame, after `apply_calibration`). While engaged,
+stores the device anchor `A_d = [R_ad, p_ad]` and the arm anchor
+`A_r = [R_ar, p_ar]`, both in one frame: the arm's base frame, after
+`apply_calibration`. While engaged, a device pose `D = [R_d, p_d]` gives a
+target by one of two conventions, chosen by `Clutch(scale=1.0, frame=...)`.
+
+`frame="world"` (default): the device's motion, measured in the base frame,
+is applied in the base frame.
+
+```
+p = p_ar + scale * (p_d - p_ad)
+R = (R_d @ R_ad^T) @ R_ar
+```
+
+The rotation since engaging, `R_d @ R_ad^T`, turns the tool about its own
+point, with the axis taken in the base frame. A pure device translation `Δ`
+moves the tool by `scale * Δ` in the base frame, whatever the device or the
+tool is pointing at. Use it when the operator watches the arm and moves a
+hand-held device (a VR controller, a mocap marker, a gizmo): moving the hand
+toward the arm's +x moves the tool toward +x.
+
+`frame="tool"`: the device's motion, measured in its own frame at engagement,
+is applied in the tool's frame at engagement.
 
 ```
 target(D) = A_r @ S(A_d^-1 @ D)
 ```
 
-`A_d^-1 @ D` is the device's displacement since engaging, expressed in the
-device's frame at that moment; `S` multiplies its translation by `scale` and
-leaves its rotation alone; the arm makes that displacement in its own frame
-at the anchor. Consequences:
+`A_d^-1 @ D` is the device's displacement in the device's frame at engagement;
+`S` multiplies its translation by `scale`. With `scale = 1` this is
+`(A_r @ A_d^-1) @ D`, a fixed rigid transform of the device's pose, so relative
+motion is reproduced exactly and the device's axes act as the tool's axes:
+pushing a SpaceMouse cap forward moves the tool along its own approach axis.
+Use it for jogging along the tool's axes.
+
+In both conventions:
 
 - `target(A_d) == A_r`: engaging never moves the target.
-- With `scale = 1`, `target(D) = (A_r @ A_d^-1) @ D`, a fixed rigid transform
-  of the device's pose: relative motion is reproduced exactly, and the
-  device's axes act as the tool's axes as they were at engagement. A hand
-  moving along its own x axis moves the tool along the tool's x axis.
-- Scaling equals `scale_about(D, scale, A_d)` followed by the unscaled clutch.
-- `release()` makes `target` return `None` (the caller holds); the next
+- Rotation is never scaled, and scaling equals `scale_about(D, scale, A_d)`
+  followed by the unscaled clutch.
+- `release()` makes `target` return `None` (the caller holds). The next
   `engage` re-anchors both frames, so the operator can reposition the device
-  without moving the arm.
+  without moving the arm. Engaging again at the current device pose and
+  target continues exactly where the clutch was.
+- The two agree when the device and arm anchors have the same orientation.
 
 Engage with the arm's actual pose, `flange_to_tcp(arm.fk(tracker.q), tool)`,
 so a rate-limited arm that is still catching up is anchored where it is.

@@ -31,7 +31,7 @@ from __future__ import annotations
 import math
 import numbers
 from collections.abc import Iterator
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -159,42 +159,64 @@ class Clutch:
     ::
 
         clutch = Clutch(scale=0.5)
-        clutch.engage(T_device, tracker_target)     # grip pressed
+        clutch.engage(T_device, T_robot)            # grip pressed
         T = clutch.target(T_device)                 # each frame while held
         clutch.release()                            # grip released
 
-    On :meth:`engage` the clutch stores the device pose ``A_d`` and the arm
-    pose ``A_r`` (both in one frame, normally the arm's base frame after
-    :func:`apply_calibration`). While engaged, for a device pose ``D``::
+    On :meth:`engage` the clutch stores the device pose ``A_d = [R_ad, p_ad]``
+    and the arm pose ``A_r = [R_ar, p_ar]``, both in one frame: the arm's base
+    frame, after :func:`apply_calibration`. While engaged, for a device pose
+    ``D = [R_d, p_d]``, ``frame`` picks how the device's motion since engaging
+    is applied to the arm:
+
+    ``frame="world"`` (default)::
+
+        p = p_ar + scale * (p_d - p_ad)
+        R = (R_d @ R_ad^T) @ R_ar
+
+    The device's translation and rotation since engaging, both expressed in
+    the base frame, are applied to the arm in the base frame, the rotation
+    about the arm's tool point. Moving the hand 10 cm along the base x axis
+    moves the tool ``scale * 10`` cm along the base x axis, whatever either is
+    pointing at. This is what an operator looking at the arm expects.
+
+    ``frame="tool"``::
 
         target(D) = A_r @ S(A_d^-1 @ D)
 
-    ``A_d^-1 @ D`` is the device's displacement since engaging, expressed in
-    the device's own frame at that moment; ``S`` multiplies its translation by
-    ``scale`` and leaves its rotation alone. The arm makes the same
-    displacement in its own frame at the anchor. With ``scale = 1`` this is
-    ``(A_r @ A_d^-1) @ D``, a fixed rigid transform of the device's pose, so
-    the device's path is reproduced rigidly from the anchor: relative motions
-    are preserved exactly, and the device's axes act as the tool's axes as they
-    were at engagement. Releasing and engaging again re-anchors both frames, so
-    the operator can reposition the device without moving the arm (indexing),
-    and the target never jumps at engagement: ``target(A_d) == A_r``.
+    ``A_d^-1 @ D`` is the device's displacement in the device's own frame at
+    engagement; ``S`` multiplies its translation by ``scale``; the arm makes
+    that displacement in its tool frame at the anchor. With ``scale = 1`` this
+    is the fixed rigid transform ``(A_r @ A_d^-1) @ D`` of the device's pose:
+    the device's axes act as the tool's axes, which suits jogging along the
+    tool's own axes (a SpaceMouse held like the tool).
 
-    Scaling here equals :func:`scale_about` about the device anchor followed by
-    the unscaled clutch.
+    In both modes the target does not jump at engagement
+    (``target(A_d) == A_r``), rotation is never scaled, and releasing and
+    engaging again re-anchors both frames, so the operator can reposition the
+    device without moving the arm (indexing). The two modes agree when the
+    device and arm anchors have the same orientation.
     """
 
-    __slots__ = ("_anchor_device_inv", "_anchor_robot", "_scale")
+    __slots__ = ("_anchor_device", "_anchor_robot", "_frame", "_scale")
 
-    def __init__(self, *, scale: float = 1.0) -> None:
+    def __init__(self, *, scale: float = 1.0, frame: Literal["world", "tool"] = "world") -> None:
+        if frame not in ("world", "tool"):
+            raise ValueError(f"frame must be 'world' or 'tool', got {frame!r}")
         self._scale = _scale(scale)
-        self._anchor_device_inv: NDArray[np.float64] | None = None
+        self._frame = frame
+        self._anchor_device: NDArray[np.float64] | None = None
         self._anchor_robot: NDArray[np.float64] | None = None
 
     @property
     def scale(self) -> float:
         """The translation scale applied to the device's displacement."""
         return self._scale
+
+    @property
+    def frame(self) -> Literal["world", "tool"]:
+        """``"world"`` or ``"tool"``: where the device's motion is applied."""
+        return self._frame
 
     @property
     def engaged(self) -> bool:
@@ -206,21 +228,27 @@ class Clutch:
         now. Engaging while engaged re-anchors."""
         A_d = _pose(T_device, "T_device")
         A_r = _pose(T_robot, "T_robot")
-        self._anchor_device_inv = _inv(A_d)
+        self._anchor_device = A_d.copy()
         self._anchor_robot = A_r.copy()
 
     def release(self) -> None:
         """Disengage. :meth:`target` returns ``None`` until the next engage."""
-        self._anchor_device_inv = None
+        self._anchor_device = None
         self._anchor_robot = None
 
     def target(self, T_device: ArrayLike) -> NDArray[np.float64] | None:
         """The arm target for device pose ``T_device``, or ``None`` while
         released (the arm should hold)."""
         D = _pose(T_device, "T_device")
-        if self._anchor_robot is None or self._anchor_device_inv is None:
+        A_d, A_r = self._anchor_device, self._anchor_robot
+        if A_r is None or A_d is None:
             return None
-        rel = self._anchor_device_inv @ D
-        rel[:3, 3] *= self._scale
-        out: NDArray[np.float64] = self._anchor_robot @ rel
+        if self._frame == "tool":
+            rel = _inv(A_d) @ D
+            rel[:3, 3] *= self._scale
+            out: NDArray[np.float64] = A_r @ rel
+            return out
+        out = np.eye(4)
+        out[:3, :3] = (D[:3, :3] @ A_d[:3, :3].T) @ A_r[:3, :3]
+        out[:3, 3] = A_r[:3, 3] + self._scale * (D[:3, 3] - A_d[:3, 3])
         return out

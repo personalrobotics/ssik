@@ -12,6 +12,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -85,31 +86,81 @@ def _engaged(clutch: Clutch, D: np.ndarray) -> np.ndarray:
     return T
 
 
+@pytest.mark.parametrize("frame", ["world", "tool"])
 @pytest.mark.parametrize("seed", range(5))
-def test_clutch(seed: int) -> None:
+def test_clutch_common_invariants(seed: int, frame: Literal["world", "tool"]) -> None:
     A_d, A_r, D1, D2, B_d = _poses(5, seed)
-    clutch = Clutch()
+    clutch = Clutch(frame=frame)
     assert not clutch.engaged
     assert clutch.target(D1) is None
     clutch.engage(A_d, A_r)
-    # No jump at engagement, and the device's motion is reproduced rigidly.
+    # No jump at engagement.
     _close(_engaged(clutch, A_d), A_r)
-    _close(invert(_engaged(clutch, D1)) @ _engaged(clutch, D2), invert(D1) @ D2)
-    # Released, it commands nothing; engaged again at a moved device and the
-    # arm's current pose, it continues from there without a jump (indexing).
-    T_now = _engaged(clutch, D1)
+    # Composition: releasing and engaging again where the device and arm are
+    # now continues exactly as if the clutch had stayed engaged.
+    T1 = _engaged(clutch, D1)
+    T2 = _engaged(clutch, D2)
     clutch.release()
     assert clutch.target(D2) is None
-    clutch.engage(B_d, T_now)
-    _close(_engaged(clutch, B_d), T_now)
+    clutch.engage(D1, T1)
+    _close(_engaged(clutch, D2), T2)
+    # Indexing: engaged at a moved device, it continues from the arm's pose.
+    clutch.engage(B_d, T1)
+    _close(_engaged(clutch, B_d), T1)
 
-    # Scaling is scale_about at the device anchor, then the unscaled clutch.
-    scaled = Clutch(scale=0.3)
+    # Scale acts on translation only, and equals scale_about at the device
+    # anchor followed by the unscaled clutch.
+    scaled = Clutch(scale=0.3, frame=frame)
     scaled.engage(A_d, A_r)
-    plain = Clutch()
+    plain = Clutch(frame=frame)
     plain.engage(A_d, A_r)
+    _close(_engaged(scaled, D1)[:3, :3], _engaged(plain, D1)[:3, :3])
     _close(_engaged(scaled, D1), _engaged(plain, scale_about(D1, 0.3, A_d)))
     _close(_engaged(scaled, A_d), A_r)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_clutch_world_frame(seed: int) -> None:
+    A_d, A_r, D1, D2, _ = _poses(5, seed)
+    clutch = Clutch(scale=0.4)  # world is the default
+    assert clutch.frame == "world"
+    clutch.engage(A_d, A_r)
+    # A pure device translation moves the arm by scale times it, along the
+    # same base-frame direction, whatever the device and tool orientations.
+    delta = np.array([0.1, -0.2, 0.05])
+    D = A_d.copy()
+    D[:3, 3] += delta
+    T = _engaged(clutch, D)
+    _close(T[:3, 3] - A_r[:3, 3], 0.4 * delta)
+    _close(T[:3, :3], A_r[:3, :3])
+    # Rigidity in the base frame: between two device poses the arm turns by
+    # the device's base-frame rotation and moves by scale times its
+    # translation.
+    T1, T2 = _engaged(clutch, D1), _engaged(clutch, D2)
+    _close(T2[:3, :3] @ T1[:3, :3].T, D2[:3, :3] @ D1[:3, :3].T)
+    _close(T2[:3, 3] - T1[:3, 3], 0.4 * (D2[:3, 3] - D1[:3, 3]))
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_clutch_tool_frame(seed: int) -> None:
+    A_d, A_r, D1, D2, _ = _poses(5, seed)
+    clutch = Clutch(frame="tool")
+    clutch.engage(A_d, A_r)
+    # With scale 1 the device's path is reproduced rigidly: relative motion
+    # in the moving frame is preserved exactly.
+    _close(invert(_engaged(clutch, D1)) @ _engaged(clutch, D2), invert(D1) @ D2)
+    # A device translation along its own axes moves the tool along the tool's
+    # axes as they were at engagement.
+    step = np.eye(4)
+    step[:3, 3] = [0.1, -0.2, 0.05]
+    _close(_engaged(clutch, A_d @ step), A_r @ step)
+    # The two modes agree when the anchors have the same orientation.
+    B_r = A_r.copy()
+    B_r[:3, :3] = A_d[:3, :3]
+    world = Clutch()
+    world.engage(A_d, B_r)
+    clutch.engage(A_d, B_r)
+    _close(_engaged(world, D1), _engaged(clutch, D1))
 
 
 def test_frame_inputs_follow_the_solve_contract() -> None:
@@ -122,6 +173,8 @@ def test_frame_inputs_follow_the_solve_contract() -> None:
         Clutch().engage(T, T.astype(complex))
     with pytest.raises(ValueError, match="scale must be finite and > 0"):
         Clutch(scale=0.0)
+    with pytest.raises(ValueError, match="frame must be 'world' or 'tool'"):
+        Clutch(frame="base")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="scale must be a real number"):
         scale_about(T, True, T)
     with pytest.raises(ValueError, match="anchor must be"):

@@ -58,7 +58,9 @@ tracker = arm.tracker([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], max_joint_speed=2.0
 tool = np.eye(4)
 tool[2, 3] = 0.10  # TCP 10 cm beyond the flange: flange_T_tcp
 calibration = np.eye(4)  # base_T_world: the tracking frame in the arm's base frame
-clutch = Clutch(scale=0.5)  # 1 m of hand motion is 0.5 m of arm motion
+# Hand motion is applied in the base frame, halved: 1 m of hand is 0.5 m of tool.
+# Clutch(frame="tool") instead moves the tool along its own axes, for jogging.
+clutch = Clutch(scale=0.5)
 
 source: PoseSource = ScriptedHand()
 last = None
