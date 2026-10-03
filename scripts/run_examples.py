@@ -1,18 +1,19 @@
 """Run every example in ``examples/`` and record what each one checked.
 
 Each example asserts its own claims, prints one ``[ok] <claim>`` or
-``[FAIL] <claim>`` line per claim, and exits non-zero if any fails. This runs
-them all (in parallel, each in its own process), writes each one's output to
-``<out>/<example>.log``, and writes ``<out>/summary.json``::
+``[FAIL] <claim>`` line per claim, and exits non-zero if any fails. The viewer
+(05, in its two scripted headless modes) and the teleoperation loop (06) print
+no such lines; they pass on a clean exit, and ``tests/test_teleop.py`` checks
+their output. This runs them all (in parallel, each in its own process), writes
+each run's output to ``<out>/<run>.log``, and writes ``<out>/summary.json``::
 
     {"python": ..., "platform": ..., "ssik": {"version": ..., "file": ...},
-     "examples": [{"name": "01_quickstart.py", "args": [], "status": "passed",
-                   "returncode": 0, "seconds": 0.4,
+     "examples": [{"name": "01_quickstart", "command": ["01_quickstart.py"],
+                   "status": "passed", "returncode": 0, "seconds": 0.4,
                    "checks": [{"claim": "...", "ok": true}, ...]}, ...]}
 
-``status`` is ``passed``, ``failed`` (non-zero exit, a ``[FAIL]`` line, no
-check lines at all, or a timeout) or ``skipped`` (with a ``reason``: an
-example this tree does not have or cannot run headless). The checks and
+``status`` is ``passed`` or ``failed`` (a non-zero exit, a ``[FAIL]`` line, no
+check lines from an example that reports them, or a timeout). The checks and
 statuses are deterministic for a given ssik build; ``seconds`` and the timings
 inside the logs are not, and no check depends on them.
 
@@ -47,83 +48,58 @@ CHECK_LINE = re.compile(r"^\[(ok|FAIL)\] (.+)$")
 
 @dataclass(frozen=True)
 class Example:
-    name: str
+    name: str  # the run's name: its log is <name>.log
+    script: str
     args: tuple[str, ...] = ()
-    # Flags the example's --help must list for this headless invocation to
-    # exist on this tree; if one is missing the example is skipped, not failed.
-    requires_flags: tuple[str, ...] = ()
-    # An example that prints no [ok]/[FAIL] lines (a viewer) passes on exit 0.
+    # An example that prints no [ok]/[FAIL] lines passes on a clean exit.
     reports_checks: bool = True
 
 
+# The viewer's headless modes (05): primitives instead of meshes (no
+# downloads), no browser, an ephemeral port, no waits, exit when done.
+_VIEWER_HEADLESS = (
+    "--no-meshes",
+    "--tour-exit",
+    "--tour-delay",
+    "0",
+    "--tour-settle",
+    "0",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "0",
+)
+
 EXAMPLES = (
-    Example("01_quickstart.py"),
-    Example("02_trajectory_tracking.py"),
-    Example("03_your_own_robot.py"),
-    Example("04_redundant_arms.py"),
-    # The interactive viewer: a short scripted tour of every arm with primitive
-    # rendering, no browser and no mesh downloads, then exit.
+    Example("01_quickstart", "01_quickstart.py"),
+    Example("02_trajectory_tracking", "02_trajectory_tracking.py"),
+    Example("03_your_own_robot", "03_your_own_robot.py"),
+    Example("04_redundant_arms", "04_redundant_arms.py"),
     Example(
+        "05_viser_tour",
         "05_viser_interactive_ik.py",
-        args=(
-            "--no-meshes",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8765",
-            "--tour",
-            "--tour-exit",
-            "--tour-delay",
-            "0",
-            "--tour-per-arm",
-            "0.2",
-        ),
-        requires_flags=("--no-meshes", "--tour-exit"),
+        ("--tour", "--tour-per-arm", "0.2", *_VIEWER_HEADLESS),
         reports_checks=False,
     ),
-    Example("06_teleop.py"),
-    Example("07_cpp_from_the_wheel.py"),
+    Example(
+        "05_viser_self_motion",
+        "05_viser_interactive_ik.py",
+        ("--self-motion", "--self-motion-seconds", "0.3", *_VIEWER_HEADLESS),
+        reports_checks=False,
+    ),
+    Example("06_teleop", "06_teleop.py", reports_checks=False),
+    Example("07_cpp_from_the_wheel", "07_cpp_from_the_wheel.py"),
 )
 
 
-def _skip_reason(ex: Example, python: str) -> str | None:
-    """Why this tree cannot run ``ex`` headless, or ``None`` if it can.
-
-    Raises ``RuntimeError`` when the example's ``--help`` itself fails: that
-    is a broken example (or a missing ``demo`` extra), not a skip.
-    """
-    path = EXAMPLES_DIR / ex.name
-    if not path.is_file():
-        return f"{ex.name} is not in this tree"
-    if ex.requires_flags:
-        proc = subprocess.run(
-            [python, str(path), "--help"], capture_output=True, text=True, timeout=120
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"{ex.name} --help exited {proc.returncode}:\n{proc.stderr}")
-        missing = [f for f in ex.requires_flags if f not in proc.stdout]
-        if missing:
-            return f"no headless mode on this tree (missing {', '.join(missing)})"
-    return None
-
-
 def _run(ex: Example, python: str, out: Path, timeout: float) -> dict[str, object]:
-    record: dict[str, object] = {"name": ex.name, "args": list(ex.args)}
-    log = out / f"{Path(ex.name).stem}.log"
-    try:
-        reason = _skip_reason(ex, python)
-    except RuntimeError as exc:
-        log.write_text(str(exc))
-        record.update(status="failed", log=log.name, checks=[], seconds=0.0)
-        return record
-    if reason is not None:
-        record.update(status="skipped", reason=reason)
-        return record
+    record: dict[str, object] = {"name": ex.name, "command": [ex.script, *ex.args]}
+    log = out / f"{ex.name}.log"
     env = {**os.environ, "PYTHONHASHSEED": "0", "PYTHONUNBUFFERED": "1"}
     t0 = time.perf_counter()
     try:
         proc = subprocess.run(
-            [python, str(EXAMPLES_DIR / ex.name), *ex.args],
+            [python, str(EXAMPLES_DIR / ex.script), *ex.args],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -167,7 +143,7 @@ def main() -> int:
         "--jobs", type=int, default=os.cpu_count() or 2, help="examples to run at once"
     )
     parser.add_argument("--timeout", type=float, default=600.0, help="seconds per example")
-    parser.add_argument("--only", nargs="*", help="run only these examples (file names)")
+    parser.add_argument("--only", nargs="*", help="run only these runs (names, e.g. 01_quickstart)")
     args = parser.parse_args()
 
     examples = [ex for ex in EXAMPLES if not args.only or ex.name in args.only]
@@ -197,9 +173,8 @@ def main() -> int:
 
     width = max(len(str(r["name"])) for r in records)
     for r in records:
-        checks = r.get("checks", [])
-        detail = r.get("reason") or f"{len(checks)} checks, {r['seconds']} s"
-        print(f"{r['status']!s:7s} {r['name']!s:{width}s}  {detail}")
+        n = len(r["checks"])  # type: ignore[arg-type]
+        print(f"{r['status']!s:7s} {r['name']!s:{width}s}  {n} checks, {r['seconds']} s")
     print(f"summary: {out / 'summary.json'}")
     return 1 if any(r["status"] == "failed" for r in records) else 0
 

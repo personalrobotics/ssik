@@ -49,7 +49,7 @@ An empty list means **no certified solution was returned** — which, by itself,
 
 ### Examples
 
-Each script in [`examples/`](examples/) checks the claims it prints and exits non-zero if one fails; CI runs them against the built wheel with [`scripts/run_examples.py`](scripts/run_examples.py). `pip install 'ssik[demo]'` installs what all of them need.
+The scripts in [`examples/`](examples/) run headless except the viewer (05, which also has scripted headless modes). 01–04 and 07 check the claims they print and exit non-zero if one fails, and the test suite checks 05 and 06; CI runs them all against the built wheel with [`scripts/run_examples.py`](scripts/run_examples.py). `pip install 'ssik[demo]'` installs what all of them need.
 
 | Script | Shows |
 |---|---|
@@ -58,6 +58,7 @@ Each script in [`examples/`](examples/) checks the claims it prints and exits no
 | [`03_your_own_robot.py`](examples/03_your_own_robot.py) | `from_urdf` on a non-Pieper URDF, the one-time derivation cost, `ssik build`, limit filtering |
 | [`04_redundant_arms.py`](examples/04_redundant_arms.py) | 7-DOF self-motion (Panda); sampled solutions and seeded tracking (Gen3) |
 | [`05_viser_interactive_ik.py`](examples/05_viser_interactive_ik.py) | the interactive viewer below |
+| [`06_teleop.py`](examples/06_teleop.py) | teleoperation with `ssik.Tracker` and the `ssik.teleop` frame helpers, from a scripted device |
 | [`07_cpp_from_the_wheel.py`](examples/07_cpp_from_the_wheel.py) | the C++ headers and solver input shipped in the wheel |
 
 ### See every branch at once
