@@ -1,4 +1,4 @@
-"""Example 01: quickstart -- load an arm, solve it, and read the answer.
+"""Example 01: quickstart -- load an arm, solve it, and read the answers.
 
 A tour of the calls most users need, on the Universal Robots UR5 that ships
 with ssik:
