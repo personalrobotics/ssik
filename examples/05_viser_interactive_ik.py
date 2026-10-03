@@ -2,26 +2,37 @@
 
 This is the headline visual of ssik's "all analytical branches" story.
 A 3D transform handle in your browser drives the target end-effector
-pose; on every update ssik returns every analytical IK solution that
-reaches that pose, and the demo renders them as live arms:
+pose. An :class:`ssik.Tracker` follows it, and the demo renders every
+analytical IK solution at that pose as a live arm:
 
-* The branch closest to the previous joint state (wrap-to-π) is the
-  **solid arm** -- the teleop / demo-collection path
-  ``solve(T, max_solutions=1, q_seed=q_current)`` would have picked.
+* The **solid arm** is the tracker's configuration: the branch nearest
+  the previous one, continued through singularities and kept inside the
+  joint limits -- what a teleop loop would command.
 * Every other branch is a **ghost arm** at the same instant: same
-  target pose, different elbow / wrist / shoulder configuration.
+  target pose, different elbow / wrist / shoulder configuration
+  (``Tracker.solutions()``). "Cycle preferred branch" switches the solid
+  arm to the next one (``Tracker.next_branch()``).
 
 Toggle through arms in the GUI -- including the ones EAIK refuses (any
-non-Pieper 6R, any 7R). The badge shows what EAIK does on each, so the
-wedge is visible side-by-side with what ssik returns.
+non-Pieper 6R, any 7R). The badge shows what EAIK does on each (measured,
+from ssik's prebuilt manifest), so the wedge is visible side-by-side with
+what ssik returns.
 
 Visuals come from ``robot_descriptions`` where it has a match (full
 URDF meshes); arms without an upstream description (Puma 560, JACO 2,
-Kassow, FANUC CRX, big_yam, OpenArm, Rizon 10) fall back to a colored
-joint-spheres-plus-capsules rendering driven by ssik's own POE FK, so
-every prebuilt is visible. A few arms can opportunistically load a
-local URDF for full meshes via ``ArmSpec.local_urdf_paths`` (e.g. JACO
-2 from a sibling ``ada_ros2/ada_description`` checkout) -- see #310.
+Kassow, FANUC CRX, big_yam, OpenArm, Rizon 10), and any whose
+description fails to load, fall back to a colored joint-spheres-plus-
+capsules rendering driven by ssik's own FK, so every arm is visible.
+Descriptions that are xacro need ``pip install 'ssik[xacro]'``; without
+it those arms (FR3, xArm, Rizon 4, Gen3) render as primitives. A local
+URDF with meshes can be supplied through ``ArmSpec.local_urdf_paths``
+(see #310). ``--no-meshes`` forces primitives everywhere (offline, or
+headless).
+
+The marker lives in the rendered scene's frame; the rigid offset between
+that frame and the arm's base frame is a calibration
+(``ssik.teleop.apply_calibration``), the same step a VR or SpaceMouse
+loop takes (``examples/07_teleop.py``).
 
 Run::
 
@@ -35,17 +46,20 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import threading
 import time
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 import trimesh
 import viser
 from viser.extras import ViserUrdf
 
-from ssik._urdf import load_urdf_kinbody_normalized
+import ssik
+from ssik.teleop import apply_calibration, invert
 
 # ---------------------------------------------------------------------------
 # Arm roster.
@@ -55,36 +69,27 @@ from ssik._urdf import load_urdf_kinbody_normalized
 @dataclass(frozen=True)
 class ArmSpec:
     label: str
-    module_name: str  # ssik.prebuilt.<module_name>
-    eaik_status: str
-    expected_max_branches: int
+    module_name: str  # a name ``ssik.Manipulator.from_prebuilt`` resolves
     # URDF mesh source. ``rd_description`` triggers
     # ``robot_descriptions.loaders.yourdfpy.load_robot_description``;
     # ``None`` triggers the primitive fallback.
     rd_description: str | None = None
     # Optional local URDF (with sibling mesh files) for arms not packaged
     # in ``robot_descriptions``. ``~`` is expanded. First existing path
-    # wins; if none exist the renderer falls back to primitives. Use this
-    # for arms like JACO 2 whose meshes ship in personal-robotics-lab
-    # repos (``ada_ros2/ada_description``) but not upstream.
+    # wins; if none exist the renderer falls back to primitives.
     local_urdf_paths: tuple[str, ...] = ()
     # The link in the rendered URDF whose world transform we treat as the
-    # arm's "end effector". Required for meshed arms; ignored otherwise.
-    # Used to compute the fixed rigid offset between ssik's POE frame and
-    # the rendered URDF's world frame -- different upstream packages
-    # orient base_link differently (e.g. 180° about Z), which would
-    # otherwise put the marker far from the visible EE.
+    # arm's "end effector". Defaults to the artifact's ``EE_LINK``. Used
+    # to compute the fixed rigid offset between ssik's base frame and the
+    # rendered URDF's world frame -- different upstream packages orient
+    # base_link differently (e.g. 180° about Z), which would otherwise put
+    # the marker far from the visible EE.
     render_ee_link: str = ""
     # Subset of the URDF's actuated joints (in URDF order) that ssik's
     # q-vector drives. ``None`` means "all actuated joints", which only
-    # works when the URDF's actuated count == ``module.DOF``. When the
+    # works when the URDF's actuated count == the arm's DOF. When the
     # URDF has extra joints (Panda's 2 grippers, etc.), name the IK ones.
     ik_joint_names: tuple[str, ...] | None = None
-    # ssik fixture URDF, used to build the KinBody for FK chain-walking
-    # (needed for primitive fallback AND for the marker-to-base offset).
-    ssik_fixture: str = ""
-    ssik_base_link: str = ""
-    ssik_ee_link: str = ""
 
 
 # Tier 1 — full meshes via robot_descriptions.
@@ -94,220 +99,119 @@ ARMS: list[ArmSpec] = [
     ArmSpec(
         label="UR5 — three-parallel 6R (Pieper)",
         module_name="ur5_ik",
-        eaik_status="supported (4 µs / FK 1.5e-15 / 2-8 sols)",
-        expected_max_branches=8,
         rd_description="ur5_description",
         render_ee_link="ee_link",
-        ssik_fixture="tests/fixtures/ur5.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="ee_link",
     ),
     ArmSpec(
         label="KUKA iiwa14 — SRS 7R",
         module_name="iiwa14_ik",
-        eaik_status='refuses ("no 7R DH path")',
-        expected_max_branches=24,
         rd_description="iiwa14_description",
     ),
     ArmSpec(
         label="Unitree Z1 — three-parallel 6R (UR-class)",
         module_name="z1_ik",
-        eaik_status="supported (4 µs / FK 1.5e-15 / 4-8 sols)",
-        expected_max_branches=8,
         rd_description="z1_description",
         render_ee_link="link06",
-        ssik_fixture="tests/fixtures/z1.urdf",
-        ssik_base_link="link00",
-        ssik_ee_link="link06",
     ),
     ArmSpec(
         label="I2RT YAM — non-Pieper 6R",
         module_name="yam_ik",
-        eaik_status='refuses ("6R-Unknown Kinematic Class")',
-        expected_max_branches=8,
         rd_description="yam_description",
         render_ee_link="link_6",
-        ssik_fixture="tests/fixtures/yam.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="link_6",
     ),
     ArmSpec(
         label="Franka Panda — anthropomorphic 7R",
         module_name="franka_panda_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=32,
         rd_description="panda_description",
         render_ee_link="panda_link8",
-        ik_joint_names=(
-            "panda_joint1",
-            "panda_joint2",
-            "panda_joint3",
-            "panda_joint4",
-            "panda_joint5",
-            "panda_joint6",
-            "panda_joint7",
-        ),
+        ik_joint_names=tuple(f"panda_joint{i}" for i in range(1, 8)),
     ),
     ArmSpec(
         label="Franka Research 3 — anthropomorphic 7R",
         module_name="fr3_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=32,
         rd_description="fr3_description",
         render_ee_link="fr3_link8",
-        ik_joint_names=(
-            "fr3_joint1",
-            "fr3_joint2",
-            "fr3_joint3",
-            "fr3_joint4",
-            "fr3_joint5",
-            "fr3_joint6",
-            "fr3_joint7",
-        ),
-        ssik_fixture="tests/fixtures/fr3.urdf",
-        ssik_base_link="fr3_link0",
-        ssik_ee_link="fr3_link8",
+        ik_joint_names=tuple(f"fr3_joint{i}" for i in range(1, 8)),
     ),
     ArmSpec(
         label="UFactory xArm6 — non-Pieper 6R",
         module_name="xarm6_ik",
-        eaik_status='refuses ("6R-Unknown Kinematic Class")',
-        expected_max_branches=12,
         rd_description="xarm6_description",
         render_ee_link="link_eef",
-        ssik_fixture="tests/fixtures/xarm6.urdf",
-        ssik_base_link="link_base",
-        ssik_ee_link="link_eef",
     ),
     ArmSpec(
         label="UFactory xArm7 — non-SRS 7R",
         module_name="xarm7_ik",
-        eaik_status='refuses ("no 7R DH path")',
-        expected_max_branches=32,
         rd_description="xarm7_description",
     ),
     ArmSpec(
         label="AgileX PiPER — non-Pieper 6R",
         module_name="piper_ik",
-        eaik_status='refuses ("6R-Unknown Kinematic Class")',
-        expected_max_branches=8,
         rd_description="piper_description",
         render_ee_link="link6",
-        ik_joint_names=(
-            "joint1",
-            "joint2",
-            "joint3",
-            "joint4",
-            "joint5",
-            "joint6",
-        ),
-        ssik_fixture="tests/fixtures/piper.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="link6",
+        ik_joint_names=tuple(f"joint{i}" for i in range(1, 7)),
     ),
     ArmSpec(
         label="Flexiv Rizon 4 — non-SRS 7R",
         module_name="rizon4_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=32,
         rd_description="rizon4_description",
         render_ee_link="flange",
-        ssik_fixture="tests/fixtures/rizon4.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="flange",
     ),
     ArmSpec(
         label="Kinova Gen3 — approximate-SRS 7R",
         module_name="gen3_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=32,
         rd_description="gen3_description",
-        ssik_fixture="tests/fixtures/gen3.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="end_effector_link",
     ),
     # Tier 2: primitive fallback (no upstream description).
-    ArmSpec(
-        label="KUKA Puma 560 — Pieper 6R (spherical wrist)",
-        module_name="puma560_ik",
-        eaik_status="supported (4 µs / FK 2.7e-14 / 8 sols)",
-        expected_max_branches=8,
-        ssik_fixture="tests/fixtures/puma560.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="wrist_3_link",
-    ),
+    ArmSpec(label="KUKA Puma 560 — Pieper 6R (spherical wrist)", module_name="puma560_ik"),
     ArmSpec(
         label="Kinova JACO 2 — non-Pieper 6R",
         module_name="jaco2_ik",
-        eaik_status='refuses ("6R-Unknown Kinematic Class")',
-        expected_max_branches=12,
-        # jaco2_ik is specs-based; no URDF in ssik. For meshed rendering,
-        # opportunistically load the j2n6s200 URDF from a local checkout
-        # of personal-robotics-lab's ada_ros2 (the IK chain matches at
-        # 1.5e-7 -- rigid base-offset). Falls back to primitives if the
-        # file isn't present.
-        local_urdf_paths=("~/code/robot-code/ada_ros2/ada_description/urdf/j2n6s200_clean.urdf",),
+        # No upstream description. To render meshes, list a local copy of
+        # personal-robotics-lab's ada_description j2n6s200 URDF here (the IK
+        # chain matches it to 1.5e-7, a rigid base offset).
         render_ee_link="j2n6s200_end_effector",
         ik_joint_names=tuple(f"j2n6s200_joint_{i}" for i in range(1, 7)),
-        ssik_fixture="",
-        ssik_base_link="",
-        ssik_ee_link="",
     ),
-    ArmSpec(
-        label="Kassow KR810 — non-SRS 7R",
-        module_name="kassow_kr810_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=32,
-        ssik_fixture="tests/fixtures/kassow_kr810.urdf",
-        ssik_base_link="base",
-        ssik_ee_link="end_effector",
-    ),
-    ArmSpec(
-        label="FANUC CRX-10iA/L — non-Pieper 6R",
-        module_name="fanuc_crx10ial_ik",
-        eaik_status='refuses ("6R-Unknown Kinematic Class")',
-        expected_max_branches=12,
-        ssik_fixture="tests/fixtures/fanuc_crx10ial.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="tool0",
-    ),
-    ArmSpec(
-        label="I2RT big_yam — non-Pieper 6R",
-        module_name="big_yam_ik",
-        eaik_status='refuses ("6R-Unknown Kinematic Class")',
-        expected_max_branches=8,
-        ssik_fixture="tests/fixtures/big_yam.urdf",
-        ssik_base_link="base",
-        ssik_ee_link="gripper",
-    ),
-    ArmSpec(
-        label="Flexiv Rizon 10 — non-SRS 7R",
-        module_name="rizon10_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=32,
-        ssik_fixture="tests/fixtures/rizon10.urdf",
-        ssik_base_link="base_link",
-        ssik_ee_link="flange",
-    ),
-    ArmSpec(
-        label="Enactic OpenArm v2.0 (left) — non-SRS 7R",
-        module_name="openarm_left_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=24,
-        ssik_fixture="tests/fixtures/openarm_left.urdf",
-        ssik_base_link="openarm_left_base_link",
-        ssik_ee_link="openarm_left_ee_base_link",
-    ),
-    ArmSpec(
-        label="Enactic OpenArm v2.0 (right) — non-SRS 7R",
-        module_name="openarm_right_ik",
-        eaik_status='refuses ("Currently, only 1-6R robots are sol")',
-        expected_max_branches=24,
-        ssik_fixture="tests/fixtures/openarm_right.urdf",
-        ssik_base_link="openarm_right_base_link",
-        ssik_ee_link="openarm_right_ee_base_link",
-    ),
+    ArmSpec(label="Kassow KR810 — non-SRS 7R", module_name="kassow_kr810_ik"),
+    ArmSpec(label="FANUC CRX-10iA/L — non-Pieper 6R", module_name="fanuc_crx10ial_ik"),
+    ArmSpec(label="I2RT big_yam — non-Pieper 6R", module_name="big_yam_ik"),
+    ArmSpec(label="Flexiv Rizon 10 — non-SRS 7R", module_name="rizon10_ik"),
+    ArmSpec(label="Enactic OpenArm v2.0 (left) — non-SRS 7R", module_name="openarm_left_ik"),
+    ArmSpec(label="Enactic OpenArm v2.0 (right) — non-SRS 7R", module_name="openarm_right_ik"),
 ]
+
+# Ghost-arm slots are created when an arm loads, one renderer each. This caps
+# them on the arms whose solve() samples a self-motion into many points.
+MAX_BRANCHES = 32
+
+
+def _manifest_arms() -> dict[str, Any]:
+    """The prebuilt manifest (``ssik/prebuilt/MANIFEST.toml``, shipped in the
+    wheel): the measured EAIK comparison for each arm lives there."""
+    from importlib.resources import files
+
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    text = (files("ssik.prebuilt") / "MANIFEST.toml").read_text(encoding="utf-8")
+    arms: dict[str, Any] = tomllib.loads(text)["arms"]
+    return arms
+
+
+def eaik_status(module_name: str) -> str:
+    """What EAIK does on this arm, from the measured manifest entry."""
+    entry = _manifest_arms().get(module_name, {}).get("eaik")
+    if not entry:
+        return "not measured"
+    if entry.get("supported"):
+        return (
+            f"supported ({entry['ms_mean'] * 1000:.0f} µs / FK {entry['max_fk']:.1e} / "
+            f"{entry['sols_min']}-{entry['sols_max']} sols)"
+        )
+    return f'refuses ("{entry.get("refusal", "?")}")'
 
 
 # ---------------------------------------------------------------------------
@@ -323,13 +227,6 @@ ACTIVE_COLOR_RGBA: tuple[float, float, float, float] = (0.86, 0.18, 0.18, 1.0)
 # solution, no privileged "preferred" coloring. Shadow casting is still
 # disabled per-ghost so they don't darken each other or the active.
 GHOST_COLOR_RGBA: tuple[float, float, float, float] = ACTIVE_COLOR_RGBA
-
-
-def wrap_distance(q_a: np.ndarray, q_b: np.ndarray) -> float:
-    """Wrap-to-π joint-space distance -- the metric the closest-branch
-    teleop pattern uses."""
-    diff = (q_a - q_b + np.pi) % (2.0 * np.pi) - np.pi
-    return float(np.linalg.norm(diff))
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +355,7 @@ class MeshArmRenderer:
             q_probe[2] = -0.5
         T_ssik = ssik_fk(q_probe)
         T_render = self._render_fk(q_probe)
-        self.base_offset = T_render @ _invert(T_ssik)
+        self.base_offset = T_render @ invert(T_ssik)
 
     def _render_fk(self, q: np.ndarray) -> np.ndarray:
         cfg = {n: 0.0 for n in self._urdf_joint_names}
@@ -477,16 +374,13 @@ class MeshArmRenderer:
         self.viz.show_visual = visible
 
     def remove(self) -> None:
-        self.viz.remove()
-
-
-def _invert(T: np.ndarray) -> np.ndarray:
-    """Rigid-transform inverse: ``[R | t] -> [R^T | -R^T t]``."""
-    Ti = np.eye(4, dtype=float)
-    R = T[:3, :3]
-    Ti[:3, :3] = R.T
-    Ti[:3, 3] = -R.T @ T[:3, 3]
-    return Ti
+        # ViserUrdf.remove() removes each link frame before the meshes under
+        # it, so every mesh removal warns that its node is already gone
+        # (~30 warnings per arm, thousands over a tour). The scene is
+        # correct; only the warning is noise.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Attempted to remove already removed node")
+            self.viz.remove()
 
 
 class PrimitiveArmRenderer:
@@ -606,29 +500,13 @@ class PrimitiveArmRenderer:
 # ---------------------------------------------------------------------------
 
 
-def _load_ssik_kb(spec: ArmSpec):
-    """KinBody for the primitive fallback path. Prefer the shipped arm's own
-    geometry (specs-only arms); else load the fixture URDF."""
-    from ssik import Manipulator
-
-    with contextlib.suppress(ValueError):
-        return Manipulator.from_prebuilt(spec.module_name).kinbody
-    if spec.ssik_fixture:
-        return load_urdf_kinbody_normalized(
-            spec.ssik_fixture, base_link=spec.ssik_base_link, ee_link=spec.ssik_ee_link
-        )
-    raise RuntimeError(f"{spec.module_name}: not a prebuilt arm and no fixture URDF")
-
-
 @dataclass
 class ArmRuntime:
     spec: ArmSpec
-    module: object
+    arm: ssik.Manipulator
+    tracker: ssik.Tracker
     active: _Renderer
     ghosts: list[_Renderer]
-    dof: int
-    q_current: np.ndarray
-    last_sols_q: list[np.ndarray] = field(default_factory=list)
     # Per-ghost-slot last-rendered q, for stable identity tracking across
     # solves. None means "this slot hasn't been bound to a branch yet".
     # See the render loop -- each frame we greedy-match each slot to the
@@ -686,11 +564,11 @@ def _resolve_local_urdf(spec: ArmSpec) -> Path | None:
     return None
 
 
-def preload_descriptions() -> None:
-    """Warm the URDF cache for every meshed arm in the roster. Called
-    from a background thread at startup so the first arm-switch isn't
-    waiting on download + xacro for each one."""
-    for spec in ARMS:
+def preload_descriptions(specs: list[ArmSpec]) -> None:
+    """Warm the URDF cache for the meshed arms in ``specs``. Called from a
+    background thread at startup so the first arm-switch isn't waiting on
+    download + xacro for each one."""
+    for spec in specs:
         local = _resolve_local_urdf(spec)
         if local is not None:
             try:
@@ -719,26 +597,47 @@ def _mesh_renderer_has_geometry(renderer: MeshArmRenderer) -> bool:
     return len(geom.geometry) > 0
 
 
-def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
-    module = importlib.import_module(f"ssik.prebuilt.{spec.module_name}")
-    dof = module.DOF
-    n_ghosts = max(spec.expected_max_branches - 1, 0)
+def _start_q(arm: ssik.Manipulator) -> np.ndarray:
+    """A mid-workspace, non-singular start inside every joint's limits."""
+    q0 = np.full(arm.dof, 0.4)
+    if arm.dof >= 4:
+        q0[1] = 0.8
+        q0[2] = -0.5
+    for i, lim in enumerate(arm.joint_limits):
+        if lim is not None:
+            lo, hi = lim
+            margin = 0.1 * (hi - lo)
+            q0[i] = float(np.clip(q0[i], lo + margin, hi - margin))
+    return q0
+
+
+def _branch_slots(arm: ssik.Manipulator, q0: np.ndarray) -> int:
+    """How many arms to create for this robot: its branch count at the start
+    pose (one per geometric branch, limits ignored), at least eight (a
+    Pieper 6R's count) and at most ``MAX_BRANCHES``."""
+    sols = arm.solve(
+        arm.fk(q0), respect_limits=False, enumerate_windings=False, max_solutions=MAX_BRANCHES
+    )
+    return min(max(len(sols), 8), MAX_BRANCHES)
+
+
+def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec, *, meshes: bool) -> ArmRuntime:
+    arm = ssik.Manipulator.from_prebuilt(spec.module_name)
+    info = next(a for a in ssik.list_arms() if a.name == spec.module_name)
+    q0 = _start_q(arm)
+    n_ghosts = _branch_slots(arm, q0) - 1
 
     # Two mesh sources: ``rd_description`` (upstream-packaged) or a
-    # ``local_urdf_paths`` candidate that exists on disk (e.g. JACO 2's
-    # meshes from ada_ros2/ada_description). Pick the first one
+    # ``local_urdf_paths`` candidate that exists on disk. Pick the first one
     # available; fall back to primitives if neither resolves.
     local_urdf = _resolve_local_urdf(spec)
-    use_mesh = spec.rd_description is not None or local_urdf is not None
+    use_mesh = meshes and (spec.rd_description is not None or local_urdf is not None)
     # The rendered EE link MUST match the link the ssik artifact was built
     # for -- otherwise the rigid base-offset model can't account for the
     # tip-frame difference and the marker drifts as joints rotate. Default
-    # to the manifest's ``ee_link`` (one source of truth) and only honor
+    # to the artifact's ``EE_LINK`` (one source of truth) and only honor
     # ``spec.render_ee_link`` as an explicit override.
-    from ssik.prebuilt._manifest import load_manifest
-
-    manifest_ee = load_manifest()[spec.module_name].ee_link
-    render_ee_link = spec.render_ee_link or manifest_ee
+    render_ee_link = spec.render_ee_link or importlib.import_module(info.import_path).EE_LINK
 
     def _build(root: str, rgba, cast_shadow: bool) -> _Renderer:
         if use_mesh:
@@ -755,7 +654,7 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
                     rgba,
                     spec.ik_joint_names,
                     render_ee_link,
-                    module.fk,
+                    arm.fk,
                     cast_shadow=cast_shadow,
                 )
                 if _mesh_renderer_has_geometry(mesh):
@@ -770,32 +669,34 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
                     f"  ! mesh load failed for {spec.label}: "
                     f"{type(e).__name__}: {e}  -- falling back to primitives"
                 )
-        kb = _load_ssik_kb(spec)
-        return PrimitiveArmRenderer(server, kb, root, rgba, cast_shadow=cast_shadow)
+        return PrimitiveArmRenderer(server, arm.kinbody, root, rgba, cast_shadow=cast_shadow)
 
     active = _build("/arm/active", ACTIVE_COLOR_RGBA, cast_shadow=True)
     ghosts: list[_Renderer] = [
         _build(f"/arm/ghost_{i:02d}", GHOST_COLOR_RGBA, cast_shadow=False) for i in range(n_ghosts)
     ]
-
-    # Seed q at a mid-workspace non-singular config.
-    q0 = np.full(dof, 0.4)
-    if dof >= 4:
-        q0[1] = 0.8
-        q0[2] = -0.5
     active.set_q(q0)
     for g in ghosts:
         g.set_q(q0)
 
     return ArmRuntime(
         spec=spec,
-        module=module,
+        arm=arm,
+        # allow_jump: the solid arm is always the branch nearest the last one,
+        # however far, as a demo wants. A teleop loop keeps the default and
+        # holds instead (examples/07_teleop.py).
+        tracker=arm.tracker(q0, allow_jump=True),
         active=active,
         ghosts=ghosts,
-        dof=dof,
-        q_current=q0,
         ghost_qs=[None] * len(ghosts),
     )
+
+
+_HELD_TEXT = {
+    "unreachable": "target out of reach",
+    "limits": "target outside the joint limits",
+    "jump": "nearest branch too far",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -804,11 +705,13 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec) -> ArmRuntime:
 
 
 def main(
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8080,
+    meshes: bool = True,
     tour: bool = False,
     tour_delay_s: float = 4.0,
     tour_per_arm_s: float = 3.0,
+    tour_settle_s: float = 2.5,
     tour_exit: bool = False,
     tour_max_ghosts: int = 7,
     tour_record_dir: str = "",
@@ -821,6 +724,11 @@ def main(
 ) -> None:
     server = viser.ViserServer(host=host, port=port)
 
+    # Viser runs GUI callbacks on a thread pool, so a drag, a slider move and
+    # an arm switch can arrive at once. Every read or write of the demo state
+    # (the loaded arm, its tracker, the renderers) holds this lock.
+    lock = threading.RLock()
+
     # Top-level (no folder collapse) so the live stats / dispatch badges
     # are visible without the user hunting through panels. Controls go
     # inside folders below.
@@ -832,21 +740,16 @@ def main(
     solver_badge = server.gui.add_markdown("**ssik**: (loading…)")
     eaik_badge = server.gui.add_markdown("**EAIK**: (loading…)")
     stats_md = server.gui.add_markdown("**Stats**: waiting for first solve…")
-    # ``max_ghosts_slider`` is hot-rewired in ``select_arm`` to match the
-    # incoming arm's ``expected_max_branches``; the initial bounds are a
-    # placeholder for the first arm in the roster.
+    # ``max_ghosts_slider`` is hot-rewired in ``select_arm`` to the incoming
+    # arm's ghost slots; the initial bounds are a placeholder.
     max_ghosts_slider = server.gui.add_slider(
-        "Ghost branches shown",
-        min=0,
-        max=max(ARMS[0].expected_max_branches - 1, 0),
-        step=1,
-        initial_value=max(ARMS[0].expected_max_branches - 1, 0),
+        "Ghost branches shown", min=0, max=7, step=1, initial_value=7
     )
     show_ghosts_chk = server.gui.add_checkbox("Show ghost branches", True)
     cycle_btn = server.gui.add_button("Cycle preferred branch")
     reset_btn = server.gui.add_button("Reset marker → current EE")
 
-    state: dict[str, object] = {"arm": None}
+    state: dict[str, ArmRuntime | None] = {"arm": None}
 
     marker = server.scene.add_transform_controls(
         "/ee_target",
@@ -860,122 +763,97 @@ def main(
         marker.wxyz = _matrix_to_wxyz(T[:3, :3])
 
     def _marker_T() -> np.ndarray:
-        w, x, y, z = marker.wxyz
+        # The client sends a float32 quaternion; normalise it so the target
+        # is a rotation to round-off, as solve() requires.
+        w, x, y, z = np.asarray(marker.wxyz, dtype=float) / np.linalg.norm(marker.wxyz)
         T = np.eye(4, dtype=float)
         T[:3, 3] = marker.position
         T[:3, :3] = np.array(
             [
-                [
-                    1 - 2 * (y * y + z * z),
-                    2 * (x * y - z * w),
-                    2 * (x * z + y * w),
-                ],
-                [
-                    2 * (x * y + z * w),
-                    1 - 2 * (x * x + z * z),
-                    2 * (y * z - x * w),
-                ],
-                [
-                    2 * (x * z - y * w),
-                    2 * (y * z + x * w),
-                    1 - 2 * (x * x + y * y),
-                ],
+                [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
             ]
         )
         return T
 
     def _solve_and_render() -> bool:
-        """Return True if the IK produced at least one solution and we
-        rendered it; False if the marker pose is unreachable (no sols).
-        Tour mode uses this signal to skip capturing dead frames where
-        the arm has frozen at its last reachable pose."""
-        runtime = state["arm"]
-        if runtime is None:
-            return False
-        rt: ArmRuntime = runtime  # type: ignore[assignment]
-
-        # All scene updates inside this call are wrapped in ``server.atomic()``
-        # so the client receives one batched apply per frame. Without this,
-        # per-joint updates (ViserUrdf.update_cfg emits N separate messages)
-        # interleave between arms and the user sees brief intermediate poses
-        # where the EE is visibly off-marker -- the "flicker that isn't an
-        # IK solution" symptom.
-        with server.atomic():
-            return _solve_and_render_inner(rt)
+        """Return True if the tracker followed the marker and we rendered it;
+        False if it held (the marker pose is out of reach). Tour mode uses
+        this signal to skip capturing dead frames where the arm has frozen
+        at its last reachable pose."""
+        with lock:
+            rt = state["arm"]
+            if rt is None:
+                return False
+            # All scene updates inside this call are wrapped in
+            # ``server.atomic()`` so the client receives one batched apply per
+            # frame. Without this, per-joint updates (ViserUrdf.update_cfg
+            # emits N separate messages) interleave between arms and the user
+            # sees brief intermediate poses where the EE is visibly off-marker
+            # -- the "flicker that isn't an IK solution" symptom.
+            with server.atomic():
+                return _solve_and_render_inner(rt)
 
     def _solve_and_render_inner(rt: ArmRuntime) -> bool:
-        # Marker is in the rendered URDF's world frame; ssik solves in its
-        # POE frame. ``base_offset`` is the constant rigid transform
-        # between the two (computed at load time by the renderer). Apply
-        # the inverse before solving so a marker drag corresponds to a
-        # 1:1 EE motion in the visible scene.
-        T_marker = _marker_T()
-        T_solve = _invert(rt.active.base_offset) @ T_marker
+        # The marker is in the rendered URDF's world frame; ssik solves in the
+        # arm's base frame. ``base_offset`` (render_T_base, measured by the
+        # renderer at load time) is that calibration; its inverse maps the
+        # marker into the base frame, so a marker drag is a 1:1 EE motion in
+        # the visible scene.
+        T_solve = apply_calibration(invert(rt.active.base_offset), _marker_T())
 
-        # Tie the solve budget to what we actually render: ``max_solutions``
-        # = active + visible ghosts. The slider already caps the rendered
-        # count; asking the solver for more would just burn CPU on
-        # branches we'd never paint. When the user dials the slider down,
-        # the solver speeds up correspondingly -- crucial for heavy 7Rs
-        # (Rizon 4 / Kassow) whose per-branch lock-sample work dominates.
+        # Tie the ghost solve to what we actually render: at most the visible
+        # ghosts + the active. The slider caps the rendered count; asking for
+        # more would burn CPU on branches we'd never paint.
         show = show_ghosts_chk.value
-        max_ghosts = int(max_ghosts_slider.value) if show else 0
-        max_solutions = max_ghosts + 1
+        max_ghosts = min(int(max_ghosts_slider.value), len(rt.ghosts)) if show else 0
         t0 = time.perf_counter()
-        sols = rt.module.solve(  # type: ignore[union-attr]
-            T_solve,
-            max_solutions=max_solutions,
-            respect_limits=False,
-            q_seed=rt.q_current,
-        )
+        step = rt.tracker.update(T_solve)
+        others: list[ssik.Solution] = []
+        if step.status is not ssik.TrackStatus.HELD and max_ghosts > 0:
+            # Every other branch at this pose, nearest first; the tracker's own
+            # configuration is the active arm, not a ghost.
+            others = [
+                s
+                for s in rt.tracker.solutions(max_solutions=max_ghosts + 1)
+                if float(np.max(np.abs(s.q - step.q))) > 1e-6
+            ][:max_ghosts]
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-        if not sols:
-            stats_md.content = (
-                f"**Branches**: 0 (target out of reach)\n\n**Solve**: {elapsed_ms:.2f} ms"
-            )
+        if step.status is ssik.TrackStatus.HELD:
+            reason = _HELD_TEXT.get(step.reason or "", step.reason)
+            stats_md.content = f"**Branches**: 0 ({reason})\n\n**Solve**: {elapsed_ms:.2f} ms"
             return False
 
-        q_list = [np.asarray(s.q, dtype=float) for s in sols]
-        rt.last_sols_q = q_list
-
-        # Always closest-track: pick the branch nearest to the previous
-        # active q. Cycle button advances ``q_current`` to the next branch
-        # before this re-solves, so closest-tracking lands on the cycled-to
-        # branch by construction -- no fixed-slot indexing (which would
-        # alias to different physical branches across solves, since the
-        # solver doesn't promise a stable enumeration order).
-        dists = [wrap_distance(q, rt.q_current) for q in q_list]
-        active_idx = int(np.argmin(dists))
-
-        q_active = q_list[active_idx]
-        rt.active.set_q(q_active)
-        rt.q_current = q_active
+        rt.active.set_q(step.q)
 
         # Ghost-arm rendering: respect both the show-ghosts toggle and the
         # user-selected cap. Ghosts beyond the cap are HIDDEN (not parked
-        # at q_active -- parking stacks N transparent meshes on the active
+        # at the active q -- parking stacks N transparent meshes on the active
         # and washes its color out).
         #
         # Stable identity via greedy matching: each ghost slot remembers
         # its prior q; we assign it the closest remaining q in the new
-        # solve (excluding the active). The solver doesn't promise a
-        # stable enumeration order across solves, so a positional
-        # "ghosts[i] = q_list[i]" assignment makes ghost #5 visibly
-        # flicker between two unrelated branches as the solver shuffles.
-        # Greedy-match keeps each ghost on its continuation branch as
-        # long as that branch survives in the new solve. ``max_ghosts``
-        # comes from the slider above (already tied to ``max_solutions``).
-        available = [j for j in range(len(q_list)) if j != active_idx]
-        n_slots = min(max_ghosts, len(rt.ghosts), len(available))
+        # solve. The solver doesn't promise a stable enumeration order
+        # across solves, so a positional "ghosts[i] = q_list[i]" assignment
+        # makes ghost #5 visibly flicker between two unrelated branches as
+        # the solver shuffles. Greedy-match keeps each ghost on its
+        # continuation branch as long as that branch survives in the new
+        # solve. Distances are plain coordinate distances: every q here is
+        # the in-limit representative nearest the active arm.
+        q_list = [np.asarray(s.q, dtype=float) for s in others]
+        available = list(range(len(q_list)))
+        n_slots = len(q_list)
         # Slot ordering: bind first to slots that already have a prior
         # q (so they stick to their continuation); fall through to fresh
-        # slots seeded against q_active.
+        # slots seeded against the active q.
         seeded_slots = [s for s in range(n_slots) if rt.ghost_qs[s] is not None]
         fresh_slots = [s for s in range(n_slots) if rt.ghost_qs[s] is None]
         for slot in seeded_slots + fresh_slots:
-            ref_q = rt.ghost_qs[slot] if rt.ghost_qs[slot] is not None else q_active
-            best_j = min(available, key=lambda j: wrap_distance(q_list[j], ref_q))
+            prior = rt.ghost_qs[slot]
+            ref_q = prior if prior is not None else step.q
+            best_j = min(available, key=lambda j: float(np.max(np.abs(q_list[j] - ref_q))))
             available.remove(best_j)
             q_pick = q_list[best_j]
             rt.ghosts[slot].set_visible(True)
@@ -985,41 +863,44 @@ def main(
             rt.ghosts[slot].set_visible(False)
             rt.ghost_qs[slot] = None
 
-        fks = [float(s.fk_residual) for s in sols]
+        fks = [step.fk_residual] + [float(s.fk_residual) for s in others]
         stats_md.content = (
-            f"**Branches**: {len(sols)} (active = #{active_idx})\n\n"
+            f"**Branches**: {1 + len(others)} shown ({step.status.name.lower()})\n\n"
             f"**FK closure**: min {min(fks):.2e}, max {max(fks):.2e}\n\n"
             f"**Solve**: {elapsed_ms:.2f} ms"
         )
         return True
 
     def select_arm(label: str) -> None:
-        if state["arm"] is not None:
-            state["arm"].remove()  # type: ignore[attr-defined]
-        spec = next(a for a in ARMS if a.label == label)
-        runtime = load_arm_runtime(server, spec)
-        state["arm"] = runtime
-        solver_name = getattr(runtime.module, "SOLVER_NAME", "?")
-        has_mesh = spec.rd_description is not None or _resolve_local_urdf(spec) is not None
-        viz_kind = "URDF meshes" if has_mesh else "kinematic primitives"
-        solver_badge.content = (
-            f"**ssik**: `{solver_name}`  ·  {runtime.dof}-DOF  ·  "
-            f"`from ssik.prebuilt import {spec.module_name}`\n\n"
-            f"**viz**: {viz_kind}"
-        )
-        eaik_badge.content = f"**EAIK**: {spec.eaik_status}"
-        # Rebind the slider bounds to this arm's branch budget. Default
-        # to "all ghosts on" -- the user can dial it down to remove
-        # visual clutter.
-        max_n = max(spec.expected_max_branches - 1, 0)
-        max_ghosts_slider.max = max_n
-        max_ghosts_slider.value = max_n
-        # Initial marker: place at the *rendered* EE position so the
-        # handle is co-located with the visible end-effector.
-        T_ssik = runtime.module.fk(runtime.q_current)  # type: ignore[union-attr]
-        T_render = runtime.active.base_offset @ T_ssik
-        _move_marker(T_render)
-        _solve_and_render()
+        with lock:
+            current = state["arm"]
+            if current is not None and current.spec.label == label:
+                return  # already loaded (the dropdown and the tour both ask)
+            if current is not None:
+                current.remove()
+                state["arm"] = None
+            spec = next(a for a in ARMS if a.label == label)
+            runtime = load_arm_runtime(server, spec, meshes=meshes)
+            state["arm"] = runtime
+            has_mesh = meshes and (
+                spec.rd_description is not None or _resolve_local_urdf(spec) is not None
+            )
+            viz_kind = "URDF meshes" if has_mesh else "kinematic primitives"
+            solver_badge.content = (
+                f"**ssik**: `{runtime.arm.solver_name}`  ·  {runtime.arm.dof}-DOF  ·  "
+                f'`ssik.Manipulator.from_prebuilt("{spec.module_name}")`\n\n'
+                f"**viz**: {viz_kind}"
+            )
+            eaik_badge.content = f"**EAIK**: {eaik_status(spec.module_name)}"
+            # Rebind the slider bounds to this arm's ghost slots. Default to
+            # "all ghosts on" -- the user can dial it down to remove clutter.
+            max_n = len(runtime.ghosts)
+            max_ghosts_slider.max = max_n
+            max_ghosts_slider.value = max_n
+            # Initial marker: place at the *rendered* EE so the handle is
+            # co-located with the visible end-effector.
+            _move_marker(runtime.active.base_offset @ runtime.arm.fk(runtime.tracker.q))
+            _solve_and_render()
 
     @marker.on_update
     def _(_):
@@ -1031,31 +912,24 @@ def main(
 
     @cycle_btn.on_click
     def _(_):
-        runtime = state["arm"]
-        if runtime is None or not runtime.last_sols_q:  # type: ignore[union-attr]
-            return
-        rt: ArmRuntime = runtime  # type: ignore[assignment]
-        # Find the current active in the last solve, advance to the next
-        # branch by q-identity (not by slot index). Update q_current so
-        # the upcoming closest-track solve locks onto the cycled-to
-        # branch even if the solver reorders its enumeration.
-        qs = rt.last_sols_q
-        cur_idx = int(np.argmin([wrap_distance(q, rt.q_current) for q in qs]))
-        next_idx = (cur_idx + 1) % len(qs)
-        rt.q_current = qs[next_idx]
-        _solve_and_render()
-        _solve_and_render()
+        with lock:
+            rt = state["arm"]
+            if rt is None:
+                return
+            # Switch the tracker to the next branch at the current target
+            # (by configuration, not by slot index); the render then follows
+            # it like any other update.
+            rt.tracker.next_branch()
+            _solve_and_render()
 
     @reset_btn.on_click
     def _(_):
-        runtime = state["arm"]
-        if runtime is None:
-            return
-        rt: ArmRuntime = runtime  # type: ignore[assignment]
-        T_ssik = rt.module.fk(rt.q_current)  # type: ignore[union-attr]
-        T_render = rt.active.base_offset @ T_ssik
-        _move_marker(T_render)
-        _solve_and_render()
+        with lock:
+            rt = state["arm"]
+            if rt is None:
+                return
+            _move_marker(rt.active.base_offset @ rt.arm.fk(rt.tracker.q))
+            _solve_and_render()
 
     @show_ghosts_chk.on_update
     def _(_):
@@ -1065,116 +939,120 @@ def main(
     def _(_):
         _solve_and_render()
 
-    # Warm the URDF cache for the rest of the meshed roster in the
-    # background so the first switch through each arm doesn't pay the
-    # download + xacro cost interactively. First-ever launch of an arm
-    # lazy ``git clone``s its upstream description repo into
-    # ``~/.cache/robot_descriptions/`` -- ~100s of MB total across the
-    # full roster. Subsequent launches reuse the cache and are instant.
+    # Warm the URDF cache for the meshed roster in the background so the
+    # first switch through each arm doesn't pay the download + xacro cost
+    # interactively. First-ever launch of an arm lazy ``git clone``s its
+    # upstream description repo into ``~/.cache/robot_descriptions/`` --
+    # ~100s of MB total across the full roster. Subsequent launches reuse
+    # the cache and are instant.
     #
     # Tour mode runs the preload synchronously up front instead so the
     # background thread isn't competing for CPU / disk / GIL while we're
-    # trying to drive frames at 30fps. The preload cost only matters
-    # for fresh checkouts; on a warm cache it's a no-op.
-    if tour:
+    # trying to drive frames at 30fps. Self-motion mode shows one arm, so it
+    # loads only that one.
+    if meshes and tour:
         print("  tour mode: pre-warming URDF cache (synchronous)", flush=True)
-        preload_descriptions()
-    else:
-        import threading
+        preload_descriptions([a for a in ARMS if a.label in _TOUR_ORDER])
+    elif meshes and not self_motion:
+        threading.Thread(target=preload_descriptions, args=(ARMS,), daemon=True).start()
 
-        threading.Thread(target=preload_descriptions, daemon=True).start()
-
-    select_arm(ARMS[0].label)
-    print(f"\n  ssik interactive-IK demo:  http://localhost:{port}", flush=True)
-    print(
-        "  (first launch: upstream URDFs lazy-fetch to "
-        "~/.cache/robot_descriptions/ in the background)\n",
-        flush=True,
-    )
-
-    if tour:
-        # Tour mode: drive arm dropdown + marker programmatically through a
-        # narrative of arms. ``tour_record_dir`` opts into per-frame PNG
-        # capture via the connected client's server-driven ``get_render``;
-        # ffmpeg later composes them into the final MP4 / GIF. With no
-        # record dir we just animate live.
+    select_arm(self_motion_arm if self_motion and not tour else ARMS[0].label)
+    print(f"\n  ssik interactive-IK demo:  http://{host}:{server.get_port()}", flush=True)
+    if meshes:
         print(
-            f"  tour mode: starting in {tour_delay_s:.1f}s, {tour_per_arm_s:.1f}s motion per arm",
+            "  (first launch: upstream URDFs lazy-fetch to "
+            "~/.cache/robot_descriptions/ in the background)\n",
             flush=True,
         )
-        record_dir = Path(tour_record_dir).expanduser().resolve() if tour_record_dir else None
-        if record_dir is not None:
-            record_dir.mkdir(parents=True, exist_ok=True)
-            # Refuse to start until at least one client connects -- the
-            # render comes from the client's three.js view, not the server.
-            print(
-                f"  tour record: open http://localhost:{port} in a browser "
-                "to act as the render client; tour waits for connection",
-                flush=True,
-            )
-            while not server.get_clients():
-                time.sleep(0.5)
-            print(
-                f"  tour record: client connected; capturing PNGs to "
-                f"{record_dir} at {tour_record_size[0]}x{tour_record_size[1]}",
-                flush=True,
-            )
-        time.sleep(tour_delay_s)
-        _run_tour(
-            select_arm=select_arm,
-            arm_dropdown=arm_dropdown,
-            max_ghosts_slider=max_ghosts_slider,
-            move_marker=_move_marker,
-            solve_and_render=_solve_and_render,
-            state=state,
-            per_arm_s=tour_per_arm_s,
-            max_ghosts=tour_max_ghosts,
-            server=server,
-            record_dir=record_dir,
-            record_size=tour_record_size,
-        )
-        print("  tour: complete", flush=True)
-        if tour_exit:
-            return
 
-    if self_motion:
-        # Self-motion mode: one redundant arm, one fixed target, sweeping a
-        # single branch of the self-motion manifold. Shares the tour's capture
-        # path, so the same record dir feeds the same ffmpeg encoder.
-        record_dir = Path(tour_record_dir).expanduser().resolve() if tour_record_dir else None
-        if record_dir is not None:
-            record_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if tour:
+            # Tour mode: drive arm dropdown + marker programmatically through
+            # a narrative of arms. ``tour_record_dir`` opts into per-frame PNG
+            # capture via the connected client's server-driven ``get_render``;
+            # ffmpeg later composes them into the final MP4 / GIF. With no
+            # record dir we just animate live.
             print(
-                f"  self-motion record: open http://localhost:{port} in a browser "
-                "to act as the render client; waiting for connection",
+                f"  tour mode: starting in {tour_delay_s:.1f}s, "
+                f"{tour_per_arm_s:.1f}s motion per arm",
                 flush=True,
             )
-            while not server.get_clients():
-                time.sleep(0.5)
-            print(
-                f"  self-motion record: client connected; capturing to {record_dir} "
-                f"at {tour_record_size[0]}x{tour_record_size[1]}",
-                flush=True,
+            record_dir = _await_recorder(server, tour_record_dir, tour_record_size, "tour")
+            time.sleep(tour_delay_s)
+            _run_tour(
+                select_arm=select_arm,
+                arm_dropdown=arm_dropdown,
+                max_ghosts_slider=max_ghosts_slider,
+                move_marker=_move_marker,
+                solve_and_render=_solve_and_render,
+                state=state,
+                lock=lock,
+                per_arm_s=tour_per_arm_s,
+                max_ghosts=tour_max_ghosts,
+                server=server,
+                record_dir=record_dir,
+                record_size=tour_record_size,
+                settle_after_load_s=tour_settle_s,
             )
-        time.sleep(tour_delay_s)
-        _run_self_motion(
-            select_arm=select_arm,
-            move_marker=_move_marker,
-            state=state,
-            arm_label=self_motion_arm,
-            seconds=self_motion_seconds,
-            n_ghosts=self_motion_ghosts,
-            server=server,
-            record_dir=record_dir,
-            record_size=tour_record_size,
-            seed=self_motion_seed,
-        )
-        print("  self-motion: complete", flush=True)
-        if tour_exit:
-            return
+            print("  tour: complete", flush=True)
+            if tour_exit:
+                return
 
-    while True:
-        time.sleep(1.0)
+        if self_motion:
+            # Self-motion mode: one redundant arm, one fixed target, sweeping
+            # a single branch of the self-motion manifold. Shares the tour's
+            # capture path, so the same record dir feeds the same encoder.
+            record_dir = _await_recorder(server, tour_record_dir, tour_record_size, "self-motion")
+            time.sleep(tour_delay_s)
+            _run_self_motion(
+                select_arm=select_arm,
+                move_marker=_move_marker,
+                state=state,
+                lock=lock,
+                arm_label=self_motion_arm,
+                seconds=self_motion_seconds,
+                n_ghosts=self_motion_ghosts,
+                server=server,
+                record_dir=record_dir,
+                record_size=tour_record_size,
+                settle_s=tour_settle_s,
+                seed=self_motion_seed,
+            )
+            print("  self-motion: complete", flush=True)
+            if tour_exit:
+                return
+
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        print("\n  stopping", flush=True)
+    finally:
+        server.stop()
+
+
+def _await_recorder(
+    server: viser.ViserServer, record_dir_arg: str, record_size: tuple[int, int], mode: str
+) -> Path | None:
+    """The capture directory, once a browser has connected to render it, or
+    ``None`` when not recording. The render comes from the client's three.js
+    view, not the server, so recording waits for one."""
+    if not record_dir_arg:
+        return None
+    record_dir = Path(record_dir_arg).expanduser().resolve()
+    record_dir.mkdir(parents=True, exist_ok=True)
+    print(
+        f"  {mode} record: open http://localhost:{server.get_port()} in a browser "
+        "to act as the render client; waiting for connection",
+        flush=True,
+    )
+    while not server.get_clients():
+        time.sleep(0.5)
+    print(
+        f"  {mode} record: client connected; capturing PNGs to {record_dir} "
+        f"at {record_size[0]}x{record_size[1]}",
+        flush=True,
+    )
+    return record_dir
 
 
 # ---------------------------------------------------------------------------
@@ -1183,11 +1061,10 @@ def main(
 
 
 # Narrative order: easy (EAIK supports) → 6R wedge (EAIK refuses) → 7R
-# climax (EAIK refuses entirely). Mesh-rendered arms only -- the primitive
-# skeleton fallback (FANUC CRX, Kassow, OpenArm without an opportunistic
-# local URDF) doesn't look cinematic enough for the README hero. JACO 2
-# is included because ``local_urdf_paths`` opportunistically loads its
-# DAE meshes from ada_ros2 when present.
+# climax (EAIK refuses entirely). Mesh-rendered arms where available -- the
+# primitive skeleton fallback doesn't look cinematic enough for the README
+# hero. JACO 2 renders meshes when ``local_urdf_paths`` names a local copy of
+# its description.
 _TOUR_ORDER: tuple[str, ...] = (
     # Act 1 — easy: EAIK has these.
     "UR5 — three-parallel 6R (Pieper)",
@@ -1290,6 +1167,7 @@ def _run_tour(
     move_marker,
     solve_and_render,
     state,
+    lock,
     per_arm_s: float,
     max_ghosts: int,
     server=None,
@@ -1320,7 +1198,10 @@ def _run_tour(
             print(f"  tour: skipping unknown arm {label!r}", flush=True)
             continue
         t_select_0 = time.perf_counter()
-        arm_dropdown.value = label  # cosmetic; also fires the dropdown's on_update
+        # Setting the dropdown is cosmetic and also fires its on_update, which
+        # loads the arm; select_arm is idempotent, so calling it here as well
+        # only guarantees the arm is loaded before the motion starts.
+        arm_dropdown.value = label
         select_arm(label)
         arm_start_idx = frame_idx
         # Cap the visible-ghost count: 32-branch arms otherwise spike to
@@ -1329,10 +1210,10 @@ def _run_tour(
         # paint every ghost. The active arm is unaffected.
         max_ghosts_slider.value = min(max_ghosts, int(max_ghosts_slider.max))
         t_select = time.perf_counter() - t_select_0
-        # Anchor pose: the rendered EE of the freshly-loaded arm at q0.
-        rt = state["arm"]
-        T_ssik = rt.module.fk(rt.q_current)  # type: ignore[union-attr]
-        T_anchor = rt.active.base_offset @ T_ssik  # type: ignore[union-attr]
+        # Anchor pose: the rendered EE of the freshly-loaded arm.
+        with lock:
+            rt: ArmRuntime = state["arm"]
+            T_anchor = rt.active.base_offset @ rt.arm.fk(rt.tracker.q)
         # Per-arm position-amplitude scale: bigger reach → bigger Lissajous.
         # ``reach`` here is the home-pose EE distance from the base, a
         # rough proxy. Cap at 1.4 so PiPER (~0.45 m) gets a smaller loop
@@ -1392,12 +1273,13 @@ def _run_tour(
             t_frame_0 = time.perf_counter()
             t = k / fps
             T = _lissajous_marker_T(T_anchor, t, per_arm_s, pos_scale=pos_scale)
-            move_marker(T)
-            had_sols = solve_and_render()
-            # Only capture frames where the IK actually produced a
-            # solution. Otherwise the recording would freeze the arm at
-            # its last reachable pose while the marker keeps moving --
-            # visually identical to a stutter / dead frame.
+            with lock:
+                move_marker(T)
+                had_sols = solve_and_render()
+            # Only capture frames where the tracker followed the marker.
+            # Otherwise the recording would freeze the arm at its last
+            # reachable pose while the marker keeps moving -- visually
+            # identical to a stutter / dead frame.
             if had_sols:
                 frame_idx = _capture(frame_idx)
             frame_times.append(time.perf_counter() - t_frame_0)
@@ -1483,6 +1365,7 @@ def _run_self_motion(
     select_arm,
     move_marker,
     state,
+    lock,
     arm_label: str,
     seconds: float,
     n_ghosts: int = 0,
@@ -1501,22 +1384,20 @@ def _run_self_motion(
     unchanging target, not an interpolation between two of them, and the
     printed EE drift is the evidence.
     """
-    import ssik
-
     fps = 30
     _capture = _make_capture(server, record_dir, record_size)
 
     select_arm(arm_label)
-    runtime = state["arm"]
-    if runtime is None:
+    with lock:
+        rt: ArmRuntime | None = state["arm"]
+    if rt is None:
         raise SystemExit(f"self-motion: could not load {arm_label!r}")
-    rt: ArmRuntime = runtime  # type: ignore[assignment]
 
-    kb = _load_ssik_kb(rt.spec)
-    arm = ssik.Manipulator(kb)
-    if rt.dof < 7:
+    arm = rt.arm
+    kb = arm.kinbody
+    if arm.dof < 7:
         raise SystemExit(
-            f"self-motion needs a redundant arm; {arm_label!r} has {rt.dof} DOF. "
+            f"self-motion needs a redundant arm; {arm_label!r} has {arm.dof} DOF. "
             f"Pick a 7R, e.g. --self-motion-arm 'Franka Panda — anthropomorphic 7R'"
         )
 
@@ -1544,59 +1425,65 @@ def _run_self_motion(
     # is sliding along. They are set once and never touched again, which is
     # why this drives the renderers directly instead of going through
     # ``_solve_and_render`` (that re-solves and rebinds every ghost per frame).
-    slots = min(n_ghosts, len(rt.ghosts))
-    picks = np.linspace(0, len(qs) - 1, slots).astype(int) if slots else np.array([], dtype=int)
-    move_marker(rt.active.base_offset @ t_target)
-    with server.atomic():
-        for slot in range(slots):
-            rt.ghosts[slot].set_visible(True)
-            rt.ghosts[slot].set_q(qs[picks[slot]])
-        for slot in range(slots, len(rt.ghosts)):
-            rt.ghosts[slot].set_visible(False)
-        rt.active.set_q(sweep[0])
-
-    # Frame the shot. The interactive default camera is wherever the user last
-    # orbited to; a captured asset needs a deliberate viewpoint, or the arm
-    # renders as a speck in the middle of an empty frame. Three-quarter view
-    # from slightly above, framed on the target the arm is holding.
-    target = (rt.active.base_offset @ t_target)[:3, 3]
-    reach = float(np.linalg.norm(target)) or 0.8
-    # Frame on the arm's mid-height rather than the target itself: the sweep
-    # moves the elbow far more than the hand, and the hand is by construction
-    # the one thing that does not move.
-    base = rt.active.base_offset[:3, 3]
-    focus = 0.5 * (base + target) + np.array([0.0, 0.0, 0.08])
-    for client in (server.get_clients() or {}).values():
-        with contextlib.suppress(Exception):
-            client.camera.position = focus + reach * np.array([0.90, -0.75, 0.30])
-            client.camera.look_at = focus
-            client.camera.up_direction = np.array([0.0, 0.0, 1.0])
-
-    # Let the meshes upload and the viewer settle before the first captured
-    # frame, then force one round-trip so the settle actually completed.
-    time.sleep(settle_s)
-    if server is not None and record_dir is not None:
-        clients = server.get_clients()
-        if clients:
-            with contextlib.suppress(Exception):
-                _ = next(iter(clients.values())).get_render(
-                    height=128, width=128, transport_format="jpeg"
-                )
-
-    # Map the requested duration onto the whole out-and-back loop. Indexing
-    # ``sweep`` by frame number instead would make the fraction of the arc
-    # covered depend on the frame count: at 30fps a 3s capture would walk 90
-    # of this branch's 800 postures and the arm would look almost still.
-    n_frames = max(int(seconds * fps), 2)
-    walk = np.linspace(0.0, len(sweep) - 1.0, n_frames).round().astype(int)
-
-    frame_idx = 0
-    for i in range(n_frames):
+    # The lock is held for the whole sweep so a stray GUI event cannot redraw
+    # the arms in between.
+    with lock:
+        slots = min(n_ghosts, len(rt.ghosts))
+        picks = np.linspace(0, len(qs) - 1, slots).astype(int) if slots else np.array([], dtype=int)
+        move_marker(rt.active.base_offset @ t_target)
         with server.atomic():
-            rt.active.set_q(sweep[walk[i]])
-        frame_idx = _capture(frame_idx)
-        if record_dir is None:
-            time.sleep(1.0 / fps)
+            for slot in range(slots):
+                rt.ghosts[slot].set_visible(True)
+                rt.ghosts[slot].set_q(qs[picks[slot]])
+            for slot in range(slots, len(rt.ghosts)):
+                rt.ghosts[slot].set_visible(False)
+            rt.active.set_q(sweep[0])
+
+        # Frame the shot. The interactive default camera is wherever the user
+        # last orbited to; a captured asset needs a deliberate viewpoint, or
+        # the arm renders as a speck in the middle of an empty frame.
+        # Three-quarter view from slightly above, framed on the target the arm
+        # is holding.
+        target = (rt.active.base_offset @ t_target)[:3, 3]
+        reach = float(np.linalg.norm(target)) or 0.8
+        # Frame on the arm's mid-height rather than the target itself: the
+        # sweep moves the elbow far more than the hand, and the hand is by
+        # construction the one thing that does not move.
+        base = rt.active.base_offset[:3, 3]
+        focus = 0.5 * (base + target) + np.array([0.0, 0.0, 0.08])
+        for client in (server.get_clients() or {}).values():
+            with contextlib.suppress(Exception):
+                client.camera.position = focus + reach * np.array([0.90, -0.75, 0.30])
+                client.camera.look_at = focus
+                client.camera.up_direction = np.array([0.0, 0.0, 1.0])
+
+        # Let the meshes upload and the viewer settle before the first
+        # captured frame, then force one round-trip so the settle actually
+        # completed.
+        time.sleep(settle_s)
+        if server is not None and record_dir is not None:
+            clients = server.get_clients()
+            if clients:
+                with contextlib.suppress(Exception):
+                    _ = next(iter(clients.values())).get_render(
+                        height=128, width=128, transport_format="jpeg"
+                    )
+
+        # Map the requested duration onto the whole out-and-back loop.
+        # Indexing ``sweep`` by frame number instead would make the fraction
+        # of the arc covered depend on the frame count: at 30fps a 3s capture
+        # would walk 90 of this branch's 800 postures and the arm would look
+        # almost still.
+        n_frames = max(int(seconds * fps), 2)
+        walk = np.linspace(0.0, len(sweep) - 1.0, n_frames).round().astype(int)
+
+        frame_idx = 0
+        for i in range(n_frames):
+            with server.atomic():
+                rt.active.set_q(sweep[walk[i]])
+            frame_idx = _capture(frame_idx)
+            if record_dir is None:
+                time.sleep(1.0 / fps)
 
     if record_dir is not None:
         import json
@@ -1623,8 +1510,19 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="address to serve on (default 127.0.0.1, this machine only; "
+        "0.0.0.0 serves the whole network)",
+    )
     parser.add_argument("--port", default=8080, type=int)
+    parser.add_argument(
+        "--no-meshes",
+        action="store_true",
+        help="render every arm as kinematic primitives: no description downloads, "
+        "so it runs offline and headless",
+    )
     parser.add_argument(
         "--tour",
         action="store_true",
@@ -1642,6 +1540,13 @@ if __name__ == "__main__":
         type=float,
         default=3.0,
         help="seconds spent on each arm during the tour",
+    )
+    parser.add_argument(
+        "--tour-settle",
+        type=float,
+        default=2.5,
+        help="seconds to hold each arm still after it loads, so meshes finish "
+        "uploading to the viewer before the motion (and capture) starts",
     )
     parser.add_argument(
         "--tour-exit",
@@ -1673,8 +1578,8 @@ if __name__ == "__main__":
         "--self-motion",
         action="store_true",
         help="animate one branch of a redundant arm's self-motion manifold with "
-        "the end-effector pinned (for the README asset). Reuses --tour-record-dir "
-        "and --tour-record-size for capture.",
+        "the end-effector pinned (for the README asset). Reuses --tour-record-dir, "
+        "--tour-record-size, --tour-delay and --tour-settle.",
     )
     parser.add_argument(
         "--self-motion-arm",
@@ -1706,9 +1611,11 @@ if __name__ == "__main__":
     main(
         host=args.host,
         port=args.port,
+        meshes=not args.no_meshes,
         tour=args.tour,
         tour_delay_s=args.tour_delay,
         tour_per_arm_s=args.tour_per_arm,
+        tour_settle_s=args.tour_settle,
         tour_exit=args.tour_exit,
         tour_max_ghosts=args.tour_max_ghosts,
         tour_record_dir=args.tour_record_dir,

@@ -147,3 +147,46 @@ def test_teleop_example_runs_headless() -> None:
     assert "(unreachable)" in out
     assert statuses[-1] == "OK"
     assert lines[-1].startswith("final q:")
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        ["--tour", "--tour-per-arm", "0.2"],
+        ["--self-motion", "--self-motion-seconds", "0.3"],
+    ],
+    ids=["tour", "self_motion"],
+)
+def test_viser_demo_runs_headless(mode: list[str]) -> None:
+    """``examples/05_viser_interactive_ik.py`` (rebuilt on ``Tracker``) runs its
+    scripted modes end to end with primitives, no browser and no downloads.
+    Needs ``viser`` (``pip install 'ssik[demo]'``)."""
+    pytest.importorskip("viser")
+    out = subprocess.run(
+        [
+            sys.executable,
+            str(EXAMPLES / "05_viser_interactive_ik.py"),
+            "--no-meshes",
+            "--tour-exit",
+            "--tour-delay",
+            "0",
+            "--tour-settle",
+            "0",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "0",
+            *mode,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=True,
+    ).stdout
+    if mode[0] == "--tour":
+        # Every arm of the tour loaded and was driven, then the tour ended.
+        assert out.count("  tour: ") == 9
+        assert "tour: complete" in out
+    else:
+        assert "EE drift <=" in out
+        assert "self-motion: complete" in out
