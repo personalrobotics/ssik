@@ -1,0 +1,99 @@
+name: Checkout environment
+description: >-
+  Installs the dependencies for one Python version without building ssik, adds
+  the modules this run's `build` job compiled for that version to the checkout,
+  and puts src/ on the environment's path as an editable install would. Every
+  later `uv run` in the job uses this environment as it is (UV_NO_SYNC) on this
+  Python (UV_PYTHON).
+
+inputs:
+  python-version:
+    description: The Python version, one from the `build` job's matrix.
+    required: true
+  native:
+    description: >-
+      "true" to add ssik._ssik_native. Without it, solve(native=True) falls back
+      to the Python solvers, which the C++ emit needs from its oracle.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+      with:
+        # The locked wheels download in ~2 s; restoring a cache of them costs
+        # more than that.
+        enable-cache: false
+
+    - name: Sync dependencies, without building ssik
+      shell: bash
+      env:
+        PYTHON_VERSION: ${{ inputs.python-version }}
+      run: |
+        uv sync --dev --python "$PYTHON_VERSION" --no-install-project
+        # A bare `uv run` would build ssik into the environment again, and would
+        # first recreate it on the Python in .python-version.
+        echo "UV_PYTHON=$PYTHON_VERSION" >> "$GITHUB_ENV"
+        echo "UV_NO_SYNC=1" >> "$GITHUB_ENV"
+
+    - name: Add the compiled modules and the version file
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: ext-py${{ inputs.python-version }}
+        path: src/ssik
+
+    - name: Add the native extension
+      if: inputs.native == 'true'
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+      with:
+        name: native-py${{ inputs.python-version }}
+        path: src/ssik
+
+    - name: Put src/ on the path and check what ssik imports
+      shell: bash
+      env:
+        NATIVE: ${{ inputs.native }}
+      run: |
+        uv run python - <<'PY'
+        import sysconfig
+        from pathlib import Path
+
+        pth = Path(sysconfig.get_path("purelib"), "_ssik_checkout.pth")
+        pth.write_text(f"{Path('src').resolve()}\n")
+        PY
+        PINNED_EIGEN="$(python3 scripts/fetch_eigen.py --version)" uv run python - <<'PY'
+        # import ssik runs the stale-extension guard (#614). Then every compiled
+        # module beside its source must be what imports, and the native extension
+        # must be present exactly when asked for, built against the pinned Eigen.
+        import importlib
+        import os
+        import sys
+        import sysconfig
+        from pathlib import Path
+
+        import ssik
+
+        pkg = Path(ssik.__file__).parent
+        assert pkg == Path("src/ssik").resolve(), pkg
+        suffix = sysconfig.get_config_var("EXT_SUFFIX")
+        compiled = sorted(p for p in pkg.rglob(f"*{suffix}") if p.with_name(p.name.removesuffix(suffix) + ".py").is_file())
+        assert compiled, f"no compiled modules for {suffix}"
+        for ext in compiled:
+            parts = ext.relative_to(pkg.parent).with_name(ext.name.removesuffix(suffix)).parts
+            name = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+            assert importlib.import_module(name).__file__ == str(ext), name
+            print(f"{name}: {ext.name}")
+        try:
+            from ssik import _ssik_native
+        except ImportError:
+            _ssik_native = None
+        if os.environ["NATIVE"] == "true":
+            assert _ssik_native is not None, "ssik._ssik_native is missing"
+            assert _ssik_native.eigen_version == os.environ["PINNED_EIGEN"], _ssik_native.eigen_version
+            print(f"ssik._ssik_native: Eigen {_ssik_native.eigen_version}")
+        else:
+            assert _ssik_native is None, "ssik._ssik_native is present but was not asked for"
+        print(f"ssik {ssik.__version__} on Python {sys.version.split()[0]}")
+        PY

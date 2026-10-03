@@ -78,6 +78,143 @@ jobs:
           cat changed.txt
           python3 scripts/classify_changes.py < changed.txt | tee -a "$GITHUB_OUTPUT"
 
+  build:
+    # Compiles, once per Python version, what the checkout's jobs import in
+    # place of source, and hands it to them as artifacts, which
+    # .github/actions/checkout-env adds to each job's checkout:
+    #   ext-py<v>     the Cython modules hatch_build.py compiles in place, with
+    #                 the source record each one carries for the stale-extension
+    #                 guard (#614), plus the version file hatch-vcs writes.
+    #   native-py<v>  ssik._ssik_native, from scripts/build_cpp_ext.py against
+    #                 the pinned Eigen (#606).
+    # Those jobs used to spend ~4.5 min each on this: `uv sync` built ssik (the
+    # build hook compiling the Cython modules and its own copy of the native
+    # extension, ~3 min), then build_cpp_ext.py compiled the native extension
+    # again (~1.5 min). A pull request restores both from a cache keyed on
+    # everything the compile reads; a push to main or a workflow_dispatch run
+    # always compiles from scratch, and saves the result for pull requests.
+    name: Build extensions (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every Python version the jobs below run on (keep in sync).
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          enable-cache: false  # see .github/actions/checkout-env
+
+      - name: Sync dependencies, without building ssik
+        run: uv sync --dev --no-install-project
+
+      - name: Cache key
+        # The compiled files are a function of these sources, the lockfile, the
+        # Python and the compiler; the runner image covers the system headers.
+        # The key also stands in for a source record for the native extension,
+        # which has none. hatch_build.py's build isolation resolves its build
+        # requirements afresh, so a new Cython reaches pull requests through the
+        # next main push or image update.
+        id: key
+        run: |
+          {
+            echo "$ImageOS $ImageVersion"
+            .venv/bin/python -VV
+            c++ --version | head -1
+          } | tee toolchain.txt
+          echo "key=ext-py${UV_PYTHON}-$(sha256sum toolchain.txt | cut -c1-16)-${{ hashFiles('hatch_build.py', 'pyproject.toml', 'uv.lock', 'scripts/build_cpp_ext.py', 'scripts/fetch_eigen.py', 'src/ssik/_stale_extensions.py', 'src/ssik/kinematics/poe_fk.py', 'src/ssik/refinement/__init__.py', 'cpp/include/**', 'cpp/bindings/**') }}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Restore the compiled files
+        id: restore
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: out/
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Do the restored Cython modules match their sources?
+        # The guard's own check: a Cython target the key does not list could
+        # have changed. Any mismatch compiles everything again.
+        id: fresh
+        if: steps.restore.outputs.cache-hit == 'true'
+        run: |
+          cp -a out/ext/. out/native/. src/ssik/
+          uv run --no-sync python - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "src/ssik")
+          import _stale_extensions
+
+          stale = _stale_extensions.stale_extensions(Path("src/ssik"))
+          print("\n".join(stale) or "all match")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              print(f"ok={'false' if stale else 'true'}", file=out)
+          PY
+
+      - name: Compile
+        if: steps.fresh.outputs.ok != 'true'
+        # The two compiles run side by side. `uv sync` builds ssik, so the build
+        # hook compiles the Cython modules in place and records their sources.
+        # native=True is the shipped default for every prebuilt arm (#554), so
+        # the tests must have the native extension: without it the ~30 native
+        # tests SKIP and the perf gate measures the Python fallback against a
+        # native-recorded baseline (#568).
+        run: |
+          python3 scripts/fetch_eigen.py  # one download of the pinned Eigen for both
+          uv run --no-sync python scripts/build_cpp_ext.py --out-dir src/ssik &
+          native=$!
+          uv sync --dev --reinstall-package ssik
+          wait "$native"
+
+      - name: Collect the compiled files
+        if: steps.fresh.outputs.ok != 'true'
+        run: |
+          suffix="$(uv run --no-sync python -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))')"
+          rm -rf out && mkdir -p out/ext out/native
+          cp "src/ssik/_ssik_native$suffix" out/native/
+          (cd src/ssik && find . \( -name "*$suffix" -o -name "*$suffix.source-sha256" \) \
+            ! -name "_ssik_native*" -exec cp --parents {} ../../out/ext/ \;)
+          find out -type f | sort
+
+      - name: Save the compiled files
+        if: steps.fresh.outputs.ok != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: out/
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Version file
+        # Written by hatch-vcs for this commit, so never cached. An sdist build
+        # runs it without compiling anything.
+        run: |
+          uv build --sdist --out-dir "$RUNNER_TEMP/sdist"
+          cp src/ssik/_version.py out/ext/
+
+      - name: Upload the Cython modules and the version file
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: ext-py${{ matrix.python-version }}
+          path: out/ext/
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload the native extension
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: native-py${{ matrix.python-version }}
+          path: out/native/
+          if-no-files-found: error
+          retention-days: 3
+
   test:
     # Each Python version's suite is split across two jobs (`pytest --shard`,
     # tests/conftest.py), which halves the worst case: on the slowest runner CPU
@@ -86,7 +223,7 @@ jobs:
     # together ran every collected test exactly once. Changing the shard count
     # means changing both the matrix and the /2 in the pytest step.
     name: Linux py${{ matrix.python-version }} (${{ matrix.shard }}/2)
-    needs: changes
+    needs: [changes, build]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     env:
@@ -101,17 +238,12 @@ jobs:
         shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # hatch-vcs needs git history
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+      - name: Dependencies, and the build job's compiled modules + native extension
+        uses: ./.github/actions/checkout-env
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Sync dependencies
-        run: uv sync --dev --python ${{ matrix.python-version }}
+          python-version: ${{ matrix.python-version }}
+          native: "true"
 
       - name: Runner info
         # Surfaces the runner's real core count up front (a standalone step so it
@@ -179,14 +311,6 @@ jobs:
         # scripts/regen_docs.py" as the only correct workflow for
         # arm metadata changes.
         run: uv run python scripts/regen_docs.py --check
-
-      - name: Build native extension into the package (pybind11)
-        # native=True is the shipped default for every prebuilt arm (#554), so
-        # the matrix must exercise it: without this the ~30 native tests here
-        # silently SKIP and the perf gate measures the Python fallback against a
-        # native-recorded baseline (#568). The Python fallback keeps its coverage
-        # from the tests that pass native=False explicitly.
-        run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
 
       - name: pytest (parallel)
         # -n 4 (ubuntu-latest = 4 vCPUs). The heavy redundant tests (full
@@ -273,7 +397,7 @@ jobs:
     # arm exactly once; `cpp` refuses to build unless every arm's fixtures
     # arrived. Changing the shard count means changing both the matrix and N.
     name: C++ emit + drift guard (${{ matrix.shard }}/4)
-    needs: changes
+    needs: [changes, build]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     env:
@@ -286,17 +410,12 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # hatch-vcs needs git history
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+      - name: Dependencies, and the build job's compiled modules
+        # No native extension: the emit's oracle is the Python solvers.
+        uses: ./.github/actions/checkout-env
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Sync dependencies
-        run: uv sync --dev --python 3.12
+          python-version: "3.12"
 
       - name: Emit this shard's arms from the current oracle (parity fixtures + artifacts)
         # Parallel across arms within the shard, slowest (jointlock) arms first.
@@ -332,21 +451,15 @@ jobs:
     # emitted fixtures: ctest (FK + Newton goldens and the artifact gate over
     # every self-contained arm) and the external-consumer smoke.
     name: C++ conformance + drift guard
-    needs: cpp_emit
+    needs: [cpp_emit, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # hatch-vcs needs git history
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+      - name: Dependencies, and the build job's compiled modules
+        uses: ./.github/actions/checkout-env
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Sync dependencies
-        run: uv sync --dev --python 3.12
+          python-version: "3.12"
 
       - name: Install CMake
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
@@ -402,31 +515,22 @@ jobs:
     # The reused Python suite needs only the pybind extension, not the emitted
     # cpp/gen artifacts, so it runs alongside the emit instead of after it.
     name: Reused Python suite vs the C++ backend
-    needs: changes
+    needs: [changes, build]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     env:
       SSIK_PR_SWEEPS: ${{ needs.changes.outputs.pr_sweeps }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Dependencies, and the build job's compiled modules + native extension
+        # ssik._ssik_native is the shipped import path (#506/#507), so the reused
+        # suite drives the native backend AND the artifact solve(native=True)
+        # dispatch resolves it.
+        uses: ./.github/actions/checkout-env
         with:
-          fetch-depth: 0  # hatch-vcs needs git history
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Sync dependencies
-        run: uv sync --dev --python 3.12
-
-      - name: Build native extension into the package (pybind11)
-        # Compiles the C++ solver as ssik._ssik_native (the shipped import path,
-        # #506/#507) so the reused suite drives the native backend AND the
-        # artifact solve(native=True) dispatch resolves it. cpp/build isn't used;
-        # src/ssik/_ssik_native.so is what `from ssik import _ssik_native` finds.
-        run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
+          python-version: "3.12"
+          native: "true"
 
       - name: Reused Python suite vs the C++ backend
         # The SAME Python tests run against the native solver -- no assertion
@@ -455,10 +559,9 @@ jobs:
           fetch-depth: 0  # hatch-vcs needs git history
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
+          enable-cache: false  # see .github/actions/checkout-env
 
       - name: Build wheel
         # hatch_build fetches the pinned Eigen itself (#606); no system Eigen.
@@ -550,22 +653,17 @@ jobs:
     # docs gates, and the tests that run examples 05 and 06 from the checkout.
     # The native wheel jobs run every example against the installed wheel.
     name: Examples-only checks
-    needs: changes
+    needs: [changes, build]
     if: needs.changes.outputs.full == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # hatch-vcs needs git history
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+      - name: Dependencies, and the build job's compiled modules + native extension
+        uses: ./.github/actions/checkout-env
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Sync dependencies
-        run: uv sync --dev --python 3.12
+          python-version: "3.12"
+          native: "true"
 
       - name: ruff check
         run: uv run ruff check
@@ -575,9 +673,6 @@ jobs:
 
       - name: regen_docs --check
         run: uv run python scripts/regen_docs.py --check
-
-      - name: Build native extension into the package (pybind11)
-        run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
 
       - name: Examples 05 and 06 (tests/test_teleop.py)
         run: uv run pytest -q tests/test_teleop.py
@@ -590,6 +685,7 @@ jobs:
     if: always()
     needs:
       - changes
+      - build
       - test
       - test_shards
       - cpp_emit
@@ -612,7 +708,7 @@ jobs:
           if full not in ("true", "false"):
               sys.exit(f"no lane chosen (full={full!r}); changes: {needs['changes']['result']}")
           lane = {"true": "success", "false": "skipped"}
-          want = {"changes": "success", "native_wheel": "success", "native_wheel_eigen": "success"}
+          want = {j: "success" for j in ("changes", "build", "native_wheel", "native_wheel_eigen")}
           want |= {j: lane[full] for j in ("test", "test_shards", "cpp_emit", "cpp", "cpp_suite")}
           want["examples_lane"] = "skipped" if full == "true" else "success"
           bad = {j: (needs[j]["result"], w) for j, w in want.items() if needs[j]["result"] != w}
