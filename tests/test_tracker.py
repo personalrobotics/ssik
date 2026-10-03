@@ -210,8 +210,15 @@ def test_irb120_allow_jump_and_next_branch(native: bool, tmp_path: Path) -> None
         assert step.fk_residual <= FK_TOL
         assert step.branch_distance > 0.0
         seen.append(step.q.copy())
-    np.testing.assert_allclose(seen[-1], q_flip, atol=Q_TOL)
-    assert len({tuple(np.round(q, 6)) for q in seen}) == n
+    # Back on the starting branch, and every branch visited once. Compared on
+    # the circle: joint 6 spans more than a turn, and after a wrist flip the
+    # two representatives of the return are equally near (pi either way), so
+    # which one a backend reports is round-off.
+    assert _wrapped(seen[-1] - q_flip) <= Q_TOL
+    assert len({tuple(np.round((q + np.pi) % (2 * np.pi) - np.pi, 6)) for q in seen}) == n
+    lims = arm.joint_limits
+    for q in seen:
+        assert all(lim is None or lim[0] <= v <= lim[1] for v, lim in zip(q, lims, strict=True))
     _write(tmp_path, f"irb120_branches_{'native' if native else 'python'}", trace)
 
 
