@@ -206,6 +206,38 @@ void contact_arcs(QScalar&& q_scalar, const std::vector<double>& grid,
 // i = 8*k + slot lives on reachable arc k. Building costs microseconds (the arcs
 // are closed form); q(t) and locate(q) never need a domain; a slot's domain
 // within an arc is computed on first request, per arc, and cached.
+// The margin's point of a chart that chart_minima leaves empty -- it refines only
+// minima within kScan of a limit -- far from one: the lowest grid point of the
+// worst-case violation, refined by golden section between its neighbours.
+// Mirrors the fallback in ssik.chart._chart_margin.
+template <typename QScalar>
+std::optional<std::pair<double, double>> grid_minimum(QScalar&& q_scalar, const std::vector<double>& grid,
+                                                      const std::array<std::array<double, 2>, 7>& limits,
+                                                      bool periodic) {
+  const int n = static_cast<int>(grid.size());
+  std::vector<double> v(n);
+  bool any = false;
+  for (int k = 0; k < n; ++k) {
+    v[k] = minimax::limit_violation(q_scalar(grid[k]), limits, minimax::kAllJoints);
+    any = any || std::isfinite(v[k]);
+  }
+  if (n == 0 || !any) return std::nullopt;
+  const int k = static_cast<int>(std::min_element(v.begin(), v.end()) - v.begin());
+  const int left = periodic ? (k - 1 + n) % n : std::max(k - 1, 0);
+  const int right = periodic ? (k + 1) % n : std::min(k + 1, n - 1);
+  const double a = grid[left] - (periodic && left > k ? feasible::kTwoPi : 0.0);
+  const double b = grid[right] + (periodic && right < k ? feasible::kTwoPi : 0.0);
+  auto f = [&](double t) {
+    return minimax::limit_violation(q_scalar(periodic ? feasible::wrap(t) : t), limits, minimax::kAllJoints);
+  };
+  auto [t, ft] = minimax::golden(f, a, b);
+  if (!(ft < v[k])) {
+    t = grid[k];
+    ft = v[k];
+  }
+  return std::make_pair(periodic ? feasible::wrap(t) : t, ft);
+}
+
 struct SphericalShoulderCharts {
   JointConsts<7> c;  // the chain itself (for the Jacobian tangent)
   Eigen::Matrix<double, 3, 48> coef;
@@ -376,6 +408,34 @@ struct SphericalShoulderCharts {
     return out;
   }
 
+  // Holdability margin of one chart under `limits` (request A4): minus the least
+  // worst-case violation along the chart, the contact minimiser of in_limits as
+  // a signed value everywhere, with the t it is attained at; {-inf, NaN} for a
+  // chart with no domain. Mirrors ssik.chart._chart_margin.
+  std::pair<double, double> margin(int chart, const std::array<std::array<double, 2>, 7>& limits) const {
+    auto q_scalar = [&](double t) {
+      std::array<double, 7> qv;
+      if (!q(chart, t, qv)) qv.fill(std::numeric_limits<double>::quiet_NaN());
+      return std::vector<double>(qv.begin(), qv.end());
+    };
+    double best_v = std::numeric_limits<double>::infinity();
+    double best_t = std::numeric_limits<double>::quiet_NaN();
+    for (const auto& iv : domain(chart)) {
+      std::vector<double> grid(kDomainGrid);
+      for (int i = 0; i < kDomainGrid; ++i) grid[i] = iv.lo + (iv.hi - iv.lo) * i / (kDomainGrid - 1);
+      auto minima = minimax::chart_minima(q_scalar, grid, limits, /*periodic=*/false);
+      if (minima.empty()) {
+        const auto low = grid_minimum(q_scalar, grid, limits, /*periodic=*/false);
+        if (low) minima.push_back(*low);
+      }
+      if (!minima.empty() && minima.front().second < best_v) {  // sorted by V: the first is the least
+        best_v = minima.front().second;
+        best_t = minima.front().first;
+      }
+    }
+    return {-best_v, best_t};
+  }
+
   // Inverse chart map: index of the chart q lies on (or -1), with t and the
   // wrap-Linf mismatch there. One slot evaluation.
   int locate(const std::array<double, 7>& qv, double match_tol, double& t, double& dist) const {
@@ -457,6 +517,26 @@ struct SrsCharts {
     const Eigen::Matrix3d a = rotation_matrix(br.u_sw, psi) * br.R_sh0 * rotation_matrix(n[3], br.q3);
     const Eigen::Vector3d wr = rates_3axis(n[4], n[5], n[6], qv[4], qv[5], Eigen::Vector3d(-a.transpose() * br.u_sw));
     return {sh[0], sh[1], sh[2], 0.0, wr[0], wr[1], wr[2]};
+  }
+
+  // Holdability margin of one swivel chart under `limits` (request A4): minus the
+  // least worst-case violation round the swivel circle, with the psi it is attained
+  // at. Mirrors ssik.chart._chart_margin.
+  std::pair<double, double> margin(int chart, const std::array<std::array<double, 2>, 7>& limits) const {
+    const auto& br = branches[chart];
+    static const std::vector<double> grid = feasible::param_grid();
+    auto q_scalar = [&](double psi) {
+      const std::array<double, 7> qv = br.q(psi);
+      return std::vector<double>(qv.begin(), qv.end());
+    };
+    auto minima = minimax::chart_minima(q_scalar, grid, limits, /*periodic=*/true);
+    if (minima.empty()) {
+      const auto low = grid_minimum(q_scalar, grid, limits, /*periodic=*/true);
+      if (low) minima.push_back(*low);
+    }
+    if (minima.empty())
+      return {-std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()};
+    return {-minima.front().second, minima.front().first};
   }
 
   // In-limits arcs of one swivel chart (request A3): the elbow is constant along
