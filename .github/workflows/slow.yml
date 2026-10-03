@@ -12,7 +12,8 @@ name: Slow suite
 # of that is the Rizon 4 composer test alone, which bounds the wall-clock
 # however the suite is sharded. It also runs the exhaustive sweeps
 # (`-m sweep`, tests/_sweeps.py) in full, which most PRs run only as a fixed
-# sample; they fit beside the Rizon 4 test on the other workers. `native_parity`: the full tier of the
+# sample; they run on the workers beside the Rizon 4 test and add ~5 min of
+# wall-clock on an EPYC 7763 runner (pytest 18.7 min). `native_parity`: the full tier of the
 # native-parity gate (tests/test_native_parity.py, #626), on its own runner so
 # it adds no wall-clock to `slow`.
 
