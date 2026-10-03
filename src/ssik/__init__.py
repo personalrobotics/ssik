@@ -65,7 +65,7 @@ from ssik.manipulator import Manipulator  # noqa: E402
 
 # Catalog of shipped arms; imports no artifact (#421).
 from ssik.prebuilt import list_arms  # noqa: E402
-from ssik.tracker import Tracker, TrackerStep, TrackStatus  # noqa: E402
+from ssik.tracker import Redundancy, Tracker, TrackerStep, TrackStatus  # noqa: E402
 
 # Library best practice: prevent "No handlers could be found" warnings and
 # avoid emitting any log records unless the consuming application configures
@@ -76,6 +76,7 @@ __all__ = [
     "DEFAULT_TOLERANCE_POLICY",
     "Diagnostic",
     "Manipulator",
+    "Redundancy",
     "Solution",
     "TolerancePolicy",
     "TrackStatus",
