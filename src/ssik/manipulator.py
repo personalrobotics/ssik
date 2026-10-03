@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from ssik.chart import PathTrack, SelfMotionManifold
+    from ssik.reach import Reach
     from ssik.tracker import Tracker
 
 __all__ = ["Manipulator"]
@@ -550,6 +551,40 @@ class Manipulator:
             solver_name=self._plan.solver_name,
             policy=self._policy,
             native=native,
+        )
+
+    def reach_along(
+        self,
+        T0: ArrayLike,
+        twist: ArrayLike,
+        s_range: tuple[float, float],
+        *,
+        limits: ArrayLike | None = None,
+        native: bool = True,
+        **options: Any,
+    ) -> Reach:
+        """Every self-motion branch's reachable stretches along ``T0 exp(s xi)``
+        (redundant 7R only): see :func:`ssik.reach.reach_along`, whose keyword
+        options ``scan``, ``depth`` and ``xtol`` pass through.
+
+        :param T0: the pose at ``s = 0``.
+        :param twist: the body-frame twist ``(v, w)`` the pose moves along per unit ``s``.
+        :param s_range: the ``(lo, hi)`` stretch of ``s`` to search.
+        :param limits: ``(dof, 2)`` per-joint ``(lower, upper)``; ``None`` uses the arm's.
+        :param native: use the C++ charts when available.
+        """
+        from ssik.reach import reach_along as _reach_along
+
+        return _reach_along(
+            self._kb,
+            T0,
+            twist,
+            s_range,
+            limits=limits,
+            solver_name=self._plan.solver_name,
+            policy=self._policy,
+            native=native,
+            **options,
         )
 
     def solve_path(

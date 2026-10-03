@@ -15,6 +15,7 @@ Auto-generated from docstrings. The public surface is small by design — most u
         - self_motion
         - solve_path
         - tracker
+        - reach_along
         - dof
         - solver_name
         - kinbody
@@ -226,6 +227,10 @@ Returned alongside the solution list when `solve(T, explain=True)`.
 ::: ssik.TolerancePolicy
     options:
       show_root_heading: false
+
+## Reachability along a family of poses: `ssik.reach`
+
+`Manipulator.reach_along(T0, twist, s_range)` (redundant 7R only) returns a `Reach`: for every self-motion branch, the `(s_lo, s_hi)` stretches of the family `T0 exp(s xi)` -- `xi` a body-frame twist, a unit translation along the tool axis for a slide along its own line -- that the branch can hold inside the joint limits, where any branch exists at all (`workspace`), and every interval end with the kind of critical point it is: a `peak` (a joint on its bound, the limit curve tangent to the slice), a `corner` (two joints on their bounds), an `edge` (a joint on its bound at a fold of a `q6` chart), a `birth` (the branch appears already holdable), the `workspace` boundary, or `bisected` where no critical-point system settled the bracket. The first three are square systems in the posture and `s` solved by Newton from seeds on a coarse scan, on stops dense in `sqrt(s - s_w)` next to each workspace boundary, and on the exact elbow-fold curves; every candidate is kept only if the branch's margin changes sign across it. `Reach.margin(label, s)` is the branch's `Chart.margin` anywhere along the family.
 
 ## Self-motion charts: `ssik.chart`
 
