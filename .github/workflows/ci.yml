@@ -13,7 +13,9 @@ name: CI
 # Cost per PR: target ~5-10 min wall, free (public repo). The suite had
 # grown to 43-68 min (serial pytest + uncached robot_descriptions clones);
 # #348 cached the description repos and parallelized pytest (-n auto).
-# Doc-only PRs skip CI entirely via paths-ignore.
+# Doc-only PRs skip CI entirely via paths-ignore; PRs that change only
+# examples (and docs) run the examples lane instead of the full suite (see the
+# `changes` job).
 
 on:
   pull_request:
@@ -38,6 +40,47 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    # Picks the lane. A pull request whose changes are all examples or docs
+    # (examples/, docs/, *.md, LICENSE, .gitignore; never under src/, tests/,
+    # scripts/, cpp/, tools/ or .github/) gets the examples lane: lint, the
+    # native wheels running every example, and tests/test_teleop.py. Anything
+    # else, every push, and any doubt (no merge commit, a failed diff, no
+    # changes) gets the full suite. The diff is the PR's merge commit against
+    # its first parent, i.e. exactly what merging would change, with renames
+    # split so a move out of src/ counts as a src/ change.
+    name: Classify changed files
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.classify.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Full suite, or examples lane?
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          full=true
+          if [ "$EVENT" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
+            changed=$(git diff --no-renames --name-only HEAD^1 HEAD) || changed=""
+            printf 'changed:\n%s\n' "$changed"
+            if [ -n "$changed" ]; then
+              full=false
+              while IFS= read -r f; do
+                case "$f" in
+                  src/*|tests/*|scripts/*|cpp/*|tools/*|.github/*) full=true ;;
+                  examples/*|docs/*|*.md|LICENSE|.gitignore) ;;
+                  *) full=true ;;
+                esac
+              done <<< "$changed"
+            fi
+          fi
+          echo "event=$EVENT full=$full"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
   test:
     # Each Python version's suite is split across two jobs (`pytest --shard`,
     # tests/conftest.py), which halves the worst case: on the slowest runner CPU
@@ -46,6 +89,8 @@ jobs:
     # together ran every collected test exactly once. Changing the shard count
     # means changing both the matrix and the /2 in the pytest step.
     name: Linux py${{ matrix.python-version }} (${{ matrix.shard }}/2)
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     env:
       SSIK_DERIVATION_CACHE: ~/.cache/ssik/rr-derivations
@@ -229,6 +274,8 @@ jobs:
     # arm exactly once; `cpp` refuses to build unless every arm's fixtures
     # arrived. Changing the shard count means changing both the matrix and N.
     name: C++ emit + drift guard (${{ matrix.shard }}/4)
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     env:
       # The drift guard checks the committed artifacts against derivations run
@@ -356,6 +403,8 @@ jobs:
     # The reused Python suite needs only the pybind extension, not the emitted
     # cpp/gen artifacts, so it runs alongside the emit instead of after it.
     name: Reused Python suite vs the C++ backend
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -494,3 +543,79 @@ jobs:
           # One file per OS in the native_wheel matrix (keep in sync).
           test "$(find eigen-version -name "*.txt" | wc -l)" -eq 2
           test "$(cat eigen-version/*.txt | sort -u | wc -l)" -eq 1
+
+  examples_lane:
+    # The examples lane's share of the Python job (see `changes`): the lint and
+    # docs gates, and the tests that run examples 05 and 06 from the checkout.
+    # The native wheel jobs run every example against the installed wheel.
+    name: Examples-only checks
+    needs: changes
+    if: needs.changes.outputs.full == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs git history
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Sync dependencies
+        run: uv sync --dev --python 3.12
+
+      - name: ruff check
+        run: uv run ruff check
+
+      - name: ruff format --check
+        run: uv run ruff format --check
+
+      - name: regen_docs --check
+        run: uv run python scripts/regen_docs.py --check
+
+      - name: Build native extension into the package (pybind11)
+        run: uv run python scripts/build_cpp_ext.py --out-dir src/ssik
+
+      - name: Examples 05 and 06 (tests/test_teleop.py)
+        run: uv run pytest -q tests/test_teleop.py
+
+  ci_ok:
+    # One check that is green exactly when every job the lane needs passed and
+    # every job outside it was skipped, so a classification bug that skips the
+    # full suite on a full-lane change shows up red here.
+    name: CI result
+    if: always()
+    needs:
+      - changes
+      - test
+      - test_shards
+      - cpp_emit
+      - cpp
+      - cpp_suite
+      - native_wheel
+      - native_wheel_eigen
+      - examples_lane
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job in the lane passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          FULL: ${{ needs.changes.outputs.full }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          needs = json.loads(os.environ["NEEDS"])
+          full = os.environ["FULL"]
+          if full not in ("true", "false"):
+              sys.exit(f"no lane chosen (full={full!r}); changes: {needs['changes']['result']}")
+          lane = {"true": "success", "false": "skipped"}
+          want = {"changes": "success", "native_wheel": "success", "native_wheel_eigen": "success"}
+          want |= {j: lane[full] for j in ("test", "test_shards", "cpp_emit", "cpp", "cpp_suite")}
+          want["examples_lane"] = "skipped" if full == "true" else "success"
+          bad = {j: (needs[j]["result"], w) for j, w in want.items() if needs[j]["result"] != w}
+          for j, (got, w) in sorted(bad.items()):
+              print(f"{j}: {got}, wanted {w}")
+          sys.exit(1 if bad else 0)
+          PY

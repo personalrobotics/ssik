@@ -90,7 +90,7 @@ cache off.
 
 ## Pre-push gate
 
-CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes skip it) takes ~15-25 min. It runs:
+CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes skip it) takes ~15-25 min. A PR that changes only `examples/` (plus docs, `*.md`, `LICENSE` or `.gitignore`) runs the examples lane instead: lint, `regen_docs.py --check`, `tests/test_teleop.py` and the native wheel jobs, which run every example. Every other change, and every push to `main`, runs the full suite:
 
 - **Linux, Python 3.10-3.14**: ruff, format, mypy, `regen_docs.py --check`, and the fast pytest suite with the native extension built, split into two shards per version plus a check that the shards together ran every test; then the serial perf gates.
 - **C++**: the native artifact drift guard and the conformance build, ctest and external-consumer smoke; plus the Python suite reused against the native backend.
