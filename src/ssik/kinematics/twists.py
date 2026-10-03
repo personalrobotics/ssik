@@ -70,7 +70,8 @@ def body_twists(kb: KinBody) -> NDArray[np.float64]:
         else:
             space.append(np.r_[np.cross(T[:3, 3], a), a])
         T = T @ joint.T_right
-    return np.asarray(space) @ _adjoint(np.linalg.inv(T)).T
+    Ad = _adjoint(np.asarray(np.linalg.inv(T), dtype=np.float64))
+    return np.asarray(np.asarray(space, dtype=np.float64) @ Ad.T, dtype=np.float64)
 
 
 def free_tail(twists: ArrayLike, generators: ArrayLike, *, tol: float = _FREE_TOL) -> int:

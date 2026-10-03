@@ -79,7 +79,7 @@ def _last_axis(arm: ssik.Manipulator) -> tuple[np.ndarray, np.ndarray]:
 
 def _perpendicular(a: np.ndarray) -> np.ndarray:
     u = np.cross(a, [1.0, 0, 0] if abs(a[0]) < 0.9 else [0, 1.0, 0])
-    return u / np.linalg.norm(u)
+    return np.asarray(u / np.linalg.norm(u), dtype=np.float64)
 
 
 @pytest.mark.parametrize("name", list(ARMS))
