@@ -33,12 +33,19 @@ Algorithmic specifics chosen here:
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import json
 import math
+import os
 import pickle
+import tempfile
 from collections.abc import Callable, Sequence
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, cast, overload
 
+import mpmath
 import numpy as np
 import sympy as sp
 from numpy.typing import NDArray
@@ -190,7 +197,7 @@ def _reduce_trig_and_so3(
     return sp.expand(remainder)
 
 
-def _derive_pq_for_arm(
+def _derive_pq_symbolic(
     alpha: tuple[float, ...],
     a: tuple[float, ...],
     d: tuple[float, ...],
@@ -417,6 +424,187 @@ def _derive_pq_for_arm(
     return p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata
 
 
+# On-disk derivation cache, shared by every process on the machine: a cold
+# derivation costs ~10-45 s of sympy per (DH, linearity), and without it each
+# process (every xdist worker, every CLI run) repeats it. An entry holds the
+# symbolic (P, Q) matrices; loading one re-lambdifies them (~0.3 s), exactly as
+# the fresh derivation does. The key covers the exact DH floats, the linearity
+# choice, this module's source and the sympy/mpmath versions, so editing the
+# derivation (or upgrading sympy) can only miss, never return a stale result.
+# Entries land by atomic rename, so concurrent writers never expose a partial
+# file; an unreadable entry is a miss and is overwritten. It lives in
+# $SSIK_DERIVATION_CACHE (``off`` disables it), else
+# $XDG_CACHE_HOME/ssik/rr-derivations or ~/.cache/ssik/rr-derivations.
+_DISK_CACHE_VERSION = 1
+_DISK_CACHE_SHAPES = {
+    "sym_p_sin": (14, 9),
+    "sym_p_cos": (14, 9),
+    "sym_p_one": (14, 9),
+    "sym_q": (14, 8),
+}
+
+
+def _source_hash() -> str:
+    try:
+        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError:  # no readable source (e.g. a zipapp): run without the cache
+        return ""
+
+
+_DERIVATION_SOURCE_HASH = _source_hash()
+
+
+def _derivation_cache_dir() -> Path | None:
+    env = os.environ.get("SSIK_DERIVATION_CACHE")
+    if env is not None:
+        return None if env.strip().lower() in ("", "off") else Path(env).expanduser()
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
+    return base / "ssik" / "rr-derivations"
+
+
+def _derivation_cache_key(
+    alpha: Sequence[float],
+    a: Sequence[float],
+    d: Sequence[float],
+    linearity_joint: int,
+    apply_so3: bool,
+) -> dict[str, object]:
+    return {
+        "version": _DISK_CACHE_VERSION,
+        "source": _DERIVATION_SOURCE_HASH,
+        "sympy": sp.__version__,
+        "mpmath": mpmath.__version__,
+        # repr round-trips a float exactly: no quantization, unlike _dh_key.
+        "dh": [[repr(float(x)) for x in v] for v in (alpha, a, d)],
+        "linearity_joint": int(linearity_joint),
+        "apply_so3": bool(apply_so3),
+    }
+
+
+def _derivation_cache_path(
+    alpha: Sequence[float],
+    a: Sequence[float],
+    d: Sequence[float],
+    *,
+    linearity_joint: int,
+    apply_so3: bool,
+) -> Path | None:
+    root = _derivation_cache_dir()
+    if root is None or not _DERIVATION_SOURCE_HASH:
+        return None
+    key = _derivation_cache_key(alpha, a, d, linearity_joint, apply_so3)
+    digest = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()
+    return root / f"{digest}.pkl"
+
+
+def _lambdify_payload(payload: dict[str, object]) -> _DerivationValue:
+    """Rebuild a derivation's callables + metadata from its symbolic matrices."""
+    T_syms = payload["sym_t_target"]
+    p_sin_fn = sp.lambdify(T_syms, payload["sym_p_sin"], "numpy")
+    p_cos_fn = sp.lambdify(T_syms, payload["sym_p_cos"], "numpy")
+    p_one_fn = sp.lambdify(T_syms, payload["sym_p_one"], "numpy")
+    q_fn = sp.lambdify(T_syms, payload["sym_q"], "numpy")
+    metadata: dict[str, object] = {
+        "linearity_joint": payload["linearity_joint"],
+        "left_bilinear": payload["left_bilinear"],
+        "right_bilinear": payload["right_bilinear"],
+        "drop_joint": payload["drop_joint"],
+        "apply_so3": payload["apply_so3"],
+        "_sym_p_sin": payload["sym_p_sin"],
+        "_sym_p_cos": payload["sym_p_cos"],
+        "_sym_p_one": payload["sym_p_one"],
+        "_sym_q": payload["sym_q"],
+        "_sym_t_target": T_syms,
+    }
+    return p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata
+
+
+def _load_cached_derivation(path: Path, key: dict[str, object]) -> _DerivationValue | None:
+    try:
+        payload = pickle.loads(path.read_bytes())
+    except FileNotFoundError:
+        return None
+    # A truncated or foreign file: treat as a miss; the fresh derivation replaces it.
+    except (
+        OSError,
+        pickle.UnpicklingError,
+        EOFError,
+        AttributeError,
+        ImportError,
+        IndexError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ):
+        return None
+    if not isinstance(payload, dict) or payload.get("key") != key:
+        return None
+    syms = payload.get("sym_t_target")
+    if not (isinstance(syms, tuple) and len(syms) == 12):
+        return None
+    for name, shape in _DISK_CACHE_SHAPES.items():
+        m = payload.get(name)
+        if not (isinstance(m, sp.MatrixBase) and m.shape == shape):
+            return None
+    return _lambdify_payload(payload)
+
+
+def _store_cached_derivation(path: Path, key: dict[str, object], meta: dict[str, object]) -> None:
+    payload = {
+        "key": key,
+        "linearity_joint": meta["linearity_joint"],
+        "apply_so3": meta["apply_so3"],
+        "left_bilinear": meta["left_bilinear"],
+        "right_bilinear": meta["right_bilinear"],
+        "drop_joint": meta["drop_joint"],
+        "sym_p_sin": meta["_sym_p_sin"],
+        "sym_p_cos": meta["_sym_p_cos"],
+        "sym_p_one": meta["_sym_p_one"],
+        "sym_q": meta["_sym_q"],
+        "sym_t_target": meta["_sym_t_target"],
+    }
+    blob = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp: str | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(blob)
+        os.replace(tmp, path)
+        tmp = None
+    except OSError:  # read-only or full cache dir: the derivation still stands
+        pass
+    finally:
+        if tmp is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+
+
+def _derive_pq_for_arm(
+    alpha: tuple[float, ...],
+    a: tuple[float, ...],
+    d: tuple[float, ...],
+    *,
+    apply_so3: bool = False,
+    linearity_joint: int = 2,
+) -> _DerivationValue:
+    """:func:`_derive_pq_symbolic`, served from the on-disk cache when an
+    entry for exactly these inputs and this derivation code exists."""
+    path = _derivation_cache_path(alpha, a, d, linearity_joint=linearity_joint, apply_so3=apply_so3)
+    if path is None:
+        return _derive_pq_symbolic(
+            alpha, a, d, apply_so3=apply_so3, linearity_joint=linearity_joint
+        )
+    key = _derivation_cache_key(alpha, a, d, linearity_joint, apply_so3)
+    cached = _load_cached_derivation(path, key)
+    if cached is not None:
+        return cached
+    value = _derive_pq_symbolic(alpha, a, d, apply_so3=apply_so3, linearity_joint=linearity_joint)
+    _store_cached_derivation(path, key, value[4])
+    return value
+
+
 # Cache the per-arm derivation. Keyed on (DH, linearity, so3) tuples.
 #
 # Implemented as a module-level ``dict`` rather than ``functools.lru_cache``
@@ -581,23 +769,7 @@ def prime_derivation_from_blob(blob: bytes) -> None:
     payload = pickle.loads(blob)
     if payload.get("version") != 1:
         raise ValueError(f"unsupported derivation payload version: {payload.get('version')}")
-    T_syms = payload["sym_t_target"]
-    p_sin_fn = sp.lambdify(T_syms, payload["sym_p_sin"], "numpy")
-    p_cos_fn = sp.lambdify(T_syms, payload["sym_p_cos"], "numpy")
-    p_one_fn = sp.lambdify(T_syms, payload["sym_p_one"], "numpy")
-    q_fn = sp.lambdify(T_syms, payload["sym_q"], "numpy")
-    metadata: dict[str, object] = {
-        "linearity_joint": payload["linearity_joint"],
-        "left_bilinear": payload["left_bilinear"],
-        "right_bilinear": payload["right_bilinear"],
-        "drop_joint": payload["drop_joint"],
-        "apply_so3": payload["apply_so3"],
-        "_sym_p_sin": payload["sym_p_sin"],
-        "_sym_p_cos": payload["sym_p_cos"],
-        "_sym_p_one": payload["sym_p_one"],
-        "_sym_q": payload["sym_q"],
-        "_sym_t_target": T_syms,
-    }
+    p_sin_fn, p_cos_fn, p_one_fn, q_fn, metadata = _lambdify_payload(payload)
     key = (
         _dh_key(payload["alpha"]),
         _dh_key(payload["a"]),
@@ -728,7 +900,7 @@ def build_pq(
         standard DH parameters per joint.
     :param t_target: 4x4 target end-effector pose in the base frame.
     :param linearity_joint: AE-3 (#70) leftvar choice. See
-        :func:`_derive_pq_for_arm` docstring for the full intuition.
+        :func:`_derive_pq_symbolic` docstring for the full intuition.
     :param apply_so3: AE-4 (#71) SO(3) identity reduction.
     :param return_metadata: If True, returns ``(P_sin, P_cos, P_one, Q, meta)``.
         ``meta`` carries the leftvar role assignment needed by

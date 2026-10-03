@@ -77,6 +77,17 @@ cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release \
   -DSSIK_EIGEN_VERSION="$(python3 scripts/fetch_eigen.py --version)"
 ```
 
+**Symbolic derivations are cached on disk.** The general-6R solver's
+Raghavan-Roth derivation costs ~10-45 s of sympy per arm and linearity choice.
+The first process to run one stores it in `~/.cache/ssik/rr-derivations`
+(under `$XDG_CACHE_HOME` when set; `SSIK_DERIVATION_CACHE` moves it and
+`SSIK_DERIVATION_CACHE=off` disables it), and every later process, including
+each pytest-xdist worker, reloads it in under a second. An entry is keyed on the
+exact DH, the linearity choice, the source of `_raghavan_roth.py` and the sympy
+and mpmath versions, so editing the derivation or upgrading sympy can only miss.
+Deleting the directory is always safe. CI's artifact drift guard runs with the
+cache off.
+
 ## Pre-push gate
 
 CI (`.github/workflows/ci.yml`, on every PR and push to `main`; doc-only changes skip it) takes ~15-25 min. It runs:
