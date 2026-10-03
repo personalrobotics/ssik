@@ -12,6 +12,8 @@ Public surface (v1.0):
   ``refinement_used``).
 - :class:`TolerancePolicy` / :data:`DEFAULT_TOLERANCE_POLICY` --
   knobs for FK closure thresholds (rarely needed).
+- :class:`Tracker` -- streaming IK: one pose in, one configuration out,
+  never a silent branch switch (:meth:`Manipulator.tracker`).
 - :func:`get_include` / :func:`get_cmake_dir` -- where the wheel's
   header-only C++ solvers and their CMake package are (:mod:`ssik.cpp`).
 
@@ -61,6 +63,7 @@ from ssik.manipulator import Manipulator  # noqa: E402
 
 # Catalog of shipped arms; imports no artifact (#421).
 from ssik.prebuilt import list_arms  # noqa: E402
+from ssik.tracker import Tracker, TrackerStep, TrackStatus  # noqa: E402
 
 # Library best practice: prevent "No handlers could be found" warnings and
 # avoid emitting any log records unless the consuming application configures
@@ -73,6 +76,9 @@ __all__ = [
     "Manipulator",
     "Solution",
     "TolerancePolicy",
+    "TrackStatus",
+    "Tracker",
+    "TrackerStep",
     "__version__",
     "get_cmake_dir",
     "get_include",

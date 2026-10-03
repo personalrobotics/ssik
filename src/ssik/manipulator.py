@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     from ssik.chart import PathTrack, SelfMotionManifold
+    from ssik.tracker import Tracker
 
 __all__ = ["Manipulator"]
 
@@ -581,6 +582,35 @@ class Manipulator:
             policy=self._policy,
             native=native,
             max_step=max_step,
+        )
+
+    def tracker(
+        self,
+        q0: ArrayLike,
+        *,
+        max_joint_speed: float | ArrayLike | None = None,
+        jump_threshold: float = 0.5,
+        allow_jump: bool = False,
+        respect_limits: bool = True,
+        native: bool = True,
+        t0: float | None = None,
+    ) -> Tracker:
+        """A streaming IK :class:`~ssik.Tracker` on this arm, starting at ``q0``.
+
+        Shorthand for ``ssik.Tracker(self, q0, ...)``; the parameters are the
+        constructor's. Feed it one pose at a time with ``update(T, t)``.
+        """
+        from ssik.tracker import Tracker
+
+        return Tracker(
+            self,
+            q0,
+            max_joint_speed=max_joint_speed,
+            jump_threshold=jump_threshold,
+            allow_jump=allow_jump,
+            respect_limits=respect_limits,
+            native=native,
+            t0=t0,
         )
 
     # ------------------------------------------------------------------
