@@ -13,10 +13,8 @@ analytical IK solution at that pose as a live arm:
   (``Tracker.solutions()``). "Cycle preferred branch" switches the solid
   arm to the next one (``Tracker.next_branch()``).
 
-Toggle through arms in the GUI -- including the ones EAIK refuses (any
-non-Pieper 6R, any 7R). The badge shows what EAIK does on each (measured,
-from ssik's prebuilt manifest), so the wedge is visible side-by-side with
-what ssik returns.
+Toggle through arms in the GUI, from Pieper-class 6R to non-Pieper 6R and
+7R; the badge shows which ssik solver each one dispatches to.
 
 Visuals come from ``robot_descriptions`` where it has a match (full
 URDF meshes); arms without an upstream description (Puma 560, JACO 2,
@@ -51,7 +49,7 @@ import time
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 import numpy as np
 import trimesh
@@ -184,34 +182,6 @@ ARMS: list[ArmSpec] = [
 # Ghost-arm slots are created when an arm loads, one renderer each. This caps
 # them on the arms whose solve() samples a self-motion into many points.
 MAX_BRANCHES = 32
-
-
-def _manifest_arms() -> dict[str, Any]:
-    """The prebuilt manifest (``ssik/prebuilt/MANIFEST.toml``, shipped in the
-    wheel): the measured EAIK comparison for each arm lives there."""
-    from importlib.resources import files
-
-    try:
-        import tomllib
-    except ModuleNotFoundError:  # Python 3.10
-        import tomli as tomllib  # type: ignore[no-redef]
-
-    text = (files("ssik.prebuilt") / "MANIFEST.toml").read_text(encoding="utf-8")
-    arms: dict[str, Any] = tomllib.loads(text)["arms"]
-    return arms
-
-
-def eaik_status(module_name: str) -> str:
-    """What EAIK does on this arm, from the measured manifest entry."""
-    entry = _manifest_arms().get(module_name, {}).get("eaik")
-    if not entry:
-        return "not measured"
-    if entry.get("supported"):
-        return (
-            f"supported ({entry['ms_mean'] * 1000:.0f} µs / FK {entry['max_fk']:.1e} / "
-            f"{entry['sols_min']}-{entry['sols_max']} sols)"
-        )
-    return f'refuses ("{entry.get("refusal", "?")}")'
 
 
 # ---------------------------------------------------------------------------
@@ -738,7 +708,6 @@ def main(
         initial_value=ARMS[0].label,
     )
     solver_badge = server.gui.add_markdown("**ssik**: (loading…)")
-    eaik_badge = server.gui.add_markdown("**EAIK**: (loading…)")
     stats_md = server.gui.add_markdown("**Stats**: waiting for first solve…")
     # ``max_ghosts_slider`` is hot-rewired in ``select_arm`` to the incoming
     # arm's ghost slots; the initial bounds are a placeholder.
@@ -891,7 +860,6 @@ def main(
                 f'`ssik.Manipulator.from_prebuilt("{spec.module_name}")`\n\n'
                 f"**viz**: {viz_kind}"
             )
-            eaik_badge.content = f"**EAIK**: {eaik_status(spec.module_name)}"
             # Rebind the slider bounds to this arm's ghost slots. Default to
             # "all ghosts on" -- the user can dial it down to remove clutter.
             max_n = len(runtime.ghosts)
@@ -1060,21 +1028,20 @@ def _await_recorder(
 # ---------------------------------------------------------------------------
 
 
-# Narrative order: easy (EAIK supports) → 6R wedge (EAIK refuses) → 7R
-# climax (EAIK refuses entirely). Mesh-rendered arms where available -- the
+# Narrative order: Pieper-class 6R → non-Pieper 6R → 7R. Mesh-rendered arms where available -- the
 # primitive skeleton fallback doesn't look cinematic enough for the README
 # hero. JACO 2 renders meshes when ``local_urdf_paths`` names a local copy of
 # its description.
 _TOUR_ORDER: tuple[str, ...] = (
-    # Act 1 — easy: EAIK has these.
+    # Act 1 — Pieper-class (and the anthropomorphic Panda).
     "UR5 — three-parallel 6R (Pieper)",
     "Unitree Z1 — three-parallel 6R (UR-class)",
     "Franka Panda — anthropomorphic 7R",
-    # Act 2 — wedge: non-Pieper 6R, EAIK refuses.
+    # Act 2 — non-Pieper 6R.
     "UFactory xArm6 — non-Pieper 6R",
     "Kinova JACO 2 — non-Pieper 6R",
     "AgileX PiPER — non-Pieper 6R",
-    # Act 3 — climax: 7R territory, EAIK refuses entirely.
+    # Act 3 — 7R.
     "KUKA iiwa14 — SRS 7R",
     "Flexiv Rizon 4 — non-SRS 7R",
 )
