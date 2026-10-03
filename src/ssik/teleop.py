@@ -1,4 +1,4 @@
-"""Frame helpers for teleoperation: calibration, tool offset, scaling, clutch.
+"""Frame helpers for teleoperating an arm: calibration, tool offset, scaling, clutch.
 
 A teleoperation loop turns device poses into arm targets and hands them to a
 :class:`~ssik.Tracker`. The device (a VR controller, a SpaceMouse, a mocap
