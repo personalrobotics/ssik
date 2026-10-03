@@ -11,12 +11,14 @@ Each update is a continuation of the branch the tracker is on, never a fresh
 solve that might land on another one:
 
 - On a redundant 7R arm with a closed-form chart (``seven_r.spherical_shoulder``,
-  ``seven_r.srs``) the branch is continued exactly as :func:`ssik.chart.track_all`
-  continues it: :meth:`~ssik.chart.SelfMotionManifold.continue_from` with the
-  redundancy coordinate held fixed, so the elbow does not flip and a tracked
-  stretch returns what ``solve_path`` returns for the same poses.
+  ``seven_r.srs``) the branch is continued on the charts as
+  :func:`ssik.chart.track_all` continues it: the redundancy coordinate is held
+  fixed and the chart point there nearest the followed one is taken, so the
+  elbow does not flip and a tracked stretch returns what ``solve_path``
+  returns for the same poses (``docs/api.md``, "Streaming IK", says where the
+  two can differ).
 - On every other arm it is the seeded solve,
-  ``solve(T, q_seed=q, max_solutions=1)``, ranked by ssik's seed metric
+  ``solve(T, q_seed=q, max_solutions=1, allow_rescue=False)``, ranked by ssik's seed metric
   (``wrap_linf``). At a singular pose ``solve()`` returns the point of a
   continuum nearest the seed (``docs/api.md``, "Singular continua"), so the
   continuation is well defined through a singularity.

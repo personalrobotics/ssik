@@ -14,6 +14,7 @@ Auto-generated from docstrings. The public surface is small by design — most u
         - fk
         - self_motion
         - solve_path
+        - tracker
         - dof
         - solver_name
         - kinbody
@@ -22,8 +23,9 @@ Auto-generated from docstrings. The public surface is small by design — most u
 
 Every public entry point that takes a pose or a joint vector checks it once,
 before it picks a backend: each prebuilt artifact's `solve` and `fk`,
-`Manipulator.solve`, `Manipulator.self_motion` and `Manipulator.solve_path`.
-A malformed call raises the same exception, with the same message, on
+`Manipulator.solve`, `Manipulator.self_motion`, `Manipulator.solve_path`,
+`Tracker` (its `q0`, and the target of every `update`) and the `ssik.teleop`
+frame helpers. A malformed call raises the same exception, with the same message, on
 `native=True` and `native=False`, and the native extension only ever sees
 well-formed input. The implementation is `ssik._solve_inputs`.
 
@@ -247,6 +249,195 @@ With the native extension (Linux and macOS wheels) a family builds in about 20 �
         - three_parallel_label
         - SelfMotionManifold
         - Chart
+
+## Streaming IK: `Tracker`
+
+`Manipulator.solve_path` tracks a pose list offline. A teleoperated arm sees
+its poses one at a time, from a VR controller, a SpaceMouse, a mocap stream or
+a transform gizmo. A `Tracker` holds the state that takes: the branch it is
+on, the configuration it last commanded, and the time of the last pose.
+
+```python
+import ssik
+
+arm = ssik.Manipulator.from_prebuilt("ur5e")       # or from_urdf(...)
+tracker = arm.tracker(q_robot, max_joint_speed=2.0)
+for T, t in source.poses():                        # any PoseSource
+    step = tracker.update(T, t)                    # one pose in
+    robot.command(step.q)                          # one configuration out
+```
+
+`Tracker` lives on `Manipulator`, so a shipped arm gets it through
+`Manipulator.from_prebuilt`, whose `solve` is the artifact's own. It adds no
+cost to `solve()`.
+
+**Continuation.** Every update continues the branch the tracker is following,
+never a fresh solve that could land on another one:
+
+- On a redundant 7R arm with a closed-form chart (`seven_r.spherical_shoulder`:
+  Franka Panda, FR3; `seven_r.srs`: KUKA iiwa and the other exactly concurrent
+  SRS arms) the redundancy coordinate is held fixed, as `solve_path` holds it,
+  and the candidate is the chart point there nearest the followed one (every
+  joint compared on the circle). Where the label contract holds, that is the
+  chart `solve_path` continues to by label, so a tracked stretch returns
+  `solve_path`'s configurations up to a `2*pi` representative. Near a fold of
+  the spherical-shoulder charts the old label can still name a point within
+  `max_step` that is not the continuation; the tracker takes the nearer point.
+- On every other arm, and on a 7R chart arm when the held point is further
+  than `jump_threshold` or outside the joint limits, the candidate is
+  `solve(T, q_seed=..., max_solutions=1, allow_rescue=False)` under the
+  tracker's `respect_limits`: the nearest configuration in ssik's seed metric.
+  At a singular pose that is the point of the continuum nearest the seed
+  ([Singular continua](#singular-continua)), so the continuation is defined
+  through a singularity. The T-perturbation rescue is off: it is for a
+  measure-zero ridge where the analytical path finds nothing, and it costs
+  milliseconds native and seconds in Python on every update it runs, which
+  would be every update the target is out of reach. At such a ridge the
+  tracker holds for one update instead.
+
+The candidate is reported in the representative `solve()` reports, the one
+nearest the followed configuration, inside the joint limits when they are
+respected.
+
+**Distance.** Every distance is ssik's seed metric (`wrap_linf`): the largest
+single-joint move, with continuous joints (no limits) compared on the circle
+and every other joint by its coordinate, since a finite joint cannot turn
+through its stop.
+
+**Statuses.** With `branch_distance` the distance from the configuration being
+followed to the candidate:
+
+| Status | When | `q` |
+|---|---|---|
+| `OK` | a candidate within `jump_threshold`, reachable this update | the candidate; FK closes to the target within the solver's tolerance |
+| `LIMITED` | as `OK`, but some joint would move more than `max_joint_speed * dt` | moved toward the candidate, the step scaled down (direction kept) until no joint exceeds its limit |
+| `HELD` | no candidate, or one further than `jump_threshold` with `allow_jump=False` | the previous `q`, unchanged |
+| `JUMPED` | a candidate further than `jump_threshold` with `allow_jump=True`, or `next_branch()` | the candidate, rate limited like any move |
+
+`HELD` carries a `reason`:
+
+- `"unreachable"`: no configuration reaches the target, within the limits or
+  not (`step.reachable` is `False`);
+- `"limits"`: the followed branch continues only outside the joint limits, or
+  no in-limit configuration reaches the target;
+- `"jump"`: the nearest configuration is further than `jump_threshold`, a
+  branch switch.
+
+While held the tracker keeps following the branch it was on, so it resumes
+`OK` when the target comes back within reach of that branch.
+
+**Thresholds.** The two limits answer different questions.
+
+- `jump_threshold` (default `0.5` rad, `solve_path`'s `max_step`) decides what
+  is the same branch. It is a property of the branch geometry, independent of
+  time: a fast hand never triggers it and a slow flip always does.
+- `max_joint_speed` (rad/s, or m/s for a prismatic joint; one number or one
+  per joint; default none) bounds how fast the arm follows. It applies to an
+  update with a timestamp `t` after an earlier timestamp (the constructor's
+  `t0`, `reset`'s `t`, or a previous update), with `dt` their difference.
+  Timestamps must not decrease. While `LIMITED`, `q` does not close FK to the
+  target: `fk_residual` is the honest `||FK(q) - T||_F` and `lag` the
+  distance still to go. Later updates keep closing the gap, and the update
+  that arrives is `OK`.
+
+**Step fields.** `TrackerStep` is a frozen record: `q` (read-only), `status`,
+`reason`, `fk_residual` (against this update's target, whatever the status),
+`moved` (from the previous step's `q`), `branch_distance` (`nan` when there
+was no candidate), `lag`, and `t`.
+
+**Branches.** `solutions(max_solutions=None)` returns every configuration at
+the target the tracker last accepted (`tracker.target`), nearest the followed
+branch first, one per geometric branch (`enumerate_windings=False`); on a
+redundant 7R arm these are `solve()`'s samples of the self-motion. They are
+for rendering the other branches. `next_branch()` switches to the next branch
+at that target, cycling in a fixed order (on a 7R chart arm by chart label at
+the held coordinate, otherwise by configuration), and returns a `JUMPED`
+step, or `None` when there is no other branch. Without a rate limit its `q` is
+on the new branch; with one the arm does not move there, the new branch
+becomes the one followed, and later timestamped updates carry the arm there
+(`LIMITED` until it arrives). `reset(q, t=None)` restarts from a
+configuration the arm is at.
+
+::: ssik.Tracker
+    options:
+      show_root_heading: false
+      members:
+        - update
+        - solutions
+        - next_branch
+        - reset
+        - q
+        - target
+
+::: ssik.TrackStatus
+    options:
+      show_root_heading: false
+
+::: ssik.TrackerStep
+    options:
+      show_root_heading: false
+
+## Teleoperation frames: `ssik.teleop`
+
+The steps between a device and `Tracker.update` are rigid-transform
+compositions, collected in `ssik.teleop`. ssik ships no device code: a device
+is anything with a `poses()` method yielding `(T, t)`, the `PoseSource`
+protocol. `examples/07_teleop.py` wires a scripted source through every step.
+
+**Conventions.** A pose is a 4x4 homogeneous rigid transform `a_T_b`, the pose
+of frame `b` in frame `a`; it maps `b`-coordinates to `a`-coordinates and
+composes as `a_T_c = a_T_b @ b_T_c`. Every pose argument is checked as
+`solve()` checks `T_target` ([Input validation](#input-validation)), with the
+argument's name in the message.
+
+| Helper | Returns |
+|---|---|
+| `invert(T)` | `[R^T, -R^T p]` |
+| `calibration_from(T_device, T_robot)` | `base_T_world = T_robot @ T_device^-1`, the calibration that maps this device reading onto this robot pose |
+| `apply_calibration(calibration, T_device)` | `calibration @ T_device`: a reading `world_T_device` in the arm's base frame |
+| `tcp_to_flange(T_tcp, flange_T_tcp)` | `T_tcp @ flange_T_tcp^-1`: the flange pose that puts the tool centre point at `T_tcp` (what IK solves for) |
+| `flange_to_tcp(T_flange, flange_T_tcp)` | `T_flange @ flange_T_tcp`: the TCP pose at a flange pose |
+| `scale_about(T, scale, anchor)` | position `a + scale * (p - a)` about the anchor point `a` (a `(3,)` point, or a pose's position, in `T`'s frame), rotation unchanged |
+
+**Clutch.** Relative teleoperation: the arm follows the device's motion since
+the grip was pressed, not its absolute pose. `engage(T_device, T_robot)`
+stores the device anchor `A_d` and the arm anchor `A_r`, both in one frame
+(normally the arm's base frame, after `apply_calibration`). While engaged,
+
+```
+target(D) = A_r @ S(A_d^-1 @ D)
+```
+
+`A_d^-1 @ D` is the device's displacement since engaging, expressed in the
+device's frame at that moment; `S` multiplies its translation by `scale` and
+leaves its rotation alone; the arm makes that displacement in its own frame
+at the anchor. Consequences:
+
+- `target(A_d) == A_r`: engaging never moves the target.
+- With `scale = 1`, `target(D) = (A_r @ A_d^-1) @ D`, a fixed rigid transform
+  of the device's pose: relative motion is reproduced exactly, and the
+  device's axes act as the tool's axes as they were at engagement. A hand
+  moving along its own x axis moves the tool along the tool's x axis.
+- Scaling equals `scale_about(D, scale, A_d)` followed by the unscaled clutch.
+- `release()` makes `target` return `None` (the caller holds); the next
+  `engage` re-anchors both frames, so the operator can reposition the device
+  without moving the arm.
+
+Engage with the arm's actual pose, `flange_to_tcp(arm.fk(tracker.q), tool)`,
+so a rate-limited arm that is still catching up is anchored where it is.
+
+::: ssik.teleop
+    options:
+      show_root_heading: false
+      members:
+        - PoseSource
+        - Clutch
+        - calibration_from
+        - apply_calibration
+        - tcp_to_flange
+        - flange_to_tcp
+        - scale_about
+        - invert
 
 ## Postprocess helpers
 
