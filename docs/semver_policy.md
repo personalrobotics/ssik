@@ -44,6 +44,7 @@ A change is **MAJOR** (breaking) when:
 - A public function's signature changes in a non-backward-compatible way (positional arg order, removed kwarg, kwarg name change)
 - A returned dataclass loses a field, or an existing field changes type
 - A bug fix that produces materially different IK behaviour for valid inputs (e.g. a previously-returned candidate is now filtered, or a previously-empty result is now populated). *Sub-machine-precision FK shifts within the documented tolerance policy are NOT breaking.*
+- A change to a documented solve contract in `docs/api.md`. That includes which point of a singular continuum a seeded or unseeded solve returns ("Singular continua", since 8.0.0), which inputs `solve()` accepts and what it raises for the rest ("Input validation", since 8.0.0), the limit band, and the angle representatives.
 - The CLI's `--flag` semantics change in a way that breaks scripts pinning a major
 - Python version support drops (e.g. dropping cp311)
 - Wheel-platform support drops in a way that affects existing installs (e.g. dropping macOS arm64)
