@@ -13,7 +13,9 @@ Public surface (v1.0):
 - :class:`TolerancePolicy` / :data:`DEFAULT_TOLERANCE_POLICY` --
   knobs for FK closure thresholds (rarely needed).
 - :class:`Tracker` -- streaming IK: one pose in, one configuration out,
-  never a silent branch switch (:meth:`Manipulator.tracker`).
+  never a silent branch switch (:meth:`Manipulator.tracker`). Frame helpers
+  for teleoperation (calibration, tool offset, scaling, a clutch) and the
+  ``PoseSource`` protocol are in :mod:`ssik.teleop`.
 - :func:`get_include` / :func:`get_cmake_dir` -- where the wheel's
   header-only C++ solvers and their CMake package are (:mod:`ssik.cpp`).
 
