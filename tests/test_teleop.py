@@ -1,4 +1,4 @@
-"""Teleoperation frame helpers (``ssik.teleop``).
+"""Teleoperation frame helpers (``ssik.teleop``) and the ``07_teleop`` example.
 
 The helpers are rigid-transform algebra, so the tests check the algebra's
 invariants on random rigid poses rather than particular outputs: calibration
@@ -8,6 +8,10 @@ engagement, with scaling equal to ``scale_about`` at the device anchor.
 """
 
 from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,6 +28,7 @@ from ssik.teleop import (
     tcp_to_flange,
 )
 
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 TOL = 1e-12
 
 
@@ -121,3 +126,24 @@ def test_frame_inputs_follow_the_solve_contract() -> None:
         scale_about(T, True, T)
     with pytest.raises(ValueError, match="anchor must be"):
         scale_about(T, 2.0, np.zeros(4))
+
+
+def test_teleop_example_runs_headless() -> None:
+    """``examples/07_teleop.py`` runs end to end with its scripted source and
+    shows the statuses a teleop loop meets: tracking, a speed limit, an
+    unreachable stretch it holds through, and recovery."""
+    out = subprocess.run(
+        [sys.executable, str(EXAMPLES / "07_teleop.py")],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
+    ).stdout
+    lines = out.splitlines()
+    statuses = [ln.split()[1] for ln in lines if ln.startswith("t=")]
+    assert statuses[0] == "OK"
+    assert "LIMITED" in statuses
+    assert "HELD" in statuses
+    assert "(unreachable)" in out
+    assert statuses[-1] == "OK"
+    assert lines[-1].startswith("final q:")
