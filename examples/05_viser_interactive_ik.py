@@ -21,8 +21,9 @@ URDF meshes); arms without an upstream description (Puma 560, JACO 2,
 Kassow, FANUC CRX, big_yam, OpenArm, Rizon 10), and any whose
 description fails to load, fall back to a colored joint-spheres-plus-
 capsules rendering driven by ssik's own FK, so every arm is visible.
-Descriptions that are xacro need ``pip install 'ssik[xacro]'``; without
-it those arms (FR3, xArm, Rizon 4, Gen3) render as primitives. A local
+Descriptions that are xacro (UR5, FR3, xArm, Rizon 4, Gen3) are expanded by
+``xacrodoc``, which ``ssik[demo]`` installs; without it those arms render as
+primitives. A local
 URDF with meshes can be supplied through ``ArmSpec.local_urdf_paths``
 (see #310). ``--no-meshes`` forces primitives everywhere (offline, or
 headless).
@@ -83,6 +84,10 @@ class ArmSpec:
     # base_link differently (e.g. 180° about Z), which would otherwise put
     # the marker far from the visible EE.
     render_ee_link: str = ""
+    # When no rendered link carries ssik's end-effector frame itself, the
+    # fixed rotation from ``render_ee_link`` to it, as roll-pitch-yaw
+    # (radians, applied x then y then z in the link's frame).
+    render_ee_rpy: tuple[float, float, float] = (0.0, 0.0, 0.0)
     # Subset of the URDF's actuated joints (in URDF order) that ssik's
     # q-vector drives. ``None`` means "all actuated joints", which only
     # works when the URDF's actuated count == the arm's DOF. When the
@@ -97,8 +102,12 @@ ARMS: list[ArmSpec] = [
     ArmSpec(
         label="UR5 — three-parallel 6R (Pieper)",
         module_name="ur5_ik",
-        rd_description="ur5_description",
-        render_ee_link="ee_link",
+        rd_description="ur5_official_description",
+        # ssik's UR5 end effector is the classic ``ee_link`` (x along the tool
+        # axis). The official description has ``flange`` instead: the same
+        # point, turned half a turn about x.
+        render_ee_link="flange",
+        render_ee_rpy=(np.pi, 0.0, 0.0),
     ),
     ArmSpec(
         label="KUKA iiwa14 — SRS 7R",
@@ -116,6 +125,8 @@ ARMS: list[ArmSpec] = [
         module_name="yam_ik",
         rd_description="yam_description",
         render_ee_link="link_6",
+        # The description lists its joints wrist first.
+        ik_joint_names=tuple(f"joint{i}" for i in range(1, 7)),
     ),
     ArmSpec(
         label="Franka Panda — anthropomorphic 7R",
@@ -274,6 +285,17 @@ def _align_z_to(direction: np.ndarray) -> np.ndarray:
     return np.array([float(np.cos(half)), axis[0] * s, axis[1] * s, axis[2] * s])
 
 
+def _rpy_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    """``Rz(yaw) @ Ry(pitch) @ Rx(roll)``, the URDF ``rpy`` convention."""
+    cr, sr = np.cos(roll), np.sin(roll)
+    cp, sp = np.cos(pitch), np.sin(pitch)
+    cy, sy = np.cos(yaw), np.sin(yaw)
+    rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+    ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
+    rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
+    return rz @ ry @ rx
+
+
 class MeshArmRenderer:
     """Real-mesh URDF arm via ``robot_descriptions`` + ``ViserUrdf``.
 
@@ -291,9 +313,12 @@ class MeshArmRenderer:
         render_ee_link: str,
         ssik_fk: callable[[np.ndarray], np.ndarray],
         cast_shadow: bool = True,
+        render_ee_rpy: tuple[float, float, float] = (0.0, 0.0, 0.0),
     ) -> None:
         self._urdf = urdf
         self._render_ee_link = render_ee_link
+        self._ee_offset = np.eye(4)
+        self._ee_offset[:3, :3] = _rpy_matrix(*render_ee_rpy)
         self.viz = ViserUrdf(
             server,
             urdf_or_path=urdf,
@@ -326,13 +351,26 @@ class MeshArmRenderer:
         T_ssik = ssik_fk(q_probe)
         T_render = self._render_fk(q_probe)
         self.base_offset = T_render @ invert(T_ssik)
+        # The model only holds if the rendered EE frame is ssik's EE frame;
+        # check it at a second configuration, or the marker would drift off
+        # the visible end effector as the joints turn.
+        q_check = q_probe[::-1] - 0.3
+        drift = float(
+            np.max(np.abs(self._render_fk(q_check) - self.base_offset @ ssik_fk(q_check)))
+        )
+        if drift > 1e-6:
+            self.viz.remove()
+            raise ValueError(
+                f"rendered link {render_ee_link!r} does not track ssik's end effector "
+                f"(drift {drift:.2e}); set ArmSpec.render_ee_link / render_ee_rpy"
+            )
 
     def _render_fk(self, q: np.ndarray) -> np.ndarray:
         cfg = {n: 0.0 for n in self._urdf_joint_names}
         for i, urdf_idx in enumerate(self._ik_to_urdf):
             cfg[self._urdf_joint_names[urdf_idx]] = float(q[i])
         self._urdf.update_cfg(cfg)
-        return np.asarray(self._urdf.get_transform(self._render_ee_link))
+        return np.asarray(self._urdf.get_transform(self._render_ee_link)) @ self._ee_offset
 
     def set_q(self, q: np.ndarray) -> None:
         cfg = np.zeros(self._dof, dtype=float)
@@ -626,6 +664,7 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec, *, meshes: bool) 
                     render_ee_link,
                     arm.fk,
                     cast_shadow=cast_shadow,
+                    render_ee_rpy=spec.render_ee_rpy,
                 )
                 if _mesh_renderer_has_geometry(mesh):
                     return mesh
@@ -642,6 +681,9 @@ def load_arm_runtime(server: viser.ViserServer, spec: ArmSpec, *, meshes: bool) 
         return PrimitiveArmRenderer(server, arm.kinbody, root, rgba, cast_shadow=cast_shadow)
 
     active = _build("/arm/active", ACTIVE_COLOR_RGBA, cast_shadow=True)
+    # If the active arm fell back to primitives, so do the ghosts, without
+    # retrying (and re-reporting) the same failure once per ghost.
+    use_mesh = use_mesh and isinstance(active, MeshArmRenderer)
     ghosts: list[_Renderer] = [
         _build(f"/arm/ghost_{i:02d}", GHOST_COLOR_RGBA, cast_shadow=False) for i in range(n_ghosts)
     ]
