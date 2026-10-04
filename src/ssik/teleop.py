@@ -15,12 +15,18 @@ checks each pose against the rigid-transform rule of ``solve()`` (default
 tolerance; ``docs/api.md``, "Input validation") and raises ``TypeError`` or
 ``ValueError`` as it does.
 
-A typical chain, device reading ``D`` (``world_T_device``) to IK target::
+A typical chain, device reading ``D`` (``tracking_T_device``, in the device's
+own tracking frame) to IK target::
 
-    D_base = apply_calibration(base_T_world, D)       # into the arm's base frame
+    D_base = apply_calibration(base_T_tracking, D)    # into the arm's base frame
     T_tcp  = clutch.target(D_base)                    # relative motion, while held
     T      = tcp_to_flange(T_tcp, flange_T_tcp)       # the pose ssik solves for
     step   = tracker.update(T, t)
+
+The calibration is ``base_T_tracking``. An arm mounted in a world frame of its
+own (a room frame, with the arm at a shoulder) has
+``base_T_tracking = invert(world_T_base) @ world_T_tracking``: the mounting
+gives ``world_T_base``, the device setup ``world_T_tracking``.
 
 ``docs/api.md`` ("Teleoperation frames") is the normative statement of these
 conventions.
@@ -97,16 +103,17 @@ def calibration_from(T_device: ArrayLike, T_robot: ArrayLike) -> NDArray[np.floa
     """The calibration that maps a device reading onto a known robot pose.
 
     Hold the device at a pose the arm also holds (or define the correspondence
-    you want), read ``T_device`` (``world_T_device``) and ``T_robot``
-    (``base_T_tcp``), and this returns ``base_T_world = T_robot @ T_device^-1``,
-    so that ``apply_calibration(calibration, T_device) == T_robot``.
+    you want), read ``T_device`` (``tracking_T_device``) and ``T_robot``
+    (``base_T_tcp``), and this returns
+    ``base_T_tracking = T_robot @ T_device^-1``, so that
+    ``apply_calibration(calibration, T_device) == T_robot``.
     """
     return _pose(T_robot, "T_robot") @ _inv(_pose(T_device, "T_device"))
 
 
 def apply_calibration(calibration: ArrayLike, T_device: ArrayLike) -> NDArray[np.float64]:
-    """A device reading ``world_T_device`` in the arm's base frame:
-    ``calibration @ T_device`` with ``calibration = base_T_world``."""
+    """A device reading ``tracking_T_device`` in the arm's base frame:
+    ``calibration @ T_device`` with ``calibration = base_T_tracking``."""
     return _pose(calibration, "calibration") @ _pose(T_device, "T_device")
 
 
