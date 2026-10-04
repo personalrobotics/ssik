@@ -6,6 +6,12 @@ joints (frame helpers, a clutch, and a streaming IK tracker that never switches
 branch silently) and no device code. Write a class with a ``poses()`` method
 yielding ``(T, t)`` and pass it in.
 
+The arm is mounted in a room the way a torso-mounted arm is: the room has a
+world frame, the arm's base sits at a tilted shoulder, and the tracking system
+has an origin of its own. The calibration from the tracking frame to the base
+is measured with ``calibration_from``, and it equals the composition of the two
+known frames. ``docs/teleop.md`` walks through each step.
+
 This runs headless with a scripted source: a hand that draws a circle, lets go
 of the grip to reposition, reaches far out of the workspace and comes back.
 
@@ -21,11 +27,29 @@ from collections.abc import Iterator
 import numpy as np
 
 import ssik
-from ssik.teleop import Clutch, PoseSource, apply_calibration, flange_to_tcp, tcp_to_flange
+from ssik.teleop import (
+    Clutch,
+    PoseSource,
+    apply_calibration,
+    calibration_from,
+    flange_to_tcp,
+    invert,
+    tcp_to_flange,
+)
+
+
+def pose(axis: int, angle: float, xyz: list[float]) -> np.ndarray:
+    """A rigid transform: a rotation by ``angle`` about axis 0, 1 or 2, then ``xyz``."""
+    c, s = np.cos(angle), np.sin(angle)
+    i, j = [k for k in range(3) if k != axis]
+    T = np.eye(4)
+    T[i, i], T[i, j], T[j, i], T[j, j] = c, -s, s, c
+    T[:3, 3] = xyz
+    return T
 
 
 class ScriptedHand:
-    """A deterministic stand-in for a device: 4 s at 50 Hz, in the device's frame."""
+    """A deterministic stand-in for a device: 4 s at 50 Hz, in the tracking frame."""
 
     def poses(self) -> Iterator[tuple[np.ndarray, float]]:
         for k in range(200):
@@ -57,8 +81,24 @@ arm = ssik.Manipulator.from_prebuilt("ur5e")
 tracker = arm.tracker([0.0, -1.57, 1.57, -1.57, -1.57, 0.0], max_joint_speed=2.0)
 tool = np.eye(4)
 tool[2, 3] = 0.10  # TCP 10 cm beyond the flange: flange_T_tcp
-calibration = np.eye(4)  # base_T_world: the tracking frame in the arm's base frame
-# Hand motion is applied in the base frame, halved: 1 m of hand is 0.5 m of tool.
+
+# The arm's mounting (world_T_base): a shoulder 1.1 m up, tilted 30 degrees.
+world_T_base = pose(0, np.pi / 6, [0.0, 0.25, 1.1])
+# The device setup (world_T_tracking): the tracker's origin on the floor 2 m
+# away, turned to face the arm.
+world_T_tracking = pose(2, np.pi / 2, [2.0, 0.0, 0.0])
+
+# Calibrate: with the arm at its start pose, hold the device at the TCP with
+# its axes on the tool's axes, read it, and pair the reading with the TCP pose.
+# Here the reading is simulated from the frames above.
+T_tcp = flange_to_tcp(arm.fk(tracker.q), tool)  # base_T_tcp
+reading = invert(world_T_tracking) @ world_T_base @ T_tcp  # tracking_T_device
+calibration = calibration_from(reading, T_tcp)  # base_T_tracking
+assert np.allclose(calibration, invert(world_T_base) @ world_T_tracking, atol=1e-12)
+print("calibration: base_T_tracking = invert(world_T_base) @ world_T_tracking")
+
+# The hand's motion in the room is the tool's motion in the room, halved: 1 m of
+# hand is 0.5 m of tool, whatever the mount's tilt.
 # Clutch(frame="tool") instead moves the tool along its own axes, for jogging.
 clutch = Clutch(scale=0.5)
 
