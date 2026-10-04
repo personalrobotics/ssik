@@ -27,6 +27,7 @@ sols = franka_panda_ik.solve(T_target)        # every analytical IK branch
 
 - **Just want to use it?** → [Quickstart](quickstart.md)
 - **Adapting to your robot?** → [Setting up your robot](setting_up_your_robot.md) — calibration, custom tools, link conventions
+- **Teleoperating an arm?** → [Teleoperation](teleop.md) — device to joints: calibration, clutch, `Tracker`, safety
 - **Need the API surface?** → [API reference](api.md) — `Manipulator`, `Solution`, `Diagnostic`, `TolerancePolicy`, postprocess helpers
 - **Working with a redundant arm?** → [Self-motion charts](api.md#self-motion-charts-ssikchart) — the one-parameter family of postures at a pose, as a curve you can evaluate, sample and track rather than a bag of samples
 - **Want to understand the dispatch?** → [Architecture](architecture.md) — solver tier catalog + algorithmic lineage

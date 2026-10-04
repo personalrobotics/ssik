@@ -80,6 +80,7 @@ nav:
   - Getting started:
       - Quickstart: quickstart.md
       - Setting up your robot: setting_up_your_robot.md
+      - Teleoperation: teleop.md
   - Reference:
       - Architecture: architecture.md
       - Arm coverage: arm_coverage.md

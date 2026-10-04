@@ -345,6 +345,10 @@ While held the tracker keeps following the branch it was on, so it resumes
 `moved` (from the previous step's `q`), `branch_distance` (`nan` when there
 was no candidate), `lag`, and `t`.
 
+**Threads.** A `Tracker` is not thread-safe. Every call reads and changes its
+state (the branch followed, the configuration, the last timestamp), so call it
+from one thread at a time.
+
 **Branches.** `solutions(max_solutions=None)` returns every configuration at
 the target the tracker last accepted (`tracker.target`), nearest the followed
 branch first, one per geometric branch (`enumerate_windings=False`); on a
