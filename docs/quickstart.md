@@ -326,7 +326,22 @@ print(franka_panda_ik.T_HOME[:3, 3])
 
 ## Trajectory tracking pattern
 
-For real-time control / teleop, "give me the IK closest to where I am now":
+For teleoperation or any live stream of poses, use `ssik.Tracker`: it keeps
+the branch, the last configuration and the time for you, rate-limits joint
+motion, and never switches branch silently. See the
+[Teleoperation guide](teleop.md) and [Streaming IK](api.md#streaming-ik-tracker).
+
+```python
+import ssik
+
+arm = ssik.Manipulator.from_prebuilt("panda")
+tracker = arm.tracker(q_current, max_joint_speed=2.0)   # q_current: where the arm is now
+for T, t in device.poses():
+    step = tracker.update(T, t)    # step.q, step.status, step.reason
+```
+
+For a scripted trajectory, or to see what a tracker does underneath, the raw
+pattern is a seeded solve, "give me the IK closest to where I am now":
 
 ```python
 q_current = np.array([0.0, -0.5, 0.0, 0.7, 0.0, 1.2, 0.0])

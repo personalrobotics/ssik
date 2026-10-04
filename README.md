@@ -510,7 +510,7 @@ ssik build <your.urdf> --base <your_base_link> --ee <your_actual_tool_link>
 
 `ssik build` reads your exact URDF, picks the right solver via the same dispatcher we use, and emits a single-file artifact correct for your kinematic chain. That artifact's import / API / public constants are identical to the prebuilts'.
 
-For trajectory tracking and IK-based teleop, the canonical pattern is "give me the IK closest to where the robot is now":
+For teleoperation, use `ssik.Tracker` (below) rather than a hand-rolled solve loop. For scripted trajectories the canonical pattern is "give me the IK closest to where the robot is now":
 
 ```python
 # Robot's current configuration (from joint sensors, last command, etc.).
@@ -539,7 +539,7 @@ sols = franka_panda_ik.solve(
 q_command = sols[0].q if sols else replan()   # empty ⇒ discontinuity
 ```
 
-For teleoperation, `ssik.Tracker` keeps that state for you: one pose in, one configuration out, and never a silent branch switch. Each update reports `OK`, `LIMITED` (clamped to a joint-speed limit), `HELD` (unreachable, out of limits, or a branch jump it refused) or `JUMPED` (a switch you allowed). `ssik.teleop` has the frame helpers (calibration, tool offset, workspace scaling, a clutch); any device that yields `(T, t)` plugs in. See `examples/06_teleop.py` and [Streaming IK](docs/api.md#streaming-ik-tracker).
+For teleoperation, `ssik.Tracker` keeps that state for you: one pose in, one configuration out, and never a silent branch switch. Each update reports `OK`, `LIMITED` (clamped to a joint-speed limit), `HELD` (unreachable, out of limits, or a branch jump it refused) or `JUMPED` (a switch you allowed). `ssik.teleop` has the frame helpers (calibration, tool offset, workspace scaling, a clutch); any device that yields `(T, t)` plugs in. The [teleoperation guide](docs/teleop.md) walks through wiring a device, calibrating a mounted arm, and handling each status; see also `examples/06_teleop.py` and [Streaming IK](docs/api.md#streaming-ik-tracker).
 
 ```python
 arm = ssik.Manipulator.from_prebuilt("panda")
