@@ -4,7 +4,8 @@ The helpers are rigid-transform algebra, so the tests check the algebra's
 invariants on random rigid poses rather than particular outputs: calibration
 and tool offsets round-trip, compose with FK and IK the way the docs say, and
 a clutch reproduces the device's relative motion rigidly, without a jump at
-engagement, with scaling equal to ``scale_about`` at the device anchor.
+engagement, with scaling equal to ``scale_about`` at the device anchor, and
+commutes with a rigid change of frame.
 """
 
 from __future__ import annotations
@@ -163,6 +164,41 @@ def test_clutch_tool_frame(seed: int) -> None:
     world.engage(A_d, B_r)
     clutch.engage(A_d, B_r)
     _close(_engaged(world, D1), _engaged(clutch, D1))
+
+
+@pytest.mark.parametrize("frame", ["world", "tool"])
+@pytest.mark.parametrize("seed", range(5))
+def test_clutch_is_frame_covariant(seed: int, frame: Literal["world", "tool"]) -> None:
+    """Both modes commute with a common rigid change of frame ``X``: anchors
+    and readings expressed in another frame give the target expressed in that
+    frame. So computing in the arm's base frame after calibration is the same
+    as computing in the room's frame, whichever frame the arm is mounted in."""
+    A_d, A_r, D, X = _poses(4, seed)
+    in_base, in_other = Clutch(scale=0.4, frame=frame), Clutch(scale=0.4, frame=frame)
+    in_base.engage(A_d, A_r)
+    in_other.engage(X @ A_d, X @ A_r)
+    _close(_engaged(in_other, X @ D), X @ _engaged(in_base, D))
+
+
+def test_world_clutch_moves_the_tool_in_the_room() -> None:
+    """With a tilted, offset arm mount and a tracking frame that is not the
+    room's, a hand moved along the room's +x moves the tool along the room's
+    +x, scaled: the three-frame calibration of ``docs/teleop.md``."""
+    world_T_base = se3_exp(np.array([0.3, -0.4, 1.1, 0.4, -0.7, 0.9]))  # a shoulder mount
+    world_T_tracking = se3_exp(np.array([-1.2, 0.5, 0.0, 0.0, 0.0, 2.0]))  # the device setup
+    calibration = invert(world_T_base) @ world_T_tracking  # base_T_tracking
+    hand_in_room = se3_exp(np.array([0.5, 0.2, 1.0, 0.3, 0.1, -0.2]))
+    moved_in_room = hand_in_room.copy()
+    moved_in_room[:3, 3] += [0.1, 0.0, 0.0]
+    reading, moved_reading = (invert(world_T_tracking) @ P for P in (hand_in_room, moved_in_room))
+
+    tool_in_base = se3_exp(np.array([0.4, 0.1, 0.3, 1.0, 0.2, 0.5]))
+    clutch = Clutch(scale=0.5)
+    clutch.engage(apply_calibration(calibration, reading), tool_in_base)
+    target_in_base = _engaged(clutch, apply_calibration(calibration, moved_reading))
+    before, after = world_T_base @ tool_in_base, world_T_base @ target_in_base
+    _close(after[:3, 3] - before[:3, 3], np.array([0.05, 0.0, 0.0]))
+    _close(after[:3, :3], before[:3, :3])
 
 
 def test_frame_inputs_follow_the_solve_contract() -> None:
