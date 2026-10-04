@@ -1226,6 +1226,7 @@ Full docs site: **<https://personalrobotics.github.io/ssik/>**
 - [Arm coverage](https://personalrobotics.github.io/ssik/arm_coverage/): per-arm fixtures, speeds, FK floors
 - [Architecture](https://personalrobotics.github.io/ssik/architecture/): solver tier catalog, dispatch flow, algorithmic lineage
 - [API reference](https://personalrobotics.github.io/ssik/api/): `Manipulator`, `Solution`, `Diagnostic`, `TolerancePolicy`
+- [Teleoperation](https://personalrobotics.github.io/ssik/teleop/): wiring a device to `ssik.Tracker`, calibrating a mounted arm, the clutch, handling each status
 - [Semver policy](https://personalrobotics.github.io/ssik/semver_policy/): what's public, what counts as breaking
 - [CONTRIBUTING.md](CONTRIBUTING.md): repo layout, dev setup, testing discipline
 
