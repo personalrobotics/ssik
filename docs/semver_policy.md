@@ -10,6 +10,7 @@ ssik follows [SemVer 2.0](https://semver.org/spec/v2.0.0.html): `MAJOR.MINOR.PAT
 - **Postprocess helpers**: `ssik.postprocess.{respect_limits, wrap_to_limits, nearest_to_seed, take_first}`
 - **Streaming IK** (since 8.1.0): `ssik.Tracker`, `ssik.TrackerStep`, `ssik.TrackStatus`, `ssik.Redundancy` and `Manipulator.tracker`: the constructor and method signatures (including `Tracker.redundancy` and `Tracker.set_redundancy`), the step's and the redundancy record's fields, the status values and hold reasons, and the rules in `docs/api.md` ("Streaming IK", including "Self-motion") that decide them
 - **Teleoperation frames** (since 8.1.0): `ssik.teleop.{PoseSource, Clutch, calibration_from, apply_calibration, tcp_to_flange, flange_to_tcp, scale_about, invert}` and the frame conventions in `docs/api.md` ("Teleoperation frames"), including both clutch conventions and the default `frame="world"`
+- **Chart margin** (since 8.2.0): `Chart.margin(limits=None)`: its signature, the `(margin, t)` return, the input checks, and the properties listed in `docs/api.md` (the `Chart.margin` paragraph under self-motion charts), on the closed-form chart families
 - **Prebuilt artifacts** (`ssik.prebuilt.*`): their `solve(T, **kwargs)` signature, the four module constants `BASE_LINK / EE_LINK / DOF / T_HOME`, and the per-module `__all__`
 - **CLI**: `ssik build / classify / add-arm` argument shapes
 - **Wheel manifest**: support for cp311 / cp312 / cp313 × Linux x86_64 / macOS arm64 / macOS x86_64 / Windows x86_64

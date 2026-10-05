@@ -371,6 +371,7 @@ class Chart:
         fold_dir_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]] | None = None,
         limit_arcs_fn: Callable[[Limits], tuple[tuple[float, float], ...]] | None = None,
         default_limits: Limits = (),
+        margin_fn: Callable[[Limits], tuple[float, float]] | None = None,
     ) -> None:
         self.label = label
         self.parameter = parameter
@@ -384,6 +385,8 @@ class Chart:
         self._limit_arcs = limit_arcs_fn
         self._default_limits = default_limits
         self._limit_cache: dict[Limits, tuple[tuple[float, float], ...]] = {}
+        self._margin_fn = margin_fn
+        self._margin_cache: dict[Limits, tuple[float, float]] = {}
 
     @cached_property
     def domain(self) -> tuple[tuple[float, float], ...]:
@@ -463,6 +466,76 @@ class Chart:
         if arcs is None:
             arcs = self._limit_cache[lims] = self._limit_arcs(lims)
         return arcs
+
+    def margin(self, limits: ArrayLike | None = None) -> tuple[float, float]:
+        """The branch's holdability margin under joint limits: ``(margin, t)``.
+
+        The margin is minus the least worst-case limit violation
+        ``V(t) = max_i(|wrap(q_i(t) - c_i)| - h_i)`` along the chart: the largest,
+        over the branch, of the smallest distance of any joint to its range. It is
+        the quantity whose minima :meth:`in_limits` reports as zero-width arcs when
+        the branch has no in-limits arc (``seven_r._minimax.chart_minima``), here
+        as a signed value everywhere:
+
+        - positive exactly where :meth:`in_limits` has an arc of positive width;
+        - within the error band of zero where it has a contact (possibly slightly
+          negative there);
+        - negative where no posture of the branch fits;
+        - continuous in the target pose.
+
+        ``t`` is *a* parameter at which the margin is attained, not a unique one:
+        where a joint that is constant along the chart sets the margin, ``V`` is
+        flat, and the native and Python backends may return different ``t`` with
+        equal margins.
+
+        A joint whose range spans a full turn never counts; with no joint limited
+        the margin is ``+inf``. Each local minimum of ``V`` on the resolver's grid
+        is refined by golden section to round-off in ``t``, so the value is exact
+        at a smooth extremum and at a corner where two joints' violations cross. A
+        0-dimensional chart (6R arms) is one posture, and the margin is its own
+        distance to the box. ``(-inf, nan)`` for an empty domain.
+
+        :param limits: ``(dof, 2)`` per-joint ``(lower, upper)``; ``None`` uses
+            the chain's own limits.
+        :raises TypeError: if ``limits`` is not an array of real numbers.
+        :raises ValueError: if ``limits`` is not ``(dof, 2)``, has a NaN or
+            infinite entry, or a lower bound above its upper bound.
+        """
+        lims = self._default_limits if limits is None else self._check_limits(limits)
+        out = self._margin_cache.get(lims)
+        if out is None:
+            if self._margin_fn is not None:
+                out = self._margin_fn(lims)
+            elif self.dimension == 0:
+                from ssik.solvers.seven_r._minimax import limit_violation
+
+                t0 = float(self.domain[0][0]) if self.domain else 0.0
+                q = self._eval(np.array([t0]))[0]
+                out = (-float(limit_violation(q, lims)[0]), t0)
+            else:
+                out = _chart_margin(self._eval, self.domain, self.periodic, lims)
+            self._margin_cache[lims] = out
+        return out
+
+    def _check_limits(self, limits: ArrayLike) -> Limits:
+        """``limits`` as a validated ``(dof, 2)`` tuple of finite ``(lo, hi)``
+        with ``lo <= hi`` (``docs/api.md``, "Input validation")."""
+        from ssik._solve_inputs import as_real_array
+
+        box = as_real_array(limits, "limits")
+        dof = len(self._default_limits)
+        if box.ndim != 2 or box.shape[1] != 2 or (dof and box.shape[0] != dof):
+            want = f"({dof}, 2)" if dof else "(dof, 2)"
+            raise ValueError(f"limits must have shape {want}, got {box.shape}")
+        if not np.isfinite(box).all():
+            raise ValueError("limits must be finite (no NaN or inf)")
+        bad = np.flatnonzero(box[:, 0] > box[:, 1])
+        if bad.size:
+            i = int(bad[0])
+            raise ValueError(
+                f"limits must have lower <= upper, got ({box[i, 0]}, {box[i, 1]}) for joint {i}"
+            )
+        return tuple((float(lo), float(hi)) for lo, hi in box)
 
     def _raw_tangent(
         self, ts: NDArray[np.float64]
@@ -1445,6 +1518,38 @@ def _jacobian_tangent(
         except np.linalg.LinAlgError:
             pass
     return out
+
+
+def _chart_margin(
+    eval_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    domain: tuple[tuple[float, float], ...],
+    periodic: bool,
+    limits: Limits,
+) -> tuple[float, float]:
+    """The reference :meth:`Chart.margin`: minus the least local minimum of the
+    worst-case violation along the chart (``_minimax.chart_minima`` with no scan
+    threshold, on the resolver's grid per domain interval, the swivel circle
+    once), with its ``t``. Mirrors ``ssik_cpp::chart::SphericalShoulderCharts::margin``
+    and ``SrsCharts::margin``."""
+    from ssik.solvers.seven_r._feasible_param import PARAM_GRID
+    from ssik.solvers.seven_r._minimax import chart_minima
+
+    if not domain:
+        return -np.inf, float("nan")
+    if all(hi - lo >= _TWO_PI for lo, hi in limits):
+        # no joint limits the branch (limit_violation is -inf everywhere): every
+        # posture fits, at any t
+        lo, hi = domain[0]
+        return np.inf, 0.5 * (lo + hi)
+    grids = (
+        [PARAM_GRID] if periodic else [np.linspace(lo, hi, _Q6_DOMAIN_GRID) for lo, hi in domain]
+    )
+    best_v, best_t = np.inf, float("nan")
+    for grid in grids:
+        minima = chart_minima(eval_fn, grid, limits, periodic=periodic, scan=np.inf)
+        if minima and minima[0][1] < best_v:  # sorted by V: the first is the least
+            best_t, best_v = minima[0]
+    return -float(best_v), float(best_t)
 
 
 def _q6_limit_arcs(
@@ -2712,6 +2817,12 @@ def _spherical_shoulder_family_native(
         hi = np.array([b for _a, b in lims], dtype=np.float64)
         return tuple((float(a), float(b)) for a, b in nat.in_limits(i, lo, hi))
 
+    def margin_of(i: int, lims: Limits) -> tuple[float, float]:
+        lo = np.array([a for a, _b in lims], dtype=np.float64)
+        hi = np.array([b for _a, b in lims], dtype=np.float64)
+        m, t = nat.margin(i, lo, hi)
+        return float(m), float(t)
+
     def make_chart(i: int) -> Chart:
         k, slot = divmod(i, _N_SLOTS)
         e, s, w = sh.slot_label(slot)
@@ -2733,6 +2844,7 @@ def _spherical_shoulder_family_native(
             deriv_fn=_deriv,
             fold_dir_fn=lambda qs: _null_tangent(kb, qs),
             limit_arcs_fn=lambda lims: limit_arcs(i, lims),
+            margin_fn=lambda lims: margin_of(i, lims),
             default_limits=limits,
         )
 
@@ -2789,6 +2901,12 @@ def _srs_family_native(ext: Any, kb: KinBody, T: NDArray[np.float64]) -> SelfMot
         hi = np.array([b for _a, b in lims], dtype=np.float64)
         return tuple((float(a), float(b)) for a, b in nat.in_limits(i, lo, hi))
 
+    def margin_of(i: int, lims: Limits) -> tuple[float, float]:
+        lo = np.array([a for a, _b in lims], dtype=np.float64)
+        hi = np.array([b for _a, b in lims], dtype=np.float64)
+        m, t = nat.margin(i, lo, hi)
+        return float(m), float(t)
+
     def make_chart(i: int) -> Chart:
         def _eval(ts: NDArray[np.float64]) -> NDArray[np.float64]:
             out: NDArray[np.float64] = nat.q(i, np.ascontiguousarray(ts, dtype=np.float64))
@@ -2807,6 +2925,7 @@ def _srs_family_native(ext: Any, kb: KinBody, T: NDArray[np.float64]) -> SelfMot
             deriv_fn=_deriv,
             fold_dir_fn=lambda qs: _null_tangent(kb, qs),
             limit_arcs_fn=lambda lims: limit_arcs(i, lims),
+            margin_fn=lambda lims: margin_of(i, lims),
             default_limits=limits,
         )
 

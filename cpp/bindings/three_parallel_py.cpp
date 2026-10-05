@@ -1453,6 +1453,16 @@ void bind_charts(py::module_& m) {
              }
              return out;
            })
+      .def("margin",
+           [](const ShCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
+             require_index(chart, 0, f.n_charts(), "chart");
+             auto lo_u = view<1>(lo, {7}, "lo"), hi_u = view<1>(hi, {7}, "hi");
+             std::array<std::array<double, 2>, 7> lim;
+             for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
+             const auto [m, t] = f.margin(chart, lim);
+             return py::make_tuple(m, t);
+           },
+           py::arg("chart"), py::arg("lo"), py::arg("hi"))
       .def("tangent",
            [](const ShCharts& f, int chart, py::array_t<double> ts) {
              require_index(chart, 0, f.n_charts(), "chart");
@@ -1556,6 +1566,16 @@ void bind_charts(py::module_& m) {
              }
              return out;
            })
+      .def("margin",
+           [](const SrsCharts& f, int chart, py::array_t<double> lo, py::array_t<double> hi) {
+             require_index(chart, 0, f.size(), "chart");
+             auto lo_u = view<1>(lo, {7}, "lo"), hi_u = view<1>(hi, {7}, "hi");
+             std::array<std::array<double, 2>, 7> lim;
+             for (int i = 0; i < 7; ++i) lim[i] = {lo_u(i), hi_u(i)};
+             const auto [m, t] = f.margin(chart, lim);
+             return py::make_tuple(m, t);
+           },
+           py::arg("chart"), py::arg("lo"), py::arg("hi"))
       .def("tangent",
            [](const SrsCharts& f, int chart, py::array_t<double> ts) {
              require_index(chart, 0, f.size(), "chart");

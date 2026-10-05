@@ -96,13 +96,15 @@ std::pair<double, double> golden(F&& f, double a, double b) {
 
 // Local minima (t, V) of the worst limit violation along a chart q_scalar(t)
 // (NaN off it), sorted by V then t. The grid is refined as for the arcs (over all
-// seven joints); every local minimum at or below kScan (and the lowest grid
-// point) is refined by golden section between its neighbours. (chart_minima)
+// seven joints); every local minimum at or below `scan` (and the lowest grid
+// point) is refined by golden section between its neighbours. `scan` is kScan for
+// the contact search; the chart margin passes inf. (chart_minima)
 template <typename QScalar>
 std::vector<std::pair<double, double>> chart_minima(QScalar&& q_scalar,
                                                     const std::vector<double>& base_grid,
                                                     const Limits7& lim, bool periodic,
-                                                    const Joints7& use = kAllJoints) {
+                                                    const Joints7& use = kAllJoints,
+                                                    double scan = kScan) {
   std::vector<double> ts = base_grid;
   std::vector<std::vector<double>> qs(ts.size());
   for (std::size_t k = 0; k < ts.size(); ++k) qs[k] = q_scalar(ts[k]);
@@ -122,7 +124,7 @@ std::vector<std::pair<double, double>> chart_minima(QScalar&& q_scalar,
   };
   for (int k = 0; k < n; ++k) {
     const double vk = v[k];
-    if (!(vk <= kScan)) continue;
+    if (!(vk <= scan)) continue;
     const int left = periodic ? (k - 1 + n) % n : std::max(k - 1, 0);
     const int right = periodic ? (k + 1) % n : std::min(k + 1, n - 1);
     // The first point of a plateau: strictly below the left, not above the right.

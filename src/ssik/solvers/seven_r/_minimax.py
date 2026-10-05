@@ -131,15 +131,18 @@ def chart_minima(
     *,
     periodic: bool,
     joints: Sequence[int] | None = None,
+    scan: float = SCAN,
 ) -> list[tuple[float, float]]:
     """Local minima ``(t, V)`` of the worst limit violation along a chart.
 
     ``q_batch(ts) -> (N, 7)`` evaluates the chart (rows ``NaN`` off it). The grid
     is refined as for the arcs (:func:`._feasible_param.refine_grid`, over all
-    seven joints), every local minimum of ``V`` on it at or below :data:`SCAN`
+    seven joints), every local minimum of ``V`` on it at or below ``scan``
     (and the lowest grid point, which a plateau can hide from the local test) is
     refined by golden section between its two neighbours, and the refined
-    points come back sorted by ``V``, then ``t``.
+    points come back sorted by ``V``, then ``t``. ``scan`` is :data:`SCAN` for
+    the contact search; :meth:`ssik.chart.Chart.margin` passes ``inf``, since
+    far from a limit the least minimum is still its point.
     ``periodic`` charts live on the circle ``[-pi, pi)``. ``joints`` restricts
     ``V`` to those joints: an approximate SRS chart leaves out its elbow, which
     is constant along the chart and off by the pivot drift, so it would hide the
@@ -167,7 +170,7 @@ def chart_minima(
     out: list[tuple[float, float]] = []
     for k in range(n):
         vk = float(v[k])
-        if not vk <= SCAN:
+        if not vk <= scan:
             continue
         if periodic:
             left, right = (k - 1) % n, (k + 1) % n
