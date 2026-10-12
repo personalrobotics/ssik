@@ -11,6 +11,7 @@ Auto-generated from docstrings. The public surface is small by design — most u
         - from_prebuilt
         - from_urdf
         - solve
+        - prepare
         - fk
         - self_motion
         - solve_path
@@ -101,6 +102,66 @@ the target's and seed's finiteness, before it reads them, and raises
 `ValueError` otherwise. The C++ headers do not check their input: their
 preconditions are in
 [`cpp/README.md`](https://github.com/personalrobotics/ssik/blob/main/cpp/README.md#use-it-from-the-python-wheel).
+
+## Per-arm preparation cache
+
+An arm built at runtime (`from_urdf`, `from_mjcf`, `from_axes`, ...) that
+dispatches to `ikgeo.general_6r` needs a symbolic Raghavan-Roth derivation
+before its first solve: seconds to a minute of sympy per arm (about 28 s for
+the JACO 2). ssik keeps that work on disk, so it is paid once per machine, not
+once per process.
+
+**What is cached.** Two kinds of entry, both functions of the arm's DH
+geometry alone:
+
+- the symbolic derivation for one linearity choice, which the Python solver
+  turns back into callables when it loads it (the first solve in a later
+  process takes about 1 s on the JACO 2, not 28 s);
+- the numeric coefficient tensor that the native backend evaluates (loading it
+  takes milliseconds).
+
+Nothing else is cached, and an arm on any other solver has nothing to cache.
+
+**Where.** In `$SSIK_DERIVATION_CACHE` when it is set, else in
+`$XDG_CACHE_HOME/ssik/rr-derivations`, else in `~/.cache/ssik/rr-derivations`.
+`SSIK_DERIVATION_CACHE=off` (or an empty value) disables the cache: nothing is
+read or written, and every process derives afresh. Derivations are stored as
+`.pkl` files and tensors as `.npz` files. File names and contents are not part
+of the contract.
+
+**When an entry misses.** An entry is keyed on the exact DH values, the
+linearity choice, the source code that produces it, and the versions of
+sympy, mpmath and (for tensors) numpy. Any change to these makes a lookup miss,
+so the cache never returns a result that differs from a fresh derivation: a
+hit is bit-identical to what the derivation would compute. Upgrading ssik
+therefore usually re-derives once. Old entries stay on disk until you delete
+them. An entry that cannot be read, is truncated or damaged, or was written
+for another key is a miss. It is derived again and replaced.
+
+**Safe across processes.** Entries are written to a temporary file and moved
+into place with an atomic rename, so concurrent processes can share one
+directory and never read a partial entry. A read-only or full directory is not
+an error: the result is computed and used, just not stored. You can delete the
+directory at any time.
+
+**Preparing ahead of time.** `Manipulator.prepare()` does an arm's one-time
+preparation immediately rather than on first use. On a `general_6r` arm it
+derives (or loads) what both backends need, keeps it in memory and writes it to
+the cache. It returns `None`, does nothing on other arms or on
+`from_prebuilt` arms, and calling it again is cheap. A deployment that starts
+every process from a fresh container image can run it during the image build,
+with the cache directory inside the image:
+
+```python
+# At image build time, with SSIK_DERIVATION_CACHE pointing into the image.
+import ssik
+
+ssik.Manipulator.from_mjcf("robot.xml", base="base", ee="ee_site").prepare()
+```
+
+The same environment variable must point at that directory when the
+container runs. An artifact from `ssik build` needs none of this: it ships the
+same work baked into the artifact.
 
 ## Per-call return: `Solution`
 

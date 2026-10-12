@@ -581,7 +581,7 @@ arm = ssik.Manipulator.from_urdf("my_arm.urdf", base="base_link", ee="tool0")
 sols = arm.solve(T_target, max_solutions=1, q_seed=q_current)
 ```
 
-Every fresh process re-runs URDF parsing, topology classification, and (for non-Pieper sub-chains) first-call sympy preprocessing, so this path is **strictly slower than the build-artifact path in production** and requires `urchin` + `sympy` on the runtime path (`pip install ssik[urdf]`). Once dispatch is settled, switch to `ssik build`.
+Every fresh process re-runs URDF parsing, topology classification, and (for non-Pieper sub-chains) first-call sympy preprocessing, so this path is **strictly slower than the build-artifact path in production** and requires `urchin` + `sympy` on the runtime path (`pip install ssik[urdf]`). Once dispatch is settled, switch to `ssik build`. The ~30 s non-Pieper 6R derivation is cached on disk after the first process, and `arm.prepare()` pays it ahead of time, for example while building a container image: see [Per-arm preparation cache](docs/api.md#per-arm-preparation-cache).
 
 Contributors extending ssik's own test fixtures (vs deploying for their own arm) use `ssik add-arm`; see [CONTRIBUTING.md](CONTRIBUTING.md#adding-a-new-arm-fixture).
 

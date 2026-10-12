@@ -33,13 +33,10 @@ Algorithmic specifics chosen here:
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import math
-import os
 import pickle
-import tempfile
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -50,6 +47,7 @@ import numpy as np
 import sympy as sp
 from numpy.typing import NDArray
 
+from ssik._prep_cache import cache_dir, source_digest, write_atomically
 from ssik.core.solution import Solution
 from ssik.refinement import dedup_same_root, lm_refine
 from ssik.refinement.polish import Chain, polish_accepted
@@ -434,7 +432,8 @@ def _derive_pq_symbolic(
 # Entries land by atomic rename, so concurrent writers never expose a partial
 # file; an unreadable entry is a miss and is overwritten. It lives in
 # $SSIK_DERIVATION_CACHE (``off`` disables it), else
-# $XDG_CACHE_HOME/ssik/rr-derivations or ~/.cache/ssik/rr-derivations.
+# $XDG_CACHE_HOME/ssik/rr-derivations or ~/.cache/ssik/rr-derivations
+# (ssik._prep_cache; docs/api.md, "Per-arm preparation cache").
 _DISK_CACHE_VERSION = 1
 _DISK_CACHE_SHAPES = {
     "sym_p_sin": (14, 9),
@@ -444,23 +443,7 @@ _DISK_CACHE_SHAPES = {
 }
 
 
-def _source_hash() -> str:
-    try:
-        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-    except OSError:  # no readable source (e.g. a zipapp): run without the cache
-        return ""
-
-
-_DERIVATION_SOURCE_HASH = _source_hash()
-
-
-def _derivation_cache_dir() -> Path | None:
-    env = os.environ.get("SSIK_DERIVATION_CACHE")
-    if env is not None:
-        return None if env.strip().lower() in ("", "off") else Path(env).expanduser()
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg).expanduser() if xdg else Path.home() / ".cache"
-    return base / "ssik" / "rr-derivations"
+_DERIVATION_SOURCE_HASH = source_digest([Path(__file__)])
 
 
 def _derivation_cache_key(
@@ -490,7 +473,7 @@ def _derivation_cache_path(
     linearity_joint: int,
     apply_so3: bool,
 ) -> Path | None:
-    root = _derivation_cache_dir()
+    root = cache_dir()
     if root is None or not _DERIVATION_SOURCE_HASH:
         return None
     key = _derivation_cache_key(alpha, a, d, linearity_joint, apply_so3)
@@ -564,21 +547,7 @@ def _store_cached_derivation(path: Path, key: dict[str, object], meta: dict[str,
         "sym_q": meta["_sym_q"],
         "sym_t_target": meta["_sym_t_target"],
     }
-    blob = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
-    tmp: str | None = None
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
-        with os.fdopen(fd, "wb") as f:
-            f.write(blob)
-        os.replace(tmp, path)
-        tmp = None
-    except OSError:  # read-only or full cache dir: the derivation still stands
-        pass
-    finally:
-        if tmp is not None:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
+    write_atomically(path, pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
 
 
 def _derive_pq_for_arm(

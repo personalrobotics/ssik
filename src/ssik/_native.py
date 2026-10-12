@@ -14,12 +14,19 @@ The generated artifacts call this from ``solve(..., native=True)``; passing
 from __future__ import annotations
 
 import contextlib
+import functools
+import hashlib
+import io
+import json
 import weakref
+import zipfile
+from pathlib import Path
 from typing import Any, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik._prep_cache import cache_dir, source_digest, write_atomically
 from ssik._solve_inputs import INT32_MAX
 from ssik.core.solution import Solution
 from ssik.core.tolerances import DEFAULT_TOLERANCE_POLICY, TolerancePolicy
@@ -440,27 +447,54 @@ def rr_native_geometry(kb: Any, *, linearity_joint: int | None = None) -> dict[s
 
     ``linearity_joint`` overrides the AE-3 choice (default: the cached best, as
     production bakes it), so the native path can be checked under every choice.
+
+    The tensor is a function of the DH ``(alpha, a, d)`` and the linearity request
+    alone, and costs seconds to a minute of sympy, so it is served from the
+    per-arm preparation cache when present (docs/api.md, "Per-arm preparation
+    cache"). The frame fields (``theta_offset``, ``t_pre_inv``, ``t_post_inv``)
+    are always computed from ``kb``, so two chains with one DH share an entry.
     """
+    from ssik.kinematics.poe_to_dh import poe_to_dh
+
+    if len(kb.joints) != 6:
+        raise ValueError(f"rr_native_geometry requires a 6R chain, got {len(kb.joints)}")
+    if linearity_joint is not None and linearity_joint not in (0, 1, 2):
+        raise ValueError(f"linearity_joint must be 0, 1 or 2; got {linearity_joint!r}")
+    dh = poe_to_dh(kb)
+    alpha, a, d = dh.to_dh_tuple()
+    at, bt, dt = tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())
+    geometry: dict[str, Any] = {
+        "alpha": np.asarray(alpha, dtype=np.float64),
+        "a": np.asarray(a, dtype=np.float64),
+        "d": np.asarray(d, dtype=np.float64),
+        "theta_offset": np.asarray(dh.theta_offset, dtype=np.float64),
+        "t_pre_inv": np.linalg.inv(dh.t_pre),
+        "t_post_inv": np.linalg.inv(dh.t_post),
+    }
+    lin = None if linearity_joint is None else int(linearity_joint)
+    path, key = _rr_tensor_cache_entry(at, bt, dt, lin)
+    tensor = None if path is None else _load_cached_rr_tensor(path, key)
+    if tensor is None:
+        tensor = _derive_rr_tensor(at, bt, dt, lin)
+        if path is not None:
+            _store_cached_rr_tensor(path, key, {**geometry, **tensor})
+    return {**geometry, **tensor}
+
+
+def _derive_rr_tensor(
+    at: tuple[float, ...], bt: tuple[float, ...], dt: tuple[float, ...], lin: int | None
+) -> dict[str, Any]:
+    """The DH-only part of :func:`rr_native_geometry`, from the symbolic derivation."""
     import sympy as sp
 
-    from ssik.kinematics.poe_to_dh import poe_to_dh
     from ssik.solvers.ikgeo._raghavan_roth import (
         _cached_best_leftvar,
         _cached_derivation,
         _derive_pq_for_arm,
     )
 
-    if len(kb.joints) != 6:
-        raise ValueError(f"rr_native_geometry requires a 6R chain, got {len(kb.joints)}")
-    dh = poe_to_dh(kb)
-    alpha, a, d = dh.to_dh_tuple()
-    at, bt, dt = tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist())
-    if linearity_joint is None:
+    if lin is None:
         lin = int(_cached_best_leftvar(at, bt, dt))
-    elif linearity_joint in (0, 1, 2):
-        lin = int(linearity_joint)
-    else:
-        raise ValueError(f"linearity_joint must be 0, 1 or 2; got {linearity_joint!r}")
     # Reuse the process-wide derivation when it carries the symbolic matrices
     # (the AE-3 pick has usually just derived every choice); an entry primed
     # from a shipped artifact carries only callables, so derive afresh then.
@@ -504,12 +538,6 @@ def rr_native_geometry(kb: Any, *, linearity_joint: int | None = None) -> dict[s
     lb = cast("tuple[int, int]", meta["left_bilinear"])
     rb = cast("tuple[int, int]", meta["right_bilinear"])
     return {
-        "alpha": np.asarray(alpha, dtype=np.float64),
-        "a": np.asarray(a, dtype=np.float64),
-        "d": np.asarray(d, dtype=np.float64),
-        "theta_offset": np.asarray(dh.theta_offset, dtype=np.float64),
-        "t_pre_inv": np.linalg.inv(dh.t_pre),
-        "t_post_inv": np.linalg.inv(dh.t_post),
         "linearity_joint": lin,
         "left_bilinear": np.array(lb, dtype=np.int32),
         "right_bilinear": np.array(rb, dtype=np.int32),
@@ -532,63 +560,177 @@ def rr_native_geometry(kb: Any, *, linearity_joint: int | None = None) -> dict[s
     }
 
 
+def _rr_npz_arrays(g: dict[str, Any]) -> dict[str, Any]:
+    """:func:`rr_native_geometry`'s result as the flat arrays of the sidecar
+    ``.npz`` format. Nested COO tuples are flattened into individual keys
+    (np.savez pickles tuples otherwise)."""
+    po_r, po_c, po_m, po_co = g["po_coo"]
+    q_r, q_c, q_m, q_co = g["q_coo"]
+    return {
+        "alpha": g["alpha"],
+        "a": g["a"],
+        "d": g["d"],
+        "theta_offset": g["theta_offset"],
+        "t_pre_inv": g["t_pre_inv"],
+        "t_post_inv": g["t_post_inv"],
+        "linearity_joint": np.int32(g["linearity_joint"]),
+        "left_bilinear": g["left_bilinear"],
+        "right_bilinear": g["right_bilinear"],
+        "drop_joint": np.int32(g["drop_joint"]),
+        "p_sin": g["p_sin"],
+        "p_cos": g["p_cos"],
+        "mono_factors": g["mono_factors"],
+        "po_row": po_r,
+        "po_col": po_c,
+        "po_mono": po_m,
+        "po_coeff": po_co,
+        "q_row": q_r,
+        "q_col": q_c,
+        "q_mono": q_m,
+        "q_coeff": q_co,
+    }
+
+
+def _rr_geometry_from_npz(z: Any) -> dict[str, Any]:
+    """Inverse of :func:`_rr_npz_arrays`, on an open ``np.load`` archive."""
+    return {
+        "alpha": z["alpha"],
+        "a": z["a"],
+        "d": z["d"],
+        "theta_offset": z["theta_offset"],
+        "t_pre_inv": z["t_pre_inv"],
+        "t_post_inv": z["t_post_inv"],
+        "linearity_joint": int(z["linearity_joint"]),
+        "left_bilinear": z["left_bilinear"],
+        "right_bilinear": z["right_bilinear"],
+        "drop_joint": int(z["drop_joint"]),
+        "p_sin": z["p_sin"],
+        "p_cos": z["p_cos"],
+        "mono_factors": z["mono_factors"],
+        "po_coo": (z["po_row"], z["po_col"], z["po_mono"], z["po_coeff"]),
+        "q_coo": (z["q_row"], z["q_col"], z["q_mono"], z["q_coeff"]),
+    }
+
+
 def bake_rr_tensor_npz(kb: Any, path: str) -> None:
     """Serialize :func:`rr_native_geometry` to a sidecar ``.npz`` (#555).
 
     The tensor derivation is ~30s of sympy, so it runs ONCE at build time
     (``ssik build`` / codegen), never per-solve. The runtime loads the flat arrays
-    via :func:`load_rr_native_geometry`. Nested COO tuples are flattened into
-    individual keys (np.savez pickles tuples otherwise)."""
-    g = rr_native_geometry(kb)
-    po_r, po_c, po_m, po_co = g["po_coo"]
-    q_r, q_c, q_m, q_co = g["q_coo"]
-    np.savez_compressed(
-        path,
-        alpha=g["alpha"],
-        a=g["a"],
-        d=g["d"],
-        theta_offset=g["theta_offset"],
-        t_pre_inv=g["t_pre_inv"],
-        t_post_inv=g["t_post_inv"],
-        linearity_joint=np.int32(g["linearity_joint"]),
-        left_bilinear=g["left_bilinear"],
-        right_bilinear=g["right_bilinear"],
-        drop_joint=np.int32(g["drop_joint"]),
-        p_sin=g["p_sin"],
-        p_cos=g["p_cos"],
-        mono_factors=g["mono_factors"],
-        po_row=po_r,
-        po_col=po_c,
-        po_mono=po_m,
-        po_coeff=po_co,
-        q_row=q_r,
-        q_col=q_c,
-        q_mono=q_m,
-        q_coeff=q_co,
-    )
+    via :func:`load_rr_native_geometry`."""
+    np.savez_compressed(path, **_rr_npz_arrays(rr_native_geometry(kb)))
 
 
 def load_rr_native_geometry(path: str) -> dict[str, Any]:
     """Load a baked RR tensor sidecar (:func:`bake_rr_tensor_npz`), reassembling
     the COO tuples that the runtime native path consumes."""
     with np.load(path) as z:
-        return {
-            "alpha": z["alpha"],
-            "a": z["a"],
-            "d": z["d"],
-            "theta_offset": z["theta_offset"],
-            "t_pre_inv": z["t_pre_inv"],
-            "t_post_inv": z["t_post_inv"],
-            "linearity_joint": int(z["linearity_joint"]),
-            "left_bilinear": z["left_bilinear"],
-            "right_bilinear": z["right_bilinear"],
-            "drop_joint": int(z["drop_joint"]),
-            "p_sin": z["p_sin"],
-            "p_cos": z["p_cos"],
-            "mono_factors": z["mono_factors"],
-            "po_coo": (z["po_row"], z["po_col"], z["po_mono"], z["po_coeff"]),
-            "q_coo": (z["q_row"], z["q_col"], z["q_mono"], z["q_coeff"]),
-        }
+        return _rr_geometry_from_npz(z)
+
+
+# The native RR tensor in the per-arm preparation cache (ssik._prep_cache): an
+# entry is the bake_rr_tensor_npz format plus its key. The key covers the exact
+# DH floats, the linearity request (``auto`` or the joint), the source of the two
+# modules that shape the tensor (this one, and the derivation, which also makes
+# the AE-3 pick) and the sympy/mpmath/numpy versions, so a changed input or
+# changed code can only miss. An entry that does not load, does not carry this
+# key or fails the range checks in _rr_tensor_well_formed is a miss and is
+# overwritten: the indices reach C++ unchecked, so a damaged entry must not.
+_RR_TENSOR_CACHE_VERSION = 1
+_RR_TENSOR_FIELDS = (
+    "linearity_joint",
+    "left_bilinear",
+    "right_bilinear",
+    "drop_joint",
+    "p_sin",
+    "p_cos",
+    "mono_factors",
+    "po_coo",
+    "q_coo",
+)
+
+
+@functools.cache
+def _rr_tensor_cache_stamp() -> dict[str, str]:
+    from importlib.metadata import version
+
+    here = Path(__file__).resolve().parent
+    return {
+        "source": source_digest(
+            [here / "_native.py", here / "solvers" / "ikgeo" / "_raghavan_roth.py"]
+        ),
+        "sympy": version("sympy"),
+        "mpmath": version("mpmath"),
+        "numpy": np.__version__,
+    }
+
+
+def _rr_tensor_cache_entry(
+    at: tuple[float, ...], bt: tuple[float, ...], dt: tuple[float, ...], lin: int | None
+) -> tuple[Path | None, bytes]:
+    root = cache_dir()
+    if root is None:
+        return None, b""
+    stamp = _rr_tensor_cache_stamp()
+    if not stamp["source"]:  # no readable source (e.g. a zipapp): run without the cache
+        return None, b""
+    key = {
+        "kind": "rr-native-tensor",
+        "version": _RR_TENSOR_CACHE_VERSION,
+        **stamp,
+        # repr round-trips a float exactly.
+        "dh": [[repr(float(x)) for x in v] for v in (at, bt, dt)],
+        "linearity_joint": "auto" if lin is None else lin,
+    }
+    blob = json.dumps(key, sort_keys=True).encode()
+    return root / f"{hashlib.sha256(blob).hexdigest()}.npz", blob
+
+
+def _load_cached_rr_tensor(path: Path, key: bytes) -> dict[str, Any] | None:
+    try:
+        with np.load(path) as z:
+            if bytes(z["cache_key"]) != key:
+                return None
+            g = _rr_geometry_from_npz(z)
+    except FileNotFoundError:
+        return None
+    # Truncated, foreign or damaged (zip CRC) file: a miss, re-derived and replaced.
+    except (OSError, EOFError, KeyError, ValueError, TypeError, zipfile.BadZipFile):
+        return None
+    if not _rr_tensor_well_formed(g):
+        return None
+    return {k: g[k] for k in _RR_TENSOR_FIELDS}
+
+
+def _rr_tensor_well_formed(g: dict[str, Any]) -> bool:
+    """Shapes, dtypes and index ranges the C++ evaluator relies on."""
+
+    def _index(x: Any, hi: int, lo: int = 0) -> bool:
+        return bool(x.dtype == np.int32 and (x.size == 0 or lo <= x.min() <= x.max() < hi))
+
+    mono = g["mono_factors"]
+    if not (mono.ndim == 2 and mono.shape[1] == 3 and _index(mono, 12, lo=-1)):
+        return False
+    if not all(g[k].dtype == np.float64 and g[k].shape == (14, 9) for k in ("p_sin", "p_cos")):
+        return False
+    for name, n_cols in (("po_coo", 9), ("q_coo", 8)):
+        rows, cols, monos, coeffs = g[name]
+        if not (rows.ndim == 1 and rows.shape == cols.shape == monos.shape == coeffs.shape):
+            return False
+        if not (_index(rows, 14) and _index(cols, n_cols) and _index(monos, len(mono))):
+            return False
+        if coeffs.dtype != np.float64:
+            return False
+    pairs = (g["left_bilinear"], g["right_bilinear"])
+    if not all(p.shape == (2,) and _index(p, 6) for p in pairs):
+        return False
+    return g["linearity_joint"] in (0, 1, 2) and 0 <= g["drop_joint"] < 6
+
+
+def _store_cached_rr_tensor(path: Path, key: bytes, g: dict[str, Any]) -> None:
+    buf = io.BytesIO()
+    np.savez_compressed(buf, cache_key=np.bytes_(key), **_rr_npz_arrays(g))
+    write_atomically(path, buf.getvalue())
 
 
 def spherical_shoulder_native_geometry(kb: Any, *, polished: bool) -> dict[str, Any] | None:

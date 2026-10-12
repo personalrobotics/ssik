@@ -30,6 +30,7 @@ _SHARED = (
     "src/ssik/__init__.py",
     "src/ssik/_kinbody.py",
     "src/ssik/_native.py",
+    "src/ssik/_prep_cache.py",
     "src/ssik/_solve_inputs.py",
     "src/ssik/_urdf.py",
     "src/ssik/core/",

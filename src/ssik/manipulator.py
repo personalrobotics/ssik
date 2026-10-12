@@ -504,6 +504,35 @@ class Manipulator:
             f"{self._plan.solver_name} (tier {self._plan.tier}){origin}>"
         )
 
+    def prepare(self) -> None:
+        """Do this arm's one-time per-arm preparation now, not on first use.
+
+        For an arm dispatched to ``ikgeo.general_6r`` this is the symbolic
+        Raghavan-Roth derivation that the Python solver needs and the numeric
+        tensor that the native backend needs, which together take seconds to a
+        minute on the first call. Both are kept in memory for this process and
+        written to the per-arm preparation cache on disk, so a later process
+        on the same machine, or a container started from an image built after
+        calling this, loads them in milliseconds (``docs/api.md``, "Per-arm
+        preparation cache"). For every other solver, and for an arm from
+        :meth:`from_prebuilt` (whose artifact ships this work baked), there is
+        nothing to prepare and this returns at once.
+
+        Calling it again is cheap and changes nothing. It never changes what
+        :meth:`solve` returns, only when the preparation cost is paid.
+        """
+        if self._prebuilt is not None or self._plan.solver_name != "ikgeo.general_6r":
+            return
+        from ssik._native import rr_native_geometry
+        from ssik.kinematics.poe_to_dh import poe_to_dh
+        from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar
+
+        # The Python solver's AE-3 pick derives every linearity choice; then the
+        # native tensor for the chosen one (a cache hit skips its derivation).
+        alpha, a, d = poe_to_dh(self._kb).to_dh_tuple()
+        _cached_best_leftvar(tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist()))
+        rr_native_geometry(self._kb)
+
     # ------------------------------------------------------------------
     # Forward kinematics
     # ------------------------------------------------------------------
