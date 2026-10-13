@@ -99,9 +99,45 @@ rules for the remaining options (`respect_limits`, `enumerate_windings`,
 are not part of the semver contract, but none of them reads memory it was not
 given. Each checks every array's shape and every index argument's range, and
 the target's and seed's finiteness, before it reads them, and raises
-`ValueError` otherwise. The C++ headers do not check their input: their
-preconditions are in
+`ValueError` otherwise. In C++, `ssik::Solver` checks its data and its input
+in the same way and throws `std::invalid_argument`; the `*_artifact_solve`
+functions do not, and their preconditions are in
 [`cpp/README.md`](https://github.com/personalrobotics/ssik/blob/main/cpp/README.md#use-it-from-the-python-wheel).
+
+## The native backend
+
+`solve(..., native=True)`, the default on every prebuilt arm, runs the arm's
+solver family in C++ through `ssik::Solver` (`ssik_cpp/solve.hpp`), built from
+`ssik.cpp.solver_data(arm)`. The families are `ssik.cpp.NATIVE_FAMILIES`.
+A call the native backend cannot honour (a non-default `policy`,
+`allow_refinement=True`, `explain=True`, or a family without a native solver)
+runs the Python backend instead; so does every call when the extension is not
+installed (Windows wheels). `solve()` on an arm built at runtime runs the
+Python backend; `solver_data` still serves such an arm to a C++ consumer.
+
+**C++ consumers get the same function.** For `d = ssik.cpp.solver_data(arm)`
+and options that `ssik::ArtifactParams` can express (the default `policy`,
+`allow_refinement=False`), `ssik::Solver(d).solve<N>(T, p)` returns the same
+list, in the same order, as the native backend for that data. For a prebuilt
+arm that is `arm.solve(T, native=True, ...)`. The wheel's "Native wheel build"
+CI job checks this from a C++ program built against the installed wheel, on
+one arm of every native family and on runtime-built arms
+(`cpp/examples/wheel_consumer/`).
+
+**Native against Python.** The two backends return the same solutions up to
+the following contract, gated per shipped arm by `tests/test_native_parity.py`
+(rules a-g in `tests/_native_parity.py`), on in-limits, near-limit,
+near-singular and at-pi poses:
+
+| family | contract |
+|---|---|
+| every family | every native solution closes FK within the policy's `subproblem_numerical` and, with `respect_limits=True`, lies within the joint limits; native is never empty where Python is not |
+| 6R (`ikgeo.*`) | the two sets are equal within the match tolerance, in both directions, except in the documented excused classes (a solution one backend's rescue or in-limits resolver adds, or a solution just across a limit) |
+| 7R (`seven_r.*`, `jointlock.seven_r`) | native covers every Python solution, except at a kinematic singularity, where the backends sample a continuum at their own points and only non-emptiness holds |
+
+Redundant 7R families are sampling solvers: they return points of the
+self-motion manifold at fixed internal sample schedules, so native and Python
+need not return the same points, only the coverage above.
 
 ## Per-arm preparation cache
 
@@ -797,9 +833,14 @@ the two counts separately.
 ## C++ headers: `ssik.cpp`
 
 Every wheel ships the header-only C++ solvers (`ssik_cpp/`) and a CMake package
-for them. `ssik.get_include()` and `ssik.get_cmake_dir()` locate them, and
+for them. `ssik.get_include()` and `ssik.get_cmake_dir()` locate them.
+`ssik.cpp.solver_data(arm)` returns the input of `ssik::Solver`, the one C++
+entry point for every family in `ssik.cpp.NATIVE_FAMILIES`; what it returns is
+the contract in [The native backend](#the-native-backend), and its arrays are
+specified in [Solver data, schema 1](specs/solver_data.md).
 `ssik.cpp.joint_data(arm)` returns the arrays a C++ caller builds
-`ssik::JointConsts<N>` and `ssik::JointLimits<N>` from. The consumer guide is
+`ssik::JointConsts<N>` and `ssik::JointLimits<N>` from, for
+`three_parallel_artifact_solve`. The consumer guide is
 [`cpp/README.md`](https://github.com/personalrobotics/ssik/blob/main/cpp/README.md#use-it-from-the-python-wheel);
 the C++ names covered by semver are listed in the [semver policy](semver_policy.md).
 
@@ -809,6 +850,11 @@ the C++ names covered by semver are listed in the [semver policy](semver_policy.
       members:
         - get_include
         - get_cmake_dir
+        - solver_data
+        - SolverData
+        - SOLVER_DATA_SCHEMA
+        - NATIVE_FAMILIES
+        - UnsupportedFamilyError
         - joint_data
         - JointData
 

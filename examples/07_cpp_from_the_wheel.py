@@ -2,8 +2,9 @@
 
 Every ssik wheel ships the header-only C++ solvers (``ssik_cpp``) and a CMake
 package for them, so a C++ program, or a Python extension of your own, can call
-the solver with no Python in the loop. This prints where they are and the joint
-data a C++ caller builds its solver input from, for the UR5.
+the solver with no Python in the loop. This prints where they are, the joint
+data a C++ caller builds its solver input from for the UR5, and the solver data
+``ssik::Solver`` takes for any native family, here for the Franka Panda.
 
 In your ``CMakeLists.txt``::
 
@@ -19,6 +20,12 @@ and in C++, with ``consts`` / ``limits`` filled from ``ssik.cpp.joint_data``::
 
     #include "ssik_cpp/solvers/three_parallel.hpp"
     auto sols = ssik::three_parallel_artifact_solve(consts, limits, T, ssik::ArtifactParams<6>{});
+
+or, for any arm whose family is in ``ssik.cpp.NATIVE_FAMILIES``, with ``data``
+built from ``ssik.cpp.solver_data``::
+
+    #include "ssik_cpp/solve.hpp"
+    auto sols = ssik::Solver(data).solve<7>(T, ssik::ArtifactParams<7>{});
 
 A complete, built-in-CI version is ``cpp/examples/wheel_consumer/`` in the
 repository; the guide is ``cpp/README.md`` ("Use it from the Python wheel").
@@ -92,6 +99,22 @@ def main() -> int:
     print(f"\nFK rebuilt from the arrays vs arm.fk, 20 random q: max difference {worst:.1e}")
     checks.append(("the joint data reproduce the arm's FK to 1e-12", worst < 1e-12))
     checks.append(("UR5 goes to three_parallel_artifact_solve", d.solver == "ikgeo.three_parallel"))
+
+    # ssik::Solver serves every native family from one record: the family, the
+    # schema number and named arrays (docs/specs/solver_data.md).
+    panda = ssik.Manipulator.from_prebuilt("franka_panda")
+    sd = ssik.cpp.solver_data(panda)
+    print(f"\nssik.cpp.solver_data(Panda): family {sd.family}, schema {sd.schema}, dof {sd.dof}")
+    for name, a in sorted(sd.arrays.items()):
+        print(f"  {name:12s} {a.dtype}  {a.shape}")
+    pd = ssik.cpp.joint_data(panda)
+    checks.append(("the Panda's family is native", sd.family in ssik.cpp.NATIVE_FAMILIES))
+    checks.append(
+        (
+            "the solver data carries the Panda's joint data",
+            all(np.array_equal(sd.arrays[k], getattr(pd, k)) for k in ("axis", "t_left", "lo")),
+        )
+    )
     print()
 
     for name, ok in checks:

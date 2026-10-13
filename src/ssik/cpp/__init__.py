@@ -13,24 +13,39 @@ directly with no Python in the loop::
 Eigen stays the consumer's responsibility: the package ``find_dependency``s
 ``Eigen3``, and ssik's own builds use the release pinned in
 ``scripts/fetch_eigen.py`` (3.4.0). The per-arm generated headers
-(``cpp/gen/<arm>_ik.hpp``) are not in the wheel. Build the solver inputs at
-runtime with :func:`joint_data`, or emit a header with ``scripts/cpp_emit.py``
-from a source checkout.
+(``cpp/gen/<arm>_ik.hpp``) are not in the wheel. Build the solver input at
+runtime instead: :func:`solver_data` for ``ssik::Solver``, which serves every
+native family, or :func:`joint_data` for ``three_parallel_artifact_solve``.
+From a source checkout, ``scripts/cpp_emit.py`` emits a per-arm header.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import NDArray
 
+from ssik._native import _NATIVE_SOLVERS, _SOLVER_DATA_SCHEMA
+
 if TYPE_CHECKING:
     from ssik.manipulator import Manipulator
 
-__all__ = ["JointData", "get_cmake_dir", "get_include", "joint_data"]
+__all__ = [
+    "NATIVE_FAMILIES",
+    "SOLVER_DATA_SCHEMA",
+    "JointData",
+    "SolverData",
+    "UnsupportedFamilyError",
+    "get_cmake_dir",
+    "get_include",
+    "joint_data",
+    "solver_data",
+]
 
 _HERE = Path(__file__).resolve().parent
 _PROBE = Path("ssik_cpp") / "fk.hpp"
@@ -157,4 +172,137 @@ def _joint_data(kb: Any, solver: str) -> JointData:
         lo=np.array([j.limits[0] if j.limits else 0.0 for j in lj], dtype=np.float64),
         hi=np.array([j.limits[1] if j.limits else 0.0 for j in lj], dtype=np.float64),
         present=np.array([bool(j.limits) for j in lj], dtype=np.bool_),
+    )
+
+
+#: The schema number of the :class:`SolverData` this ssik produces, and the only
+#: one its ``ssik::Solver`` accepts (``ssik::kSolverDataSchema``). The arrays of
+#: each family at this number are specified in ``docs/specs/solver_data.md``.
+SOLVER_DATA_SCHEMA: int = _SOLVER_DATA_SCHEMA
+
+#: The solver families with a native solver: the ones :func:`solver_data` and
+#: ``ssik::Solver`` serve (``ssik::native_families()``).
+NATIVE_FAMILIES: frozenset[str] = _NATIVE_SOLVERS
+
+
+class UnsupportedFamilyError(ValueError):
+    """:func:`solver_data` cannot describe this arm for ``ssik::Solver``.
+
+    Raised when the arm's solver family has no native solver (it is not in
+    :data:`NATIVE_FAMILIES`), for a ``jointlock.seven_r`` arm built at runtime
+    (only the prebuilt jointlock arms ship the data its native solver needs),
+    and when a family's native geometry check rejects an arm the dispatcher put
+    in that family. The message says which. ``family`` is the arm's solver
+    family.
+    """
+
+    def __init__(self, family: str, message: str) -> None:
+        super().__init__(message)
+        self.family = family
+
+
+@dataclass(frozen=True)
+class SolverData:
+    """The complete input of one arm's native solver, ``ssik::Solver``.
+
+    The same record as ``ssik::SolverData`` (``ssik_cpp/solver_data.hpp``): a
+    family name, a schema number and a flat map of named arrays. Every array
+    is read-only, C-contiguous and either float64 or int32; a scalar has shape
+    ``()``. The names, shapes, dtypes and meaning of each family's arrays are
+    specified in ``docs/specs/solver_data.md``; semver covers them through
+    ``schema``.
+
+    - ``family``: the solver family, :attr:`ssik.Manipulator.solver_name`.
+    - ``schema``: :data:`SOLVER_DATA_SCHEMA` of the ssik that produced it.
+    - ``dof``: the number of joints, 6 or 7.
+    - ``arrays``: ``{name: ndarray}``, read-only.
+
+    A pybind11 extension converts it with
+    ``ssik::pybind11_interop::solver_data_from_python``
+    (``ssik_cpp/pybind11/solver_data.hpp``). It maps one-to-one onto an
+    ``.npz``: ``np.savez(path, schema=d.schema, family=d.family, **d.arrays)``.
+    """
+
+    family: str
+    schema: int
+    dof: int
+    arrays: Mapping[str, NDArray[Any]]
+
+
+def solver_data(arm: Manipulator) -> SolverData:
+    """The input ``ssik::Solver`` (``ssik_cpp/solve.hpp``) needs for ``arm``.
+
+    It is built by the same code that feeds ssik's own native backend, so for
+    the options ``ssik::ArtifactParams`` can express, ``ssik::Solver(d).solve<N>``
+    returns the list, in the same order, that the native backend returns for
+    this data (``docs/api.md``, "The native backend"). For an arm from
+    :meth:`ssik.Manipulator.from_prebuilt` that is ``arm.solve(T, native=True)``.
+
+    Works for prebuilt arms and for arms built at runtime (``from_urdf``,
+    ``from_mjcf``, ``from_axes``), and needs no native extension. A runtime arm
+    on ``ikgeo.general_6r`` needs its numeric coefficient tensor: about 28 s of
+    symbolic work the first time on a machine (the JACO 2), then milliseconds
+    from the per-arm preparation cache (``docs/api.md``, "Per-arm preparation
+    cache"); :meth:`ssik.Manipulator.prepare` pays it ahead of time. Prebuilt
+    arms ship it.
+
+    >>> import ssik
+    >>> d = ssik.cpp.solver_data(ssik.Manipulator.from_prebuilt("ur5"))
+    >>> d.family, d.schema, d.dof, d.arrays["t_left"].shape
+    ('ikgeo.three_parallel', 1, 6, (6, 4, 4))
+
+    :raises TypeError: ``arm`` is not a :class:`ssik.Manipulator`.
+    :raises UnsupportedFamilyError: the arm's family has no native solver, the
+        arm is a ``jointlock.seven_r`` arm built at runtime, or the family's
+        native geometry check rejects the arm.
+    """
+    from ssik import _native
+    from ssik.manipulator import Manipulator
+
+    if not isinstance(arm, Manipulator):
+        raise TypeError(f"solver_data() takes an ssik.Manipulator, got {type(arm).__name__}")
+    family = arm.solver_name
+    if family not in NATIVE_FAMILIES:
+        raise UnsupportedFamilyError(
+            family,
+            f"solver family {family!r} has no native solver; ssik::Solver serves "
+            f"{', '.join(sorted(NATIVE_FAMILIES))}",
+        )
+    kb = arm.kinbody
+    prebuilt = arm._prebuilt
+    geometry: Any = None
+    if family == "jointlock.seven_r":
+        # The artifact's own baked sweep, the data its native=True path uses.
+        geometry = None if prebuilt is None else prebuilt._jointlock_native_geometry()
+        if geometry is None:
+            raise UnsupportedFamilyError(
+                family,
+                "a jointlock.seven_r arm built at runtime has no native solver data: its "
+                "inner kernel (Raghavan-Roth or Husty-Pfurner) and its 16 lock samples are "
+                "fixed when an arm is onboarded, so only the prebuilt jointlock arms "
+                "(Manipulator.from_prebuilt) ship them",
+            )
+    elif family == "ikgeo.general_6r":
+        # A prebuilt arm's shipped tensor, the one its native=True path uses.
+        if prebuilt is not None:
+            geometry = prebuilt._rr_native_geometry()
+        if geometry is None:
+            geometry = _native.rr_native_geometry(kb)
+    arrays = _native._solver_arrays(kb, family, geometry)
+    if arrays is None:
+        raise UnsupportedFamilyError(
+            family,
+            f"the dispatcher put this arm in {family!r}, but that family's native "
+            f"geometry check rejects it, so there is no native solver data for it",
+        )
+    frozen: dict[str, NDArray[Any]] = {}
+    for name, value in arrays.items():
+        a = np.array(value, copy=True, order="C")
+        a.flags.writeable = False
+        frozen[name] = a
+    return SolverData(
+        family=family,
+        schema=SOLVER_DATA_SCHEMA,
+        dof=len(kb.joints),
+        arrays=MappingProxyType(frozen),
     )

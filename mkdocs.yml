@@ -89,6 +89,7 @@ nav:
           - SRS 7R (Singh-Kreutz): specs/srs_7r_singh_kreutz.md
           - IK-Geo general 6R: specs/ikgeo_general_6r.md
           - HP robustness notes: specs/hp_robustness_investigation.md
+          - Solver data (C++ consumers): specs/solver_data.md
   - Project:
       - Semver policy: semver_policy.md
       - "ADR-0001: Python is the compiler": adr/0001-python-is-the-compiler.md

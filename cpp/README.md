@@ -91,7 +91,7 @@ cmake -S . -B build \
 ```
 
 ```cmake
-find_package(ssik_cpp 6 CONFIG REQUIRED)   # the ssik release; any 6.x >= the request
+find_package(ssik_cpp 8.2 CONFIG REQUIRED)   # the ssik release; any 8.x >= 8.2 (ssik::Solver)
 target_link_libraries(my_ext PRIVATE ssik::ssik_cpp)
 ```
 
@@ -104,7 +104,92 @@ prints a prefix for it).
 
 The wheel ships the `ssik_cpp/` primitives and solvers, not the generated
 `<arm>_ik.hpp` artifacts. Build the solver input at runtime from the Python
-arm instead:
+arm instead.
+
+### Every native family: `ssik::Solver`
+
+`ssik.cpp.solver_data(arm)` returns everything the arm's native solver needs,
+for any arm whose family is in `ssik.cpp.NATIVE_FAMILIES`, prebuilt or built at
+runtime (`from_urdf`, `from_mjcf`, `from_axes`). `ssik::Solver`
+(`ssik_cpp/solve.hpp`) takes the same record as an `ssik::SolverData`, checks
+it once and prepares the family's solver once:
+
+```python
+d = ssik.cpp.solver_data(ssik.Manipulator.from_prebuilt("franka_panda"))
+d.family, d.schema, d.dof   # "seven_r.spherical_shoulder", 1, 7
+d.arrays                    # {name: float64 / int32 ndarray}, read-only
+```
+
+```cpp
+#include "ssik_cpp/solve.hpp"
+
+const ssik::Solver solver(data);   // throws ssik::SolverDataError on bad data
+if (solver.dof() == 7) {
+  ssik::ArtifactParams<7> p;       // the Python solve() defaults
+  for (const auto& s : solver.solve<7>(T, p)) use(s.q);
+  ssik::Pose F = solver.fk<7>(q);
+}
+```
+
+A pybind11 extension converts the Python record with the Eigen-free header
+`ssik_cpp/pybind11/solver_data.hpp`, which uses your own pybind11; the
+`ssik::ssik_cpp` target does not depend on pybind11:
+
+```cpp
+#include "ssik_cpp/pybind11/solver_data.hpp"
+ssik::SolverData data = ssik::pybind11_interop::solver_data_from_python(obj);
+```
+
+Arrays that are not float64 or int32 in native byte order and C order raise
+`TypeError`; nothing is converted silently. `ssik_cpp/solver_data.hpp` is
+Eigen-free too, so a public header can hold a `SolverData`. Without pybind11,
+fill `SolverData` yourself: `examples/wheel_consumer/solve_any.cpp` reads it
+from a text file. The record also maps one-to-one onto an `.npz`
+(`np.savez(path, schema=d.schema, family=d.family, **d.arrays)`); ssik ships no
+C++ reader for one.
+
+What `Solver` guarantees:
+
+- **Same result as ssik's native backend.** ssik's own extension calls this
+  class, so `Solver(solver_data(arm)).solve<N>(T, p)` returns the list
+  `arm.solve(T, native=True)` returns for a prebuilt arm, in the same order,
+  for every option `ArtifactParams` can express. Its relation to the Python
+  backend is the native-parity contract in `docs/api.md` ("The native
+  backend").
+- **It checks its input.** The constructor throws `ssik::UnsupportedSolverData`
+  for another schema number or a family with no native solver, and
+  `ssik::SolverDataError` for a missing, unknown, mis-shaped or mis-typed
+  array, a non-finite value or an out-of-range index. `solve<N>` and `fk<N>`
+  throw `std::invalid_argument` when `N` is not `dof()`; `solve<N>` also
+  throws it for a target that is not finite and rigid (the rules of
+  `docs/api.md`, "Input validation"), a non-finite seed, `max_solutions < -1`
+  or `refinement_max_iters < 0`. All three are `std::invalid_argument`.
+- **The schema must match exactly.** A consumer compiles one ssik release's
+  headers and may run with another ssik installed. A different
+  `SOLVER_DATA_SCHEMA` is rejected, never misread.
+- **Thread-safe.** Every method is `const`; one `Solver` can serve many threads.
+
+Redundant 7R families resolve their self-motion with fixed internal schedules
+that are not parameters: 16 swivel samples for `seven_r.srs*`, a closed-form
+interval plus a 16-point grid for `seven_r.spherical_shoulder*`, and the 16
+lock samples in the data for `jointlock.seven_r`. With `has_seed` and
+`max_solutions == 1`, the SRS and spherical-shoulder families first track the
+seed with Newton steps and return one solution that may lie off the sample
+grid.
+
+`solver_data` raises `ssik.cpp.UnsupportedFamilyError` (a `ValueError`) for
+`ikgeo.spherical_two_intersecting` and `ikgeo.spherical`, which have no native
+solver, and for a `jointlock.seven_r` arm built at runtime: only the prebuilt
+jointlock arms ship the data that family needs. A runtime `ikgeo.general_6r`
+arm needs its Raghavan-Roth tensor, about 28 s the first time on a machine and
+milliseconds afterwards from the per-arm preparation cache
+(`Manipulator.prepare()` pays it ahead of time). The arrays of each family are
+specified in [`docs/specs/solver_data.md`](../docs/specs/solver_data.md).
+
+### UR-class arms: `three_parallel_artifact_solve`
+
+The single-family entry point that `Solver` dispatches to for
+`ikgeo.three_parallel` takes `JointConsts<6>` and `JointLimits<6>` directly:
 
 ```python
 d = ssik.cpp.joint_data(ssik.Manipulator.from_prebuilt("ur5e"))
@@ -118,18 +203,22 @@ d.lo, d.hi, d.present                        # JointLimits<6>
 auto sols = ssik::three_parallel_artifact_solve(consts, limits, T, ssik::ArtifactParams<6>{});
 ```
 
-The `*_artifact_solve` functions take their input as given and do not check
-it. They expect a finite rigid `T` (rotation block in SO(3), bottom row
-`[0, 0, 0, 1]`), a finite `p.q_seed` when `p.has_seed`, and `p.max_solutions`
-of `-1` (no cap) or at least 1. Python's `solve()` checks exactly this before
-it calls them (`docs/api.md`, "Input validation"); a C++ caller with poses from
-an untrusted source checks them first. On a non-finite target a solver may
-return nothing or run for a long time.
+Unlike `Solver`, the `*_artifact_solve` functions take their input as given
+and do not check it. They expect a finite rigid `T` (rotation block in SO(3),
+bottom row `[0, 0, 0, 1]`), a finite `p.q_seed` when `p.has_seed`, and
+`p.max_solutions` of `-1` (no cap) or at least 1. Python's `solve()` checks
+exactly this before it calls them (`docs/api.md`, "Input validation"); a C++
+caller with poses from an untrusted source checks them first. On a non-finite
+target a solver may return nothing or run for a long time.
 
-`examples/wheel_consumer/` is a complete version, run against the installed
-wheel in CI ("Native wheel build"). For a generated artifact, emit it from a
-checkout (`python scripts/cpp_emit.py <arm>_ik`) or use the `cmake --install`
-route above. Which C++ names semver covers is in `docs/semver_policy.md`. In an
+### The complete example
+
+`examples/wheel_consumer/` is a complete version of both routes, run against
+the installed wheel in CI ("Native wheel build"): `three_parallel_solve.cpp`
+for the UR5 and `solve_any.cpp` for one arm of every native family plus
+runtime-built arms. For a generated artifact, emit it from a checkout
+(`python scripts/cpp_emit.py <arm>_ik`) or use the `cmake --install` route
+above. Which C++ names semver covers is in `docs/semver_policy.md`. In an
 editable install `get_include()` returns the checkout's `cpp/include`, and
 `get_cmake_dir()` raises: the CMake package is built into wheels only.
 

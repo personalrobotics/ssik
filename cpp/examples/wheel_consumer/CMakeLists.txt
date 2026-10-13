@@ -21,3 +21,7 @@ message(STATUS "ssik_wheel_consumer: Eigen ${Eigen3_VERSION} (${Eigen3_DIR})")
 
 add_executable(three_parallel_solve three_parallel_solve.cpp)
 target_link_libraries(three_parallel_solve PRIVATE ssik::ssik_cpp)
+
+# Every native family through one entry point, ssik::Solver (ssik_cpp/solve.hpp).
+add_executable(solve_any solve_any.cpp)
+target_link_libraries(solve_any PRIVATE ssik::ssik_cpp)
