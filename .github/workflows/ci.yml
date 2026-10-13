@@ -513,6 +513,16 @@ jobs:
       - name: ctest (FK + Newton golden conformance)
         run: ctest --test-dir cpp/build --output-on-failure
 
+      - name: SolverData trust boundary under AddressSanitizer and UBSan
+        # ssik::Solver must reject every malformed SolverData before it reads
+        # out of bounds (#707); the sanitizers turn a missed check into a failure.
+        run: |
+          cmake -S cpp -B cpp/build-asan -DCMAKE_BUILD_TYPE=Debug -DSSIK_SANITIZE=ON \
+            -DSSIK_CPP_EXAMPLES=OFF -DSSIK_CPP_INSTALL=OFF \
+            -DCMAKE_PREFIX_PATH="$PINNED_EIGEN_PREFIX" -DSSIK_EIGEN_VERSION="$PINNED_EIGEN_VERSION"
+          cmake --build cpp/build-asan --target test_solver_data -j
+          ./cpp/build-asan/test_solver_data
+
       - name: C++ consumer smoke (install + find_package + build + run)
         # Proves the self-contained artifacts are usable by an external C++
         # project: installs ssik_cpp to a temp prefix, then a standalone

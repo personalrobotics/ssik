@@ -126,6 +126,19 @@ target_link_libraries(test_batch PRIVATE ssik_cpp)
 target_include_directories(test_batch PRIVATE gen)
 add_test(NAME batch COMMAND test_batch)
 
+# ssik::Solver's trust boundary (#707): a malformed SolverData or solve() input
+# throws, and never reads out of bounds. -DSSIK_SANITIZE=ON builds it under
+# AddressSanitizer and UBSan, which is how CI runs it.
+option(SSIK_SANITIZE "Build test_solver_data with AddressSanitizer and UBSan" OFF)
+add_executable(test_solver_data tests/test_solver_data.cpp)
+target_link_libraries(test_solver_data PRIVATE ssik_cpp)
+if(SSIK_SANITIZE)
+  target_compile_options(test_solver_data PRIVATE
+    -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -O1 -g)
+  target_link_options(test_solver_data PRIVATE -fsanitize=address,undefined)
+endif()
+add_test(NAME solver_data COMMAND test_solver_data)
+
 # THE GATE (data-driven): every self-contained artifact validated against its
 # Python oracle golden, zero pybind/Python. The arm list is generated into
 # cpp/gen/artifact_gate.hpp by cpp_emit.py, so onboarding an arm needs no edit
