@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from ssik import _native
 from ssik._kinbody import JointSpec, KinBody, build_kinbody
 from ssik.core.diagnostic import Diagnostic
 from ssik.core.dispatcher import DispatchPlan, dispatch
@@ -86,6 +87,61 @@ def _coerce_limits(limits: ArrayLike | None, n: int) -> list[tuple[float, float]
     if arr.shape != (n, 2):
         raise ValueError(f"limits must be (N, 2) for N={n}; got {arr.shape}")
     return [(float(lo), float(hi)) for lo, hi in arr]
+
+
+# Runtime-built arms of these families solve natively by default, as prebuilt
+# arms do: the native parity gate (tests/test_native_parity.py) holds the 6R
+# native and Python results to the same solution set. On a 7R family the two
+# backends sample the self-motion at different points, which
+# docs/semver_policy.md classes as a MAJOR change of default, so there native
+# is opt-in (native=True) until 9.0. Runtime-built jointlock.seven_r has no
+# native data (ssik.cpp.solver_data) and always runs Python.
+_RUNTIME_NATIVE_DEFAULT = frozenset(
+    {"ikgeo.three_parallel", "ikgeo.spherical_two_parallel", "ikgeo.general_6r"}
+)
+_RUNTIME_NATIVE_OPT_IN = frozenset(
+    {
+        "seven_r.srs",
+        "seven_r.srs_polished",
+        "seven_r.spherical_shoulder",
+        "seven_r.spherical_shoulder_polished",
+    }
+)
+
+# A runtime general_6r arm's native coefficient tensor, per KinBody: derived (or
+# read from the per-arm preparation cache) once, then the same object on every
+# solve, which is what keeps _native's prepared solver for the arm cached.
+_runtime_rr_geometry = _native._KinBodyCache()
+
+
+def _runtime_native_solve(
+    family: str,
+    kb: KinBody,
+    T: NDArray[np.float64],
+    *,
+    policy: TolerancePolicy,
+    allow_refinement: bool,
+    **options: Any,
+) -> list[Solution] | None:
+    """A runtime-built arm's native solve, or None when native cannot answer
+    (no extension, a family without runtime native data, options native does
+    not implement, or an arm the family's native geometry check rejects)."""
+    if not _native.native_available() or not _native.honours_options(policy, allow_refinement):
+        return None
+    if family in _RUNTIME_NATIVE_OPT_IN:
+        return _native.try_native_solve_7r(
+            family, kb, T, policy=policy, allow_refinement=allow_refinement, **options
+        )
+    if family not in _RUNTIME_NATIVE_DEFAULT:
+        return None
+    rr = None
+    if family == "ikgeo.general_6r":
+        rr = _runtime_rr_geometry.get(kb)
+        if rr is None:
+            rr = _runtime_rr_geometry.put(kb, _native.rr_native_geometry(kb))
+    return _native.try_native_solve(
+        family, kb, T, rr_geometry=rr, policy=policy, allow_refinement=allow_refinement, **options
+    )
 
 
 class Manipulator:
@@ -231,10 +287,10 @@ class Manipulator:
         for ``import panda_ik`` -- it is that same solver, with the chart API
         attached. The two cases that cannot be delegated fall back to the live
         path: ``explain=True`` (artifacts do not build a :class:`Diagnostic`)
-        and any ``solver_kwargs`` beyond ``native`` (artifacts take a fixed
-        parameter set). Everything else -- :meth:`fk`, :meth:`self_motion`,
-        :meth:`solve_path`, the introspection properties -- is computed here
-        from the artifact's own geometry.
+        and any ``solver_kwargs`` (artifacts take a fixed parameter set).
+        Everything else -- :meth:`fk`, :meth:`self_motion`, :meth:`solve_path`,
+        the introspection properties -- is computed here from the artifact's
+        own geometry.
 
         Four spellings resolve, tried in that order, so an exact catalog name
         can never be shadowed by an abbreviation::
@@ -523,15 +579,16 @@ class Manipulator:
         """
         if self._prebuilt is not None or self._plan.solver_name != "ikgeo.general_6r":
             return
-        from ssik._native import rr_native_geometry
         from ssik.kinematics.poe_to_dh import poe_to_dh
         from ssik.solvers.ikgeo._raghavan_roth import _cached_best_leftvar
 
         # The Python solver's AE-3 pick derives every linearity choice; then the
-        # native tensor for the chosen one (a cache hit skips its derivation).
+        # native tensor for the chosen one (a cache hit skips its derivation),
+        # kept for this arm's native solves.
         alpha, a, d = poe_to_dh(self._kb).to_dh_tuple()
         _cached_best_leftvar(tuple(alpha.tolist()), tuple(a.tolist()), tuple(d.tolist()))
-        rr_native_geometry(self._kb)
+        if _runtime_rr_geometry.get(self._kb) is None:
+            _runtime_rr_geometry.put(self._kb, _native.rr_native_geometry(self._kb))
 
     # ------------------------------------------------------------------
     # Forward kinematics
@@ -662,6 +719,7 @@ class Manipulator:
         seed_tolerance: float | None = None,
         allow_rescue: bool = True,
         enumerate_windings: bool = True,
+        native: bool | None = None,
         **solver_kwargs: Any,
     ) -> list[Solution]: ...
 
@@ -681,6 +739,7 @@ class Manipulator:
         seed_tolerance: float | None = None,
         allow_rescue: bool = True,
         enumerate_windings: bool = True,
+        native: bool | None = None,
         **solver_kwargs: Any,
     ) -> tuple[list[Solution], Diagnostic]: ...
 
@@ -699,6 +758,7 @@ class Manipulator:
         seed_tolerance: float | None = None,
         allow_rescue: bool = True,
         enumerate_windings: bool = True,
+        native: bool | None = None,
         **solver_kwargs: Any,
     ) -> list[Solution] | tuple[list[Solution], Diagnostic]:
         """Inverse kinematics: find every ``q`` such that ``fk(q) ≈ T_target``.
@@ -764,6 +824,20 @@ class Manipulator:
             :data:`~ssik.core.tolerances.DEFAULT_TOLERANCE_POLICY`.
         :param refinement_max_iters: cap on Newton iterations per candidate
             when ``allow_refinement=True``.
+        :param native: which backend answers (``docs/api.md``, "Which backend
+            solve() uses"). ``None`` (default) picks per arm: the native (C++)
+            backend for every arm from :meth:`from_prebuilt` and for an arm
+            built at runtime on ``ikgeo.three_parallel``,
+            ``ikgeo.spherical_two_parallel`` or ``ikgeo.general_6r``; the
+            Python solver for a runtime-built 7R arm. ``True`` asks for native
+            wherever it exists, which adds the runtime-built ``seven_r.srs``,
+            ``seven_r.srs_polished``, ``seven_r.spherical_shoulder`` and
+            ``seven_r.spherical_shoulder_polished`` arms (their default
+            becomes native in 9.0). ``False`` forces Python. Native is a
+            performance hint, never an error: without the extension, for a
+            family it does not cover, or with options it does not implement
+            (``explain=True``, ``solver_kwargs``, a non-default ``policy``,
+            ``allow_refinement=True``) the call runs the Python solver.
         :param solver_kwargs: forwarded verbatim to the dispatched solver
             for power users (``swivel_samples`` for SRS-class,
             ``linearity_joint`` for RR, etc.).
@@ -794,7 +868,9 @@ class Manipulator:
         # ``explain`` and extra solver_kwargs have no artifact equivalent, so
         # those calls fall through; every artifact takes exactly the fixed
         # parameter set used here, which test_prebuilt_namespace pins.
-        if self._prebuilt is not None and not explain and set(solver_kwargs) <= {"native"}:
+        if self._prebuilt is not None and not explain and not solver_kwargs:
+            if native is not None:
+                solver_kwargs = {"native": native}
             sols: list[Solution] = self._prebuilt.solve(
                 T_target,
                 max_solutions=max_solutions,
@@ -837,6 +913,31 @@ class Manipulator:
                 refinement_engaged=0,
                 fk_atol=policy.subproblem_numerical,
             )
+
+        # Built at runtime: the native backend answers when the caller (or the
+        # family's default, _RUNTIME_NATIVE_DEFAULT) asks for it and it can,
+        # through the same per-arm prepared solver and entry points a prebuilt
+        # arm's artifact uses. None means it cannot, and the Python path runs.
+        if self._prebuilt is None and not explain and not solver_kwargs:
+            family = self._plan.solver_name
+            if native if native is not None else family in _RUNTIME_NATIVE_DEFAULT:
+                native_sols = _runtime_native_solve(
+                    family,
+                    self._kb,
+                    T,
+                    respect_limits=respect_limits,
+                    q_seed=q_seed_arr,
+                    seed_metric=seed_metric,
+                    seed_tolerance=seed_tolerance,
+                    max_solutions=max_solutions,
+                    allow_rescue=allow_rescue,
+                    refinement_max_iters=refinement_max_iters,
+                    enumerate_windings=enumerate_windings,
+                    policy=policy,
+                    allow_refinement=allow_refinement,
+                )
+                if native_sols is not None:
+                    return native_sols
 
         # Filter kwargs by the dispatched solver's signature so callers can
         # pass q_seed (or any other not-universally-supported kwarg) without
