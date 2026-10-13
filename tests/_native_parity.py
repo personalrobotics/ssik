@@ -27,6 +27,12 @@ Poses
     The other strata are drawn from ``numpy.random.default_rng`` seeded with
     ``SEED`` and the arm and stratum names, so they reproduce exactly.
 
+Runtime-built arms
+    ``evaluate(arm, tier, runtime=True)`` runs the same poses and assertions on
+    a copy of the arm built at runtime (``RUNTIME_ARMS``, one per family whose
+    runtime-built arms solve natively, #707), where native is held to the live
+    Python solver instead of the artifact's.
+
 Assertions (``evaluate``), in the default (``respect_limits=True``) and raw
 (``respect_limits=False``) modes, geometric set only (``enumerate_windings=
 False``: winding lifts are a deterministic function of the limits applied after
@@ -239,6 +245,55 @@ def arm_names() -> list[str]:
 
 def module(arm: str) -> Any:
     return importlib.import_module(_arm_paths()[arm])
+
+
+# Arms built at runtime (#707): one per family whose runtime-built arms solve
+# natively (Manipulator.solve, docs/api.md "Which backend solve() uses"). Each
+# is rebuilt from the prebuilt arm's own zero-pose frames by
+# Manipulator.from_transforms, which reproduces the prebuilt KinBody bit for
+# bit, then given its joint limits (from_transforms cannot express a
+# continuous joint). So its poses and oracle adjudications are the prebuilt
+# arm's, and the gate holds what a runtime-built arm's user gets -- native
+# against the live Python solver -- to the prebuilt contract. srs_polished uses
+# the j2s7s300 because the Gen3, RM75 and YuMi left have a known class-I cell.
+RUNTIME_ARMS = (
+    "ur5_ik",  # ikgeo.three_parallel
+    "puma560_ik",  # ikgeo.spherical_two_parallel
+    "jaco2_ik",  # ikgeo.general_6r
+    "iiwa14_ik",  # seven_r.srs
+    "j2s7s300_ik",  # seven_r.srs_polished
+    "franka_panda_ik",  # seven_r.spherical_shoulder
+    "xarm7_ik",  # seven_r.spherical_shoulder_polished
+)
+
+
+class RuntimeArm:
+    """A runtime-built copy of a prebuilt arm, read through the surface the
+    gate reads from an artifact module (``solve``, ``fk``, ``_KB``, ``DOF``).
+    ``solve(native=...)`` is ``Manipulator.solve``'s switch: ``True`` the
+    native backend, ``False`` the live Python solver."""
+
+    def __init__(self, arm: str) -> None:
+        from ssik import Manipulator
+
+        kb = module(arm)._KB
+        frames = [j.T_left for j in kb.joints] + [kb.joints[-1].T_right]
+        self.arm = Manipulator.from_transforms(np.array(frames), [j.axis for j in kb.joints])
+        for built, shipped in zip(self.arm.kinbody.joints, kb.joints, strict=True):
+            built.limits = shipped.limits
+        self._KB = self.arm.kinbody
+        self.DOF = self.arm.dof
+
+    def fk(self, q: Q) -> Q:
+        return self.arm.fk(q)
+
+    def solve(self, t: Q, **kwargs: Any) -> Any:
+        return self.arm.solve(t, **kwargs)
+
+
+@cache
+def runtime_arm(arm: str) -> RuntimeArm:
+    return RuntimeArm(arm)
 
 
 def family(arm: str) -> str:
@@ -517,9 +572,9 @@ def _solve(m: Any, t: Q, *, limits: bool, native: bool, rescue: bool) -> tuple[Q
 class _Pose:
     """One pose's solve sets and the classification rules that read them."""
 
-    def __init__(self, arm: str, pid: str, q: Q, rep: Report) -> None:
+    def __init__(self, arm: str, pid: str, q: Q, rep: Report, runtime: bool = False) -> None:
         self.arm, self.pid, self.rep = arm, pid, rep
-        self.m = module(arm)
+        self.m = runtime_arm(arm) if runtime else module(arm)
         self.kb = self.m._KB
         self.dof = len(self.kb.joints)
         self.fam = family(arm)
@@ -746,11 +801,12 @@ class _Pose:
 
 
 @cache
-def evaluate(arm: str, tier: str) -> Report:
-    """Every gap on the tier's poses, each attributed to a class."""
+def evaluate(arm: str, tier: str, runtime: bool = False) -> Report:
+    """Every gap on the tier's poses, each attributed to a class; with
+    ``runtime``, on the arm's runtime-built copy (:data:`RUNTIME_ARMS`)."""
     rep = Report()
     for pid, q in poses(arm, tier):
-        pose = _Pose(arm, pid, q, rep)
+        pose = _Pose(arm, pid, q, rep, runtime)
         for mode in ("limits", "raw"):
             pose.check(mode)
     return rep
