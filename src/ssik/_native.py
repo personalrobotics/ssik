@@ -20,6 +20,7 @@ import io
 import json
 import weakref
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -151,32 +152,188 @@ class _KinBodyCache:
 # "this arm is not of that solver class").
 _MISS: Any = object()
 
-_consts_cache = _KinBodyCache()
+# The native backend runs every family through one class, ``_ssik_native.Solver``
+# (``ssik::Solver`` in cpp/include/ssik_cpp/solve.hpp, #707). It is built once
+# per arm and family from a solver-data record: the family name, the schema
+# number and a flat map of float64 / int32 arrays whose names, shapes and dtypes
+# the C++ constructor checks. It prepares the family's constants once (the RR
+# coefficient tensors included), so a solve only converts the target and options.
+_SOLVER_DATA_SCHEMA = 1
 
 
-def _consts(solver_name: str, kb: Any) -> tuple[Any, ...]:
-    cached = _consts_cache.get(kb)
-    if cached is not None:
-        return cached  # type: ignore[no-any-return]
-    # The public ssik.cpp.joint_data arrays, which also feed cpp_emit's headers.
-    # spherical_two_parallel gets the wrist gauge canonicalized there (the raw
-    # _KB lacks it -- 15/18 arms); canonicalization is FK-identical, so the
-    # returned q are physical joint values and the joint limits are unchanged.
-    # Done in Python (cached per-arm), so no preprocessing is ported to C++.
+@dataclass(frozen=True)
+class _SolverRecord:
+    """What ``_ssik_native.Solver`` reads (``ssik_cpp/pybind11/solver_data.hpp``)."""
+
+    family: str
+    schema: int
+    arrays: dict[str, NDArray[Any]]
+
+
+def _f64(x: Any) -> NDArray[np.float64]:
+    return np.array(x, dtype=np.float64, order="C")
+
+
+def _i32(x: Any) -> NDArray[np.int32]:
+    return np.array(x, dtype=np.int32, order="C")
+
+
+def _joint_arrays(kb: Any, solver_name: str) -> dict[str, NDArray[Any]]:
+    """The joint arrays of every family: the public ``ssik.cpp.joint_data``,
+    which also feeds cpp_emit's headers. spherical_two_parallel gets the wrist
+    gauge canonicalized there (the raw _KB lacks it -- 15/18 arms);
+    canonicalization is FK-identical, so the returned q are physical joint
+    values and the joint limits are unchanged."""
     from ssik.cpp import _joint_data
 
     d = _joint_data(kb, solver_name)
-    marshalled = (
-        d.axis,
-        d.t_left,
-        d.t_right,
-        d.joint_type,
-        d.lo,
-        d.hi,
-        d.present.astype(np.int32),
+    return {
+        "axis": _f64(d.axis),
+        "t_left": _f64(d.t_left),
+        "t_right": _f64(d.t_right),
+        "joint_type": _i32(d.joint_type),
+        "lo": _f64(d.lo),
+        "hi": _f64(d.hi),
+        "present": _i32(d.present),
+    }
+
+
+def _rr_arrays(g: dict[str, Any]) -> dict[str, NDArray[Any]]:
+    """:func:`rr_native_geometry`'s constants and tensor as solver-data arrays."""
+    po_r, po_c, po_m, po_co = g["po_coo"]
+    q_r, q_c, q_m, q_co = g["q_coo"]
+    return {
+        "alpha": _f64(g["alpha"]),
+        "a": _f64(g["a"]),
+        "d": _f64(g["d"]),
+        "theta_offset": _f64(g["theta_offset"]),
+        "t_pre_inv": _f64(g["t_pre_inv"]),
+        "t_post_inv": _f64(g["t_post_inv"]),
+        "linearity_joint": _i32(int(g["linearity_joint"])),
+        "left_bilinear": _i32(g["left_bilinear"]),
+        "right_bilinear": _i32(g["right_bilinear"]),
+        "drop_joint": _i32(int(g["drop_joint"])),
+        "p_sin": _f64(g["p_sin"]),
+        "p_cos": _f64(g["p_cos"]),
+        "mono_factors": _i32(g["mono_factors"]),
+        "po_rc": _i32(np.stack([po_r, po_c], axis=1)),
+        "po_mono": _i32(po_m),
+        "po_coeff": _f64(po_co),
+        "q_rc": _i32(np.stack([q_r, q_c], axis=1)),
+        "q_mono": _i32(q_m),
+        "q_coeff": _f64(q_co),
+    }
+
+
+def _srs_arrays(geom: dict[str, Any]) -> dict[str, NDArray[Any]]:
+    """:func:`srs_native_geometry`'s constants as solver-data arrays."""
+    return {
+        "l_se": _f64(geom["l_se"]),
+        "l_ew": _f64(geom["l_ew"]),
+        "ee_offset_local": _f64(geom["ee_offset_local"]),
+        "shoulder_pivot": _f64(geom["shoulder_pivot"]),
+        "r_post_wrist": _f64(geom["r_post_wrist"]),
+        "elbow_index": _i32(int(geom["elbow_index"])),
+        "upper_home": _f64(geom["upper_home"]),
+        "forearm_home": _f64(geom["forearm_home"]),
+        "general_path": _i32(int(bool(geom["general_path"]))),
+    }
+
+
+def _ragged(parts: list[Any], dtype: Any) -> tuple[NDArray[Any], NDArray[np.int32]]:
+    """Per-sample arrays concatenated along the first axis, plus the (S + 1,)
+    row offsets of each sample."""
+    offsets = np.zeros(len(parts) + 1, dtype=np.int32)
+    offsets[1:] = np.cumsum([len(p) for p in parts])
+    return np.array(np.concatenate(parts), dtype=dtype, order="C"), offsets
+
+
+def _jointlock_arrays(g: dict[str, Any]) -> dict[str, NDArray[Any]]:
+    """A baked jointlock geometry (:func:`load_jointlock_native_geometry`) as
+    solver-data arrays: the RR kernel's ragged per-sample tensors become
+    concatenated rows plus ``*_offsets``; the HP kernel's sub-chain joints take
+    the common joint names."""
+    out: dict[str, NDArray[Any]] = {
+        "axis": _f64(g["axes"]),
+        "t_left": _f64(g["t_left"]),
+        "t_right": _f64(g["t_right"]),
+        "joint_type": _i32(g["types"]),
+        "lo": _f64(g["lo"]),
+        "hi": _f64(g["hi"]),
+        "present": _i32(g["has_limits"]),
+        "lock_idx": _i32(int(g["lock_idx"])),
+        "q_lock": _f64(g["q_lock"]),
+    }
+    if g["kind"] == "hp":
+        out["inner_kernel"] = _i32(1)
+        renamed = {"sub_axes": "sub_axis", "sub_types": "sub_joint_type"}
+        ints = ("right_pv", "drop_idx", "sub_types")
+        for k in _JL_HP_KEYS:
+            out[renamed.get(k, k)] = _i32(g[k]) if k in ints else _f64(g[k])
+        return out
+    out["inner_kernel"] = _i32(0)
+    for k in ("alpha", "a", "d", "theta_offset", "t_pre_inv", "t_post_inv"):
+        out[k] = _f64(g[k])
+    for k in ("linearity_joint", "left_bilinear", "right_bilinear", "drop_joint"):
+        out[k] = _i32(g[k])
+    out["p_sin"] = _f64(np.stack(g["p_sin"]))
+    out["p_cos"] = _f64(np.stack(g["p_cos"]))
+    out["mono_factors"], out["mono_offsets"] = _ragged(g["mono_factors"], np.int32)
+    for prefix in ("po", "q"):
+        out[f"{prefix}_rc"], out[f"{prefix}_offsets"] = _ragged(g[f"{prefix}_rc"], np.int32)
+        out[f"{prefix}_mono"], _ = _ragged(g[f"{prefix}_mono"], np.int32)
+        out[f"{prefix}_coeff"], _ = _ragged(g[f"{prefix}_coeff"], np.float64)
+    return out
+
+
+def _solver_arrays(kb: Any, family: str, geometry: Any = None) -> dict[str, NDArray[Any]] | None:
+    """The solver-data arrays of ``kb`` for ``family``, or None when the arm is
+    not of that family's class (the SRS and spherical-shoulder classifiers).
+    ``geometry`` is the baked data a family cannot derive here: the RR tensor of
+    ``ikgeo.general_6r`` (:func:`load_rr_native_geometry`) and the jointlock
+    sweep of ``jointlock.seven_r`` (:func:`load_jointlock_native_geometry`)."""
+    if family == "jointlock.seven_r":
+        return _jointlock_arrays(geometry)
+    if family == "ikgeo.general_6r":
+        return {**_joint_arrays(kb, family), **_rr_arrays(geometry)}
+    if family in ("seven_r.srs", "seven_r.srs_polished"):
+        geom = (
+            srs_polished_native_geometry(kb)
+            if family == "seven_r.srs_polished"
+            else srs_native_geometry(kb)
+        )
+        return None if geom is None else {**_joint_arrays(kb, family), **_srs_arrays(geom)}
+    if family in ("seven_r.spherical_shoulder", "seven_r.spherical_shoulder_polished"):
+        sh = spherical_shoulder_native_geometry(
+            kb, polished=family == "seven_r.spherical_shoulder_polished"
+        )
+        return None if sh is None else {**_joint_arrays(kb, family), "coef": _f64(sh["coef"])}
+    return _joint_arrays(kb, family)
+
+
+# Per-KinBody prepared solvers: {family: (geometry, Solver or None)}. An entry
+# is reused only for the same ``geometry`` object (an artifact passes its one
+# lazily loaded sidecar on every call), so other baked data rebuilds it.
+_solver_cache = _KinBodyCache()
+
+
+def _solver(ext: Any, kb: Any, family: str, geometry: Any = None) -> Any:
+    """The prepared ``_ssik_native.Solver`` for ``kb`` and ``family``, or None
+    when the arm is not of the family's class."""
+    per_kb = _solver_cache.get(kb)
+    if per_kb is None:
+        per_kb = _solver_cache.put(kb, {})
+    entry = per_kb.get(family)
+    if entry is not None and entry[0] is geometry:
+        return entry[1]
+    arrays = _solver_arrays(kb, family, geometry)
+    solver = (
+        None
+        if arrays is None
+        else ext.Solver(_SolverRecord(family=family, schema=_SOLVER_DATA_SCHEMA, arrays=arrays))
     )
-    _consts_cache.put(kb, marshalled)
-    return marshalled
+    per_kb[family] = (geometry, solver)
+    return solver
 
 
 def _limit_mode(respect_limits: bool | Literal["wrap"]) -> int:
@@ -185,6 +342,65 @@ def _limit_mode(respect_limits: bool | Literal["wrap"]) -> int:
     if respect_limits == "wrap":
         return 2
     return 1 if respect_limits else 0
+
+
+# The seed argument when there is none (the extension reads it only with a seed).
+_NO_SEED = np.zeros(0, dtype=np.float64)
+
+
+def _solve(
+    solver: Any,
+    t_target: NDArray[np.float64],
+    *,
+    respect_limits: bool | Literal["wrap"] = True,
+    q_seed: NDArray[np.float64] | None = None,
+    seed_metric: str = "wrap_linf",
+    seed_tolerance: float | None = None,
+    max_solutions: int | None = None,
+    allow_rescue: bool = True,
+    refinement_max_iters: int = 15,
+    enumerate_windings: bool = True,
+) -> list[Solution]:
+    """One native artifact solve on a prepared Solver."""
+    has_seed = q_seed is not None
+    qs, resids, refine = solver.solve(
+        t_target,
+        _limit_mode(respect_limits),
+        has_seed,
+        q_seed if has_seed else _NO_SEED,
+        seed_metric,
+        seed_tolerance is not None,
+        seed_tolerance if seed_tolerance is not None else 0.0,
+        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
+        allow_rescue,
+        min(refinement_max_iters, INT32_MAX),
+        enumerate_windings,
+    )
+    return [
+        Solution(
+            q=np.asarray(qs[i], dtype=np.float64),
+            fk_residual=float(resids[i]),
+            refinement_used="lm" if int(refine[i]) == 1 else "none",
+        )
+        for i in range(len(qs))
+    ]
+
+
+def _try_native(
+    family: str, kb: Any, t_target: NDArray[np.float64], geometry: Any = None, **options: Any
+) -> list[Solution] | None:
+    """The native solve, or None when the extension is absent or the arm is not
+    of the family's class."""
+    ext = _load_ext()
+    if ext is None:
+        return None
+    solver = _solver(ext, kb, family, geometry)
+    if solver is None:
+        return None
+    return _solve(solver, t_target, **options)
+
+
+_NATIVE_6R = frozenset({"ikgeo.three_parallel", "ikgeo.spherical_two_parallel", "ikgeo.general_6r"})
 
 
 def try_native_solve(
@@ -204,7 +420,7 @@ def try_native_solve(
     policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY,
     allow_refinement: bool = False,
 ) -> list[Solution] | None:
-    """Native artifact solve for a supported family, or ``None`` to fall back.
+    """Native artifact solve for a supported 6R family, or ``None`` to fall back.
 
     Mirrors the ``<arm>_ik.solve()`` contract (limits -> seed -> truncate, force
     refinement); parity with the Python artifact is validated in
@@ -217,137 +433,27 @@ def try_native_solve(
     A ``policy`` or ``allow_refinement`` other than the default returns ``None``
     (:func:`honours_options`).
     """
-    if solver_name not in _NATIVE_SOLVERS or not honours_options(policy, allow_refinement):
+    if solver_name not in _NATIVE_6R or not honours_options(policy, allow_refinement):
         return None
     _validate_seed_metric(seed_metric, q_seed)
-    ext = _load_ext()
-    if ext is None:
-        return None
     if len(kb.joints) != 6:
         return None
-
-    if solver_name == "ikgeo.general_6r":
-        if rr_geometry is None:
-            return None
-        return _rr_native_solve(
-            ext,
-            kb,
-            rr_geometry,
-            t_target,
-            respect_limits=respect_limits,
-            q_seed=q_seed,
-            seed_metric=seed_metric,
-            seed_tolerance=seed_tolerance,
-            max_solutions=max_solutions,
-            allow_rescue=allow_rescue,
-            refinement_max_iters=refinement_max_iters,
-            enumerate_windings=enumerate_windings,
-        )
-
-    axes, t_left, t_right, types, lo, hi, has_limits = _consts(solver_name, kb)
-    has_seed = q_seed is not None
-    seed_arr = q_seed if has_seed else np.zeros(len(kb.joints), np.float64)
-    qs, resids, refine = ext.native_artifact_solve(
+    if solver_name == "ikgeo.general_6r" and rr_geometry is None:
+        return None
+    return _try_native(
         solver_name,
-        axes,
-        t_left,
-        t_right,
-        types,
-        lo,
-        hi,
-        has_limits,
+        kb,
         t_target,
-        _limit_mode(respect_limits),
-        has_seed,
-        seed_arr,
-        seed_metric,
-        seed_tolerance is not None,
-        seed_tolerance if seed_tolerance is not None else 0.0,
-        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
-        allow_rescue,
-        min(refinement_max_iters, INT32_MAX),
-        enumerate_windings,
+        rr_geometry if solver_name == "ikgeo.general_6r" else None,
+        respect_limits=respect_limits,
+        q_seed=q_seed,
+        seed_metric=seed_metric,
+        seed_tolerance=seed_tolerance,
+        max_solutions=max_solutions,
+        allow_rescue=allow_rescue,
+        refinement_max_iters=refinement_max_iters,
+        enumerate_windings=enumerate_windings,
     )
-    return [
-        Solution(
-            q=np.asarray(qs[i], dtype=np.float64),
-            fk_residual=float(resids[i]),
-            refinement_used="lm" if int(refine[i]) == 1 else "none",
-        )
-        for i in range(len(qs))
-    ]
-
-
-def _rr_native_solve(
-    ext: Any,
-    kb: Any,
-    g: dict[str, Any],
-    t_target: NDArray[np.float64],
-    *,
-    respect_limits: bool | Literal["wrap"],
-    q_seed: NDArray[np.float64] | None,
-    seed_metric: str,
-    seed_tolerance: float | None,
-    max_solutions: int | None,
-    allow_rescue: bool,
-    refinement_max_iters: int,
-    enumerate_windings: bool = True,
-) -> list[Solution]:
-    """Full native general_6r artifact solve via the baked RR tensor ``g`` (#555)."""
-    axes, t_left, t_right, types, lo, hi, has_limits = _consts("ikgeo.general_6r", kb)
-    po_r, po_c, po_m, po_co = g["po_coo"]
-    q_r, q_c, q_m, q_co = g["q_coo"]
-    po_rc = np.stack([po_r, po_c], axis=1).astype(np.int32)
-    q_rc = np.stack([q_r, q_c], axis=1).astype(np.int32)
-    has_seed = q_seed is not None
-    seed_arr = q_seed if has_seed else np.zeros(len(kb.joints), np.float64)
-    qs, resids, refine = ext.general_6r_tensor_artifact_solve(
-        axes,
-        t_left,
-        t_right,
-        types,
-        lo,
-        hi,
-        has_limits,
-        np.asarray(g["alpha"], dtype=np.float64),
-        np.asarray(g["a"], dtype=np.float64),
-        np.asarray(g["d"], dtype=np.float64),
-        np.asarray(g["theta_offset"], dtype=np.float64),
-        np.asarray(g["t_pre_inv"], dtype=np.float64),
-        np.asarray(g["t_post_inv"], dtype=np.float64),
-        int(g["linearity_joint"]),
-        np.asarray(g["left_bilinear"], dtype=np.int32),
-        np.asarray(g["right_bilinear"], dtype=np.int32),
-        int(g["drop_joint"]),
-        np.asarray(g["p_sin"], dtype=np.float64),
-        np.asarray(g["p_cos"], dtype=np.float64),
-        np.asarray(g["mono_factors"], dtype=np.int32),
-        po_rc,
-        np.asarray(po_m, dtype=np.int32),
-        np.asarray(po_co, dtype=np.float64),
-        q_rc,
-        np.asarray(q_m, dtype=np.int32),
-        np.asarray(q_co, dtype=np.float64),
-        t_target,
-        _limit_mode(respect_limits),
-        has_seed,
-        seed_arr,
-        seed_metric,
-        seed_tolerance is not None,
-        seed_tolerance if seed_tolerance is not None else 0.0,
-        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
-        allow_rescue,
-        min(refinement_max_iters, INT32_MAX),
-        enumerate_windings,
-    )
-    return [
-        Solution(
-            q=np.asarray(qs[i], dtype=np.float64),
-            fk_residual=float(resids[i]),
-            refinement_used="lm" if int(refine[i]) == 1 else "none",
-        )
-        for i in range(len(qs))
-    ]
 
 
 # Per-KinBody native-SRS args (baked geometry + marshalled JointConsts) or None.
@@ -1068,86 +1174,20 @@ def try_native_jointlock_solve(
     if not honours_options(policy, allow_refinement):
         return None
     _validate_seed_metric(seed_metric, q_seed)
-    ext = _load_ext()
-    if ext is None:
-        return None
-    g = jointlock_geometry
-    has_seed = q_seed is not None
-    seed_arr = q_seed if has_seed else np.zeros(7, np.float64)
-    tail = (
-        _limit_mode(respect_limits),
-        has_seed,
-        seed_arr,
-        seed_metric,
-        seed_tolerance is not None,
-        seed_tolerance if seed_tolerance is not None else 0.0,
-        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
-        allow_rescue,
-        min(refinement_max_iters, INT32_MAX),
-        enumerate_windings,
+    return _try_native(
+        solver_name,
+        kb,
+        t_target,
+        jointlock_geometry,
+        respect_limits=respect_limits,
+        q_seed=q_seed,
+        seed_metric=seed_metric,
+        seed_tolerance=seed_tolerance,
+        max_solutions=max_solutions,
+        allow_rescue=allow_rescue,
+        refinement_max_iters=refinement_max_iters,
+        enumerate_windings=enumerate_windings,
     )
-    common = (g["axes"], g["t_left"], g["t_right"], g["types"], int(g["lock_idx"]), g["q_lock"])
-    if g["kind"] == "hp":
-        qs, resids, refine = ext.jointlock_hp_artifact_solve(
-            *common,
-            g["t_u"],
-            g["t_w_pre"],
-            g["dh_a"],
-            g["dh_l"],
-            g["dh_d"],
-            g["theta_offset"],
-            g["t_pre_inv"],
-            g["t_post_inv"],
-            g["t_z_neg_d1"],
-            g["t_joint6_offset_inv"],
-            g["right_pv"],
-            g["drop_idx"],
-            g["sub_axes"],
-            g["sub_t_left"],
-            g["sub_t_right"],
-            g["sub_types"],
-            g["lo"],
-            g["hi"],
-            g["has_limits"],
-            t_target,
-            *tail,
-        )
-    else:
-        qs, resids, refine = ext.jointlock_rr_artifact_solve(
-            *common,
-            g["alpha"],
-            g["a"],
-            g["d"],
-            g["theta_offset"],
-            g["t_pre_inv"],
-            g["t_post_inv"],
-            g["linearity_joint"],
-            g["left_bilinear"],
-            g["right_bilinear"],
-            g["drop_joint"],
-            g["p_sin"],
-            g["p_cos"],
-            g["mono_factors"],
-            g["po_rc"],
-            g["po_mono"],
-            g["po_coeff"],
-            g["q_rc"],
-            g["q_mono"],
-            g["q_coeff"],
-            g["lo"],
-            g["hi"],
-            g["has_limits"],
-            t_target,
-            *tail,
-        )
-    return [
-        Solution(
-            q=np.asarray(qs[i], dtype=np.float64),
-            fk_residual=float(resids[i]),
-            refinement_used="lm" if int(refine[i]) == 1 else "none",
-        )
-        for i in range(len(qs))
-    ]
 
 
 def _srs_native_args(kb: Any, solver_name: str = "seven_r.srs") -> dict[str, Any] | None:
@@ -1197,10 +1237,10 @@ def try_native_srs_solve(
     enumerate_windings: bool = True,
 ) -> list[Solution] | None:
     """FULL native SRS artifact solve (the whole ``<arm>.solve()`` contract in
-    C++), or ``None`` to fall back. Runs the entire pipeline natively via
-    ``srs_artifact_solve`` -- seeded-track fast path, canonical/general core,
-    finalize (limits -> seed -> truncate), and the #359 in-limits fallback -- so
-    the Python postprocess (which dominated the per-call time) is skipped.
+    C++), or ``None`` to fall back: seeded-track fast path, canonical/general
+    core, finalize (limits -> seed -> truncate), and the #359 in-limits
+    fallback, so the Python postprocess (which dominated the per-call time) is
+    skipped.
 
     The empty-gated T-perturbation rescue runs in C++, the same definition as
     Python's (#622). Parity with the Python solve is validated across the
@@ -1208,83 +1248,19 @@ def try_native_srs_solve(
     """
     if solver_name not in ("seven_r.srs", "seven_r.srs_polished"):
         return None
-    ext = _load_ext()
-    if ext is None:
-        return None
-    a = _srs_native_args(kb, solver_name)
-    if a is None:
-        return None
-    has_seed = q_seed is not None
-    seed_arr = q_seed if has_seed else np.zeros(7, np.float64)
-    qs, resids, refine = ext.srs_artifact_solve(
-        a["axes"],
-        a["t_left"],
-        a["t_right"],
-        a["types"],
-        a["l_se"],
-        a["l_ew"],
-        a["ee_offset_local"],
-        a["shoulder_pivot"],
-        a["r_post_wrist"],
-        a["elbow_index"],
-        a["upper_home"],
-        a["forearm_home"],
-        a["lo"],
-        a["hi"],
-        a["has_limits"],
+    return _try_native(
+        solver_name,
+        kb,
         t_target,
-        a["general_path"],
-        _limit_mode(respect_limits),
-        has_seed,
-        seed_arr,
-        seed_metric,
-        seed_tolerance is not None,
-        seed_tolerance if seed_tolerance is not None else 0.0,
-        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
-        allow_rescue,
-        min(refinement_max_iters, INT32_MAX),
-        polished=(solver_name == "seven_r.srs_polished"),
+        respect_limits=respect_limits,
+        q_seed=q_seed,
+        seed_metric=seed_metric,
+        seed_tolerance=seed_tolerance,
+        max_solutions=max_solutions,
+        allow_rescue=allow_rescue,
+        refinement_max_iters=refinement_max_iters,
         enumerate_windings=enumerate_windings,
     )
-    return [
-        Solution(
-            q=np.asarray(qs[i], dtype=np.float64),
-            fk_residual=float(resids[i]),
-            refinement_used="lm" if int(refine[i]) == 1 else "none",
-        )
-        for i in range(len(qs))
-    ]
-
-
-# Per-KinBody native spherical_shoulder args (baked (3,48) coef + JointConsts) or
-# None. Geometry-only, cached per-arm.
-_sh_cache = _KinBodyCache()
-
-
-def _sh_native_args(kb: Any, *, polished: bool) -> dict[str, Any] | None:
-    """Cached :func:`spherical_shoulder_native_geometry` + marshalled JointConsts /
-    limits for the binding, or None when the arm isn't spherical-shoulder class."""
-    cached = _sh_cache.get(kb, _MISS)
-    if cached is not _MISS:
-        return cached  # type: ignore[no-any-return]
-    geom = spherical_shoulder_native_geometry(kb, polished=polished)
-    result: dict[str, Any] | None = None
-    if geom is not None:
-        j = kb.joints
-        result = {
-            "axes": np.array([jt.axis for jt in j], dtype=np.float64),
-            "t_left": np.array([jt.T_left for jt in j], dtype=np.float64),
-            "t_right": np.array([jt.T_right for jt in j], dtype=np.float64),
-            "types": np.array(
-                [0 if jt.joint_type == "revolute" else 1 for jt in j], dtype=np.int32
-            ),
-            "lo": np.array([jt.limits[0] if jt.limits else 0.0 for jt in j], dtype=np.float64),
-            "hi": np.array([jt.limits[1] if jt.limits else 0.0 for jt in j], dtype=np.float64),
-            "has_limits": np.array([1 if jt.limits else 0 for jt in j], dtype=np.int32),
-            "coef": np.asarray(geom["coef"], dtype=np.float64),
-        }
-    _sh_cache.put(kb, result)
-    return result
 
 
 def try_native_spherical_shoulder_solve(
@@ -1305,47 +1281,21 @@ def try_native_spherical_shoulder_solve(
     to fall back. ``_polished`` (xarm7/gen72) LM-refines the approximate candidates;
     the exact arms (franka/fr3) FK-gate. Redundant 7R, so the runtime contract is
     relative-completeness (soundness + coverage), same as srs_polished."""
-    polished = solver_name == "seven_r.spherical_shoulder_polished"
     if solver_name not in ("seven_r.spherical_shoulder", "seven_r.spherical_shoulder_polished"):
         return None
-    ext = _load_ext()
-    if ext is None:
-        return None
-    a = _sh_native_args(kb, polished=polished)
-    if a is None:
-        return None
-    has_seed = q_seed is not None
-    seed_arr = q_seed if has_seed else np.zeros(7, np.float64)
-    qs, resids, refine = ext.spherical_shoulder_artifact_solve(
-        a["axes"],
-        a["t_left"],
-        a["t_right"],
-        a["types"],
-        a["coef"],
-        a["lo"],
-        a["hi"],
-        a["has_limits"],
+    return _try_native(
+        solver_name,
+        kb,
         t_target,
-        _limit_mode(respect_limits),
-        has_seed,
-        seed_arr,
-        seed_metric,
-        seed_tolerance is not None,
-        seed_tolerance if seed_tolerance is not None else 0.0,
-        -1 if max_solutions is None or max_solutions >= INT32_MAX else max_solutions,
-        allow_rescue,
-        min(refinement_max_iters, INT32_MAX),
-        polished,
-        enumerate_windings,
+        respect_limits=respect_limits,
+        q_seed=q_seed,
+        seed_metric=seed_metric,
+        seed_tolerance=seed_tolerance,
+        max_solutions=max_solutions,
+        allow_rescue=allow_rescue,
+        refinement_max_iters=refinement_max_iters,
+        enumerate_windings=enumerate_windings,
     )
-    return [
-        Solution(
-            q=np.asarray(qs[i], dtype=np.float64),
-            fk_residual=float(resids[i]),
-            refinement_used="lm" if int(refine[i]) == 1 else "none",
-        )
-        for i in range(len(qs))
-    ]
 
 
 def try_native_solve_7r(

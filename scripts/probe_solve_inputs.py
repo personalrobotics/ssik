@@ -11,8 +11,10 @@ recorded as such instead of ending the run:
 - ``bindings``: every function and class of ``ssik._ssik_native``, called
   directly with shape-valid placeholder arguments of which one at a time is
   malformed (one rank too many, one entry short, NaN/inf in the target or
-  seed, an index out of range, an unknown enum value); the chart objects'
-  methods, on charts built for a real arm, with an out-of-range chart index.
+  seed, an index out of range, an unknown enum value); ``Solver``'s
+  constructor with one array of its solver-data record malformed, and its
+  ``solve`` with one argument malformed; the chart objects' methods, on
+  charts built for a real arm, with an out-of-range chart index.
 
 The cases are fixed (no randomness), so two runs on the same build print the
 same table. Usage::
@@ -39,6 +41,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -442,6 +445,20 @@ def _baseline_values(fn_name: str) -> dict[str, Any]:
         "grid": np.linspace(0.0, 1.0, 4),
         "tangent": _f(2, 7),
     }
+    # Solver: a three_parallel solver-data record (ssik_cpp/solve.hpp).
+    v["data"] = SimpleNamespace(
+        family="ikgeo.three_parallel",
+        schema=1,
+        arrays={
+            "axis": _tile([0.0, 0.0, 1.0], 6),
+            "t_left": _tile(np.eye(4), 6),
+            "t_right": _tile(np.eye(4), 6),
+            "joint_type": _i(6),
+            "lo": -np.ones(6),
+            "hi": np.ones(6),
+            "present": _i(6, fill=1),
+        },
+    )
     if fn_name == "feasible_arcs_test":
         v["lo"], v["hi"] = -np.ones(2), np.ones(2)
     if "jointlock" in fn_name:  # 16 locked samples, each a 6R sub-chain
@@ -506,8 +523,15 @@ def binding_names(ext: Any) -> list[str]:
     )
 
 
+# Methods probed like functions, on an object built from the baseline.
+_OBJECT_METHODS = ("Solver.solve",)
+
+
 def binding_baseline(ext: Any, name: str) -> tuple[list[str], tuple]:
-    names = _arg_names(getattr(ext, name))
+    target = ext
+    for part in name.split("."):
+        target = getattr(target, part)
+    names = _arg_names(target)
     values = _baseline_values(name)
     missing = [n for n in names if n not in values]
     if missing:
@@ -541,6 +565,21 @@ def binding_mutations(names: list[str], args: tuple) -> Iterator[tuple[str, str,
                 yield f"{pname}=99", pname, put(bad)
         elif isinstance(a, list):
             yield f"{pname} list short", pname, put(a[:-1])
+        elif isinstance(a, SimpleNamespace):  # a solver-data record: malform one array
+            for key, arr in a.arrays.items():
+
+                def rec(x: np.ndarray, key: str = key, a: Any = a) -> SimpleNamespace:
+                    return SimpleNamespace(
+                        family=a.family, schema=a.schema, arrays={**a.arrays, key: x}
+                    )
+
+                yield f"{pname}.{key} rank+1", key, put(rec(arr[None]))
+                if arr.ndim >= 2:
+                    yield f"{pname}.{key} short inner", key, put(rec(arr[..., :-1].copy()))
+                yield f"{pname}.{key} short", key, put(rec(arr[:-1].copy()))
+                bad = arr.copy()
+                bad.flat[-1] = 99 if bad.dtype == np.int32 else np.nan
+                yield f"{pname}.{key}={bad.flat[-1]}", key, put(rec(bad))
         elif pname in _INDEX_INTS:
             yield f"{pname}=99", pname, put(99)
             yield f"{pname}=-1", pname, put(-1)
@@ -617,13 +656,16 @@ def binding_jobs() -> list[Job]:
     for name in binding_names(ext):
         names, args = binding_baseline(ext, name)
         jobs += [(name, "binding", label) for label, _, _ in binding_mutations(names, args)]
+    for name in _OBJECT_METHODS:
+        names, args = binding_baseline(ext, name)
+        jobs += [(name, "binding", label) for label, _, _ in binding_mutations(names, args)]
     jobs += [(f"{c}.{m}", "binding", label) for c, m, label, _, _ in _METHOD_CASES]
     return jobs
 
 
 def binding_argument(name: str, label: str) -> str:
     """The argument a binding job malforms; its error message must name it."""
-    if "." in name:
+    if "." in name and name not in _OBJECT_METHODS:
         cls, method = name.split(".")
         return next(a for c, m, lab, a, _ in _METHOD_CASES if (c, m, lab) == (cls, method, label))
     from ssik._native import _load_ext
@@ -636,6 +678,12 @@ def _run_binding(name: str, label: str) -> str:
     from ssik._native import _load_ext
 
     ext = _load_ext()
+    if name in _OBJECT_METHODS:
+        cls, method = name.split(".")
+        obj = getattr(ext, cls)(_baseline_values(cls)["data"])
+        names, args = binding_baseline(ext, name)
+        mutated = next(a for lab, _, a in binding_mutations(names, args) if lab == label)
+        return _outcome(lambda: getattr(obj, method)(*mutated))
     if "." in name:
         cls, method = name.split(".")
         obj = _chart_objects()[cls]

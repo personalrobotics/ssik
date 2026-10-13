@@ -62,6 +62,32 @@ class _CppSolution:
     refinement_used: str
 
 
+def srs_solver(a: dict[str, Any], *, general_path: bool = False) -> Any:
+    """``_ssik_native.Solver`` for ``seven_r.srs`` from a test's baked SRS
+    arrays (keys as ``srs_resolve_in_limits`` names its arguments)."""
+    from ssik._native import _SOLVER_DATA_SCHEMA, _SolverRecord
+
+    arrays: dict[str, Any] = {
+        "axis": a["axes"],
+        "t_left": a["t_left"],
+        "t_right": a["t_right"],
+        "joint_type": a["types"],
+        "lo": a["lo"],
+        "hi": a["hi"],
+        "present": a["has_limits"],
+        "l_se": np.array(a["l_se"], dtype=np.float64),
+        "l_ew": np.array(a["l_ew"], dtype=np.float64),
+        "ee_offset_local": a["ee_offset"],
+        "shoulder_pivot": a["shoulder_pivot"],
+        "r_post_wrist": np.ascontiguousarray(a["r_post_wrist"]),
+        "elbow_index": np.array(a["elbow_index"], dtype=np.int32),
+        "upper_home": a["upper_home"],
+        "forearm_home": a["forearm_home"],
+        "general_path": np.array(int(general_path), dtype=np.int32),
+    }
+    return _load_ext().Solver(_SolverRecord("seven_r.srs", _SOLVER_DATA_SCHEMA, arrays))
+
+
 def cpp_three_parallel_solve(
     kb: Any,
     t_target: NDArray[np.float64],
@@ -152,15 +178,19 @@ def cpp_artifact_solve(
         np.asarray(q_seed, dtype=np.float64) if has_seed else np.zeros(len(kb.joints), np.float64)
     )
 
-    qs, resids, refine = ext.native_artifact_solve(
-        "ikgeo.three_parallel",
-        axes,
-        t_left,
-        t_right,
-        types,
-        lo,
-        hi,
-        has_limits,
+    from ssik._native import _SOLVER_DATA_SCHEMA, _SolverRecord
+
+    arrays: dict[str, Any] = {
+        "axis": axes,
+        "t_left": t_left,
+        "t_right": t_right,
+        "joint_type": types,
+        "lo": lo,
+        "hi": hi,
+        "present": has_limits,
+    }
+    solver = ext.Solver(_SolverRecord("ikgeo.three_parallel", _SOLVER_DATA_SCHEMA, arrays))
+    qs, resids, refine = solver.solve(
         np.asarray(t_target, dtype=np.float64),
         respect_limits,
         has_seed,

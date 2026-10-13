@@ -29,7 +29,7 @@ from ssik.solvers.seven_r.srs import (  # type: ignore[attr-defined]
     _arm_constants,
     _classify_srs_7r_geometric,
 )
-from tests._cpp_backend import _load_ext, cpp_available
+from tests._cpp_backend import cpp_available, srs_solver
 
 pytestmark = pytest.mark.skipif(not cpp_available(), reason="ssik._ssik_native not built")
 
@@ -74,26 +74,12 @@ def _baked() -> dict[str, Any]:
 
 _ARGS = _baked()
 _LIMS = [(float(a), float(b)) for a, b in zip(_ARGS["lo"], _ARGS["hi"], strict=True)]
+_SOLVER: Any = srs_solver(_ARGS) if cpp_available() else None
 
 
 def _cpp_solve(T: np.ndarray, **kw: Any) -> tuple[list[np.ndarray], list[int]]:
     q_seed = kw.get("q_seed")
-    qs, _resids, refine = _load_ext().srs_artifact_solve(
-        _ARGS["axes"],
-        _ARGS["t_left"],
-        _ARGS["t_right"],
-        _ARGS["types"],
-        _ARGS["l_se"],
-        _ARGS["l_ew"],
-        _ARGS["ee_offset"],
-        _ARGS["shoulder_pivot"],
-        _ARGS["r_post_wrist"],
-        _ARGS["elbow_index"],
-        _ARGS["upper_home"],
-        _ARGS["forearm_home"],
-        _ARGS["lo"],
-        _ARGS["hi"],
-        _ARGS["has_limits"],
+    qs, _resids, refine = _SOLVER.solve(
         np.asarray(T, dtype=np.float64),
         respect_limits=kw.get("respect_limits", True),
         has_seed=q_seed is not None,

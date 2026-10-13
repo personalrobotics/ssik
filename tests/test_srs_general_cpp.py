@@ -23,7 +23,7 @@ from ssik.solvers.seven_r.srs import (  # type: ignore[attr-defined]
     _arm_constants,
     _classify_srs_7r_geometric,
 )
-from tests._cpp_backend import _load_ext, cpp_available
+from tests._cpp_backend import cpp_available, srs_solver
 
 pytestmark = pytest.mark.skipif(not cpp_available(), reason="ssik._ssik_native not built")
 
@@ -83,24 +83,8 @@ def _bake(kb: Any) -> dict[str, Any]:
 
 def _cpp_solve(a: dict[str, Any], T: np.ndarray, **kw: Any) -> list[np.ndarray]:
     q_seed = kw.get("q_seed")
-    qs, _resids, _refine = _load_ext().srs_artifact_solve(
-        a["axes"],
-        a["t_left"],
-        a["t_right"],
-        a["types"],
-        a["l_se"],
-        a["l_ew"],
-        a["ee_offset"],
-        a["shoulder_pivot"],
-        a["r_post_wrist"],
-        a["elbow_index"],
-        a["upper_home"],
-        a["forearm_home"],
-        a["lo"],
-        a["hi"],
-        a["has_limits"],
+    qs, _resids, _refine = srs_solver(a, general_path=a["general_path"]).solve(
         np.asarray(T, dtype=np.float64),
-        general_path=a["general_path"],
         respect_limits=kw.get("respect_limits", True),
         has_seed=q_seed is not None,
         q_seed=(np.asarray(q_seed, dtype=np.float64) if q_seed is not None else np.zeros(7)),
