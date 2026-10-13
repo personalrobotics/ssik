@@ -300,8 +300,8 @@ def dispatch(kb: KinBody, policy: TolerancePolicy = DEFAULT_TOLERANCE_POLICY) ->
                 reason=(
                     "Spherical wrist at joints (3, 4, 5) AND ||p[1]|| ~= 0 "
                     "(joints 0 and 1 share an origin).\n"
-                    "Closed-form via SP3 + SP2 + SP4 + SP1. Compact-base arms "
-                    "(IRB120-class, lite6/xArm6 subfamilies)."
+                    "Closed-form via SP3 + SP2 + SP4 + SP1. Rare in commercial "
+                    "arms: no shipped arm dispatches here."
                 ),
             )
         else:

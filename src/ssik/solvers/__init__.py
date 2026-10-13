@@ -19,9 +19,10 @@ Current contents:
   spherical-wrist + intersecting-shoulder 6R solver built on
   SP1/SP2/SP3/SP4 composition. Handles any arm with three consecutive
   intersecting axes at joints ``(3, 4, 5)`` and joints ``(0, 1)``
-  sharing an origin (``p[1] = 0``) -- compact arms where the waist
-  and shoulder pivots coincide (Puma 560, ABB IRB smaller variants,
-  uFactory lite6/xArm6 family).
+  sharing an origin (``p[1] = 0``), where the waist and shoulder pivots
+  coincide. No shipped arm dispatches here: the dispatcher checks for a
+  parallel shoulder first, and the common compact arms (Puma 560, IRB120)
+  have one.
 - :mod:`ssik.solvers.ikgeo.spherical` -- generic spherical-wrist 6R
   solver built on SP1/SP4/SP5 composition. Fallback for spherical-
   wrist arms that match neither shoulder specialization (rare in

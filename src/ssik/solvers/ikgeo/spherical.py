@@ -9,10 +9,10 @@ This is the fallback member of the spherical-wrist family. Its
 more-specialized siblings handle the common cases:
 
 - :mod:`ssik.solvers.ikgeo.spherical_two_parallel` -- when joints ``(1, 2)``
-  are parallel (Puma, Fanuc, KUKA KR, uFactory lite6/xArm6).
+  are parallel (Puma 560, IRB120, Fanuc LR Mate, KUKA KR).
 - :mod:`ssik.solvers.ikgeo.spherical_two_intersecting` -- when joints
-  ``(0, 1)`` share a common origin (``p[1] = 0``) (Puma, IRB120-class
-  compact arms).
+  ``(0, 1)`` share a common origin (``p[1] = 0``) and the shoulder is not
+  parallel. No shipped arm dispatches there.
 
 This solver fires only when neither specialization applies. Commercial 6R
 arms rarely sit in that gap -- essentially every industrial spherical-wrist
