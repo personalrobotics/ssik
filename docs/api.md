@@ -112,16 +112,22 @@ functions do not, and their preconditions are in
 
 ### Which backend `solve()` uses
 
-`Manipulator.solve` takes `native: bool | None = None`. `None` picks the
-arm's default backend from the table; `True` asks for native wherever the
-table has it; `False` always runs the Python backend.
+One rule, since 9.0.0: **every arm runs the native backend when its solver
+family has a native core**, whether it is prebuilt (`from_prebuilt`, or an
+artifact module) or built at runtime (`from_urdf`, `from_mjcf`, `from_axes`,
+`from_transforms`, `from_dh`, `Manipulator(kb)`). So a runtime-built arm
+returns exactly what the prebuilt arm of the same geometry returns.
+`Manipulator.solve` takes `native: bool | None = None`; `None` and `True` both
+mean that rule, and `False` always runs the Python backend.
 
-| solver family | prebuilt arm (`from_prebuilt`, or an artifact module) | arm built at runtime (`from_urdf`, `from_mjcf`, `from_axes`, `from_transforms`, `from_dh`, `Manipulator(kb)`) |
+| solver family | prebuilt arm | arm built at runtime |
 |---|---|---|
-| `ikgeo.three_parallel`, `ikgeo.spherical_two_parallel`, `ikgeo.general_6r` | native by default | native by default (since 8.3.0) |
-| `seven_r.srs`, `seven_r.srs_polished`, `seven_r.spherical_shoulder`, `seven_r.spherical_shoulder_polished` | native by default | Python by default; native with `native=True`. The default becomes native in 9.0 |
-| `jointlock.seven_r` | native by default | Python, whatever `native` says: its native data (the inner kernel and the lock samples) is fixed when an arm is onboarded, so only prebuilt arms ship it |
-| `ikgeo.spherical_two_intersecting`, `ikgeo.spherical` | no prebuilt arm | Python: no native solver |
+| `ikgeo.three_parallel`, `ikgeo.spherical_two_parallel`, `ikgeo.general_6r`, `seven_r.srs`, `seven_r.srs_polished`, `seven_r.spherical_shoulder`, `seven_r.spherical_shoulder_polished` | native | native |
+| `jointlock.seven_r` | native | Python, whatever `native` says: its native data (the inner kernel and the lock samples) is fixed when an arm is onboarded, so only prebuilt arms ship it |
+| `ikgeo.spherical_two_intersecting`, `ikgeo.spherical` | no prebuilt arm | Python: no native core |
+
+Before 9.0.0 an arm built at runtime always ran the Python backend. The 9.0.0
+release notes measure what the switch changed for runtime-built 7R arms.
 
 On a runtime-built arm the native solve is the one a prebuilt arm of the same
 geometry runs: the same `ssik::Solver`, built once per arm from
@@ -146,16 +152,17 @@ implement (`respect_limits` in all three modes, `q_seed`, `seed_metric`,
 `enumerate_windings`) means on native what it means on Python, and the input
 checks ([Input validation](#input-validation)) run before either.
 
-**Why 7R stays opt-in on runtime arms until 9.0.** The 6R backends return the
-same solution set (the contract below), so switching a runtime 6R arm to native
-changes no answer beyond that contract, and makes it the prebuilt arm's answer.
-The redundant 7R backends sample the self-motion at their own points, so the
-switch would change which configurations `solve()` returns, and the seeded pick
-that `Tracker` and seeded tracking callers follow;
-[`docs/semver_policy.md`](semver_policy.md) classes that as MAJOR.
-`Manipulator.self_motion` and `solve_path` are not affected: their charts use
-the native extension on every arm when it is installed (`native=True`, their
-default).
+**The Python backend on a runtime-built arm** (`native=False`, no extension,
+or an option native does not implement) is the live solver of the arm's
+family, not an artifact's Python path. On a redundant 7R family it samples the
+self-motion at its own points, and it has no in-limits resolver, so it can
+return `[]` at an in-limits pose where native and the artifact's Python path
+find solutions (#715, open).
+
+`Tracker` follows the same rule: its `solve()` calls and its charts run native
+unless it is constructed with `native=False`. `Manipulator.self_motion` and
+`solve_path` build their charts natively whenever the extension is installed
+(`native=True`, their default), on every arm.
 
 **C++ consumers get the same function.** For `d = ssik.cpp.solver_data(arm)`
 and options that `ssik::ArtifactParams` can express (the default `policy`,
@@ -436,10 +443,9 @@ never a fresh solve that could land on another one:
   would be every update the target is out of reach. At such a ridge the
   tracker holds for one update instead.
 
-The tracker's `solve()` calls run on the arm's default backend
-([Which backend `solve()` uses](#which-backend-solve-uses)): native on a
-prebuilt arm and on a runtime-built 6R arm, Python on a runtime-built 7R arm
-until 9.0. Its charts use the native extension whenever it is installed.
+The tracker's `solve()` calls and its charts run on the native backend
+wherever the arm's family has one, prebuilt or built at runtime
+([Which backend `solve()` uses](#which-backend-solve-uses)).
 `Tracker(native=False)` runs both in Python.
 
 The candidate is reported in the representative `solve()` reports, the one
