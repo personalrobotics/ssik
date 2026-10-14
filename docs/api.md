@@ -106,14 +106,63 @@ functions do not, and their preconditions are in
 
 ## The native backend
 
-`solve(..., native=True)`, the default on every prebuilt arm, runs the arm's
-solver family in C++ through `ssik::Solver` (`ssik_cpp/solve.hpp`), built from
+`solve(..., native=True)` runs the arm's solver family in C++ through
+`ssik::Solver` (`ssik_cpp/solve.hpp`), built from
 `ssik.cpp.solver_data(arm)`. The families are `ssik.cpp.NATIVE_FAMILIES`.
-A call the native backend cannot honour (a non-default `policy`,
-`allow_refinement=True`, `explain=True`, or a family without a native solver)
-runs the Python backend instead; so does every call when the extension is not
-installed (Windows wheels). `solve()` on an arm built at runtime runs the
-Python backend; `solver_data` still serves such an arm to a C++ consumer.
+
+### Which backend `solve()` uses
+
+One rule, since 9.0.0: **every arm runs the native backend when its solver
+family has a native core**, whether it is prebuilt (`from_prebuilt`, or an
+artifact module) or built at runtime (`from_urdf`, `from_mjcf`, `from_axes`,
+`from_transforms`, `from_dh`, `Manipulator(kb)`). So a runtime-built arm
+returns exactly what the prebuilt arm of the same geometry returns.
+`Manipulator.solve` takes `native: bool | None = None`; `None` and `True` both
+mean that rule, and `False` always runs the Python backend.
+
+| solver family | prebuilt arm | arm built at runtime |
+|---|---|---|
+| `ikgeo.three_parallel`, `ikgeo.spherical_two_parallel`, `ikgeo.general_6r`, `seven_r.srs`, `seven_r.srs_polished`, `seven_r.spherical_shoulder`, `seven_r.spherical_shoulder_polished` | native | native |
+| `jointlock.seven_r` | native | Python, whatever `native` says: its native data (the inner kernel and the lock samples) is fixed when an arm is onboarded, so only prebuilt arms ship it |
+| `ikgeo.spherical_two_intersecting`, `ikgeo.spherical` | no prebuilt arm | Python: no native core |
+
+Before 9.0.0 an arm built at runtime always ran the Python backend. The 9.0.0
+release notes measure what the switch changed for runtime-built 7R arms.
+
+On a runtime-built arm the native solve is the one a prebuilt arm of the same
+geometry runs: the same `ssik::Solver`, built once per arm from
+`ssik.cpp.solver_data(arm)` and kept, so later calls cost what a prebuilt
+arm's do. A runtime `ikgeo.general_6r` arm first needs its numeric coefficient
+tensor ([Per-arm preparation cache](#per-arm-preparation-cache);
+`Manipulator.prepare()` pays it ahead of time). Its tensor is derived on the
+machine, where a prebuilt arm ships one baked at onboarding. Rebuilt at
+runtime, every prebuilt geometry returns the prebuilt arm's result bit for bit,
+except the YAM and Big YAM, whose shipped tensors were baked from an earlier
+derivation and agree with today's only to round-off (#629).
+
+**Native is a performance hint, never an error.** A call native cannot honour
+runs the Python backend, with the same result the Python backend gives: an
+option native does not implement (a non-default `policy`,
+`allow_refinement=True`, `explain=True`, or any `solver_kwargs` such as
+`swivel_samples`), a family without native data for the arm (the table), or an
+arm the family's native geometry check rejects. So does every call when the
+extension is not installed (Windows wheels). Every option native does
+implement (`respect_limits` in all three modes, `q_seed`, `seed_metric`,
+`seed_tolerance`, `max_solutions`, `allow_rescue`, `refinement_max_iters`,
+`enumerate_windings`) means on native what it means on Python, and the input
+checks ([Input validation](#input-validation)) run before either.
+
+**The Python backend on a runtime-built arm** (`native=False`, no extension,
+or an option native does not implement) is the live solver of the arm's
+family, not an artifact's Python path. On a redundant 7R family it samples the
+self-motion at its own points, and it has no in-limits resolver, so it can
+return `[]` at an in-limits pose where native and the artifact's Python path
+find solutions (#715, open).
+
+`Tracker` follows the same rule: its `solve()` calls and its charts run native
+unless it is constructed with `native=False`. `Manipulator.self_motion` and
+`solve_path` build their charts natively whenever the extension is installed
+(`native=True`, their default), on every arm.
 
 **C++ consumers get the same function.** For `d = ssik.cpp.solver_data(arm)`
 and options that `ssik::ArtifactParams` can express (the default `policy`,
@@ -127,7 +176,9 @@ one arm of every native family and on runtime-built arms
 **Native against Python.** The two backends return the same solutions up to
 the following contract, gated per shipped arm by `tests/test_native_parity.py`
 (rules a-g in `tests/_native_parity.py`), on in-limits, near-limit,
-near-singular and at-pi poses:
+near-singular and at-pi poses. The same gate runs on a runtime-built copy of
+one arm per family with a runtime native path, against the live Python solver
+(on 7R, native covering Python):
 
 | family | contract |
 |---|---|
@@ -391,6 +442,11 @@ never a fresh solve that could land on another one:
   milliseconds native and seconds in Python on every update it runs, which
   would be every update the target is out of reach. At such a ridge the
   tracker holds for one update instead.
+
+The tracker's `solve()` calls and its charts run on the native backend
+wherever the arm's family has one, prebuilt or built at runtime
+([Which backend `solve()` uses](#which-backend-solve-uses)).
+`Tracker(native=False)` runs both in Python.
 
 The candidate is reported in the representative `solve()` reports, the one
 nearest the followed configuration, inside the joint limits when they are

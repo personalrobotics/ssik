@@ -234,7 +234,10 @@ class Tracker:
     :param respect_limits: keep every commanded configuration within the joint
         limits (default). ``False`` follows the geometric branch regardless.
     :param native: use the C++ extension when it is available (default);
-        ``False`` forces the pure-Python reference.
+        ``False`` forces the pure-Python reference, for the self-motion charts
+        and for the tracker's ``solve()`` calls alike, on a prebuilt arm and
+        on an arm built at runtime (``docs/api.md``, "Which backend solve()
+        uses").
     :param t0: optional timestamp of ``q0``, so the first update is rate
         limited too.
 
@@ -371,11 +374,6 @@ class Tracker:
         return located
 
     def _seeded(self, T: NDArray[np.float64], respect_limits: bool) -> list[Solution]:
-        kwargs: dict[str, Any] = {}
-        if self._arm._prebuilt is not None:
-            # Only an artifact's solve takes the backend switch; the live solve
-            # is the Python one.
-            kwargs["native"] = self._native
         # No T-perturbation rescue: it exists for a measure-zero ridge where the
         # analytical path finds nothing, and costs tens of milliseconds native
         # and seconds in Python on every update it runs -- which, with the
@@ -387,7 +385,7 @@ class Tracker:
             max_solutions=1,
             respect_limits=respect_limits,
             allow_rescue=False,
-            **kwargs,
+            native=self._native,
         )
         return sols
 
@@ -598,16 +596,13 @@ class Tracker:
         ``solve()``'s samples of the self-motion. For rendering the other
         branches ("ghost arms"); :meth:`next_branch` switches to one.
         """
-        kwargs: dict[str, Any] = {}
-        if self._arm._prebuilt is not None:
-            kwargs["native"] = self._native
         sols: list[Solution] = self._arm.solve(
             self._target,
             q_seed=self._goal,
             max_solutions=max_solutions,
             respect_limits=self._respect,
             enumerate_windings=False,
-            **kwargs,
+            native=self._native,
         )
         return sols
 

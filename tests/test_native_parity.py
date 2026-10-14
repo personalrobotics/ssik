@@ -103,13 +103,18 @@ def _classes(arm: str, direction: str) -> list[str]:
     return [*sorted(out), npar.NEW]
 
 
-def _cells(direction: str, known: dict[str, dict[str, tuple[str, ...]]]) -> list[Any]:
+def _cells(
+    direction: str, known: dict[str, dict[str, tuple[str, ...]]], runtime: bool = False
+) -> list[Any]:
     cells = []
-    for arm in npar.arm_names():
+    prefix = "runtime-" if runtime else ""
+    for arm in npar.RUNTIME_ARMS if runtime else npar.arm_names():
+        if runtime and direction == "reverse" and npar.module(arm).DOF == 7:
+            continue  # see the runtime cells below
         for cls in _classes(arm, direction):
             # One arm's cells share one evaluation (cached per process);
             # ``--dist loadgroup`` keeps them on one worker (slow.yml).
-            marks: list[pytest.MarkDecorator] = [pytest.mark.xdist_group(f"parity-{arm}")]
+            marks: list[pytest.MarkDecorator] = [pytest.mark.xdist_group(f"parity-{prefix}{arm}")]
             where = known.get(cls, {}).get(arm, ())
             if where:
                 issue, title = npar.CLASSES[cls]
@@ -124,7 +129,7 @@ def _cells(direction: str, known: dict[str, dict[str, tuple[str, ...]]]) -> list
                     marks.append(
                         pytest.mark.xfail(sys.platform in where, strict=True, reason=reason)
                     )
-            cells.append(pytest.param(arm, cls, marks=marks, id=f"{arm}-{cls}"))
+            cells.append(pytest.param(arm, cls, marks=marks, id=f"{prefix}{arm}-{cls}"))
     return cells
 
 
@@ -138,12 +143,14 @@ def _assert_none(gaps: list[npar.Gap], arm: str, cls: str) -> None:
         pytest.fail(f"{arm}: {len(gaps)} x {what}:\n  {head}{more}", pytrace=False)
 
 
-def _forward(arm: str, cls: str, tier: str) -> None:
-    _assert_none([g for g in npar.evaluate(arm, tier).forward if g.cls == cls], arm, cls)
+def _forward(arm: str, cls: str, tier: str, runtime: bool = False) -> None:
+    gaps = npar.evaluate(arm, tier, runtime).forward
+    _assert_none([g for g in gaps if g.cls == cls], arm, cls)
 
 
-def _reverse(arm: str, cls: str, tier: str) -> None:
-    _assert_none([g for g in npar.evaluate(arm, tier).reverse if g.cls == cls], arm, cls)
+def _reverse(arm: str, cls: str, tier: str, runtime: bool = False) -> None:
+    gaps = npar.evaluate(arm, tier, runtime).reverse
+    _assert_none([g for g in gaps if g.cls == cls], arm, cls)
 
 
 @pytest.mark.parametrize(("arm", "cls"), _cells("forward", KNOWN_FORWARD))
@@ -172,6 +179,43 @@ def test_python_covers_native_full(arm: str, cls: str) -> None:
     _reverse(arm, cls, "full")
 
 
+# The same cells on arms built at runtime (``_native_parity.RUNTIME_ARMS``, one
+# per family whose runtime-built arms solve natively, #707): native against the
+# live Python solver, the two backends ``Manipulator.solve(native=...)`` selects.
+# The reverse direction ("Python covers native") runs on the 6R arms only. On a
+# 7R arm it would measure the live Python solver, reachable only with
+# native=False, which has no in-limits resolver and returns [] at in-limits
+# poses where native (and the artifact's Python path) find solutions (#715);
+# the forward direction holds the default (native) result to the contract.
+
+
+@pytest.mark.parametrize(("arm", "cls"), _cells("forward", KNOWN_FORWARD, runtime=True))
+def test_runtime_native_parity(arm: str, cls: str) -> None:
+    """Soundness, emptiness and coverage of native against Python on a
+    runtime-built arm (fast tier)."""
+    _forward(arm, cls, "fast", runtime=True)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(("arm", "cls"), _cells("forward", KNOWN_FORWARD, runtime=True))
+def test_runtime_native_parity_full(arm: str, cls: str) -> None:
+    """The same, on the full tier."""
+    _forward(arm, cls, "full", runtime=True)
+
+
+@pytest.mark.parametrize(("arm", "cls"), _cells("reverse", KNOWN_REVERSE, runtime=True))
+def test_runtime_python_covers_native(arm: str, cls: str) -> None:
+    """The reverse direction on a runtime-built arm (fast tier)."""
+    _reverse(arm, cls, "fast", runtime=True)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(("arm", "cls"), _cells("reverse", KNOWN_REVERSE, runtime=True))
+def test_runtime_python_covers_native_full(arm: str, cls: str) -> None:
+    """The same, on the full tier."""
+    _reverse(arm, cls, "full", runtime=True)
+
+
 # f. Non-default options, each of which changes the Python result on some
 # shipped arm: a closure gate below round-off, a merge radius wider than some
 # branch separations, and LM polish.
@@ -186,13 +230,18 @@ _POLICY_CASES = {
 _POLICY_POSES = 3
 
 
-@pytest.mark.parametrize("arm", npar.arm_names())
-def test_native_honours_policy(arm: str) -> None:
+@pytest.mark.parametrize(
+    ("arm", "runtime"),
+    [pytest.param(a, False, id=a) for a in npar.arm_names()]
+    + [pytest.param(a, True, id=f"runtime-{a}") for a in npar.RUNTIME_ARMS],
+)
+def test_native_honours_policy(arm: str, runtime: bool) -> None:
     """A caller's ``policy`` and ``allow_refinement`` reach the result: native
     returns what the Python path returns under the same options, whether it
-    honours them itself or hands the call to Python (#625, #628). Analytic
-    solves only (``allow_rescue=False``), so both sides are deterministic."""
-    m = npar.module(arm)
+    honours them itself or hands the call to Python (#625, #628), on a
+    prebuilt arm and on a runtime-built one. Analytic solves only
+    (``allow_rescue=False``), so both sides are deterministic."""
+    m = npar.runtime_arm(arm) if runtime else npar.module(arm)
     tol = npar.MATCH_TOL[m.DOF]
     diffs = []
     for pid, q in npar.poses(arm, "full")[:_POLICY_POSES]:
