@@ -425,11 +425,11 @@ def test_runtime_native_falls_back_when_unavailable(monkeypatch: Any, arm_name: 
 @pytest.mark.parametrize("arm_name", _RUNTIME_ARMS)
 def test_runtime_arm_matches_prebuilt(arm_name: str) -> None:
     """A runtime-built arm with a prebuilt arm's geometry returns, bit for bit,
-    what the prebuilt arm returns natively: by default on a 6R family, with
-    native=True on a 7R one, whose default stays the Python solver until 9.0.
-    A jointlock arm built at runtime has no native data and solves in Python
-    whatever ``native`` says. Unseeded, and seeded with ``max_solutions=1``
-    (the tracking call)."""
+    what the prebuilt arm returns (natively, its default), by default and with
+    native=True, on every family with a native core (since 9.0.0). A jointlock
+    arm built at runtime has no native data and solves in Python whatever
+    ``native`` says. Unseeded, and seeded with ``max_solutions=1`` (the
+    tracking call)."""
     mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
     arm = _runtime(arm_name)
     jointlock = mod.SOLVER_NAME == "jointlock.seven_r"
@@ -445,11 +445,7 @@ def test_runtime_arm_matches_prebuilt(arm_name: str) -> None:
                     assert got == py, f"{arm_name} {pid}: native={native} is not the Python result"
                 continue
             want = _bits(mod.solve(t, **kw))
-            if mod.DOF == 6:
-                assert _bits(arm.solve(t, **kw)) == want, f"{arm_name} {pid}: default"
-            else:
-                py = _bits(arm.solve(t, native=False, **kw))
-                assert _bits(arm.solve(t, **kw)) == py, f"{arm_name} {pid}: 7R default"
+            assert _bits(arm.solve(t, **kw)) == want, f"{arm_name} {pid}: default"
             assert _bits(arm.solve(t, native=True, **kw)) == want, f"{arm_name} {pid}: native"
 
 

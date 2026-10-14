@@ -234,11 +234,10 @@ class Tracker:
     :param respect_limits: keep every commanded configuration within the joint
         limits (default). ``False`` follows the geometric branch regardless.
     :param native: use the C++ extension when it is available (default);
-        ``False`` forces the pure-Python reference. The self-motion charts
-        follow it directly; the tracker's ``solve()`` calls follow
-        ``solve(native=None)``, the arm's default backend, so on a 7R arm built
-        at runtime they run Python until 9.0 (``docs/api.md``, "Which backend
-        solve() uses").
+        ``False`` forces the pure-Python reference, for the self-motion charts
+        and for the tracker's ``solve()`` calls alike, on a prebuilt arm and
+        on an arm built at runtime (``docs/api.md``, "Which backend solve()
+        uses").
     :param t0: optional timestamp of ``q0``, so the first update is rate
         limited too.
 
@@ -374,12 +373,6 @@ class Tracker:
         located: tuple[Chart, float] | None = self._charts(T).locate(q)
         return located
 
-    def _solve_backend(self) -> bool | None:
-        """``solve()``'s ``native`` for this tracker: ``solve()``'s own per-arm
-        default when native is allowed, so a runtime-built 7R arm keeps its
-        Python default until 9.0 (docs/api.md, "Which backend solve() uses")."""
-        return None if self._native else False
-
     def _seeded(self, T: NDArray[np.float64], respect_limits: bool) -> list[Solution]:
         # No T-perturbation rescue: it exists for a measure-zero ridge where the
         # analytical path finds nothing, and costs tens of milliseconds native
@@ -392,7 +385,7 @@ class Tracker:
             max_solutions=1,
             respect_limits=respect_limits,
             allow_rescue=False,
-            native=self._solve_backend(),
+            native=self._native,
         )
         return sols
 
@@ -609,7 +602,7 @@ class Tracker:
             max_solutions=max_solutions,
             respect_limits=self._respect,
             enumerate_windings=False,
-            native=self._solve_backend(),
+            native=self._native,
         )
         return sols
 
