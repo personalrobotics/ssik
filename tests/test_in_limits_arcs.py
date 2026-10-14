@@ -78,7 +78,9 @@ def test_feasible_arc_survives_a_flip_at_its_midpoint() -> None:
 def test_seeded_solve_capped_to_one_returns_the_nearest() -> None:
     """The tracking idiom `solve(T, q_seed=q, max_solutions=1, respect_limits=False)`
     on a solver that takes no seed (SRS): the cap used to reach the solver before
-    the seed ranking, returning its first branch instead of the nearest."""
+    the seed ranking, returning its first branch instead of the nearest. The
+    live Python solver (``native=False``): native continues the seed instead
+    (``docs/api.md``, "Which backend solve() uses")."""
     kb = load_urdf_kinbody_normalized(FIXTURES / "kuka_iiwa14.urdf", "base", "iiwa_link_ee_kuka")
     arm = ssik.Manipulator(kb)
     rng = np.random.default_rng(31)
@@ -86,7 +88,7 @@ def test_seeded_solve_capped_to_one_returns_the_nearest() -> None:
         q = _random_q(kb, rng)
         T = poe_forward_kinematics(kb, q)
         seed = q + rng.uniform(-0.05, 0.05, 7)
-        full = arm.solve(T, respect_limits=False)
+        full = arm.solve(T, respect_limits=False, native=False)
         nearest = min(float(np.max(np.abs(_wrap(s.q - seed)))) for s in full)
-        (top,) = arm.solve(T, q_seed=seed, max_solutions=1, respect_limits=False)
+        (top,) = arm.solve(T, q_seed=seed, max_solutions=1, respect_limits=False, native=False)
         assert float(np.max(np.abs(_wrap(top.q - seed)))) == pytest.approx(nearest, abs=1e-9)

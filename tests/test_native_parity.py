@@ -182,11 +182,11 @@ def test_python_covers_native_full(arm: str, cls: str) -> None:
 # The same cells on arms built at runtime (``_native_parity.RUNTIME_ARMS``, one
 # per family whose runtime-built arms solve natively, #707): native against the
 # live Python solver, the two backends ``Manipulator.solve(native=...)`` selects.
-# The reverse direction runs on the 6R arms, where native is the default and is
-# held to the same solution set both ways. On a 7R arm it would measure the live
-# Python solver, which has no in-limits resolver and returns [] at in-limits
+# The reverse direction ("Python covers native") runs on the 6R arms only. On a
+# 7R arm it would measure the live Python solver, reachable only with
+# native=False, which has no in-limits resolver and returns [] at in-limits
 # poses where native (and the artifact's Python path) find solutions (#715);
-# the forward direction is what a native=True caller relies on.
+# the forward direction holds the default (native) result to the contract.
 
 
 @pytest.mark.parametrize(("arm", "cls"), _cells("forward", KNOWN_FORWARD, runtime=True))

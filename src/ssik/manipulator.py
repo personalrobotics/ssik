@@ -89,17 +89,14 @@ def _coerce_limits(limits: ArrayLike | None, n: int) -> list[tuple[float, float]
     return [(float(lo), float(hi)) for lo, hi in arr]
 
 
-# Runtime-built arms of these families solve natively by default, as prebuilt
-# arms do: the native parity gate (tests/test_native_parity.py) holds the 6R
-# native and Python results to the same solution set. On a 7R family the two
-# backends sample the self-motion at different points, which
-# docs/semver_policy.md classes as a MAJOR change of default, so there native
-# is opt-in (native=True) until 9.0. Runtime-built jointlock.seven_r has no
-# native data (ssik.cpp.solver_data) and always runs Python.
-_RUNTIME_NATIVE_DEFAULT = frozenset(
+# The families a runtime-built arm solves natively, by default as a prebuilt arm
+# does (since 9.0.0), so the two return the same result for the same geometry.
+# Runtime-built jointlock.seven_r has no native data (ssik.cpp.solver_data) and
+# always runs Python, as do the families without a native core.
+_RUNTIME_NATIVE_6R = frozenset(
     {"ikgeo.three_parallel", "ikgeo.spherical_two_parallel", "ikgeo.general_6r"}
 )
-_RUNTIME_NATIVE_OPT_IN = frozenset(
+_RUNTIME_NATIVE_7R = frozenset(
     {
         "seven_r.srs",
         "seven_r.srs_polished",
@@ -128,11 +125,11 @@ def _runtime_native_solve(
     not implement, or an arm the family's native geometry check rejects)."""
     if not _native.native_available() or not _native.honours_options(policy, allow_refinement):
         return None
-    if family in _RUNTIME_NATIVE_OPT_IN:
+    if family in _RUNTIME_NATIVE_7R:
         return _native.try_native_solve_7r(
             family, kb, T, policy=policy, allow_refinement=allow_refinement, **options
         )
-    if family not in _RUNTIME_NATIVE_DEFAULT:
+    if family not in _RUNTIME_NATIVE_6R:
         return None
     rr = None
     if family == "ikgeo.general_6r":
@@ -825,19 +822,16 @@ class Manipulator:
         :param refinement_max_iters: cap on Newton iterations per candidate
             when ``allow_refinement=True``.
         :param native: which backend answers (``docs/api.md``, "Which backend
-            solve() uses"). ``None`` (default) picks per arm: the native (C++)
-            backend for every arm from :meth:`from_prebuilt` and for an arm
-            built at runtime on ``ikgeo.three_parallel``,
-            ``ikgeo.spherical_two_parallel`` or ``ikgeo.general_6r``; the
-            Python solver for a runtime-built 7R arm. ``True`` asks for native
-            wherever it exists, which adds the runtime-built ``seven_r.srs``,
-            ``seven_r.srs_polished``, ``seven_r.spherical_shoulder`` and
-            ``seven_r.spherical_shoulder_polished`` arms (their default
-            becomes native in 9.0). ``False`` forces Python. Native is a
-            performance hint, never an error: without the extension, for a
-            family it does not cover, or with options it does not implement
-            (``explain=True``, ``solver_kwargs``, a non-default ``policy``,
-            ``allow_refinement=True``) the call runs the Python solver.
+            solve() uses"). ``None`` (default) and ``True`` run the native
+            (C++) backend wherever the arm's family has one, on a prebuilt arm
+            and on an arm built at runtime alike, so the two return the same
+            result for the same geometry; ``False`` forces the Python solver.
+            Native is a performance hint, never an error: without the
+            extension, for a family it does not cover (a runtime-built
+            ``jointlock.seven_r`` arm among them), or with options it does not
+            implement (``explain=True``, ``solver_kwargs``, a non-default
+            ``policy``, ``allow_refinement=True``) the call runs the Python
+            solver.
         :param solver_kwargs: forwarded verbatim to the dispatched solver
             for power users (``swivel_samples`` for SRS-class,
             ``linearity_joint`` for RR, etc.).
@@ -914,30 +908,29 @@ class Manipulator:
                 fk_atol=policy.subproblem_numerical,
             )
 
-        # Built at runtime: the native backend answers when the caller (or the
-        # family's default, _RUNTIME_NATIVE_DEFAULT) asks for it and it can,
-        # through the same per-arm prepared solver and entry points a prebuilt
-        # arm's artifact uses. None means it cannot, and the Python path runs.
-        if self._prebuilt is None and not explain and not solver_kwargs:
-            family = self._plan.solver_name
-            if native if native is not None else family in _RUNTIME_NATIVE_DEFAULT:
-                native_sols = _runtime_native_solve(
-                    family,
-                    self._kb,
-                    T,
-                    respect_limits=respect_limits,
-                    q_seed=q_seed_arr,
-                    seed_metric=seed_metric,
-                    seed_tolerance=seed_tolerance,
-                    max_solutions=max_solutions,
-                    allow_rescue=allow_rescue,
-                    refinement_max_iters=refinement_max_iters,
-                    enumerate_windings=enumerate_windings,
-                    policy=policy,
-                    allow_refinement=allow_refinement,
-                )
-                if native_sols is not None:
-                    return native_sols
+        # Built at runtime: the native backend answers unless the caller asked
+        # for Python, through the same per-arm prepared solver and entry points
+        # a prebuilt arm's artifact uses. None means it cannot (no extension, a
+        # family without runtime native data, options it does not implement),
+        # and the Python path runs.
+        if self._prebuilt is None and native is not False and not explain and not solver_kwargs:
+            native_sols = _runtime_native_solve(
+                self._plan.solver_name,
+                self._kb,
+                T,
+                respect_limits=respect_limits,
+                q_seed=q_seed_arr,
+                seed_metric=seed_metric,
+                seed_tolerance=seed_tolerance,
+                max_solutions=max_solutions,
+                allow_rescue=allow_rescue,
+                refinement_max_iters=refinement_max_iters,
+                enumerate_windings=enumerate_windings,
+                policy=policy,
+                allow_refinement=allow_refinement,
+            )
+            if native_sols is not None:
+                return native_sols
 
         # Filter kwargs by the dispatched solver's signature so callers can
         # pass q_seed (or any other not-universally-supported kwarg) without
