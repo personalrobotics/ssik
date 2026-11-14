@@ -157,6 +157,43 @@ def _wrap_pi(a: NDArray[np.float64]) -> NDArray[np.float64]:
     return out
 
 
+def _compass_search(
+    f: Callable[[NDArray[np.float64]], float],
+    x: NDArray[np.float64],
+    bounds: list[tuple[float, float]],
+    steps: NDArray[np.float64],
+    *,
+    min_step: float = 1e-13,
+    max_evals: int = 2000,
+) -> tuple[NDArray[np.float64], float]:
+    """Minimise ``f`` in the box from ``x`` by coordinate steps: take the first
+    step along any axis that lowers ``f``, else halve every step, until the
+    steps fall below ``min_step``. Uses only values of ``f``, so it also
+    converges onto a jump of ``f``, where gradient methods stall."""
+    lo = np.array([b[0] for b in bounds])
+    hi = np.array([b[1] for b in bounds])
+    x = np.clip(np.asarray(x, dtype=np.float64), lo, hi)
+    fx = f(x)
+    steps = np.asarray(steps, dtype=np.float64).copy()
+    evals = 1
+    while float(np.max(steps)) > min_step and evals < max_evals:
+        moved = False
+        for k in range(x.shape[0]):
+            for sign in (1.0, -1.0):
+                y = x.copy()
+                y[k] = min(max(y[k] + sign * steps[k], lo[k]), hi[k])
+                fy = f(y)
+                evals += 1
+                if fy < fx:
+                    x, fx, moved = y, fy, True
+                    break
+            if moved:
+                break
+        if not moved:
+            steps *= 0.5
+    return x, float(fx)
+
+
 _FRAME_DEGENERATE = 1e-12  # chart.hpp kFrameDegenerate
 
 
@@ -1187,6 +1224,7 @@ class SelfMotionManifold:
                     return v if np.isfinite(v) else 1e6
 
                 x0 = np.array([t for _c, t in free])
+                bounds = [bounds_of(c, t) for c, t in free]
                 # Tight tolerances: the gradient of a squared distance vanishes with the
                 # distance, and at scipy's defaults the search stopped ~1e-3 rad short
                 # of a touching pair -- too coarse for drift_to_merge to call a merge.
@@ -1194,12 +1232,21 @@ class SelfMotionManifold:
                     objective,
                     x0,
                     method="L-BFGS-B",
-                    bounds=[bounds_of(c, t) for c, t in free],
+                    bounds=bounds,
                     options={"ftol": 1e-16, "gtol": 1e-14, "maxiter": 500},
                 )
-                if res.fun < best_v:
-                    best_v = float(res.fun)
-                    qa, qb = points(res.x)
+                # The nearest pair can sit where a chart switches representation:
+                # a Panda branch jumps from (q1, q2, q3) to (q1 + pi, -q2, q3 + pi)
+                # as q2 touches 0, and the pair is approached from opposite sides
+                # of the jump. The objective is discontinuous there, L-BFGS-B's line
+                # search fails, and where it stops is decided by rounding (0.037
+                # or 2.4e-4 on one Panda pose, by platform and argument order,
+                # #722). A compass search needs no gradient and walks into it.
+                steps = np.array([(hi - lo) / (n_samples - 1) for lo, hi in bounds])
+                x, v = _compass_search(objective, res.x, bounds, steps)
+                if v < best_v:
+                    best_v = v
+                    qa, qb = points(x)
         if box is None:
             return float(np.sqrt(np.sum(_wrap_pi(qb - qa) ** 2))), qa, qb
         d2v, ra, rb = _inbox_dist2(qa[None, :], qb[None, :], box)
