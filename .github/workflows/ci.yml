@@ -504,9 +504,12 @@ jobs:
         run: uv run python scripts/cpp_emit.py --artifact-gate
 
       - name: Configure + build
-        # SSIK_EIGEN_VERSION makes configure fail on any Eigen but the pin.
+        # SSIK_EIGEN_VERSION makes configure fail on any Eigen but the pin. The
+        # baseline ISA, as the wheel's extension (#724): the runner's GCC defaults
+        # to x86-64-v3, whose FMA/AVX2 rounding moves the gate's known cases.
         run: |
           cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS="-march=x86-64 -mtune=generic" \
             -DCMAKE_PREFIX_PATH="$PINNED_EIGEN_PREFIX" -DSSIK_EIGEN_VERSION="$PINNED_EIGEN_VERSION"
           cmake --build cpp/build -j
 
