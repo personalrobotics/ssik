@@ -40,7 +40,7 @@ jobs:
   slow:
     name: Linux py3.12 slow suite
     if: ${{ !inputs.regen }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: 26.04 fails the slow suite (#724)
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
 
   native_parity:
     name: Linux py3.12 native-parity gate (full tier)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # pinned: 26.04 fails the slow suite (#724)
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
