@@ -14,6 +14,7 @@ LM-polish budgets. Add new files here as their Cython annotations land.
 
 from __future__ import annotations
 
+import platform
 import re
 import shutil
 import sys
@@ -141,6 +142,17 @@ def _native_supported() -> bool:
     return sys.platform in NATIVE_SUPPORTED_PLATFORMS
 
 
+def _baseline_isa_flags() -> list[str]:
+    """Compile for the baseline x86-64 ISA, as manylinux wheels are, whatever
+    the distro's compiler defaults to. Ubuntu 26.04's GCC defaults to
+    x86-64-v3, whose FMA and AVX2 (Eigen's wider kernels) change rounding,
+    and with it the boundary cases that the parity gate pins per platform
+    (#724). scripts/build_cpp_ext.py repeats this."""
+    if sys.platform.startswith("linux") and platform.machine() == "x86_64":
+        return ["-march=x86-64", "-mtune=generic"]
+    return []
+
+
 def _eigen_include(root: Path) -> str | None:
     """The Eigen include dir to compile the native extension against (#606).
 
@@ -237,6 +249,11 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                 annotate=False,
                 force=force,
             )
+            for ext in ext_modules:
+                ext.extra_compile_args = [
+                    *(ext.extra_compile_args or []),
+                    *_baseline_isa_flags(),
+                ]
             # Append the native C++ solver extension on supported platforms when
             # the pinned Eigen is available. If it is absent (a dev/editable install that
             # doesn't need native -- the test harness uses cpp/build), skip it
@@ -280,7 +297,12 @@ class CythonBuildHook(BuildHookInterface):  # type: ignore[type-arg]
                             # jitters, near-singular poses) by design and reject the
                             # garbage via FK-certification; an active eigen_assert
                             # would abort() the shipped wheel on those poses.
-                            extra_compile_args=["-std=c++20", "-O2", "-DNDEBUG"],
+                            extra_compile_args=[
+                                "-std=c++20",
+                                "-O2",
+                                "-DNDEBUG",
+                                *_baseline_isa_flags(),
+                            ],
                             # parallel.hpp (rescue / jointlock sweep, #546) uses
                             # std::thread -> link pthread on Linux (macOS libSystem
                             # already has it; this block only runs on Linux/macOS).

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import subprocess
 import sys
 import sysconfig
@@ -75,6 +76,9 @@ def build(out_dir: Path) -> Path:
         "-o",
         str(out),
     ]
+    if sys.platform.startswith("linux") and platform.machine() == "x86_64":
+        # The baseline ISA, as the wheel (hatch_build._baseline_isa_flags, #724).
+        cmd += ["-march=x86-64", "-mtune=generic"]
     if sys.platform == "darwin":
         cmd += ["-undefined", "dynamic_lookup"]
     else:
