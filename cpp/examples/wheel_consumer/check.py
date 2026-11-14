@@ -53,6 +53,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import platform
 import subprocess
 import sys
 import time
@@ -336,11 +337,21 @@ def main() -> int:
     out.mkdir(parents=True, exist_ok=True)
     major = ssik.__version__.split(".")[0]
     build = out / "build"
+    # The sets are compared within 1e-6, which holds only for one instruction
+    # set: FMA and AVX2 move boundary cases (kassow's dense jointlock sweep,
+    # #724). Build for the baseline x86-64 the wheel's extension is built for,
+    # not a distro default such as Ubuntu 26.04's x86-64-v3.
+    isa = (
+        ["-DCMAKE_CXX_FLAGS=-march=x86-64 -mtune=generic"]
+        if sys.platform.startswith("linux") and platform.machine() == "x86_64"
+        else []
+    )
     subprocess.run(
         [
             "cmake", "-S", str(here), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release",
             f"-DCMAKE_PREFIX_PATH={cmake_dir};{args.eigen_prefix}",
             f"-DSSIK_CPP_VERSION={major}", f"-DSSIK_EIGEN_VERSION={args.eigen_version}",
+            *isa,
         ],
         check=True,
     )  # fmt: skip
