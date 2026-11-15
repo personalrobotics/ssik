@@ -149,7 +149,9 @@ def test_artifact_matches_live_solver(arm: str) -> None:
         # from the baked artifact by design (#328); only the artifact is pinned.
         if fk_only:
             continue
-        live_sols = live.solve(t, respect_limits=False, allow_rescue=False, allow_refinement=True)
+        live_sols = live.solve(
+            t, respect_limits=False, allow_rescue=False, allow_refinement=True, native=False
+        )
         worst_live = max((float(np.max(np.abs(art.fk(s.q) - t))) for s in live_sols), default=0.0)
         assert worst_live < fk_ceiling, (
             f"{arm}: live FK closure {worst_live:.2e} > {fk_ceiling:.0e}"

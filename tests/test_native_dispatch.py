@@ -23,6 +23,7 @@ import pytest
 from ssik import TolerancePolicy, _native
 from ssik.kinematics.poe_fk import poe_forward_kinematics
 from ssik.prebuilt._manifest import load_manifest
+from tests import _native_parity as npar
 
 # Redundant / approximate 7R families: native samples the self-motion manifold via
 # a different (sound) enumeration than Python, so exact set-match is not the runtime
@@ -375,3 +376,99 @@ def test_native_srs_polished_respects_limits(arm_name: str, q: list[float]) -> N
         assert _limit_violation(kb, s.q) == 0.0, (
             f"{arm_name}: native returned q={s.q.tolist()} outside the joint limits"
         )
+
+
+# ---------------------------------------------------------------------------
+# Arms built at runtime (#707): Manipulator.solve's backend per family.
+# ---------------------------------------------------------------------------
+
+# One runtime-built copy per family with runtime native routing, plus a
+# jointlock arm, which has none.
+_RUNTIME_ARMS = (*npar.RUNTIME_ARMS, "rizon4_ik")
+
+
+def _runtime(arm: str) -> Any:
+    if arm in npar.RUNTIME_ARMS:
+        return npar.runtime_arm(arm).arm
+    return npar.RuntimeArm(arm).arm
+
+
+def _bits(sols: list[Any]) -> list[tuple[bytes, float, str]]:
+    return [(s.q.tobytes(), s.fk_residual, s.refinement_used) for s in sols]
+
+
+def _runtime_poses(arm: str) -> list[tuple[str, Any]]:
+    """The parity gate's fast-tier uniform, near-singular and near-limit poses."""
+    keep = ("uniform/", "near_singular/", "near_limit/")
+    return [(pid, q) for pid, q in npar.poses(arm, "fast") if pid.startswith(keep)]
+
+
+@pytest.mark.parametrize("arm_name", ["ur5_ik", "iiwa14_ik"])
+def test_runtime_native_falls_back_when_unavailable(monkeypatch: Any, arm_name: str) -> None:
+    """Without the extension a runtime-built arm's solve, by default and with
+    native=True, returns exactly the Python result."""
+    monkeypatch.setattr(_native, "_ext", None)
+    monkeypatch.setattr(_native, "_ext_tried", True)
+    arm = _runtime(arm_name)
+    for _, q in _runtime_poses(arm_name)[:3]:
+        t = arm.fk(q)
+        py = _bits(arm.solve(t, native=False))
+        assert _bits(arm.solve(t)) == py
+        assert _bits(arm.solve(t, native=True)) == py
+
+
+@pytest.mark.skipif(
+    not _native.native_available(),
+    reason="ssik._ssik_native not built (see scripts/build_cpp_ext.py --out-dir src/ssik)",
+)
+@pytest.mark.filterwarnings("ignore:jointlock.seven_r. solving this 7R arm")
+@pytest.mark.parametrize("arm_name", _RUNTIME_ARMS)
+def test_runtime_arm_matches_prebuilt(arm_name: str) -> None:
+    """A runtime-built arm with a prebuilt arm's geometry returns, bit for bit,
+    what the prebuilt arm returns (natively, its default), by default and with
+    native=True, on every family with a native core (since 9.0.0). A jointlock
+    arm built at runtime has no native data and solves in Python whatever
+    ``native`` says. Unseeded, and seeded with ``max_solutions=1`` (the
+    tracking call)."""
+    mod = importlib.import_module(f"ssik.prebuilt.{arm_name}")
+    arm = _runtime(arm_name)
+    jointlock = mod.SOLVER_NAME == "jointlock.seven_r"
+    rng = np.random.default_rng(707)
+    for pid, q in _runtime_poses(arm_name)[: 2 if jointlock else None]:
+        t = arm.fk(q)
+        seed = q + rng.normal(0.0, 0.05, size=len(q))
+        for kw in ({}, {"q_seed": seed, "max_solutions": 1}):
+            if jointlock:
+                py = _bits(arm.solve(t, native=False, allow_rescue=False, **kw))
+                for native in (None, True):
+                    got = _bits(arm.solve(t, native=native, allow_rescue=False, **kw))
+                    assert got == py, f"{arm_name} {pid}: native={native} is not the Python result"
+                continue
+            want = _bits(mod.solve(t, **kw))
+            assert _bits(arm.solve(t, **kw)) == want, f"{arm_name} {pid}: default"
+            assert _bits(arm.solve(t, native=True, **kw)) == want, f"{arm_name} {pid}: native"
+
+
+@pytest.mark.skipif(
+    not _native.native_available(),
+    reason="ssik._ssik_native not built (see scripts/build_cpp_ext.py --out-dir src/ssik)",
+)
+@pytest.mark.parametrize(
+    ("arm_name", "options"),
+    [
+        pytest.param("puma560_ik", {"policy": _TIGHT}, id="puma560-policy"),
+        pytest.param("ur5_ik", {"allow_refinement": True}, id="ur5-refinement"),
+        pytest.param("iiwa14_ik", {"swivel_samples": 7}, id="iiwa14-solver_kwargs"),
+    ],
+)
+def test_runtime_options_native_lacks_run_python(arm_name: str, options: dict[str, Any]) -> None:
+    """On a runtime-built arm, native=True with an option native does not
+    implement returns the Python result, as on a prebuilt arm; so does
+    explain=True, which keeps its (solutions, Diagnostic) return."""
+    arm = _runtime(arm_name)
+    t = arm.fk(np.array(_Q_OPTIONS[: arm.dof]))
+    py = _bits(arm.solve(t, native=False, **options))
+    assert _bits(arm.solve(t, native=True, **options)) == py
+    sols, diag = arm.solve(t, native=True, explain=True)
+    assert _bits(sols) == _bits(arm.solve(t, native=False))
+    assert diag.final_count == len(sols)
